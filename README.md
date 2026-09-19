@@ -50,18 +50,49 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | Command | Behavior |
 | --- | --- |
 | `run -- APP [ARGS...]` | Start Sway, wayvnc, and the application; stay in the foreground. |
-| `screenshot PATH` | Write a PNG of the 1280 by 720 display. |
+| `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
 | `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
 | `type TEXT` | Send printable ASCII characters to the focused widget. |
 | `key NAME` | Press/release `Return`, `Tab`, or `BackSpace`. |
 
-The runner accepts another application command, but only the bundled native
-Wayland demo is tested. X11 and GPU-dependent apps are outside this MVP.
+The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 has
+also been tested manually as a Flatpak (see below). X11 and GPU-dependent apps
+are outside this MVP.
 
 `Session ready:` means the display and input sockets exist and the application
 process has started. The app may still be drawing its first frame. A screenshot
 captures the current display; it does not wait for the app to finish responding
-to input. Capture again when necessary.
+to input automatically. To allow time for an animation, choose a delay before
+capture:
+
+```sh
+framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
+```
+
+The delay accepts finite, nonnegative seconds, including fractions. It defaults
+to zero and does not count toward the capture process's ten-second timeout.
+Capture again when necessary.
+
+## Flatpak game
+
+With the `org.gnome.SwellFoop` Flatpak installed, run this inside `nix develop`:
+
+```sh
+framewisp --session /tmp/framewisp-swell run -- \
+  flatpak run --socket=wayland org.gnome.SwellFoop
+```
+
+Use the same screenshot and click commands as for the demo. A manual test of
+Swell Foop 50.0 with GNOME runtime 50 covered starting a game, removing tile
+groups, Undo, Redo, and stopping the runner with SIGTERM. All test processes,
+including the Flatpak wrapper and game, exited on shutdown.
+
+The game rendered and accepted input despite warnings about the missing D-Bus
+session and settings portal. Other Flatpak apps may need those services. An
+immediate screenshot after clicking Let's Play still showed the welcome screen;
+later captures showed the board. Waiting 0.5 seconds after subsequent moves was
+enough for this test; use `screenshot --delay 0.5 PATH` to request that wait.
+This is not a general animation-completion guarantee.
 
 ## Logs and cleanup
 

@@ -1,4 +1,6 @@
 import argparse
+import math
+import time
 from pathlib import Path
 
 from framewisp.lib import KEYS, run_session, screenshot, send_input
@@ -22,6 +24,13 @@ def main() -> None:
         "screenshot", help="save the current display as a PNG"
     )
     capture.add_argument("path", type=Path)
+    capture.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="wait this many seconds before capturing (default: 0)",
+    )
 
     click = commands.add_parser(
         "click", help="send a left click at display coordinates"
@@ -45,6 +54,10 @@ def main() -> None:
             parser.error("run requires an application command after --")
         result = run_session(session, command)
     elif args.action == "screenshot":
+        if not math.isfinite(args.delay) or args.delay < 0:
+            parser.error("--delay must be a finite, nonnegative number of seconds")
+        if args.delay:
+            time.sleep(args.delay)
         result = screenshot(session, args.path)
     elif args.action == "click":
         result = send_input(session, ["move", str(args.x), str(args.y), "click", "1"])
