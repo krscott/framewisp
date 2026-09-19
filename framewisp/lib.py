@@ -18,6 +18,7 @@ from vncdotool import api
 
 SWAY_CONFIG = """\
 xwayland disable
+primary_selection disabled
 output HEADLESS-1 mode 1280x720@60Hz
 seat seat0 fallback true
 input * xkb_layout us
@@ -340,19 +341,36 @@ def screenshot(session: Path, destination: Path) -> int:
     ).returncode
 
 
-def click_pointer(session: Path, x: int, y: int, *, button: str, count: int) -> int:
+def click_pointer(
+    session: Path,
+    x: int,
+    y: int,
+    *,
+    button: str,
+    count: int,
+    modifiers: tuple[str, ...] = (),
+) -> int:
     arguments = ["move", str(x), str(y)]
     for index in range(count):
         if index:
             arguments.extend(["pause", "0.1"])
         arguments.extend(["click", str(CLICK_BUTTONS[button])])
-    return send_input(session, arguments)
+    return send_input(session, arguments, modifiers=modifiers)
 
 
 def drag_pointer(
-    session: Path, x1: int, y1: int, x2: int, y2: int, *, duration: float
+    session: Path,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    *,
+    duration: float,
+    button: str = "left",
+    modifiers: tuple[str, ...] = (),
 ) -> int:
-    arguments = ["move", str(x1), str(y1), "mousedown", "1"]
+    button_number = str(CLICK_BUTTONS[button])
+    arguments = ["move", str(x1), str(y1), "mousedown", button_number]
     steps = max(1, math.ceil(duration * 60))
     for step in range(1, steps + 1):
         if duration:
@@ -360,8 +378,8 @@ def drag_pointer(
         x = round(x1 + (x2 - x1) * step / steps)
         y = round(y1 + (y2 - y1) * step / steps)
         arguments.extend(["move", str(x), str(y)])
-    arguments.extend(["mouseup", "1"])
-    return send_input(session, arguments, duration=duration)
+    arguments.extend(["mouseup", button_number])
+    return send_input(session, arguments, duration=duration, modifiers=modifiers)
 
 
 def scroll_pointer(session: Path, x: int, y: int, *, direction: str, steps: int) -> int:
@@ -384,9 +402,20 @@ def type_text(session: Path, text: str, *, interval: float) -> int:
     return send_input(session, arguments, duration=max(0, len(text) - 1) * interval)
 
 
-def send_input(session: Path, arguments: list[str], *, duration: float = 0) -> int:
+def send_input(
+    session: Path,
+    arguments: list[str],
+    *,
+    duration: float = 0,
+    modifiers: tuple[str, ...] = (),
+) -> int:
     env = session_environment(session)
     socket = Path(env["XDG_RUNTIME_DIR"]) / "vnc.sock"
+    arguments = (
+        [part for modifier in modifiers for part in ("keydown", modifier)]
+        + arguments
+        + [part for modifier in reversed(modifiers) for part in ("keyup", modifier)]
+    )
     # Sway needs time to focus wayvnc's newly created keyboard. Without this,
     # the first character (or a single named key) is lost on each connection.
     return subprocess.run(

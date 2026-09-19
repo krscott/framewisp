@@ -43,7 +43,9 @@ The foreground `run` command is the lifetime owner.
    and `GSK_RENDERER=cairo`.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at 1280x720 and 60 Hz, a fallback seat, US keyboard layout,
-   and no window borders. Load no host Sway configuration.
+   and no window borders. Disable primary selection to avoid the observed wayvnc
+   crash on automatic selection offers; ordinary clipboard copy/paste stays enabled.
+   Load no host Sway configuration.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
 7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
@@ -104,8 +106,14 @@ one connection with a 0.1-second pause between clicks; recognition depends on
 the target app's settings. Unsupported buttons and counts are rejected before
 reading the session. Plain `click` invokes `vncdo move X Y click 1`.
 
-`drag --duration SECONDS X1 Y1 X2 Y2`
-moves to the start, presses the left button, and sends linearly interpolated
+Clicks and drags accept repeatable `--modifier ctrl|shift|alt`. The CLI
+normalizes case and rejects unknown or duplicate modifiers before reading the
+session. `send_input` prefixes the gesture with modifier keydowns and suffixes
+it with keyups in reverse order, all on the same connection. GTK tests verify
+modifier state during the gesture, release order, and a subsequent plain click.
+
+`drag [--button left|right] --duration SECONDS X1 Y1 X2 Y2`
+moves to the start, presses the chosen button (default: left), and sends linearly interpolated
 integer coordinates at approximately 60 steps per second before releasing at
 the endpoint. The number of steps is `max(1, ceil(duration * 60))`, with a pause
 of `duration / steps` before each move. Zero duration sends one endpoint move

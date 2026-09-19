@@ -224,3 +224,39 @@ def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert option in result.stderr
     assert "session.json" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "action,coordinates",
+    [("click", ["100", "100"]), ("drag", ["100", "100", "200", "200"])],
+)
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--modifier", "super"],
+        ["--modifier", "Ctrl", "--modifier", "ctrl"],
+        ["--button", "middle"],
+    ],
+)
+def test_invalid_pointer_gesture(
+    action: str, coordinates: list[str], options: list[str], tmp_path: Path
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "missing"),
+            action,
+            *options,
+            *coordinates,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert options[0] in result.stderr
+    assert "session.json" not in result.stderr

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from framewisp.lib import (
     CLICK_BUTTONS,
+    MODIFIERS,
     SCROLL_BUTTONS,
     click_pointer,
     drag_pointer,
@@ -88,7 +89,13 @@ def main() -> None:
         "--steps", type=int, default=1, help="positive wheel step count (default: 1)"
     )
 
-    drag = commands.add_parser("drag", help="drag with the left mouse button")
+    drag = commands.add_parser("drag", help="drag with a mouse button")
+    drag.add_argument(
+        "--button",
+        choices=CLICK_BUTTONS,
+        default="left",
+        help="mouse button (default: left)",
+    )
     drag.add_argument("x1", type=int)
     drag.add_argument("y1", type=int)
     drag.add_argument("x2", type=int)
@@ -100,6 +107,16 @@ def main() -> None:
         metavar="SECONDS",
         help="time spent dragging (default: 0.4; 0 moves immediately)",
     )
+
+    for gesture in (click, drag):
+        gesture.add_argument(
+            "--modifier",
+            action="append",
+            choices=sorted(MODIFIERS),
+            type=str.lower,
+            default=[],
+            help="hold a modifier for the gesture; repeat for combinations",
+        )
 
     typing = commands.add_parser("type", help="type printable ASCII text")
     typing.add_argument("text")
@@ -124,6 +141,10 @@ def main() -> None:
 
     args = parser.parse_args()
     session = args.session.resolve()
+    if args.action in {"click", "drag"} and len(set(args.modifier)) != len(
+        args.modifier
+    ):
+        parser.error("each --modifier may only be specified once")
     if args.action == "run":
         command: list[str] = args.command
         if command[:1] == ["--"]:
@@ -139,11 +160,23 @@ def main() -> None:
         result = send_input(session, ["move", str(args.x), str(args.y)])
     elif args.action == "click":
         result = click_pointer(
-            session, args.x, args.y, button=args.button, count=args.count
+            session,
+            args.x,
+            args.y,
+            button=args.button,
+            count=args.count,
+            modifiers=tuple(args.modifier),
         )
     elif args.action == "drag":
         result = drag_pointer(
-            session, args.x1, args.y1, args.x2, args.y2, duration=args.duration
+            session,
+            args.x1,
+            args.y1,
+            args.x2,
+            args.y2,
+            duration=args.duration,
+            button=args.button,
+            modifiers=tuple(args.modifier),
         )
     elif args.action == "scroll":
         if args.steps < 1:
