@@ -118,6 +118,8 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | Command | Behavior |
 | --- | --- |
 | `run [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `record-start FILE` | Start a clip in the running session. |
+| `record-stop` | Finalize the clip without stopping the app. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
@@ -251,17 +253,32 @@ Add `--record` before the application command to save a silent MP4:
 framewisp /tmp/framewisp-demo run --record /tmp/demo.mp4 -- framewisp-demo
 ```
 
-Recording starts before the app launches. Continue using the normal input and
-screenshot commands. Stop the runner with Ctrl+C or SIGTERM, or close the app,
-and wait for the runner to exit before playing the file. It finalizes the video
-before stopping the display. The recording uses H.264 at the selected display size and 30 fps.
+Recording starts before the app launches. You can also start and stop individual
+clips after setting up the app:
 
-Choose a new output path in an existing directory; existing files are not
-overwritten. Session log and metadata paths are reserved. Recorder startup,
-capture, or finalization failures fail the session
-and point to `recorder.log`. A forced kill may leave an incomplete MP4. The package supplies
-the recorder; recording is disabled unless requested. The development shell also
-includes FFmpeg for video inspection.
+```sh
+framewisp /tmp/framewisp-demo record-start /tmp/first.mp4
+framewisp /tmp/framewisp-demo type 'First demonstration'
+framewisp /tmp/framewisp-demo record-stop
+# Change the app's state, then record another clip.
+framewisp /tmp/framewisp-demo record-start /tmp/second.mp4
+framewisp /tmp/framewisp-demo type 'Second demonstration'
+framewisp /tmp/framewisp-demo record-stop
+```
+
+`record-start FILE` returns when capture is ready. `record-stop` returns after the
+MP4 is finalized and playable, leaving the app running. It can also stop a clip
+started with `run --record FILE`. Only one recording can be active at a time;
+starting another or stopping when none is active reports an error.
+
+Recordings are silent H.264 MP4 files at 30 fps and the session's display size.
+Recording requires even width and height. Existing output files are never
+overwritten. The session runner owns the recorder and finalizes an active clip
+on normal app exit, Ctrl+C, or SIGTERM. A recorder failure stops the session;
+an invalid recording request or failed `record-start` leaves the app running.
+The recorder writes diagnostics to `recorder.log`, replaced for each clip.
+Keep the runner alive until shutdown completes so it can finalize the MP4.
+The development shell includes FFmpeg for video inspection.
 
 ## Flatpak game
 

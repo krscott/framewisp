@@ -25,7 +25,8 @@ acceptance application.
 - grim captures the headless output directly to PNG.
 - wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
 
-There is no controller daemon, RPC API, or framebuffer cache.
+There is no separate controller daemon or framebuffer cache.
+The runner accepts recording commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
 
 ## Startup
@@ -36,7 +37,7 @@ The foreground `run` command is the lifetime owner.
    metadata before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
 3. Create a temporary runtime directory. It holds the compositor configuration
-   and sockets and is removed when the runner exits normally. Its short path
+   and sockets (including `control.sock`) and is removed when the runner exits normally. Its short path
    avoids Unix socket path limits even when the session log directory is long.
 4. Copy the environment, remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
@@ -64,7 +65,7 @@ The foreground `run` command is the lifetime owner.
    for a nonempty output file, checking for recorder exit. With the pinned
    wf-recorder, the MP4 header is written after the first frame is received.
 9. Launch the application with the private environment and no shell expansion.
-10. Write `session.json` and print `Session ready:`. This indicates process and
+10. Write `session.json` atomically and print `Session ready:`. This indicates process and
    socket readiness, not application rendering readiness.
 
 Each child runs in its own process session with stdin disconnected and combined
@@ -247,3 +248,25 @@ combination, VNC connected and delivered input but full-frame screenshot request
 timed out. grim captured the same display successfully. The MVP uses grim for
 all screenshots instead of patching a display dependency or implementing RFB.
 The cause of the VNC capture failure has not been established.
+
+## Recording controls
+
+The runner owns a `Recordings` object with an optional recorder process and an
+`ExitStack` for its lifetime. `run --record FILE` and `record-start FILE` use the
+same startup path. `record-stop` closes that recorder's stack, finalizes the MP4,
+and clears its process reference without stopping the app. Runner cleanup closes
+any active recorder before stopping the display.
+
+The runner listens on `control.sock` in its private runtime directory. Each
+recording CLI call sends one newline-terminated JSON request with a `destination`
+(an absolute path for start, null for stop), then waits for a JSON response with
+an `error` string or null. The runner handles requests serially in its monitoring
+loop. It replies only after capture is ready or finalization has finished.
+Validation/startup errors are returned to the caller without stopping the app.
+Unexpected recorder exit or finalization failure still fails the session.
+
+State updates use `.session.json` followed by an atomic rename. The `processes`
+map includes `recorder` only while recording. Both metadata filenames are reserved
+along with the session logs when choosing recording destinations. Recording
+requests reject odd display dimensions, existing/reserved output paths, a start
+while already active, and a stop while inactive. Each start replaces `recorder.log`.

@@ -4,11 +4,14 @@ import json
 import math
 import os
 import signal
+import socket
 import subprocess
+import sys
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from string import ascii_lowercase, digits
 from threading import Event
@@ -219,6 +222,121 @@ def start_recording(
         raise RuntimeError(f"Recorder failed to finalize {destination}. See {log}")
 
 
+def recording_path_error(session: Path, destination: Path) -> str | None:
+    reserved = {
+        (session / name).resolve()
+        for name in (
+            "session.json",
+            ".session.json",
+            "sway.log",
+            "wayvnc.log",
+            "recorder.log",
+            "app.log",
+        )
+    }
+    if destination in reserved:
+        return (
+            f"{destination} is reserved for session files. Choose a new recording path."
+        )
+    if destination.exists():
+        return f"{destination} already exists. Choose a new recording path."
+    return None
+
+
+@dataclass
+class Recordings:
+    session: Path
+    env: dict[str, str]
+    stop_requested: Event
+    size: tuple[int, int]
+    process: subprocess.Popen[bytes] | None = None
+    resources: ExitStack = field(default_factory=ExitStack)
+
+    def start(self, destination: Path) -> str | None:
+        if self.process is not None:
+            return "A recording is already active. Use record-stop first."
+        if any(dimension % 2 for dimension in self.size):
+            return "Recording requires even display width and height."
+        error = recording_path_error(self.session, destination)
+        if error is not None:
+            return error
+        try:
+            self.process = self.resources.enter_context(
+                start_recording(
+                    destination,
+                    log=self.session / "recorder.log",
+                    env=self.env,
+                    stop=self.stop_requested,
+                )
+            )
+        except (RuntimeError, OSError) as error:
+            return str(error)
+        if self.process is None:
+            self.resources.close()
+            return "Session stopped while starting recording."
+        return None
+
+    def finish(self) -> str | None:
+        if self.process is None:
+            return "No recording is active."
+        self.close()
+        return None
+
+    def close(self) -> None:
+        try:
+            self.resources.close()
+        finally:
+            self.process = None
+
+
+def recording_command(session: Path, destination: Path | None) -> int:
+    state = json.loads((session / "session.json").read_text())
+    request = {"destination": str(destination.resolve()) if destination else None}
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        connection.sendall((json.dumps(request) + "\n").encode())
+        with connection.makefile("r") as response:
+            line = response.readline()
+    if not line:
+        print(
+            "Session disconnected before the recording command completed.",
+            file=sys.stderr,
+        )
+        return 1
+    error = json.loads(line)["error"]
+    if error is not None:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
+
+
+def handle_recording_command(
+    listener: socket.socket, recordings: Recordings, write_state: Callable[[], None]
+) -> None:
+    try:
+        connection, _ = listener.accept()
+    except TimeoutError:
+        return
+    with connection:
+        connection.settimeout(2)
+        with connection.makefile("r") as request:
+            try:
+                destination = json.loads(request.readline())["destination"]
+            except (ValueError, OSError):
+                return
+        error = (
+            recordings.start(Path(destination))
+            if destination is not None
+            else recordings.finish()
+        )
+        write_state()
+        try:
+            connection.sendall((json.dumps({"error": error}) + "\n").encode())
+        except BrokenPipeError:
+            # The CLI can be interrupted while a recording starts or finalizes.
+            pass
+
+
 def run_session(
     session: Path,
     command: list[str],
@@ -228,24 +346,9 @@ def run_session(
 ) -> int:
     if recording is not None:
         recording = recording.resolve()
-        reserved = {
-            (session / name).resolve()
-            for name in (
-                "session.json",
-                "sway.log",
-                "wayvnc.log",
-                "recorder.log",
-                "app.log",
-            )
-        }
-        if recording in reserved:
-            raise RuntimeError(
-                f"{recording} is reserved for session files. Choose a new recording path."
-            )
-        if recording.exists():
-            raise RuntimeError(
-                f"{recording} already exists. Choose a new recording path."
-            )
+        error = recording_path_error(session, recording)
+        if error is not None:
+            raise RuntimeError(error)
     session.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = session / "session.json"
     if state.exists():
@@ -287,35 +390,50 @@ def run_session(
             stack.enter_context(keep_input_devices(runtime))
 
             backends = {"sway": sway, "wayvnc": vnc}
+            recordings = Recordings(session, env, stop, size)
+            stack.callback(recordings.close)
             if recording is not None:
-                recorder = stack.enter_context(
-                    start_recording(
-                        recording, log=session / "recorder.log", env=env, stop=stop
-                    )
-                )
-                if recorder is None:
-                    return 0
-                backends["recorder"] = recorder
+                error = recordings.start(recording)
+                if error is not None:
+                    if stop.is_set():
+                        return 0
+                    raise RuntimeError(error)
 
             app = stack.enter_context(
                 managed_process(command, log=session / "app.log", env=env)
             )
-            state.write_text(
-                json.dumps(
-                    {
-                        "runtime_directory": directory,
-                        "wayland_display": display,
-                        "processes": {
-                            name: process.pid
-                            for name, process in (backends | {"app": app}).items()
-                        },
-                    }
+            listener = stack.enter_context(socket.socket(socket.AF_UNIX))
+            listener.bind(str(runtime / "control.sock"))
+            listener.listen()
+            listener.settimeout(0.1)
+
+            def write_state() -> None:
+                processes = backends | {"app": app}
+                if recordings.process is not None:
+                    processes["recorder"] = recordings.process
+                temporary = session / ".session.json"
+                temporary.write_text(
+                    json.dumps(
+                        {
+                            "runtime_directory": directory,
+                            "wayland_display": display,
+                            "processes": {
+                                name: process.pid for name, process in processes.items()
+                            },
+                        }
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
+                # Keep metadata reads complete while recording commands update it.
+                temporary.replace(state)
+
+            write_state()
             print(f"Session ready: {session}", flush=True)
-            while not stop.wait(0.1):
-                for name, process in backends.items():
+            while not stop.is_set():
+                monitored = backends.copy()
+                if recordings.process is not None:
+                    monitored["recorder"] = recordings.process
+                for name, process in monitored.items():
                     if process.poll() is not None:
                         raise RuntimeError(
                             f"{name} exited. See {session / (name + '.log')}"
@@ -323,6 +441,7 @@ def run_session(
                 result = app.poll()
                 if result is not None:
                     return result if result >= 0 else 128 - result
+                handle_recording_command(listener, recordings, write_state)
             return 0
     finally:
         state.unlink(missing_ok=True)
