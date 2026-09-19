@@ -60,6 +60,16 @@ def main() -> None:
     content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     area = Gtk.DrawingArea()
     area.set_size_request(640, 400)
+    area.set_has_tooltip(True)
+
+    def on_tooltip(
+        _widget: Gtk.Widget, x: int, y: int, keyboard: bool, tooltip: Gtk.Tooltip
+    ) -> bool:
+        tooltip.set_text("Pointer hover feedback")
+        log("tooltip", x=x, y=y, keyboard=keyboard)
+        return True
+
+    area.connect("query-tooltip", on_tooltip)
     content.append(area)
     motion = Gtk.EventControllerMotion()
 

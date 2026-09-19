@@ -338,6 +338,54 @@ def input_events(demo: Demo) -> list[dict[str, str | float | bool]]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_move_shows_tooltip_without_clicking(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    before, hovered, after = [
+        tmp_path / name for name in ["before.png", "hovered.png", "after.png"]
+    ]
+    cli(demo.directory, "move", "100", "600")
+    cli(demo.directory, "screenshot", "--delay", "0.5", str(before))
+    cli(demo.directory, "move", "500", "200")
+    cli(demo.directory, "screenshot", "--delay", "1", str(hovered))
+    events = input_events(demo)
+    assert any(
+        event["event"] == "motion"
+        and event["x"] == 500
+        and event["y"] == 200
+        and not event["pressed"]
+        for event in events
+    )
+    assert any(
+        event["event"] == "tooltip" and not event["keyboard"] for event in events
+    )
+    assert not any(event["event"] in {"press", "release"} for event in events)
+    cli(demo.directory, "move", "100", "600")
+    cli(demo.directory, "screenshot", "--delay", "0.2", str(after))
+    with (
+        Image.open(before) as original,
+        Image.open(hovered) as tooltip,
+        Image.open(after) as restored,
+    ):
+        # The drawing area excludes the entry's blinking text cursor.
+        region = (0, 0, 1280, 400)
+        assert (
+            ImageChops.difference(
+                original.crop(region).convert("RGB"),
+                tooltip.crop(region).convert("RGB"),
+            ).getbbox()
+            is not None
+        )
+        assert (
+            ImageChops.difference(
+                original.crop(region).convert("RGB"),
+                restored.crop(region).convert("RGB"),
+            ).getbbox()
+            is None
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
 @pytest.mark.parametrize("button", [None, "right"])
 @pytest.mark.parametrize("count", [None, 2])
 def test_click_delivers_button_and_recognized_count(

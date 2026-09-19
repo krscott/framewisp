@@ -81,6 +81,11 @@ invoking capture. The grim process still has its own ten-second deadline; the
 delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
 
+`move X Y` invokes `vncdo move X Y` without button commands. Movement is
+immediate. Use `screenshot --delay` to wait for app-defined hover feedback.
+A GTK test verifies received coordinates, no button events, a visible tooltip,
+and its disappearance after moving away.
+
 `scroll X Y DIRECTION --steps N` moves the pointer to `(X, Y)` and sends `N`
 wheel-button press/release pairs on the same VNC connection. The VNC buttons are
 4 for up, 5 for down, 6 for left, and 7 for right. After the last release, the
