@@ -53,4 +53,4 @@ These are notes for later issues, not requirements for this MVP.
 - Configure resolution, DPI, fonts, themes, locale, and keyboard layout for
   reproducible screenshots across hosts.
 - Measure startup/input/capture costs before adding caches or persistent connections.
-- Add a standalone runnable Nix package and broader integration coverage.
+- Broaden package compatibility beyond the tested x86_64 Linux environment.

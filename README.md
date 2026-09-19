@@ -4,20 +4,59 @@ Run a native Wayland app without a physical display, save PNG screenshots or MP4
 send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
 development environment and includes a small GTK demo.
 
-## Try it
+## Install or run with Nix
 
-In the first terminal:
+The flake supports `x86_64-linux`. The package supplies framewisp's display,
+input, screenshot, and recording tools, plus the bundled GTK demo. No development
+shell, checkout, virtual environment, or sudo is needed for `nix run`. External
+applications such as Flatpaks still need their own installation.
+
+For this private repository, use an SSH flake URL with an authorized GitHub key:
 
 ```sh
-nix develop
+nix run 'git+ssh://git@github.com/krscott/framewisp' -- \
+  --session /tmp/framewisp-demo run -- framewisp-demo
+```
+
+Repeat the same `nix run ... --` prefix for input and screenshot commands.
+The first invocation builds or downloads the package and its dependencies.
+
+To put `framewisp` and `framewisp-demo` on PATH, add the flake to your NixOS or
+Home Manager configuration's inputs:
+
+```nix
+inputs.framewisp.url = "git+ssh://git@github.com/krscott/framewisp";
+```
+
+Pass `inputs` to your modules through `specialArgs` (NixOS) or
+`extraSpecialArgs` (standalone Home Manager). Then select the package:
+
+```nix
+{ inputs, pkgs, ... }:
+{
+  # Home Manager:
+  home.packages = [
+    inputs.framewisp.packages.${pkgs.stdenv.hostPlatform.system}.default
+  ];
+
+  # For NixOS, use environment.systemPackages instead of home.packages.
+}
+```
+
+Apply your configuration normally. No framewisp service or dedicated module is
+needed.
+
+## Try it
+
+After installation, in the first terminal:
+
+```sh
 framewisp --session /tmp/framewisp-demo run -- framewisp-demo
 ```
 
-Wait for `Session ready:`. Keep that process running. In a second terminal,
-enter the same repo and run:
+Wait for `Session ready:`. Keep that process running. In a second terminal, run:
 
 ```sh
-nix develop
 framewisp --session /tmp/framewisp-demo screenshot /tmp/before.png
 ```
 
@@ -39,9 +78,8 @@ first terminal, or send SIGTERM to the `framewisp ... run` process. An agent can
 keep that foreground process running through its shell tool while it makes
 separate CLI calls.
 
-The Nix development shell supplies the display and input tools. No manual system
-package installation or sudo is needed. Its first run downloads dependencies and
-creates the Python virtual environment.
+The installed package supplies the display and input tools. You can also use
+these commands inside `nix develop` when working on the source.
 
 ## Commands
 
@@ -90,12 +128,13 @@ before stopping the display. The recording uses H.264 at 1280 by 720 and 30 fps.
 Choose a new output path in an existing directory; existing files are not
 overwritten. Session log and metadata paths are reserved. Recorder startup,
 capture, or finalization failures fail the session
-and point to `recorder.log`. A forced kill may leave an incomplete MP4. Nix supplies
-the recorder and video inspection tools; recording is disabled unless requested.
+and point to `recorder.log`. A forced kill may leave an incomplete MP4. The package supplies
+the recorder; recording is disabled unless requested. The development shell also
+includes FFmpeg for video inspection.
 
 ## Flatpak game
 
-With the `org.gnome.SwellFoop` Flatpak installed, run this inside `nix develop`:
+With the `org.gnome.SwellFoop` Flatpak installed, run:
 
 ```sh
 framewisp --session /tmp/framewisp-swell run -- \
@@ -116,7 +155,7 @@ This is not a general animation-completion guarantee.
 
 ## Drawing with a drag
 
-With the `org.kde.kolourpaint` Flatpak installed, run this inside `nix develop`:
+With the `org.kde.kolourpaint` Flatpak installed, run:
 
 ```sh
 framewisp --session /tmp/framewisp-paint run -- \
@@ -157,7 +196,8 @@ without it. No private D-Bus service is started.
 
 ## Development
 
-Inside `nix develop`:
+Enter `nix develop` from a checkout. It creates the development virtual
+environment on first use. Then run:
 
 ```sh
 python -m pytest
@@ -172,6 +212,9 @@ managed-process cleanup.
 After changing Python dependencies or script entry points, refresh the existing
 virtual environment with `python -m pip install -e '.[dev]'` inside `nix develop`.
 
+Run `nix flake check` to test the installed package in an empty environment,
+including real input, screenshots, and recording. This checks that it works
+without the development shell.
+
 See [DESIGN.md](DESIGN.md) for the implementation and [FOLLOWUPS.md](FOLLOWUPS.md)
-for deferred work. The standalone Nix package is not a supported launch method
-yet; use the development shell.
+for deferred work.

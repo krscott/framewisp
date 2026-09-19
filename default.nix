@@ -7,13 +7,41 @@
   pygobject3,
   pygobject-stubs,
   pillow,
+  wrapGAppsHook4,
+  gobject-introspection,
+  gtk4,
+  sway-unwrapped,
+  wayvnc,
+  grim,
+  wf-recorder,
 }:
 buildPythonPackage {
   name = "framewisp";
   src = lib.cleanSource ./.;
   pyproject = true;
 
-  nativeBuildInputs = [ setuptools ];
+  nativeBuildInputs = [
+    setuptools
+    wrapGAppsHook4
+    gobject-introspection
+  ];
+  buildInputs = [ gtk4 ];
+
+  dontWrapGApps = true;
+  preFixup = ''
+    makeWrapperArgs+=(
+      "''${gappsWrapperArgs[@]}"
+      --prefix PATH : "$out/bin:${
+        lib.makeBinPath [
+          sway-unwrapped
+          wayvnc
+          grim
+          wf-recorder
+          vncdotool
+        ]
+      }"
+    )
+  '';
 
   propagatedBuildInputs = [
     vncdotool

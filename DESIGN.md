@@ -109,8 +109,17 @@ deferred.
 
 ## Environment and verification
 
-The pinned Nix development shell supplies Sway, wayvnc, grim, wf-recorder, FFmpeg, GTK's libraries and
-introspection data, and Python dependencies. Python dependencies are also declared
+The standalone Nix package wraps both entry points with Python dependencies,
+GTK libraries and introspection data, and a PATH containing Sway, wayvnc, grim,
+wf-recorder, vncdotool, and its own bin directory (for the bundled demo). The
+flake exports this package as `packages.x86_64-linux.default` and `framewisp`,
+with `meta.mainProgram` selecting the CLI for `nix run`. NixOS and Home Manager
+can install the same package onto PATH. No system service is required.
+
+The development shell additionally supplies FFmpeg for test decoding and the
+Python development tools. `checks.x86_64-linux.package` runs the integration
+tests against the built package with an empty environment and only the package
+and FFmpeg on PATH. Python dependencies are also declared
 in `pyproject.toml` and `default.nix`. The demo uses a plain GTK window and GLib
 loop and runs without a D-Bus session.
 

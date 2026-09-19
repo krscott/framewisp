@@ -42,5 +42,8 @@ jobs:
     - name: Test and Build
       run: nix build -L
 
+    - name: Test standalone package
+      run: nix flake check -L
+
     - name: Check nix
       run: nix flake show '.?submodules=1'

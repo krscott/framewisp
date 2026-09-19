@@ -60,6 +60,21 @@
           default = pkgs.framewisp;
         };
 
+        checks.package = pkgs.runCommand "framewisp-package-test" { } ''
+          export HOME="$TMPDIR"
+          ${pkgs.coreutils}/bin/env -i \
+            HOME="$HOME" \
+            PATH="${pkgs.framewisp}/bin:${pkgs.ffmpeg}/bin" \
+            ${
+              (pkgs.python3.withPackages (ps: [
+                ps.pytest
+                ps.pillow
+              ]))
+            }/bin/python \
+            -m pytest -c ${./pyproject.toml} ${./tests/test_integration.py} --basetemp "$TMPDIR/tests"
+          touch "$out"
+        '';
+
         devShells = {
           default = pkgs.mkShell {
             inputsFrom = [ pkgs.framewisp ];
