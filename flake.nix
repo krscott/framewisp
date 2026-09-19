@@ -89,7 +89,7 @@
 
         apps = {
           format = mkApp "just format";
-          lint = mkApp "just lint";
+          lint = mkApp "${pkgs.nix}/bin/nix develop --command ${pkgs.just}/bin/just lint";
         };
 
         formatter = pkgs.nixfmt;
