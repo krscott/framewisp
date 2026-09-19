@@ -4,15 +4,16 @@
 
 Framewisp gives an agent a CLI loop for one native Wayland application on the
 current x86_64 NixOS environment: launch, screenshot, click, drag, type, screenshot,
-stop. The included GTK 4 demo is the acceptance application.
+stop. Sessions can optionally record a silent MP4. The included GTK 4 demo is the
+acceptance application.
 
 ## Components
 
 - `framewisp/__main__.py` parses the CLI and dispatches to the runner or a tool.
 - `framewisp/lib.py` owns process lifetime and invokes existing display tools.
   `run_session` coordinates startup, monitoring, and shutdown. Separate helpers
-  prepare its environment and manage Sway and wayvnc startup, including waiting
-  for their sockets. Each startup helper uses `managed_process` for cleanup and
+  prepare its environment and manage Sway, wayvnc, and optional recorder startup,
+  waiting for sockets or the recording header. Each startup helper uses `managed_process` for cleanup and
   yields `None` if shutdown is requested while waiting.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
   changes the label to `Entered: TEXT`; clicking the button changes it to
@@ -21,14 +22,16 @@ stop. The included GTK 4 demo is the acceptance application.
 - wayvnc creates virtual pointer and keyboard devices. vncdotool's `vncdo`
   command sends input over a private Unix socket, connecting once per CLI call.
 - grim captures the headless output directly to PNG.
+- wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
 
-There is no controller daemon, RPC API, framebuffer cache, or video pipeline.
+There is no controller daemon, RPC API, or framebuffer cache.
 The foreground `run` command is the lifetime owner.
 
 ## Startup
 
 1. Create or reuse the requested session directory. Refuse an existing
    `session.json`; concurrent runs and stale-session recovery are unsupported.
+   Refuse an existing recording destination before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
 3. Create a temporary runtime directory. It holds the compositor configuration
    and sockets and is removed when the runner exits normally. Its short path
@@ -44,18 +47,23 @@ The foreground `run` command is the lifetime owner.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
 7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
    the private runtime directory. Wait up to ten seconds for that socket.
-8. Launch the application with the private environment and no shell expansion.
-9. Write `session.json` and print `Session ready:`. This indicates process and
+8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
+   30 fps, software `libx264`, `yuv420p`, and the MP4 muxer. Wait up to ten seconds
+   for a nonempty output file, checking for recorder exit. With the pinned
+   wf-recorder, the MP4 header is written after the first frame is received.
+9. Launch the application with the private environment and no shell expansion.
+10. Write `session.json` and print `Session ready:`. This indicates process and
    socket readiness, not application rendering readiness.
 
 Each child runs in its own process session with stdin disconnected and combined
-stdout/stderr directed to its log. The runner monitors the three direct children.
+stdout/stderr directed to its log. The runner monitors all managed children.
 
 ## Interaction
 
 CLI calls read `session.json` to locate the display and VNC socket. The JSON has
 `runtime_directory`, `wayland_display`, and `processes` keys. The last is a map
-of `sway`, `wayvnc`, and `app` to their PIDs; no inherited environment is saved.
+of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
+environment is saved.
 
 `screenshot` invokes grim for `HEADLESS-1` with PNG output. It obtains a new
 capture from the compositor, but makes no claim that preceding input has finished
@@ -84,10 +92,14 @@ Application exit ends the session and returns its exit code. SIGINT or SIGTERM
 requests a clean stop and returns zero. A backend exit or startup timeout reports
 an error naming its log. Unexpected errors keep their traceback.
 
-ExitStack stops managed children in reverse order: app, wayvnc, Sway. It sends
+ExitStack stops managed children in reverse order: app, optional recorder,
+wayvnc, Sway. It sends
 SIGTERM, waits up to five seconds per process, then uses SIGKILL if needed and
 reaps the process. The runtime directory and `session.json` are removed. Logs
-remain in the session directory.
+remain in the session directory. The recorder handles SIGTERM by flushing its
+encoder and writing the MP4 trailer while Sway is still alive. A nonzero recorder
+exit during finalization raises an error naming the destination and log. A killed
+recorder may leave an incomplete file; no crash recovery is attempted.
 
 This guarantees cleanup of the managed direct children in the tested paths.
 Descendant containment, crash recovery, and concurrent command coordination are
@@ -95,7 +107,7 @@ deferred.
 
 ## Environment and verification
 
-The pinned Nix development shell supplies Sway, wayvnc, grim, GTK's libraries and
+The pinned Nix development shell supplies Sway, wayvnc, grim, wf-recorder, FFmpeg, GTK's libraries and
 introspection data, and Python dependencies. Python dependencies are also declared
 in `pyproject.toml` and `default.nix`. The demo uses a plain GTK window and GLib
 loop and runs without a D-Bus session.
@@ -105,7 +117,18 @@ types text, sends BackSpace and Return, clicks the button, and verifies both the
 demo's emitted messages and changed screenshot regions. It also exercises Tab
 and drags across the entry to select and replace text, then clicks the button.
 Shutdown tests check that the recorded child PIDs and private sockets are gone
-after SIGTERM and SIGINT. Both mypy and pyright check the Python code.
+after SIGTERM and SIGINT. Recording tests decode the resulting MP4s with FFmpeg,
+check changing frames, and cover app exit, both shutdown signals, startup failure,
+and recorder failure. Both mypy and pyright check the Python code.
+
+## Recording decision
+
+wf-recorder 0.6.0 captured the headless Pixman output and finalized a playable MP4
+in the local probe. It uses the compositor's screencopy protocol and handles
+encoding and frame timestamps. Continuous capture keeps idle periods in the video
+and lets the recorder continue receiving frames during shutdown. Framewisp owns
+its process alongside the display tools; it does not implement a frame queue or
+feed repeated PNG screenshots into an encoder.
 
 ## Capture decision
 

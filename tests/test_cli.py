@@ -40,3 +40,31 @@ def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "--delay" in result.stderr
     assert not destination.exists()
+
+
+def test_recording_does_not_overwrite(tmp_path: Path) -> None:
+    destination = tmp_path / "existing.mp4"
+    destination.write_bytes(b"keep this recording")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "session"),
+            "run",
+            "--record",
+            str(destination),
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+    assert destination.read_bytes() == b"keep this recording"

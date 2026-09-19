@@ -116,7 +116,57 @@ def start_wayvnc(
         yield process if socket is not None else None
 
 
-def run_session(session: Path, command: list[str]) -> int:
+@contextmanager
+def start_recording(
+    destination: Path, *, log: Path, env: dict[str, str], stop: Event
+) -> Generator[subprocess.Popen[bytes] | None, None, None]:
+    """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
+    command = [
+        "wf-recorder",
+        "-o",
+        "HEADLESS-1",
+        "-D",
+        "-r",
+        "30",
+        "-c",
+        "libx264",
+        "-x",
+        "yuv420p",
+        "-m",
+        "mp4",
+        "-f",
+        str(destination),
+    ]
+    with managed_process(command, log=log, env=env) as process:
+        deadline = time.monotonic() + 10
+        while not stop.is_set():
+            if process.poll() is not None:
+                raise RuntimeError(f"Recorder exited during startup. See {log}")
+            # wf-recorder opens and writes the MP4 header after receiving a frame.
+            if destination.exists() and destination.stat().st_size > 0:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Waiting for recording to start timed out. See {log}"
+                )
+            stop.wait(0.05)
+        else:
+            yield None
+            return
+        yield process
+    if process.returncode != 0:
+        raise RuntimeError(f"Recorder failed to finalize {destination}. See {log}")
+
+
+def run_session(
+    session: Path, command: list[str], *, recording: Path | None = None
+) -> int:
+    if recording is not None:
+        recording = recording.resolve()
+        if recording.exists():
+            raise RuntimeError(
+                f"{recording} already exists. Choose a new recording path."
+            )
     session.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = session / "session.json"
     if state.exists():
@@ -154,6 +204,17 @@ def run_session(session: Path, command: list[str]) -> int:
             if vnc is None:
                 return 0
 
+            backends = {"sway": sway, "wayvnc": vnc}
+            if recording is not None:
+                recorder = stack.enter_context(
+                    start_recording(
+                        recording, log=session / "recorder.log", env=env, stop=stop
+                    )
+                )
+                if recorder is None:
+                    return 0
+                backends["recorder"] = recorder
+
             app = stack.enter_context(
                 managed_process(command, log=session / "app.log", env=env)
             )
@@ -163,9 +224,8 @@ def run_session(session: Path, command: list[str]) -> int:
                         "runtime_directory": directory,
                         "wayland_display": display,
                         "processes": {
-                            "sway": sway.pid,
-                            "wayvnc": vnc.pid,
-                            "app": app.pid,
+                            name: process.pid
+                            for name, process in (backends | {"app": app}).items()
                         },
                     }
                 )
@@ -173,7 +233,7 @@ def run_session(session: Path, command: list[str]) -> int:
             )
             print(f"Session ready: {session}", flush=True)
             while not stop.wait(0.1):
-                for name, process in (("sway", sway), ("wayvnc", vnc)):
+                for name, process in backends.items():
                     if process.poll() is not None:
                         raise RuntimeError(
                             f"{name} exited. See {session / (name + '.log')}"
