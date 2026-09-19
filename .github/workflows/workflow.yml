@@ -1,0 +1,46 @@
+name: Workflow
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check Format
+      run: |
+        nix run -L .#format
+        git diff --exit-code
+
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Lint
+      run: nix run -L .#lint
+
+    - name: Check Develop Shell
+      run: nix develop --command bash -c 'pystart --help'
+
+    - name: Test CLI and library
+      run: nix develop --command python -m pytest
+
+    - name: Test and Build
+      run: nix build -L
+
+    - name: Check nix
+      run: nix flake show '.?submodules=1'

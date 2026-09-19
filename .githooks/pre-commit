@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v just >/dev/null; then
+    exec just pre-commit
+fi
