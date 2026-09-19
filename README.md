@@ -149,10 +149,10 @@ The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
 KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below). X11 and GPU-dependent apps
 are outside this MVP.
 
-Automatic copy-on-selection (the primary clipboard) is disabled. It triggered a
-wayvnc clipboard-offer crash during ordinary text selection. Ctrl+C/Ctrl+V remain
-available; the underlying clipboard issue is tracked in
-[#30](https://github.com/krscott/framewisp/issues/30).
+Clipboard forwarding between VNC clients and the session is disabled. Applications
+can still use Ctrl+C/Ctrl+V and primary selection. Framewisp's Nix package patches
+wayvnc to disable forwarding independently of keyboard and pointer input, avoiding
+the clipboard-offer crash described in [#30](https://github.com/krscott/framewisp/issues/30).
 
 The display defaults to 1280 by 720 pixels. Set `run --width 1600 --height 900`
 for more room. Screenshots and input use those pixel dimensions, with `(0, 0)`

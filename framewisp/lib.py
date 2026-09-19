@@ -25,7 +25,6 @@ from framewisp.x11 import type_text as type_x11_text
 
 SWAY_CONFIG = """\
 xwayland disable
-primary_selection disabled
 output HEADLESS-1 mode {width}x{height}@60Hz
 seat seat0 fallback true
 input * xkb_layout us
@@ -211,7 +210,15 @@ def start_wayvnc(
     runtime: Path, *, log: Path, env: dict[str, str], stop: Event
 ) -> Generator[subprocess.Popen[bytes] | None, None, None]:
     """Yield the ready process, or None if startup is interrupted."""
-    command = ["wayvnc", "-C", "/dev/null", "-k", "us", f"unix:{runtime / 'vnc.sock'}"]
+    command = [
+        "wayvnc",
+        "--disable-clipboard",
+        "-C",
+        "/dev/null",
+        "-k",
+        "us",
+        f"unix:{runtime / 'vnc.sock'}",
+    ]
     with managed_process(command, log=log, env=env) as process:
         socket = wait_for_socket(
             runtime, "vnc.sock", process=process, log=log, stop=stop

@@ -2,6 +2,8 @@ import json
 import os
 import re
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import time
@@ -53,7 +55,12 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     x11 = isinstance(mode, str) and mode.startswith("x11")
     if x11:
         assert isinstance(mode, str)
-        mode = {"x11": None, "x11-probe": "probe", "x11-record": True}[mode]
+        mode = {
+            "x11": None,
+            "x11-probe": "probe",
+            "x11-record": True,
+            "x11-clipboard": "clipboard",
+        }[mode]
     recording = (
         tmp_path / "session.mp4"
         if mode is True or mode in {"large", "uncaptioned"}
@@ -71,6 +78,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--width", str(width), "--height", str(height)])
     probes = {
         "probe": "input_probe.py",
+        "clipboard": "input_probe.py",
         "scroll": "scroll_probe.py",
         "large": "input_probe.py",
         "odd": "input_probe.py",
@@ -85,6 +93,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         process = subprocess.Popen(
             command,
             env=os.environ
+            | ({"WAYLAND_DEBUG": "client"} if mode == "clipboard" else {})
             | (
                 {
                     "DISPLAY": ":99999",
@@ -127,7 +136,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert b"WAYLAND_DISPLAY=host-display-do-not-use" not in app_env
             assert b"XAUTHORITY=/dev/null" in app_env
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
-            if mode != "probe":
+            if mode not in {"probe", "clipboard"}:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
                 )
@@ -725,18 +734,54 @@ def test_scroll_targets_pane_and_returns_to_start(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("demo", ["clipboard", "x11-clipboard"], indirect=True)
 def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     cli(demo.directory, "click", "100", "425")
     for text in ["one", "two", "three"]:
         cli(demo.directory, "key", "Ctrl+a")
         cli(demo.directory, "type", "--interval", "0", text)
-        for chord in ["Ctrl+a", "Ctrl+c", "Right", "Ctrl+v"]:
+        for chord in ["Ctrl+a", "Ctrl+c"]:
+            cli(demo.directory, "key", chord)
+        # Tear down clients while the app owns a clipboard selection. Each
+        # client also tries to overwrite it through VNC clipboard forwarding.
+        for _ in range(100):
+            disconnect_vnc_with_clipboard(demo.runtime)
+        for chord in ["Right", "Ctrl+v"]:
             cli(demo.directory, "key", chord)
         wait_until(
             lambda: any(event.get("text") == text * 2 for event in input_events(demo))
         )
+    protocol_log = (demo.directory / "wayvnc.log").read_text()
+    assert "create_virtual_keyboard(" in protocol_log
+    assert "get_data_device(" not in protocol_log
+    assert demo.process.poll() is None
+
+
+def disconnect_vnc_with_clipboard(runtime: Path) -> None:
+    """Complete an RFB 3.8 handshake, send clipboard text, and disconnect."""
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(5)
+        connection.connect(str(runtime / "vnc.sock"))
+
+        def receive(count: int) -> bytes:
+            data = b""
+            while len(data) < count:
+                chunk = connection.recv(count - len(data))
+                assert chunk, "VNC server disconnected during handshake"
+                data += chunk
+            return data
+
+        assert receive(12) == b"RFB 003.008\n"
+        connection.sendall(b"RFB 003.008\n")
+        assert 1 in receive(receive(1)[0])  # Security type None.
+        connection.sendall(b"\x01")
+        assert receive(4) == bytes(4)  # SecurityResult success.
+        connection.sendall(b"\x01")  # ClientInit: share the display.
+        server_init = receive(24)
+        receive(struct.unpack("!I", server_init[20:24])[0])
+        text = b"remote clipboard must not replace application text"
+        connection.sendall(struct.pack("!B3xI", 6, len(text)) + text)
 
 
 @pytest.mark.integration

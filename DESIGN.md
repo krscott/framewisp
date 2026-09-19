@@ -66,15 +66,22 @@ basic GUI workflows, user-started attachment, and permission before filing issue
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at the requested width and height (default 1280x720) and
    60 Hz, a fallback seat, US keyboard layout,
-   and no window borders. Disable primary selection to avoid the observed wayvnc
-   crash on automatic selection offers; ordinary clipboard copy/paste stays enabled.
+   and no window borders. Ordinary clipboard copy/paste and primary selection
+   stay enabled within the session.
    Load no host Sway configuration. The CLI validates positive integer dimensions
    before starting the session. Recording requires even dimensions, since
    wf-recorder otherwise crops the last row or column.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
-7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
+7. Start wayvnc with an empty configuration, US layout, `--disable-clipboard`, and a Unix socket in
    the private runtime directory. Wait up to ten seconds for that socket.
+   The Nix overlay applies `patches/wayvnc-disable-clipboard.patch` for this option.
+   It skips per-client data-control devices, disabling VNC clipboard forwarding
+   while keeping keyboard and pointer input. Short-lived clients can otherwise
+   destroy their devices before pending
+   clipboard offers arrive. Libwayland discards those offers, leaving gaps in its
+   server object map that can make a later offer fail with an invalid object ID.
+   Application clipboard and primary-selection transfers do not use these devices.
    Open one idle connection through vncdotool's threaded API and wait up to ten
    seconds for its handshake by calling `pause(0)`. Keep it connected for the
    session so the seat retains a keyboard and pointer between CLI commands.
