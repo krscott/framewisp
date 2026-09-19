@@ -3,6 +3,8 @@
 import json
 import subprocess
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
 
@@ -123,3 +125,120 @@ def test_stale_attach_socket(
     )
     assert request_attached(tmp_path, "detach", {}) == 1
     assert "disconnected" in capsys.readouterr().err
+
+
+_SERVER = """
+import sys
+import time
+from pathlib import Path
+import framewisp.attach as attach
+root = Path(sys.argv[1])
+class Portal:
+    def __init__(self, stop):
+        self.stop = stop
+        self.size = (800, 600)
+        self.node = 1
+    def open(self):
+        (root / 'waiting').touch()
+        while not (root / 'approve').exists():
+            if self.stop.wait(.01):
+                raise InterruptedError('cancelled')
+    def input(self, method, signature, *values):
+        with (root / 'events').open('a') as out:
+            out.write(repr((method, values)) + '\\n')
+    def close(self):
+        time.sleep(.1)
+        (root / 'closed').touch()
+attach.DesktopPortal = Portal
+attach.dispatch_events = lambda: None
+raise SystemExit(attach.attach_session(root / 'session'))
+"""
+
+
+def wait_file(path: Path) -> None:
+    deadline = time.monotonic() + 5
+    while not path.exists():
+        assert time.monotonic() < deadline, f"Timed out waiting for {path}"
+        time.sleep(0.01)
+
+
+@pytest.fixture
+def attach_process(tmp_path: Path) -> Iterator[subprocess.Popen[str]]:
+    process = subprocess.Popen(
+        [sys.executable, "-c", _SERVER, str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_file(tmp_path / "waiting")
+        yield process
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+
+
+def test_pending_consent_reserves_session(
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+) -> None:
+    metadata = tmp_path / "session" / "session.json"
+    original = metadata.read_text()
+    duplicate = subprocess.run(
+        [sys.executable, "-c", _SERVER, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert duplicate.returncode == 1
+    assert "already exists" in duplicate.stderr
+    assert metadata.read_text() == original
+    assert attach_process.poll() is None
+    assert request_attached(tmp_path / "session", "detach", {}) == 0
+    assert not metadata.exists()
+    assert (tmp_path / "closed").exists()
+    assert attach_process.wait(timeout=5) == 0
+
+
+def test_detach_cancels_long_input_and_waits_for_cleanup(
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+) -> None:
+    session = tmp_path / "session"
+    assert request_attached(session, "key", {"chord": "a"}) == 1
+    assert not (tmp_path / "events").exists()
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    command = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(session),
+            "type",
+            "AB",
+            "--interval",
+            "60",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_file(tmp_path / "events")
+        started = time.monotonic()
+        assert request_attached(session, "detach", {}) == 0
+        assert time.monotonic() - started < 3
+        assert command.wait(timeout=5) == 1
+        assert (tmp_path / "closed").exists()
+        assert not (session / "session.json").exists()
+        assert "66" not in (tmp_path / "events").read_text()
+        assert attach_process.wait(timeout=5) == 0
+    finally:
+        if command.poll() is None:
+            command.terminate()
+        command.wait(timeout=5)

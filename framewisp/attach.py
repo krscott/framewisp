@@ -10,6 +10,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -233,6 +234,8 @@ def attach_session(session: Path) -> int:
             f"{state} already exists. Use a different session directory."
         )
     stop = Event()
+    ready = Event()
+    owns_state = False
     lock = Lock()
     workers: list[Thread] = []
     portal = DesktopPortal(stop)
@@ -244,7 +247,6 @@ def attach_session(session: Path) -> int:
     previous = {
         sig: signal.signal(sig, request_stop) for sig in (signal.SIGINT, signal.SIGTERM)
     }
-    (session / "inputs.jsonl").write_text("", encoding="utf-8")
 
     def handle(connection: socket.socket) -> None:
         with connection:
@@ -258,6 +260,8 @@ def attach_session(session: Path) -> int:
                 if action == "detach":
                     stop.set()
                 else:
+                    if not ready.is_set():
+                        raise RuntimeError("Attach is waiting for desktop permission.")
                     while not lock.acquire(timeout=0.05):
                         inputs.wait()
                     try:
@@ -286,50 +290,76 @@ def attach_session(session: Path) -> int:
             except OSError:
                 pass
 
+    def serve(listener: socket.socket) -> None:
+        while not stop.is_set():
+            try:
+                connection, _ = listener.accept()
+            except TimeoutError:
+                continue
+            worker = Thread(target=handle, args=(connection,))
+            workers[:] = [thread for thread in workers if thread.is_alive()]
+            workers.append(worker)
+            worker.start()
+
     try:
         with tempfile.TemporaryDirectory(prefix="framewisp-attach-") as directory:
             with socket.socket(socket.AF_UNIX) as listener:
                 listener.bind(str(Path(directory) / "attach.sock"))
                 listener.listen()
                 listener.settimeout(0.05)
-                print(
-                    f"Stop: framewisp {session} detach (bind this command to your desktop escape shortcut). Ctrl+C also stops access.",
-                    flush=True,
-                )
-                portal.open()
-                state.write_text(
-                    json.dumps(
+                # Reserve ownership before consent so two requests cannot share a session.
+                try:
+                    metadata = state.open("x")
+                except FileExistsError:
+                    print(
+                        f"{state} already exists. Use a different session directory.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                owns_state = True
+                with metadata:
+                    json.dump(
                         {
                             "kind": "attached",
                             "runtime_directory": directory,
                             "processes": {"attach": os.getpid()},
-                        }
+                        },
+                        metadata,
                     )
-                    + "\n"
-                )
-                print(
-                    f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Input shares your desktop pointer and focus.",
-                    flush=True,
-                )
-                while not stop.is_set():
-                    dispatch_events()
-                    try:
-                        connection, _ = listener.accept()
-                    except TimeoutError:
-                        continue
-                    worker = Thread(target=handle, args=(connection,))
-                    workers = [thread for thread in workers if thread.is_alive()]
-                    workers.append(worker)
-                    worker.start()
+                    metadata.write("\n")
+                (session / "inputs.jsonl").write_text("", encoding="utf-8")
+                server = Thread(target=serve, args=(listener,))
+                server.start()
+                try:
+                    print(
+                        f"Stop: framewisp {session} detach (bind this command to your desktop escape shortcut). Ctrl+C also stops access.",
+                        flush=True,
+                    )
+                    portal.open()
+                    inputs.wait()
+                    ready.set()
+                    print(
+                        f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Input shares your desktop pointer and focus.",
+                        flush=True,
+                    )
+                    while not stop.wait(0.02):
+                        dispatch_events()
+                finally:
+                    stop.set()
+                    server.join()
     except InterruptedError:
         return 0
+    except (RuntimeError, GLib.Error) as error:
+        print(error, file=sys.stderr)
+        return 1
     finally:
         stop.set()
         for worker in workers:
             worker.join()
         inputs.release()
         portal.close()
-        state.unlink(missing_ok=True)
+        if owns_state:
+            state.unlink(missing_ok=True)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
         print("Detached. The app and desktop are still running.", flush=True)

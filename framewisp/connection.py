@@ -3,6 +3,7 @@
 import json
 import socket
 import sys
+import time
 from pathlib import Path
 
 
@@ -27,6 +28,16 @@ def request_attached(session: Path, action: str, parameters: dict[str, object]) 
         result = json.loads(line)
         if result["error"]:
             print(result["error"], file=sys.stderr)
+        if action == "detach" and result["status"] == 0:
+            deadline = time.monotonic() + 10
+            while (session / "session.json").exists():
+                if time.monotonic() >= deadline:
+                    print(
+                        "Detach cleanup timed out. Check the attach terminal.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                time.sleep(0.01)
         return int(result["status"])
     except (FileNotFoundError, ConnectionError):
         print(

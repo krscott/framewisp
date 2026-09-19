@@ -80,17 +80,21 @@ class DesktopPortal:
             while not response:
                 dispatch_events()
                 if self.stop.wait(0.02):
-                    self.bus.call_sync(
-                        PORTAL,
-                        path,
-                        "org.freedesktop.portal.Request",
-                        "Close",
-                        None,
-                        None,
-                        Gio.DBusCallFlags.NONE,
-                        2000,
-                        None,
-                    )
+                    try:
+                        self.bus.call_sync(
+                            PORTAL,
+                            path,
+                            "org.freedesktop.portal.Request",
+                            "Close",
+                            None,
+                            None,
+                            Gio.DBusCallFlags.NONE,
+                            2000,
+                            None,
+                        )
+                    except GLib.Error:
+                        # Session revocation may already have removed the request.
+                        pass
                     raise InterruptedError(
                         "Attach stopped while waiting for desktop permission."
                     )

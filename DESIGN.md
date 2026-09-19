@@ -314,16 +314,18 @@ devices, select one monitor through ScreenCast, and request consent with Start.
 The connection stays open until detach, SIGINT, SIGTERM, or the portal's Closed
 signal. Permission is requested on every new connection.
 
-After consent, session.json records `kind: attached`, the private runtime
+Before requesting consent, exclusive creation of session.json reserves the directory and records `kind: attached`, the private runtime
 directory, and the attach PID. `connection.py` sends newline-delimited JSON
 requests over that directory's attach.sock. The existing CLI dispatches attached
 input and screenshots there; isolated sessions keep their existing tools.
-Workers serialize actions with a lock, while the main thread keeps dispatching
-portal signals and accepting disconnect requests. Detach sets a shared Event
+A listener thread accepts requests; workers serialize actions with a lock.
+The main thread dispatches portal signals. Before consent, input requests fail
+with a waiting-for-permission message, but detach remains available. Detach sets a shared Event
 without waiting for the action lock. Paced typing and drags use interruptible
 Event waits. Queued workers check the Event before executing. Held buttons and
 keys release during action cleanup; shutdown closes the portal and removes the
-socket and session metadata. It never signals the user's app or compositor.
+socket and owned session metadata. The detach client waits for metadata removal
+before reporting success, so immediate reconnection is possible. It never signals the user's app or compositor.
 
 Pointer coordinates use screenshot pixels and the portal stream node. Portal
 Notify methods deliver absolute motion, buttons, wheel steps, and keyboard

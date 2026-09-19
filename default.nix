@@ -32,7 +32,7 @@ let
     ];
   };
   capturePlugins = lib.makeSearchPath "lib/gstreamer-1.0" [
-    gst_all_1.gstreamer
+    (lib.getLib gst_all_1.gstreamer)
     pipewire
     gst_all_1.gst-plugins-base
     gst_all_1.gst-plugins-good
