@@ -256,7 +256,7 @@ def attach_session(session: Path) -> int:
         "Before continuing, bind BOTH Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape to:\n"
         "  framewisp --detach\n"
         "The second binding is needed when the agent holds Shift. Test your bindings.\n"
-        "Ctrl+C here also stops access. Closing this terminal ends the connection.",
+        "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
         flush=True,
     )
     try:

@@ -224,8 +224,10 @@ your live pointer and keyboard focus. Keyboard input goes to the focused app,
 even if that app is on another monitor. Screenshots include everything visible
 on the shared monitor.
 
-Ctrl+Alt+Escape runs `framewisp --detach`. Ctrl+C, closing the attach terminal,
-suspending the command, or portal revocation also ends access. If the attach
+Ctrl+Alt+Escape runs `framewisp --detach`. Ctrl+C, loss of the controlling terminal,
+pressing Ctrl+Z, or portal revocation also ends access. Detaching from tmux
+or screen can leave that terminal and the attach process running. Use `--detach`
+before disconnecting from a terminal multiplexer. If the attach
 process crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive attach process
 after half a second. It uses Linux 6.5 or newer to identify the socket owner safely. No separate stop-sharing control was visible
