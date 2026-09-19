@@ -92,6 +92,7 @@
               pkgs.wayvnc
               pkgs.grim
               pkgs.wf-recorder
+              pkgs.wtype
               pkgs.ffmpeg
             ];
             venvDir = ".venv";

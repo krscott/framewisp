@@ -528,7 +528,8 @@ def test_drag_delivers_paced_motion_and_release(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
-@pytest.mark.parametrize("interval,text", [(None, "Ab c"), (0, "Ab c"), (5.5, "Ab c")])
+@pytest.mark.parametrize("interval", [None, 0, 5.5])
+@pytest.mark.parametrize("text", ["Ab c", "é中🙂a"])
 def test_typing_paces_received_characters(
     demo: Demo, interval: float | None, text: str
 ) -> None:
@@ -543,9 +544,13 @@ def test_typing_paces_received_characters(
         text[:end] for end in range(1, len(text) + 1)
     ]
     expected_interval = 0.08 if interval is None else interval
-    for previous, current in zip(events, events[1:]):
+    # Check key receipt separately from text updates. Both input tools send zero
+    # protocol timestamps, so allow 30 ms of observed GTK callback jitter.
+    keys = [event for event in input_events(demo) if event["event"] == "key-press"]
+    assert len(keys) == len(text)
+    for previous, current in zip(keys, keys[1:]):
         elapsed = float(current["time"]) - float(previous["time"])
-        assert expected_interval * 0.9 <= elapsed < expected_interval + 2
+        assert max(0, expected_interval * 0.9 - 0.03) <= elapsed < expected_interval + 2
     # A 16.5-second action exceeds both original deadlines. It must also return
     # without sleeping for another 5.5 seconds after the final character.
     assert finished - float(events[-1]["time"]) < 3
@@ -709,3 +714,24 @@ def test_custom_display_size(demo: Demo, size: tuple[int, int], tmp_path: Path) 
     assert demo.process.wait(timeout=20) == 0
     if demo.recording is not None:
         assert len(recording_frames(demo.recording, size=size)) > 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "425")
+    text = "-café Ελληνικά Русский 日本語 😀 e\u0301"
+    cli(demo.directory, "type", "--interval", "0", "--", text)
+    wait_until(lambda: any(event.get("text") == text for event in input_events(demo)))
+    cli(demo.directory, "type", " ASCII")
+    wait_until(
+        lambda: any(
+            event.get("text") == text + " ASCII" for event in input_events(demo)
+        )
+    )
+    cli(demo.directory, "key", "Ctrl+a")
+    cli(demo.directory, "type", "replaced")
+    wait_until(
+        lambda: any(event.get("text") == "replaced" for event in input_events(demo))
+    )

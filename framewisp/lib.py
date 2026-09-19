@@ -400,12 +400,34 @@ def scroll_pointer(session: Path, x: int, y: int, *, direction: str, steps: int)
 
 
 def type_text(session: Path, text: str, *, interval: float) -> int:
+    if not text.isascii():
+        return type_unicode(session, text, interval=interval)
     arguments: list[str] = []
     for index, character in enumerate(text):
         if index and interval:
             arguments.extend(["pause", str(interval)])
         arguments.extend(["type", character])
     return send_input(session, arguments, duration=max(0, len(text) - 1) * interval)
+
+
+def type_unicode(session: Path, text: str, *, interval: float) -> int:
+    # wtype uploads a keymap containing the requested characters; wayvnc's US
+    # keymap cannot represent arbitrary Unicode. Use keysyms so text never
+    # becomes a wtype option, and sleep only between characters.
+    pause_ms = math.ceil(interval * 1000)
+    arguments = ["wtype"]
+    for index, character in enumerate(text):
+        if index and pause_ms:
+            arguments.extend(["-s", str(pause_ms)])
+        arguments.extend(["-k", f"U{ord(character):04X}"])
+    duration = max(0, len(text) - 1) * pause_ms / 1000
+    # wtype also spends 2 ms on each key press and release.
+    return subprocess.run(
+        arguments,
+        env=session_environment(session),
+        check=False,
+        timeout=15 + duration + len(text) * 0.004,
+    ).returncode
 
 
 def send_input(
