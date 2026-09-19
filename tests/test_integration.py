@@ -30,7 +30,7 @@ def wait_until(predicate: Callable[[], bool]) -> None:
 
 def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        ["framewisp", "--session", str(directory), *arguments],
+        ["framewisp", str(directory), *arguments],
         capture_output=True,
         text=True,
         check=False,
@@ -46,11 +46,11 @@ def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
-    directory = tmp_path / "session"
+    directory = tmp_path / "session with spaces"
     runner_log = tmp_path / "runner.log"
     mode = getattr(request, "param", None)
     recording = tmp_path / "session.mp4" if mode is True or mode == "large" else None
-    command = ["framewisp", "--session", str(directory), "run"]
+    command = ["framewisp", str(directory), "run"]
     if recording is not None:
         command.extend(["--record", str(recording)])
     if mode in {"large", "odd"}:
@@ -274,7 +274,6 @@ def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -
     result = subprocess.run(
         [
             "framewisp",
-            "--session",
             str(tmp_path / "session"),
             "run",
             "--record",
@@ -314,7 +313,6 @@ def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             "framewisp",
-            "--session",
             str(session),
             "run",
             "--record",

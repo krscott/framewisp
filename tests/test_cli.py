@@ -14,7 +14,7 @@ def test_cli_help() -> None:
         timeout=5,
     )
     assert result.returncode == 0
-    assert "--session" in result.stdout
+    assert "SESSION" in result.stdout
     assert "screenshot" in result.stdout
 
 
@@ -26,7 +26,6 @@ def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "session"),
             "screenshot",
             f"--delay={delay}",
@@ -50,7 +49,6 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "session"),
             "run",
             "--record",
@@ -81,7 +79,6 @@ def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(session),
             "run",
             "--record",
@@ -114,7 +111,6 @@ def test_invalid_input_timing(
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "missing"),
             action,
             f"{option}={value}",
@@ -151,7 +147,6 @@ def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "missing"),
             "key",
             chord,
@@ -173,7 +168,6 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "missing"),
             "scroll",
             "100",
@@ -209,7 +203,6 @@ def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "missing"),
             "click",
             f"{option}={value}",
@@ -246,7 +239,6 @@ def test_invalid_pointer_gesture(
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "missing"),
             action,
             *options,
@@ -271,7 +263,6 @@ def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(session),
             "run",
             f"{option}={value}",
@@ -297,7 +288,6 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(session),
             "run",
             option,
@@ -327,7 +317,6 @@ def test_type_rejects_nonprintable_text(text: str, tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "framewisp",
-            "--session",
             str(tmp_path / "missing"),
             "type",
             text,

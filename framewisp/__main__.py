@@ -38,7 +38,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run and interact with a headless Wayland app."
     )
-    parser.add_argument("--session", type=Path, required=True, help="session directory")
+    parser.add_argument(
+        "session", type=Path, metavar="SESSION", help="session directory"
+    )
     commands = parser.add_subparsers(dest="action", required=True)
 
     run = commands.add_parser(
