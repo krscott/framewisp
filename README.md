@@ -304,3 +304,8 @@ without the development shell.
 
 See [DESIGN.md](DESIGN.md) for the implementation and [FOLLOWUPS.md](FOLLOWUPS.md)
 for deferred work.
+
+## License
+
+Framewisp is licensed under the GNU General Public License, version 3 only
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the full text.
