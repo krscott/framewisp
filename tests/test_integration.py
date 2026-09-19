@@ -50,12 +50,18 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session with spaces"
     runner_log = tmp_path / "runner.log"
     mode = getattr(request, "param", None)
+    x11 = isinstance(mode, str) and mode.startswith("x11")
+    if x11:
+        assert isinstance(mode, str)
+        mode = {"x11": None, "x11-probe": "probe", "x11-record": True}[mode]
     recording = (
         tmp_path / "session.mp4"
         if mode is True or mode in {"large", "uncaptioned"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
+    if x11:
+        command.append("--x11")
     if recording is not None:
         command.extend(["--record", str(recording)])
         if mode == "uncaptioned":
@@ -78,9 +84,20 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     with runner_log.open("w") as output:
         process = subprocess.Popen(
             command,
+            env=os.environ
+            | (
+                {
+                    "DISPLAY": ":99999",
+                    "WAYLAND_DISPLAY": "host-display-do-not-use",
+                    "XAUTHORITY": str(tmp_path / "host-authority"),
+                }
+                if x11
+                else {}
+            ),
             stdout=output,
             stderr=subprocess.STDOUT,
         )
+    x11_children: list[int] = []
     try:
 
         def ready() -> bool:
@@ -89,6 +106,31 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
 
         wait_until(ready)
         state = json.loads((directory / "session.json").read_text())
+        if x11:
+            # wlroots double-forks Xwayland, so it is not a Sway child in /proc.
+            for path in Path("/proc").glob("[0-9]*/cmdline"):
+                try:
+                    argv = path.read_bytes().split(b"\0")
+                except OSError:
+                    continue  # Other system processes can exit during enumeration.
+                if b"Xwayland" in argv[0] and state["x11_display"].encode() in argv:
+                    x11_children.append(int(path.parent.name))
+            assert len(x11_children) == 1
+            x11_socket = Path("/tmp/.X11-unix") / f"X{state['x11_display'][1:]}"
+            assert x11_socket.is_socket()
+            assert state["x11_display"] != ":99999"
+            app_env = (
+                Path(f"/proc/{state['processes']['app']}/environ")
+                .read_bytes()
+                .split(b"\0")
+            )
+            assert b"WAYLAND_DISPLAY=host-display-do-not-use" not in app_env
+            assert b"XAUTHORITY=/dev/null" in app_env
+            assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
+            if mode != "probe":
+                wait_until(
+                    lambda: "Display: X11Display" in (directory / "app.log").read_text()
+                )
         yield Demo(
             directory=directory,
             process=process,
@@ -100,9 +142,12 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=20)
+        for pid in x11_children:
+            wait_until(lambda: not Path(f"/proc/{pid}").exists())
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
@@ -503,7 +548,7 @@ def test_input_devices_remain_between_commands(demo: Demo) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("duration", [None, 0, 0.6])
 def test_drag_delivers_paced_motion_and_release(
     demo: Demo, duration: float | None
@@ -532,7 +577,7 @@ def test_drag_delivers_paced_motion_and_release(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("interval", [None, 0, 5.5])
 @pytest.mark.parametrize("text", ["Ab c", "é中🙂a"])
 def test_typing_paces_received_characters(
@@ -562,6 +607,7 @@ def test_typing_paces_received_characters(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_shortcuts_select_and_edit_text(demo: Demo) -> None:
     capture = demo.directory / "ready.png"
 
@@ -722,7 +768,7 @@ def test_custom_display_size(demo: Demo, size: tuple[int, int], tmp_path: Path) 
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     cli(demo.directory, "click", "100", "425")
@@ -743,7 +789,7 @@ def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, True], indirect=True)
+@pytest.mark.parametrize("demo", [None, True, "x11-record"], indirect=True)
 def test_record_multiple_clips_without_restarting_app(
     demo: Demo, tmp_path: Path
 ) -> None:
@@ -849,6 +895,7 @@ def video_patch(path: Path, second: float) -> bytes:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
     cli(demo.directory, "click", "120", "100")
     cli(demo.directory, "type", "Setup outside the clip")
@@ -922,6 +969,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
     wait_until(lambda: "Demo ready" in log.read_text())
@@ -940,6 +988,7 @@ def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
     log = demo.directory / "app.log"
     wait_until(lambda: "Demo ready" in log.read_text())
@@ -990,6 +1039,7 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
     wait_until(lambda: "Demo ready" in log.read_text())
@@ -1008,3 +1058,85 @@ def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Option: True\n" in log.read_text())
     cli(demo.directory, "key", "Space")
     wait_until(lambda: "Option: False\n" in log.read_text())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("missing_executable", [False, True])
+def test_x11_failed_app_startup_cleans_up(
+    tmp_path: Path, missing_executable: bool
+) -> None:
+    directory = tmp_path / "failed-session"
+    for _ in range(2):
+        app = (
+            ["/framewisp-no-such-executable"]
+            if missing_executable
+            else [
+                sys.executable,
+                "-c",
+                "import json, os; print(json.dumps({k: os.environ[k] for k in ('DISPLAY', 'XDG_RUNTIME_DIR')}), flush=True); raise SystemExit(7)",
+            ]
+        )
+        result = subprocess.run(
+            ["framewisp", str(directory), "run", "--x11", "--", *app],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert result.returncode == (1 if missing_executable else 7), result.stderr
+        assert not (directory / "session.json").exists()
+        if not missing_executable:
+            env = json.loads((directory / "app.log").read_text())
+            assert not Path(env["XDG_RUNTIME_DIR"]).exists()
+            assert not (Path("/tmp/.X11-unix") / f"X{env['DISPLAY'][1:]}").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["x11"], indirect=True)
+def test_x11_unicode_mapping_limit_and_reuse(demo: Demo) -> None:
+    log = demo.directory / "app.log"
+    cli(demo.directory, "click", "120", "100")
+    too_many = "".join(chr(0x4E00 + index) for index in range(129))
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "type", "--interval", "0", too_many],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert "128 distinct" in result.stderr
+    assert "Text:" not in log.read_text()
+    for text in [too_many[:128], too_many[:3], too_many[3:6]]:
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "type", "--interval", "0", text)
+        cli(demo.directory, "key", "Return")
+        wait_until(lambda: f"Entered: {text}\n" in log.read_text())
+
+    before = log.read_text()
+    rejected = subprocess.run(
+        ["framewisp", str(demo.directory), "type", "é"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert rejected.returncode == 1
+    assert "per session" in rejected.stderr
+    assert log.read_text() == before
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["x11"], indirect=True)
+def test_x11_busy_app_keeps_queued_unicode(demo: Demo) -> None:
+    state = json.loads((demo.directory / "session.json").read_text())
+    app_pid = state["processes"]["app"]
+    cli(demo.directory, "click", "120", "100")
+    os.kill(app_pid, signal.SIGSTOP)
+    try:
+        cli(demo.directory, "type", "é", "--interval", "0")
+        cli(demo.directory, "type", "中", "--interval", "0")
+    finally:
+        os.kill(app_pid, signal.SIGCONT)
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Entered: é中\n" in (demo.directory / "app.log").read_text())

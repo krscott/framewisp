@@ -42,7 +42,7 @@ def positive_integer(value: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run a headless Wayland app or attach to your desktop."
+        description="Run a headless Wayland or X11 app, or attach to your desktop."
     )
     parser.add_argument(
         "--detach",
@@ -60,6 +60,9 @@ def main() -> None:
 
     run = commands.add_parser(
         "run", help="run an app until it exits or you interrupt it"
+    )
+    run.add_argument(
+        "--x11", action="store_true", help="run the app on a private Xwayland display"
     )
     run.add_argument(
         "--record", type=Path, metavar="FILE", help="record the session to MP4"
@@ -238,6 +241,7 @@ def main() -> None:
             recording=args.record,
             captions=not args.no_captions,
             size=(args.width, args.height),
+            x11=args.x11,
         )
     elif args.action in {"record-start", "record-stop"}:
         result = (

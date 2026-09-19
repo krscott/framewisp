@@ -15,10 +15,15 @@
   grim,
   wf-recorder,
   wtype,
+  bash,
+  xwayland,
+  xdotool,
+  xmodmap,
   ffmpeg,
   gst_all_1,
   pipewire,
   makeFontsConf,
+  dejavu_fonts,
   noto-fonts,
   noto-fonts-cjk-sans,
   noto-fonts-monochrome-emoji,
@@ -26,6 +31,7 @@
 let
   captionFonts = makeFontsConf {
     fontDirectories = [
+      dejavu_fonts
       noto-fonts
       noto-fonts-cjk-sans
       noto-fonts-monochrome-emoji
@@ -66,6 +72,10 @@ buildPythonPackage {
           grim
           wf-recorder
           wtype
+          bash
+          xwayland
+          xdotool
+          xmodmap
           ffmpeg
           gst_all_1.gstreamer
           vncdotool

@@ -1,6 +1,6 @@
 # framewisp
 
-Run a native Wayland app without a physical display, save PNG screenshots or MP4 recordings, and
+Run a Wayland or X11 app without a physical display, save PNG screenshots or MP4 recordings, and
 send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
 development environment and includes a small GTK demo.
 
@@ -13,6 +13,8 @@ Framewisp's Python CLI manages the session and calls these tools:
 | Sway / wlroots | Runs the headless Wayland display with Pixman software rendering. |
 | wayvnc | Provides virtual pointer and keyboard devices through a VNC server on a private Unix socket. |
 | vncdotool (`vncdo`) | Sends clicks, drags, scrolling, and keyboard input to wayvnc. |
+| Xwayland | Runs X11 clients inside the private Sway session when `run --x11` is selected. |
+| xmodmap / xdotool | Keep X11 Unicode key mappings and send their key events. |
 | wtype | Types non-ASCII text through a Wayland virtual keyboard with a matching keymap. |
 | grim | Captures the Wayland display as a PNG. Screenshots do not use VNC. |
 | wf-recorder | Records the display as silent H.264 MP4 when requested, using its FFmpeg libraries. |
@@ -160,7 +162,7 @@ Capture again when necessary.
 
 ## Demo controls
 
-`framewisp-demo` includes controls for every input command. At the default
+`framewisp-demo` includes controls for every input command. The demo uses bundled DejaVu Sans 11 to keep its control positions stable. At the default
 1280x720 session size, use these targets:
 
 | Interaction | Target and result |
@@ -486,6 +488,36 @@ immediately to their destination. Smooth movement before clicks, random timing,
 and curved paths are deferred. `screenshot --delay` remains a separate wait
 before capture; it does not change input timing.
 
+## Headless X11 apps
+
+Add `--x11` to `run` to start a private Xwayland server inside the headless compositor:
+
+```sh
+framewisp /tmp/framewisp-x11 run --x11 -- framewisp-demo
+# In another terminal:
+framewisp /tmp/framewisp-x11 type 'Hello X11! café 日本語 😀'
+framewisp /tmp/framewisp-x11 key Return
+framewisp /tmp/framewisp-x11 screenshot /tmp/x11.png
+```
+
+The demo prints `Display: X11Display` in `app.log` and shows that backend in its
+heading. This verifies GTK is using X11. The same click, drag, scroll, keyboard,
+screenshot, and recording commands work in this mode. All required tools and the
+demo come with the Nix package; no X11 desktop or development shell is needed.
+
+The runner discovers Xwayland's allocated display number. It removes the host's
+`DISPLAY`, `WAYLAND_DISPLAY`, and `XAUTHORITY`, then gives the app the private
+`DISPLAY` and `XAUTHORITY=/dev/null`. It sets `GDK_BACKEND=x11`,
+`QT_QPA_PLATFORM=xcb`, and `SDL_VIDEODRIVER=x11` for the app. Display selection is
+not a security sandbox for untrusted applications. Sway owns Xwayland and shuts
+it down when the session ends.
+
+The bundled GTK demo is the tested X11 target. GPU/game support, desktop services,
+and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
+launching has not been verified. X11 pointer commands prime a new virtual pointer
+one pixel beside the target before moving to it; this adds 100 ms before the
+requested action to avoid losing its first motion.
+
 ## Unicode text
 
 ```sh
@@ -498,10 +530,20 @@ Control characters, line breaks, and format characters such as zero-width joiner
 are rejected before input. This does not implement an input method or compose
 emoji sequences with joiners. The app's fonts determine how characters look.
 
-ASCII text uses VNC. A command containing non-ASCII text uses `wtype`, included
+ASCII text uses VNC. In a Wayland session, a command containing non-ASCII text uses `wtype`, included
 in the Nix package, to create a keymap for its characters. Unicode intervals round
 up to whole milliseconds; `wtype` also adds about 4 ms per character for key
 press/release. `--interval 0` removes the between-character pauses.
+
+In an X11 session, Unicode text uses persistent mappings in the private server
+and `xdotool` key events. A 100 ms pause initializes XTest input before typing;
+then pauses occur between characters. `--interval 0` removes
+the between-character pauses. Each session supports at most 128 distinct
+non-ASCII characters across its text commands; repeats do not count again.
+Start a new session to use a different character set once that limit is reached.
+A command that would exceed the limit fails before sending any input. These
+mappings use upper keycodes reserved by framewisp; ordinary US keys
+and the supported shortcuts retain their mappings.
 
 LibreOffice Writer was tested as a Flatpak with a private D-Bus session:
 

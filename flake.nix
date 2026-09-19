@@ -93,6 +93,10 @@
               pkgs.grim
               pkgs.wf-recorder
               pkgs.wtype
+              pkgs.bash
+              pkgs.xwayland
+              pkgs.xdotool
+              pkgs.xmodmap
               pkgs.ffmpeg
               pkgs.gst_all_1.gstreamer
             ];

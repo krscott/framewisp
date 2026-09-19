@@ -1,7 +1,9 @@
-"""A native Wayland app for trying framewisp's screenshot and input commands."""
+"""A GTK app for trying framewisp's screenshot and input commands."""
 
 # GI loads these modules from GTK's typelibs, not Python source files.
 # pyright: reportMissingModuleSource=false
+
+import os
 
 import gi
 
@@ -11,9 +13,17 @@ from gi.repository import GLib, Gtk, Pango  # isort: skip
 
 
 def main() -> None:
+    # Keep the documented input targets stable across desktop font settings.
+    if fonts := os.environ.get("FRAMEWISP_FONTCONFIG_FILE"):
+        os.environ["FONTCONFIG_FILE"] = fonts
     Gtk.init()
+    settings = Gtk.Settings.get_default()
+    assert settings is not None
+    settings.set_property("gtk-font-name", "DejaVu Sans 11")
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Framewisp demo")
+    backend = type(window.get_display()).__name__
+    print(f"Display: {backend}", flush=True)
     window.set_default_size(960, 640)
     window.connect("close-request", lambda *_: loop.quit())
     window.connect("map", lambda *_: print("Demo ready", flush=True))
@@ -27,7 +37,7 @@ def main() -> None:
     content.set_halign(Gtk.Align.START)
     content.set_valign(Gtk.Align.START)
 
-    title = Gtk.Label(label="Framewisp demo")
+    title = Gtk.Label(label=f"Framewisp demo ({backend})")
     title.set_xalign(0)
     content.append(title)
 
