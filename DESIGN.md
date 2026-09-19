@@ -10,6 +10,10 @@ stop. The included GTK 4 demo is the acceptance application.
 
 - `framewisp/__main__.py` parses the CLI and dispatches to the runner or a tool.
 - `framewisp/lib.py` owns process lifetime and invokes existing display tools.
+  `run_session` coordinates startup, monitoring, and shutdown. Separate helpers
+  prepare its environment and manage Sway and wayvnc startup, including waiting
+  for their sockets. Each startup helper uses `managed_process` for cleanup and
+  yields `None` if shutdown is requested while waiting.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
   changes the label to `Entered: TEXT`; clicking the button changes it to
   `Applied: TEXT`. It also prints those messages to stdout for integration tests.

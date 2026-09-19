@@ -69,6 +69,53 @@ def wait_for_socket(
     return None
 
 
+def session_environment_for_run(runtime: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    for key in (
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "SWAYSOCK",
+        "DBUS_SESSION_BUS_ADDRESS",
+    ):
+        env.pop(key, None)
+    env.update(
+        XDG_RUNTIME_DIR=str(runtime),
+        WLR_BACKENDS="headless",
+        WLR_RENDERER="pixman",
+        WLR_LIBINPUT_NO_DEVICES="1",
+        GDK_BACKEND="wayland",
+        GSK_RENDERER="cairo",
+    )
+    return env
+
+
+@contextmanager
+def start_sway(
+    runtime: Path, *, log: Path, env: dict[str, str], stop: Event
+) -> Generator[tuple[subprocess.Popen[bytes], str] | None, None, None]:
+    """Yield the process and display name, or None if startup is interrupted."""
+    config = runtime / "sway.conf"
+    config.write_text(SWAY_CONFIG)
+    with managed_process(["sway", "-c", str(config)], log=log, env=env) as process:
+        display = wait_for_socket(
+            runtime, "wayland-*", process=process, log=log, stop=stop
+        )
+        yield (process, display.name) if display is not None else None
+
+
+@contextmanager
+def start_wayvnc(
+    runtime: Path, *, log: Path, env: dict[str, str], stop: Event
+) -> Generator[subprocess.Popen[bytes] | None, None, None]:
+    """Yield the ready process, or None if startup is interrupted."""
+    command = ["wayvnc", "-C", "/dev/null", "-k", "us", f"unix:{runtime / 'vnc.sock'}"]
+    with managed_process(command, log=log, env=env) as process:
+        socket = wait_for_socket(
+            runtime, "vnc.sock", process=process, log=log, stop=stop
+        )
+        yield process if socket is not None else None
+
+
 def run_session(session: Path, command: list[str]) -> int:
     session.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = session / "session.json"
@@ -92,60 +139,19 @@ def run_session(session: Path, command: list[str]) -> int:
             ExitStack() as stack,
         ):
             runtime = Path(directory)
-            config = runtime / "sway.conf"
-            config.write_text(SWAY_CONFIG)
-            env = os.environ.copy()
-            for key in (
-                "DISPLAY",
-                "WAYLAND_DISPLAY",
-                "SWAYSOCK",
-                "DBUS_SESSION_BUS_ADDRESS",
-            ):
-                env.pop(key, None)
-            env.update(
-                XDG_RUNTIME_DIR=directory,
-                WLR_BACKENDS="headless",
-                WLR_RENDERER="pixman",
-                WLR_LIBINPUT_NO_DEVICES="1",
-                GDK_BACKEND="wayland",
-                GSK_RENDERER="cairo",
+            env = session_environment_for_run(runtime)
+            compositor = stack.enter_context(
+                start_sway(runtime, log=session / "sway.log", env=env, stop=stop)
             )
-            sway = stack.enter_context(
-                managed_process(
-                    ["sway", "-c", str(config)], log=session / "sway.log", env=env
-                )
-            )
-            display = wait_for_socket(
-                runtime, "wayland-*", process=sway, log=session / "sway.log", stop=stop
-            )
-            if display is None:
+            if compositor is None:
                 return 0
-            env["WAYLAND_DISPLAY"] = display.name
+            sway, display = compositor
+            env["WAYLAND_DISPLAY"] = display
 
             vnc = stack.enter_context(
-                managed_process(
-                    [
-                        "wayvnc",
-                        "-C",
-                        "/dev/null",
-                        "-k",
-                        "us",
-                        f"unix:{runtime / 'vnc.sock'}",
-                    ],
-                    log=session / "wayvnc.log",
-                    env=env,
-                )
+                start_wayvnc(runtime, log=session / "wayvnc.log", env=env, stop=stop)
             )
-            if (
-                wait_for_socket(
-                    runtime,
-                    "vnc.sock",
-                    process=vnc,
-                    log=session / "wayvnc.log",
-                    stop=stop,
-                )
-                is None
-            ):
+            if vnc is None:
                 return 0
 
             app = stack.enter_context(
@@ -155,7 +161,7 @@ def run_session(session: Path, command: list[str]) -> int:
                 json.dumps(
                     {
                         "runtime_directory": directory,
-                        "wayland_display": display.name,
+                        "wayland_display": display,
                         "processes": {
                             "sway": sway.pid,
                             "wayvnc": vnc.pid,
@@ -194,6 +200,7 @@ def screenshot(session: Path, destination: Path) -> int:
     return subprocess.run(
         ["grim", "-t", "png", "-o", "HEADLESS-1", str(destination)],
         env=session_environment(session),
+        check=False,
         timeout=10,
     ).returncode
 
@@ -215,5 +222,6 @@ def send_input(session: Path, arguments: list[str]) -> int:
             "0.1",
             *arguments,
         ],
+        check=False,
         timeout=15,
     ).returncode
