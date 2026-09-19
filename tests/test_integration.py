@@ -387,3 +387,80 @@ def test_typing_paces_received_characters(
     # A 16.5-second action exceeds both original deadlines. It must also return
     # without sleeping for another 5.5 seconds after the final character.
     assert finished - float(events[-1]["time"]) < 3
+
+
+@pytest.mark.integration
+def test_shortcuts_select_and_edit_text(demo: Demo) -> None:
+    capture = demo.directory / "ready.png"
+
+    def entry_is_visible() -> bool:
+        cli(demo.directory, "screenshot", str(capture))
+        with Image.open(capture) as image:
+            return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
+
+    wait_until(entry_is_visible)
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "abcd")
+    for chord in ["Left", "Left", "Delete", "BackSpace", "Shift+Right"]:
+        cli(demo.directory, "key", chord)
+    cli(demo.directory, "type", "Z")
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Entered: aZ\n" in (demo.directory / "app.log").read_text())
+    cli(demo.directory, "key", "Ctrl+A")
+    cli(demo.directory, "type", "replaced")
+    cli(demo.directory, "key", "Return")
+    wait_until(
+        lambda: "Entered: replaced\n" in (demo.directory / "app.log").read_text()
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize(
+    "chord,key,modifiers",
+    [
+        ("Ctrl+Shift+z", "Z", ["Control_L", "Shift_L"]),
+        ("Alt+x", "x", ["Alt_L"]),
+        ("Shift+a", "A", ["Shift_L"]),
+        ("Shift+1", "exclam", ["Shift_L"]),
+        ("Shift+Tab", "ISO_Left_Tab", ["Shift_L"]),
+        ("Escape", "Escape", []),
+        ("Up", "Up", []),
+        ("Down", "Down", []),
+        ("Space", "space", []),
+        ("7", "7", []),
+    ],
+)
+def test_key_combination_events(
+    demo: Demo, chord: str, key: str, modifiers: list[str]
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "425")
+    cli(demo.directory, "key", chord)
+    expected = [
+        *(("key-press", modifier) for modifier in modifiers),
+        ("key-press", key),
+        ("key-release", key),
+        *(("key-release", modifier) for modifier in reversed(modifiers)),
+    ]
+
+    def keyboard_events() -> list[dict[str, str | float | bool]]:
+        return [
+            event
+            for event in input_events(demo)
+            if str(event["event"]).startswith("key-")
+        ]
+
+    wait_until(lambda: len(keyboard_events()) >= len(expected))
+    events = keyboard_events()
+    assert [(event["event"], event["key"]) for event in events] == expected
+    key_press = events[len(modifiers)]
+    assert key_press["ctrl"] == ("Control_L" in modifiers)
+    assert key_press["shift"] == ("Shift_L" in modifiers)
+    assert key_press["alt"] == ("Alt_L" in modifiers)
+    # A following unmodified key must arrive with no modifiers still held.
+    cli(demo.directory, "key", "q")
+    wait_until(lambda: len(keyboard_events()) >= len(expected) + 2)
+    final_press = keyboard_events()[-2]
+    assert final_press["key"] == "q"
+    assert not any(final_press[name] for name in ["ctrl", "shift", "alt"])

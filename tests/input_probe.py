@@ -9,6 +9,7 @@ from functools import partial
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, GLib, Gtk  # isort: skip
 
@@ -23,6 +24,28 @@ def main() -> None:
     window = Gtk.Window(title="Input probe")
     window.connect("close-request", lambda *_: loop.quit())
     window.connect("map", lambda *_: log("ready"))
+    keyboard = Gtk.EventControllerKey()
+    keyboard.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+    def on_key(
+        event: str,
+        _controller: Gtk.EventControllerKey,
+        keyval: int,
+        _keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        log(
+            event,
+            key=Gdk.keyval_name(keyval) or "unknown",
+            ctrl=bool(state & Gdk.ModifierType.CONTROL_MASK),
+            shift=bool(state & Gdk.ModifierType.SHIFT_MASK),
+            alt=bool(state & Gdk.ModifierType.ALT_MASK),
+        )
+        return False
+
+    keyboard.connect("key-pressed", partial(on_key, "key-press"))
+    keyboard.connect("key-released", partial(on_key, "key-release"))
+    window.add_controller(keyboard)
     content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     area = Gtk.DrawingArea()
     area.set_size_request(640, 400)

@@ -92,7 +92,7 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
 | `drag [--duration SECONDS] X1 Y1 X2 Y2` | Hold the left button while moving along a straight path (default: 0.4 seconds). |
 | `type [--interval SECONDS] TEXT` | Send printable ASCII with a pause between characters (default: 0.08 seconds). |
-| `key NAME` | Press/release `Return`, `Tab`, or `BackSpace`. |
+| `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
 The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
 KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below). X11 and GPU-dependent apps
@@ -111,6 +111,32 @@ framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Keyboard shortcuts
+
+Use `key` for a key or modifier combination:
+
+```sh
+framewisp --session /tmp/framewisp-demo key Ctrl+a
+framewisp --session /tmp/framewisp-demo type 'Replacement text'
+framewisp --session /tmp/framewisp-demo key Shift+Left
+framewisp --session /tmp/framewisp-demo key Escape
+framewisp --session /tmp/framewisp-paint key Ctrl+z
+framewisp --session /tmp/framewisp-paint key Ctrl+Shift+z
+framewisp --session /tmp/framewisp-paint key Ctrl+s
+```
+
+Accepted keys are `a` through `z`, `0` through `9`, `Space`, `Return`, `Tab`,
+`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, and `Down`. Prefix a key
+with any combination of `Ctrl+`, `Shift+`, and `Alt+`, each at most once.
+Names are case-insensitive: `Ctrl+A` and `ctrl+a` mean the same shortcut.
+Letter case does not add Shift; use `Shift+a` to send a capital A, or `type`
+to enter literal text.
+
+Each command presses the modifiers, presses and releases the key, then releases
+the modifiers in reverse order on the same connection. Modifiers do not remain
+held for the next command. Unknown keys and malformed combinations are rejected
+before connecting. Shortcut behavior depends on the focused app and control.
 
 ## Record a session
 

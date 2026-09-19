@@ -128,3 +128,39 @@ def test_invalid_input_timing(
     assert result.returncode == 2
     assert option in result.stderr
     assert "session.json" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "chord",
+    [
+        "",
+        "Ctrl",
+        "Ctrl+",
+        "+a",
+        "Ctrl++a",
+        "Ctrl+CTRL+a",
+        "Super+a",
+        "Ctrl+unknown",
+        "a+b",
+        "Ctrl+é",
+    ],
+)
+def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "missing"),
+            "key",
+            chord,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "unsupported key combination" in result.stderr
+    assert "session.json" not in result.stderr
