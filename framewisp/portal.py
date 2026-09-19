@@ -190,6 +190,11 @@ class DesktopPortal:
             raise RuntimeError("Attach requires exactly one shared monitor.")
         self.node, properties = streams[0]
         self.size = cast(tuple[int, int], properties["size"])
+        # COSMIC creates its EI devices on the first Notify call. Zero motion
+        # starts that handshake without changing the pointer's position.
+        self.input("NotifyPointerMotion", "dd", 0.0, 0.0)
+        if self.stop.wait(0.1):
+            raise InterruptedError("Attach stopped during input setup.")
 
     def input(self, method: str, signature: str, *values: object) -> None:
         options: dict[str, GLib.Variant] = {}

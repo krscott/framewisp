@@ -125,6 +125,8 @@ class AttachedInput:
                 self.move(p["x"], p["y"])
             elif action == "click":
                 self.move(p["x"], p["y"])
+                # COSMIC can deliver the button before the absolute move settles.
+                self.wait(0.05)
                 for index in range(p["count"]):
                     if index:
                         self.wait(0.1)
@@ -132,6 +134,7 @@ class AttachedInput:
                     self.button(p["button"], False)
             elif action == "drag":
                 self.move(p["x1"], p["y1"])
+                self.wait(0.05)
                 # Validate the endpoint before holding a button.
                 if not (
                     0 <= p["x2"] < self.portal.size[0]
@@ -149,6 +152,7 @@ class AttachedInput:
                 self.button(p["button"], False)
             elif action == "scroll":
                 self.move(p["x"], p["y"])
+                self.wait(0.05)
                 direction = p["direction"]
                 axis = 0 if direction in {"up", "down"} else 1
                 sign = -1 if direction in {"up", "left"} else 1

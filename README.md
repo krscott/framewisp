@@ -172,9 +172,28 @@ framewisp /tmp/debug-app detach
 ```
 
 In COSMIC Settings, open **Input devices > Keyboard > Keyboard shortcuts** and add
-a custom shortcut with that command and Ctrl+Alt+Escape. Use the absolute path to
+custom shortcuts with that command for both Ctrl+Alt+Escape and
+Ctrl+Alt+Shift+Escape. The second binding lets physical Ctrl+Alt+Escape stop
+access while framewisp holds Shift for a gesture. Use the absolute path to
 the installed `framewisp` executable if your desktop does not have it on PATH.
-The session path in the binding must match the one you share.
+The session path in both bindings must match the one you share.
+Verify the shortcuts appear in the saved list. On the tested COSMIC version,
+the custom-shortcut form displayed the chord without saving it. The equivalent
+entries in `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` are:
+
+```ron
+(
+    modifiers: [Ctrl, Alt], key: "Escape",
+    description: Some("framewisp-detach"),
+): Spawn("framewisp /tmp/debug-app detach"),
+(
+    modifiers: [Ctrl, Alt, Shift], key: "Escape",
+    description: Some("framewisp-detach-held-shift"),
+): Spawn("framewisp /tmp/debug-app detach"),
+```
+
+Close Settings before editing that file. Add the entries inside its existing
+outer braces, keeping your other bindings.
 
 Then start sharing from a terminal on your desktop:
 

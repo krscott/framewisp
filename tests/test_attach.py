@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -115,11 +116,13 @@ def test_disconnected_cli(arguments: list[str], tmp_path: Path) -> None:
 def test_stale_attach_socket(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    with tempfile.TemporaryDirectory(prefix="fw-stale-") as runtime:
+        missing = Path(runtime) / "gone"
     (tmp_path / "session.json").write_text(
         json.dumps(
             {
                 "kind": "attached",
-                "runtime_directory": str(tmp_path / "gone"),
+                "runtime_directory": str(missing),
             }
         )
     )
