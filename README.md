@@ -115,8 +115,8 @@ Every command takes `--session DIRECTORY` before the subcommand.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
-| `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
+| `run [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
 | `click [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
@@ -132,6 +132,11 @@ Automatic copy-on-selection (the primary clipboard) is disabled. It triggered a
 wayvnc clipboard-offer crash during ordinary text selection. Ctrl+C/Ctrl+V remain
 available; the underlying clipboard issue is tracked in
 [#30](https://github.com/krscott/framewisp/issues/30).
+
+The display defaults to 1280 by 720 pixels. Set `run --width 1600 --height 900`
+for more room. Screenshots and input use those pixel dimensions, with `(0, 0)`
+at the top left. Width and height must be positive integers; recording also
+requires both to be even, because the recorder crops odd dimensions.
 
 `Session ready:` means the display and input sockets exist and the application
 process has started. The app may still be drawing its first frame. A screenshot
@@ -247,7 +252,7 @@ framewisp --session /tmp/framewisp-demo run --record /tmp/demo.mp4 -- framewisp-
 Recording starts before the app launches. Continue using the normal input and
 screenshot commands. Stop the runner with Ctrl+C or SIGTERM, or close the app,
 and wait for the runner to exit before playing the file. It finalizes the video
-before stopping the display. The recording uses H.264 at 1280 by 720 and 30 fps.
+before stopping the display. The recording uses H.264 at the selected display size and 30 fps.
 
 Choose a new output path in an existing directory; existing files are not
 overwritten. Session log and metadata paths are reserved. Recorder startup,

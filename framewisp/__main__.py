@@ -27,6 +27,13 @@ def seconds(value: str) -> float:
     return result
 
 
+def positive_integer(value: str) -> int:
+    result = int(value)
+    if result <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run and interact with a headless Wayland app."
@@ -39,6 +46,18 @@ def main() -> None:
     )
     run.add_argument(
         "--record", type=Path, metavar="FILE", help="record the session to MP4"
+    )
+    run.add_argument(
+        "--width",
+        type=positive_integer,
+        default=1280,
+        help="display width in pixels (default: 1280)",
+    )
+    run.add_argument(
+        "--height",
+        type=positive_integer,
+        default=720,
+        help="display height in pixels (default: 720)",
     )
     run.add_argument(
         "command", nargs=argparse.REMAINDER, help="-- executable [args...]"
@@ -151,7 +170,11 @@ def main() -> None:
             command = command[1:]
         if not command:
             parser.error("run requires an application command after --")
-        result = run_session(session, command, recording=args.record)
+        if args.record is not None and (args.width % 2 or args.height % 2):
+            parser.error("--record requires even --width and --height")
+        result = run_session(
+            session, command, recording=args.record, size=(args.width, args.height)
+        )
     elif args.action == "screenshot":
         if args.delay:
             time.sleep(args.delay)

@@ -49,11 +49,19 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session"
     runner_log = tmp_path / "runner.log"
     mode = getattr(request, "param", None)
-    recording = tmp_path / "session.mp4" if mode is True else None
+    recording = tmp_path / "session.mp4" if mode is True or mode == "large" else None
     command = ["framewisp", "--session", str(directory), "run"]
     if recording is not None:
         command.extend(["--record", str(recording)])
-    probes = {"probe": "input_probe.py", "scroll": "scroll_probe.py"}
+    if mode in {"large", "odd"}:
+        width, height = (1600, 900) if mode == "large" else (1601, 901)
+        command.extend(["--width", str(width), "--height", str(height)])
+    probes = {
+        "probe": "input_probe.py",
+        "scroll": "scroll_probe.py",
+        "large": "input_probe.py",
+        "odd": "input_probe.py",
+    }
     app = (
         [sys.executable, str(Path(__file__).with_name(probes[mode]))]
         if mode in probes
@@ -172,7 +180,7 @@ def test_interrupt_stops_session(demo: Demo) -> None:
             os.kill(pid, 0)
 
 
-def recording_frames(path: Path) -> set[str]:
+def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
         capture_output=True,
@@ -183,7 +191,7 @@ def recording_frames(path: Path) -> set[str]:
     streams = json.loads(probe.stdout)["streams"]
     assert len(streams) == 1
     assert streams[0]["codec_name"] == "h264"
-    assert (streams[0]["width"], streams[0]["height"]) == (1280, 720)
+    assert (streams[0]["width"], streams[0]["height"]) == size
     decoded = subprocess.run(
         ["ffmpeg", "-v", "error", "-xerror", "-i", str(path), "-f", "framemd5", "-"],
         capture_output=True,
@@ -673,3 +681,31 @@ def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
         wait_until(
             lambda: any(event.get("text") == text * 2 for event in input_events(demo))
         )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "demo,size", [("large", (1600, 900)), ("odd", (1601, 901))], indirect=["demo"]
+)
+def test_custom_display_size(demo: Demo, size: tuple[int, int], tmp_path: Path) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    capture = tmp_path / "custom-size.png"
+    cli(demo.directory, "screenshot", str(capture))
+    with Image.open(capture) as image:
+        assert image.size == size
+    # This point is outside the default display. Check coordinates received by GTK.
+    cli(demo.directory, "click", "1500", "300")
+    wait_until(lambda: any(event["event"] == "release" for event in input_events(demo)))
+    release = next(event for event in input_events(demo) if event["event"] == "release")
+    assert (release["x"], release["y"]) == (1500, 300)
+    cli(demo.directory, "click", "100", "425")
+    cli(demo.directory, "type", "larger display")
+    wait_until(
+        lambda: any(
+            event.get("text") == "larger display" for event in input_events(demo)
+        )
+    )
+    demo.process.terminate()
+    assert demo.process.wait(timeout=20) == 0
+    if demo.recording is not None:
+        assert len(recording_frames(demo.recording, size=size)) > 1

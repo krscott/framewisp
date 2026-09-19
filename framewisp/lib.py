@@ -19,7 +19,7 @@ from vncdotool import api
 SWAY_CONFIG = """\
 xwayland disable
 primary_selection disabled
-output HEADLESS-1 mode 1280x720@60Hz
+output HEADLESS-1 mode {width}x{height}@60Hz
 seat seat0 fallback true
 input * xkb_layout us
 default_border none
@@ -139,11 +139,11 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
 
 @contextmanager
 def start_sway(
-    runtime: Path, *, log: Path, env: dict[str, str], stop: Event
+    runtime: Path, *, log: Path, env: dict[str, str], stop: Event, size: tuple[int, int]
 ) -> Generator[tuple[subprocess.Popen[bytes], str] | None, None, None]:
     """Yield the process and display name, or None if startup is interrupted."""
     config = runtime / "sway.conf"
-    config.write_text(SWAY_CONFIG)
+    config.write_text(SWAY_CONFIG.format(width=size[0], height=size[1]))
     with managed_process(["sway", "-c", str(config)], log=log, env=env) as process:
         display = wait_for_socket(
             runtime, "wayland-*", process=process, log=log, stop=stop
@@ -220,7 +220,11 @@ def start_recording(
 
 
 def run_session(
-    session: Path, command: list[str], *, recording: Path | None = None
+    session: Path,
+    command: list[str],
+    *,
+    recording: Path | None = None,
+    size: tuple[int, int] = (1280, 720),
 ) -> int:
     if recording is not None:
         recording = recording.resolve()
@@ -266,7 +270,9 @@ def run_session(
             runtime = Path(directory)
             env = session_environment_for_run(runtime)
             compositor = stack.enter_context(
-                start_sway(runtime, log=session / "sway.log", env=env, stop=stop)
+                start_sway(
+                    runtime, log=session / "sway.log", env=env, stop=stop, size=size
+                )
             )
             if compositor is None:
                 return 0
