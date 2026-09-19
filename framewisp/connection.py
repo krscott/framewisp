@@ -3,7 +3,6 @@
 import json
 import socket
 import sys
-import time
 from pathlib import Path
 
 
@@ -14,10 +13,17 @@ def request_attached(session: Path, action: str, parameters: dict[str, object]) 
             print("This command requires an attached desktop session.", file=sys.stderr)
             return 1
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(Path(state["runtime_directory"]) / "attach.sock"))
+            connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
             connection.sendall(
                 (
-                    json.dumps({"action": action, "parameters": parameters}) + "\n"
+                    json.dumps(
+                        {
+                            "action": action,
+                            "parameters": parameters,
+                            "attachment": state["attachment"],
+                        }
+                    )
+                    + "\n"
                 ).encode()
             )
             with connection.makefile("r") as response:
@@ -28,24 +34,17 @@ def request_attached(session: Path, action: str, parameters: dict[str, object]) 
         result = json.loads(line)
         if result["error"]:
             print(result["error"], file=sys.stderr)
-        if action == "detach" and result["status"] == 0:
-            deadline = time.monotonic() + 10
-            while (session / "session.json").exists():
-                if time.monotonic() >= deadline:
-                    print(
-                        "Detach cleanup timed out. Check the attach terminal.",
-                        file=sys.stderr,
-                    )
-                    return 1
-                time.sleep(0.01)
         return int(result["status"])
     except (FileNotFoundError, ConnectionError):
         print(
-            "Attached session is disconnected. Run attach again to reconnect.",
+            "Attached session is disconnected. Ask the user to run attach in another terminal.",
             file=sys.stderr,
         )
         return 1
 
-
-if __name__ == "__main__":
-    raise SystemExit(request_attached(Path(sys.argv[1]), "detach", {}))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        print(
+            f"Cannot use attached session: {error}. Ask the user to reconnect.",
+            file=sys.stderr,
+        )
+        return 1

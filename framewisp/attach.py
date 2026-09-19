@@ -7,19 +7,25 @@
 import json
 import math
 import os
+import select
+import shlex
 import signal
 import socket
-import subprocess
 import sys
-import tempfile
 import time
+import traceback
+import uuid
 from pathlib import Path
 from threading import Event, Lock, Thread
 from types import FrameType
 from typing import TypedDict
 
-from gi.repository import GLib
+import gi
 
+gi.require_version("Gst", "1.0")
+from gi.repository import GLib, Gst
+
+from framewisp.desktop import reserve_desktop, write_state
 from framewisp.portal import DesktopPortal, dispatch_events
 
 
@@ -183,112 +189,161 @@ class AttachedInput:
 
 
 def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+    # Capture lives in the owner process: even SIGKILL closes every capture FD.
+    Gst.init(None)
     descriptor = portal.capture_fd()
+    pipeline: Gst.Element | None = None
     try:
-        with log.open("w") as output:
-            process = subprocess.Popen(
-                [
-                    "gst-launch-1.0",
-                    "-q",
-                    "pipewiresrc",
-                    f"fd={descriptor}",
-                    f"path={portal.node}",
-                    "num-buffers=1",
-                    "!",
-                    "videoconvert",
-                    "!",
-                    "pngenc",
-                    "snapshot=true",
-                    "!",
-                    "filesink",
-                    f"location={destination}",
-                ],
-                pass_fds=(descriptor,),
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
+        pipeline = Gst.parse_launch(
+            "pipewiresrc name=source num-buffers=1 ! videoconvert ! "
+            "pngenc snapshot=true ! filesink name=sink"
+        )
+        assert isinstance(pipeline, Gst.Bin)
+        source = pipeline.get_by_name("source")
+        sink = pipeline.get_by_name("sink")
+        assert source is not None and sink is not None
+        source.set_property("fd", descriptor)
+        source.set_property("path", str(portal.node))
+        sink.set_property("location", str(destination))
+        bus = pipeline.get_bus()
+        assert bus is not None
+        if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("Could not start desktop capture.")
+        deadline = time.monotonic() + 10
+        while not stop.is_set():
+            message = bus.timed_pop_filtered(
+                50 * Gst.MSECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
             )
-        try:
-            deadline = time.monotonic() + 10
-            while process.poll() is None:
-                if stop.wait(0.02):
-                    raise InterruptedError(
-                        "Attached session disconnected; capture cancelled."
-                    )
-                if time.monotonic() > deadline:
-                    raise RuntimeError(f"Desktop capture timed out. See {log}")
-            if process.returncode:
-                raise RuntimeError(f"Desktop capture failed. See {log}")
-        finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+            if message is not None:
+                if message.type == Gst.MessageType.ERROR:
+                    error, detail = message.parse_error()
+                    log.write_text(f"{error}\n{detail}\n")
+                    raise RuntimeError(f"Desktop capture failed. See {log}")
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Desktop capture timed out.")
+        raise InterruptedError("Attached session disconnected; capture cancelled.")
     finally:
+        if pipeline is not None:
+            pipeline.set_state(Gst.State.NULL)
         os.close(descriptor)
 
 
+def foreground_terminal(descriptor: int) -> bool:
+    try:
+        return os.isatty(descriptor) and os.tcgetpgrp(descriptor) == os.getpgrp()
+    except OSError:
+        return False
+
+
 def attach_session(session: Path) -> int:
-    session.mkdir(mode=0o700, parents=True, exist_ok=True)
-    state = session / "session.json"
-    if state.exists():
-        raise RuntimeError(
-            f"{state} already exists. Use a different session directory."
+    if (
+        not sys.stdin.isatty()
+        or not sys.stdout.isatty()
+        or not foreground_terminal(sys.stdin.fileno())
+    ):
+        print(
+            "Desktop attachment must be started by the user in a foreground interactive terminal.\n"
+            "Agents: do not allocate a PTY or bypass this check. Ask the user to run:\n"
+            f"  framewisp {shlex.quote(str(session))} attach\n"
+            "in another desktop terminal, read the instructions, and approve sharing.",
+            file=sys.stderr,
         )
-    stop = Event()
-    ready = Event()
-    owns_state = False
+        return 1
+    print(
+        "This shares a monitor and gives agent commands keyboard and pointer control of your live desktop.\n"
+        "Input can reach any focused app. Keep this terminal open; do not background or suspend this command.\n"
+        "Before continuing, bind BOTH Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape to:\n"
+        "  framewisp --detach\n"
+        "The second binding is needed when the agent holds Shift. Test your bindings.\n"
+        "Ctrl+C here also stops access. Closing this terminal ends the connection.",
+        flush=True,
+    )
+    try:
+        confirmation = input(
+            "Type ATTACH to confirm the bindings are configured and you understand this access: "
+        )
+    except (EOFError, KeyboardInterrupt):
+        print("\nNot attached.")
+        return 1
+    if confirmation != "ATTACH":
+        print("Not attached.")
+        return 1
+    if not foreground_terminal(sys.stdin.fileno()):
+        print(
+            "Not attached: this command is no longer the terminal foreground job.",
+            file=sys.stderr,
+        )
+        return 1
+    return run_attachment(session, sys.stdin.fileno())
+
+
+def run_attachment(session: Path, terminal: int | None) -> int:
+    """Own all desktop access. The CLI must complete interactive consent first."""
+    stop, ready = Event(), Event()
     lock = Lock()
     workers: list[Thread] = []
-    portal = DesktopPortal(stop)
-    inputs = AttachedInput(portal, stop)
+    failures: list[BaseException] = []
+    portal: DesktopPortal | None = None
+    inputs: AttachedInput | None = None
+    attachment = uuid.uuid4().hex
+    state = session / "session.json"
+    owns_state = False
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
 
     previous = {
-        sig: signal.signal(sig, request_stop) for sig in (signal.SIGINT, signal.SIGTERM)
+        sig: signal.signal(sig, request_stop)
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGTSTP)
     }
 
     def handle(connection: socket.socket) -> None:
+        assert portal is not None and inputs is not None
         with connection:
             status, error = 0, None
             try:
                 connection.settimeout(2)
                 with connection.makefile("r") as source:
-                    request = json.loads(source.readline())
+                    line = source.readline(1024 * 1024 + 1)
+                if len(line) > 1024 * 1024:
+                    raise ValueError("Input request is too large.")
+                request = json.loads(line)
+                if request.get("attachment") != attachment:
+                    raise ValueError(
+                        "Attached session is disconnected. Ask the user to attach again."
+                    )
                 action: str = request["action"]
                 parameters: InputParameters = request["parameters"]
-                if action == "detach":
-                    stop.set()
-                else:
-                    if not ready.is_set():
-                        raise RuntimeError("Attach is waiting for desktop permission.")
-                    while not lock.acquire(timeout=0.05):
-                        inputs.wait()
-                    try:
-                        inputs.wait()
-                        if action == "screenshot":
-                            capture(
-                                portal,
-                                Path(parameters["path"]),
-                                stop,
-                                session / "capture.log",
-                            )
-                        elif action.startswith("record-"):
-                            raise ValueError(
-                                "Recording attached sessions is not supported yet."
-                            )
-                        else:
-                            inputs.perform(action, parameters)
-                    finally:
-                        lock.release()
-            except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
+                if not ready.is_set():
+                    raise ValueError("Attach is waiting for desktop permission.")
+                while not lock.acquire(timeout=0.05):
+                    inputs.wait()
+                try:
+                    inputs.wait()
+                    if action == "screenshot":
+                        capture(
+                            portal,
+                            Path(parameters["path"]),
+                            stop,
+                            session / "capture.log",
+                        )
+                    elif action.startswith("record-"):
+                        raise ValueError(
+                            "Recording attached sessions is not supported yet."
+                        )
+                    else:
+                        inputs.perform(action, parameters)
+                finally:
+                    lock.release()
+            except (ValueError, InterruptedError, TimeoutError) as failure:
                 status, error = 1, str(failure)
+            except BaseException as failure:
+                status, error = 1, str(failure)
+                failures.append(failure)
+                stop.set()
+                portal.close()
+                traceback.print_exc()
             try:
                 connection.sendall(
                     (json.dumps({"status": status, "error": error}) + "\n").encode()
@@ -296,77 +351,106 @@ def attach_session(session: Path) -> int:
             except OSError:
                 pass
 
-    def serve(listener: socket.socket) -> None:
-        while not stop.is_set():
-            try:
-                connection, _ = listener.accept()
-            except TimeoutError:
-                continue
-            worker = Thread(target=handle, args=(connection,))
-            workers[:] = [thread for thread in workers if thread.is_alive()]
-            workers.append(worker)
-            worker.start()
+    def serve(listener: socket.socket, emergency: socket.socket) -> None:
+        try:
+            while not stop.is_set():
+                readable, _, _ = select.select([listener, emergency], [], [], 0.05)
+                for endpoint in readable:
+                    connection, _ = endpoint.accept()
+                    if endpoint is emergency:
+                        connection.close()
+                        continue
+                    worker = Thread(target=handle, args=(connection,), daemon=True)
+                    workers[:] = [thread for thread in workers if thread.is_alive()]
+                    workers.append(worker)
+                    worker.start()
+        except BaseException as failure:
+            failures.append(failure)
+            stop.set()
+            if portal is not None:
+                portal.close()
+            traceback.print_exc()
 
     try:
-        with tempfile.TemporaryDirectory(prefix="framewisp-attach-") as directory:
-            with socket.socket(socket.AF_UNIX) as listener:
-                listener.bind(str(Path(directory) / "attach.sock"))
-                listener.listen()
-                listener.settimeout(0.05)
-                # Reserve ownership before consent so two requests cannot share a session.
-                try:
-                    metadata = state.open("x")
-                except FileExistsError:
-                    print(
-                        f"{state} already exists. Use a different session directory.",
-                        file=sys.stderr,
+        with reserve_desktop() as directory:
+            try:
+                session.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if (
+                    state.exists()
+                    and json.loads(state.read_text()).get("kind") != "attached"
+                ):
+                    raise RuntimeError(
+                        f"{state} belongs to another session. Use a different directory."
                     )
-                    return 1
-                owns_state = True
-                with metadata:
-                    json.dump(
+                with (
+                    socket.socket(socket.AF_UNIX) as listener,
+                    socket.socket(socket.AF_UNIX) as emergency,
+                ):
+                    listener.bind(str(directory / "control.sock"))
+                    emergency.bind(str(directory / "detach.sock"))
+                    listener.listen(32)
+                    emergency.listen(32)
+                    write_state(
+                        state,
                         {
                             "kind": "attached",
-                            "runtime_directory": directory,
+                            "attachment": attachment,
+                            "runtime_directory": str(directory),
                             "processes": {"attach": os.getpid()},
                         },
-                        metadata,
                     )
-                    metadata.write("\n")
-                (session / "inputs.jsonl").write_text("", encoding="utf-8")
-                server = Thread(target=serve, args=(listener,))
-                server.start()
-                try:
-                    print(
-                        f"Stop: framewisp {session} detach (bind this command to your desktop escape shortcut). Ctrl+C also stops access.",
-                        flush=True,
+                    owns_state = True
+                    write_state(
+                        directory / "desktop.json",
+                        {"session": str(session), "attachment": attachment},
                     )
-                    portal.open()
-                    inputs.wait()
-                    ready.set()
-                    print(
-                        f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Input shares your desktop pointer and focus.",
-                        flush=True,
+                    (session / "inputs.jsonl").write_text("", encoding="utf-8")
+                    portal = DesktopPortal(stop)
+                    inputs = AttachedInput(portal, stop)
+                    server = Thread(
+                        target=serve, args=(listener, emergency), daemon=True
                     )
-                    while not stop.wait(0.02):
-                        dispatch_events()
-                finally:
-                    stop.set()
-                    server.join()
+                    server.start()
+                    try:
+                        portal.open()
+                        inputs.wait()
+                        ready.set()
+                        print(
+                            f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+                            flush=True,
+                        )
+                        while not stop.wait(0.02):
+                            if terminal is not None and not foreground_terminal(
+                                terminal
+                            ):
+                                raise RuntimeError(
+                                    "The attach terminal is no longer in the foreground; disconnecting."
+                                )
+                            dispatch_events()
+                    finally:
+                        stop.set()
+                        portal.close()
+                        server.join(timeout=0.2)
+                        deadline = time.monotonic() + 0.2
+                        for worker in workers:
+                            worker.join(timeout=max(0, deadline - time.monotonic()))
+            finally:
+                stop.set()
+                if portal is not None:
+                    portal.close()
+                if owns_state:
+                    state.unlink(missing_ok=True)
+                    owns_state = False
     except InterruptedError:
-        return 0
-    except (RuntimeError, GLib.Error) as error:
-        print(error, file=sys.stderr)
+        pass
+    except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
+        print(f"Could not attach: {failure}", file=sys.stderr)
         return 1
     finally:
         stop.set()
-        for worker in workers:
-            worker.join()
-        inputs.release()
-        portal.close()
-        if owns_state:
-            state.unlink(missing_ok=True)
+        if portal is not None:
+            portal.close()
         for sig, handler in previous.items():
             signal.signal(sig, handler)
         print("Detached. The app and desktop are still running.", flush=True)
-    return 0
+    return int(bool(failures))

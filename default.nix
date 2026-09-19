@@ -48,7 +48,10 @@ buildPythonPackage {
     wrapGAppsHook4
     gobject-introspection
   ];
-  buildInputs = [ gtk4 ];
+  buildInputs = [
+    gtk4
+    gst_all_1.gstreamer
+  ];
 
   dontWrapGApps = true;
   preFixup = ''

@@ -308,35 +308,57 @@ app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session pat
 ## Attached desktop sessions
 
 `attach.py` owns a foreground connection to the user's existing desktop. It does
-not launch or own that desktop's app or compositor. `portal.py` uses Gio on the
-user's session bus to create a RemoteDesktop session, select keyboard and pointer
-devices, select one monitor through ScreenCast, and request consent with Start.
-The connection stays open until detach, SIGINT, SIGTERM, or the portal's Closed
-signal. Permission is requested on every new connection.
+not launch or own that desktop's app or compositor. The CLI requires a controlling
+terminal with this process group in the foreground, prints stop-binding and access
+instructions, and requires the exact typed confirmation ATTACH before creating any
+portal connection. Agents receiving a rejection must ask the user to run the
+command in another terminal. There is no noninteractive override. This prevents
+accidental startup, not deliberate bypass by another program under the same UID.
 
-Before requesting consent, exclusive creation of session.json reserves the directory and records `kind: attached`, the private runtime
-directory, and the attach PID. `connection.py` sends newline-delimited JSON
-requests over that directory's attach.sock. The existing CLI dispatches attached
-input and screenshots there; isolated sessions keep their existing tools.
-A listener thread accepts requests; workers serialize actions with a lock.
-The main thread dispatches portal signals. Before consent, input requests fail
-with a waiting-for-permission message, but detach remains available. Detach sets a shared Event
-without waiting for the action lock. Paced typing and drags use interruptible
-Event waits. Queued workers check the Event before executing. Held buttons and
-keys release during action cleanup; shutdown closes the portal and removes the
-socket and owned session metadata. The detach client waits for metadata removal
-before reporting success, so immediate reconnection is possible. It never signals the user's app or compositor.
+`portal.py` uses a private Gio connection to the user's session bus to create a
+RemoteDesktop session, select keyboard and pointer devices, select one monitor
+through ScreenCast, and request consent with Start. Every attachment requests fresh
+permission. Closing the private bus connection revokes all its portal sessions;
+process death also closes that connection. No access-owning child processes exist.
+SIGINT, SIGTERM, SIGHUP, and SIGTSTP request shutdown. Loss of terminal foreground
+ownership or the portal's Closed signal also stops access.
+
+An exclusive flock on $XDG_RUNTIME_DIR/framewisp/desktop.lock limits desktop access
+to one owner per user runtime directory, including while permission is pending.
+The directory must be private and owned by the user. The lock inode is never
+removed. After acquiring the lock, a new owner removes stale socket and global
+metadata files. Atomic JSON writes publish global desktop.json and session.json;
+the latter records kind, the runtime directory, an attachment token, and the PID
+for inspection. Commands carry the token, so stale session metadata cannot direct
+input to a later attachment using the same global socket.
+
+`connection.py` sends newline-delimited JSON requests over control.sock. A listener
+thread accepts requests; workers serialize actions with a lock. Before portal
+consent they reject input. Paced actions and queued workers check a shared stop
+Event. Unexpected worker errors stop access and print a traceback. Shutdown closes
+the portal before bounded waits for workers, then removes state under the ownership
+lock. Held buttons and keys release during action cleanup; on connection loss the
+compositor removes the virtual input devices and releases their held inputs.
+
+`framewisp --detach` connects to a separate detach.sock, checks its peer UID, and
+uses Linux SO_PEERPIDFD (6.5+) to obtain a stable handle to the socket owner. It
+sends SIGTERM and waits up to 500 ms, then SIGKILL if needed, and reports success
+only after process exit. This avoids PID reuse and works when the owner is stopped
+or its command workers are blocked. The emergency socket never queues behind
+ordinary commands. Stale files after SIGKILL do not hold the kernel lock. Detach
+never signals the user's apps or compositor.
 
 Pointer coordinates use screenshot pixels and the portal stream node. Portal
 Notify methods deliver absolute motion, buttons, wheel steps, and keyboard
 keycodes for held keys and shortcuts, with keysyms for literal text. Keycode
 names currently assume the tested desktop's US layout. Each screenshot opens a PipeWire remote file descriptor through the
-portal and passes it to a one-frame GStreamer pipewiresrc pipeline. videoconvert
-and pngenc write the PNG. Cancellation stops that capture process; a ten-second
-limit reports capture failures with capture.log. Nix supplies GStreamer and the
+portal and passes it to an in-process one-frame GStreamer pipewiresrc pipeline.
+videoconvert and pngenc write the PNG. Cancellation tears down the pipeline; process
+death closes every capture descriptor. A ten-second limit reports capture failures
+with capture.log. Nix supplies GStreamer and the
 PipeWire, base, and good plugins in both the installed wrapper and dev shell.
 
-The user configures a desktop binding for `framewisp SESSION detach`. COSMIC on
+The user configures a desktop binding for `framewisp --detach`. COSMIC on
 this host does not expose the GlobalShortcuts portal. The binding is independent
 of which app has focus. Attached recording is explicitly rejected; input JSONL
 logging still happens in the command client.

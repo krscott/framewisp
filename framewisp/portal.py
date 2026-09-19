@@ -24,7 +24,16 @@ def dispatch_events() -> None:
 class DesktopPortal:
     def __init__(self, stop: Event):
         self.stop = stop
-        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+        self.bus = Gio.DBusConnection.new_for_address_sync(
+            address,
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+            | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            None,
+            None,
+        )
+        self.bus.set_exit_on_close(False)
+        self.bus.connect("closed", self.connection_closed)
         self.session: str | None = None
         self.subscription: int | None = None
         self.node = 0
@@ -80,21 +89,7 @@ class DesktopPortal:
             while not response:
                 dispatch_events()
                 if self.stop.wait(0.02):
-                    try:
-                        self.bus.call_sync(
-                            PORTAL,
-                            path,
-                            "org.freedesktop.portal.Request",
-                            "Close",
-                            None,
-                            None,
-                            Gio.DBusCallFlags.NONE,
-                            2000,
-                            None,
-                        )
-                    except GLib.Error:
-                        # Session revocation may already have removed the request.
-                        pass
+                    self.close()
                     raise InterruptedError(
                         "Attach stopped while waiting for desktop permission."
                     )
@@ -221,22 +216,16 @@ class DesktopPortal:
         assert descriptors is not None
         return descriptors.get(result.unpack()[0])
 
+    def connection_closed(
+        self, connection: Gio.DBusConnection, remote: bool, error: GLib.Error | None
+    ) -> None:
+        self.stop.set()
+
     def close(self) -> None:
-        if self.session is not None:
+        # Losing this private bus connection revokes all its portal sessions.
+        # Close locally before waiting for workers; a stuck RPC must not delay revocation.
+        if not self.bus.is_closed():
             try:
-                self.bus.call_sync(
-                    PORTAL,
-                    self.session,
-                    "org.freedesktop.portal.Session",
-                    "Close",
-                    None,
-                    None,
-                    Gio.DBusCallFlags.NONE,
-                    2000,
-                    None,
-                )
+                self.bus.close_sync(None)
             except GLib.Error:
-                # The desktop may already have revoked and closed the session.
                 pass
-        if self.subscription is not None:
-            self.bus.signal_unsubscribe(self.subscription)
