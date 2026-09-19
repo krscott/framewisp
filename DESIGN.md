@@ -21,6 +21,7 @@ acceptance application.
 - Sway provides the headless Wayland display using the Pixman software renderer.
 - wayvnc creates virtual pointer and keyboard devices. vncdotool's `vncdo`
   command sends input over a private Unix socket, connecting once per CLI call.
+- wtype supplies a temporary Wayland keyboard/keymap for non-ASCII text.
 - grim captures the headless output directly to PNG.
 - wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
 
@@ -123,10 +124,21 @@ of `duration / steps` before each move. Zero duration sends one endpoint move
 without a pause. The default is 0.4 seconds. This is a straight path at a steady
 pace; it has no random variation or easing.
 
-`type --interval SECONDS TEXT` sends one `vncdo type CHARACTER` command per
-printable ASCII character, with explicit pauses only between characters.
+`type --interval SECONDS TEXT` accepts characters satisfying Python's
+`str.isprintable`, rejecting control and format characters before session access.
+For ASCII text it sends one `vncdo type CHARACTER` command per character, with
+explicit pauses only between characters.
 The default interval is 0.08 seconds; zero disables pauses. Empty text sends
 no keys and adds no duration. The CLI rejects negative and nonfinite timing values.
+
+For text containing non-ASCII characters, call wtype in the session's Wayland
+environment. Its generated keymap supports characters absent from wayvnc's US
+keymap. Pass each character as `-k UXXXX` (hexadecimal Unicode code point),
+separating characters with `-s MILLISECONDS` when the interval is nonzero. This
+avoids interpreting text as options and adds no trailing interval. Round intervals
+up to whole milliseconds. The subprocess timeout is fifteen seconds plus those
+intervals and wtype's 4 ms per-character key press/release time. No clipboard or
+input-method composition is involved.
 
 `key CHORD` accepts one letter, digit, or named key, prefixed by zero or more
 `Ctrl+`, `Shift+`, or `Alt+` modifiers. Names are case-insensitive, and letter case
@@ -142,7 +154,7 @@ modifiers. vncdotool lacks a name for ISO_Left_Tab, so this one keysym is encode
 as `chr(0xFE20)`; its single-character path sends the ordinal as the RFB keysym.
 There are no held keys across commands.
 
-All steps of one input operation use one VNC connection. Each operation presses
+All steps of a VNC input operation use one connection. Each operation presses
 and releases its buttons or keys within that connection. vncdotool's implicit
 command delay is disabled so only our explicit pauses control pacing. Each
 connection waits 100 ms before sending input: without that delay, Sway dropped
@@ -180,7 +192,7 @@ deferred.
 
 The standalone Nix package wraps both entry points with Python dependencies,
 GTK libraries and introspection data, and a PATH containing Sway, wayvnc, grim,
-wf-recorder, vncdotool, and its own bin directory (for the bundled demo). The
+wf-recorder, vncdotool, wtype, and its own bin directory (for the bundled demo). The
 flake exports this package as `packages.x86_64-linux.default` and `framewisp`,
 with `meta.mainProgram` selecting the CLI for `nix run`. NixOS and Home Manager
 can install the same package onto PATH. No system service is required.

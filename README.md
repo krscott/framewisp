@@ -13,6 +13,7 @@ Framewisp's Python CLI manages the session and calls these tools:
 | Sway / wlroots | Runs the headless Wayland display with Pixman software rendering. |
 | wayvnc | Provides virtual pointer and keyboard devices through a VNC server on a private Unix socket. |
 | vncdotool (`vncdo`) | Sends clicks, drags, scrolling, and keyboard input to wayvnc. |
+| wtype | Types non-ASCII text through a Wayland virtual keyboard with a matching keymap. |
 | grim | Captures the Wayland display as a PNG. Screenshots do not use VNC. |
 | wf-recorder | Records the display as silent H.264 MP4 when requested, using its FFmpeg libraries. |
 | GTK 4, GLib, and PyGObject | Provide the bundled demo and test apps, their event loops, and Python bindings. |
@@ -121,7 +122,7 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
 | `click [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
 | `drag [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
-| `type [--interval SECONDS] TEXT` | Send printable ASCII with a pause between characters (default: 0.08 seconds). |
+| `type [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
 | `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
 The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
@@ -322,6 +323,34 @@ A drag still moves immediately to its starting point, and clicks still move
 immediately to their destination. Smooth movement before clicks, random timing,
 and curved paths are deferred. `screenshot --delay` remains a separate wait
 before capture; it does not change input timing.
+
+## Unicode text
+
+```sh
+framewisp --session /tmp/framewisp-writer type 'café Ελληνικά Русский 日本語 😀'
+```
+
+`type` accepts characters that Python classifies as printable, including combining
+accents and individual emoji. Use `key Return` and `key Tab` for those keys.
+Control characters, line breaks, and format characters such as zero-width joiners
+are rejected before input. This does not implement an input method or compose
+emoji sequences with joiners. The app's fonts determine how characters look.
+
+ASCII text uses VNC. A command containing non-ASCII text uses `wtype`, included
+in the Nix package, to create a keymap for its characters. Unicode intervals round
+up to whole milliseconds; `wtype` also adds about 4 ms per character for key
+press/release. `--interval 0` removes the between-character pauses.
+
+LibreOffice Writer was tested as a Flatpak with a private D-Bus session:
+
+```sh
+framewisp --session /tmp/framewisp-writer run -- \
+  dbus-run-session -- flatpak run --socket=wayland --nosocket=x11 \
+  --env=SAL_USE_VCLPLUGIN=gtk3 org.libreoffice.LibreOffice --writer
+```
+
+Inkscape 1.4.4 was tested with Shift-click selection and Ctrl-drag constraints.
+Papers 50.2 was tested with PDF navigation, zoom, and search at 1600x900.
 
 ## Logs and cleanup
 

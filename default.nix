@@ -14,6 +14,7 @@
   wayvnc,
   grim,
   wf-recorder,
+  wtype,
 }:
 buildPythonPackage {
   name = "framewisp";
@@ -37,6 +38,7 @@ buildPythonPackage {
           wayvnc
           grim
           wf-recorder
+          wtype
           vncdotool
         ]
       }"

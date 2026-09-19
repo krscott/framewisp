@@ -316,3 +316,27 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     assert "even" in result.stderr
     assert not session.exists()
     assert not recording.exists()
+
+
+@pytest.mark.parametrize(
+    "text", ["line\nbreak", "tab\tstop", "escape\x1b", "join\u200der"]
+)
+def test_type_rejects_nonprintable_text(text: str, tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "missing"),
+            "type",
+            text,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "printable" in result.stderr
+    assert "session.json" not in result.stderr

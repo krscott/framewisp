@@ -46,7 +46,8 @@ These are notes for later issues, not requirements for this MVP.
   timing or paths if a real test needs them.
 - Configurable double-click timing, smooth scrolling, mouse buttons beyond left
   and right, more named keys, held keys,
-  Unicode, input methods, clipboard support, and broader input validation.
+  input methods, nonprintable Unicode format characters (including emoji joiners),
+  clipboard support, and broader input validation.
 - Audio, streaming, recording profiles, encoder backpressure, video/event timestamp alignment,
   cursor rendering policy, and structured action/process event logs.
 - Screenshot frame metadata, input/render synchronization, visual stability,

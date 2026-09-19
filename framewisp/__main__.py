@@ -137,7 +137,7 @@ def main() -> None:
             help="hold a modifier for the gesture; repeat for combinations",
         )
 
-    typing = commands.add_parser("type", help="type printable ASCII text")
+    typing = commands.add_parser("type", help="type printable Unicode text")
     typing.add_argument("text")
     typing.add_argument(
         "--interval",
@@ -208,8 +208,10 @@ def main() -> None:
             session, args.x, args.y, direction=args.direction, steps=args.steps
         )
     elif args.action == "type":
-        if any(not 32 <= ord(char) <= 126 for char in args.text):
-            parser.error("type supports printable ASCII only")
+        if any(not char.isprintable() for char in args.text):
+            parser.error(
+                "type supports printable characters only; use key for Return or Tab"
+            )
         result = type_text(session, args.text, interval=args.interval)
     else:
         arguments = key_commands(args.chord)
