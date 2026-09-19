@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ class Demo:
     process: subprocess.Popen[bytes]
     runtime: Path
     child_pids: list[int]
+    recording: Path | None
 
 
 def wait_until(predicate: Callable[[], bool]) -> None:
@@ -37,12 +39,17 @@ def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.fixture
-def demo(tmp_path: Path) -> Iterator[Demo]:
+def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session"
     runner_log = tmp_path / "runner.log"
+    recording = tmp_path / "session.mp4" if getattr(request, "param", False) else None
+    command = ["framewisp", "--session", str(directory), "run"]
+    if recording is not None:
+        command.extend(["--record", str(recording)])
+    command.extend(["--", "framewisp-demo"])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
-            ["framewisp", "--session", str(directory), "run", "--", "framewisp-demo"],
+            command,
             stdout=output,
             stderr=subprocess.STDOUT,
         )
@@ -59,6 +66,7 @@ def demo(tmp_path: Path) -> Iterator[Demo]:
             process=process,
             runtime=Path(state["runtime_directory"]),
             child_pids=list(state["processes"].values()),
+            recording=recording,
         )
     finally:
         if process.poll() is None:
@@ -149,3 +157,159 @@ def test_interrupt_stops_session(demo: Demo) -> None:
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+
+
+def recording_frames(path: Path) -> set[str]:
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    streams = json.loads(probe.stdout)["streams"]
+    assert len(streams) == 1
+    assert streams[0]["codec_name"] == "h264"
+    assert (streams[0]["width"], streams[0]["height"]) == (1280, 720)
+    decoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-xerror", "-i", str(path), "-f", "framemd5", "-"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=20,
+    )
+    frames = {
+        line.rsplit(",", 1)[1].strip()
+        for line in decoded.stdout.splitlines()
+        if line and not line.startswith("#")
+    }
+    assert frames
+    return frames
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+@pytest.mark.parametrize("stop_signal", [signal.SIGINT, signal.SIGTERM])
+def test_recording_finalizes_on_shutdown(
+    demo: Demo, stop_signal: signal.Signals
+) -> None:
+    assert demo.recording is not None
+    screenshot = demo.directory / "visible.png"
+
+    def app_is_visible() -> bool:
+        cli(demo.directory, "screenshot", str(screenshot))
+        with Image.open(screenshot) as image:
+            return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
+
+    wait_until(app_is_visible)
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "recorded")
+    cli(demo.directory, "key", "Return")
+    cli(demo.directory, "screenshot", "--delay", "0.2", str(screenshot))
+    demo.process.send_signal(stop_signal)
+    assert demo.process.wait(timeout=20) == 0
+    assert len(recording_frames(demo.recording)) > 1
+    # Check a uniform background patch against the screenshot. A range mismatch
+    # can produce a playable video with visibly shifted brightness.
+    with Image.open(screenshot) as image:
+        expected = image.convert("RGB").crop((1000, 600, 1002, 602)).tobytes()
+    samples = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(demo.recording),
+            "-vf",
+            "fps=10,crop=2:2:1000:600",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+    assert any(
+        max(
+            abs(a - b)
+            for a, b in zip(samples[offset : offset + 12], expected, strict=True)
+        )
+        <= 3
+        for offset in range(0, len(samples), 12)
+    )
+    assert not demo.runtime.exists()
+    assert not (demo.directory / "session.json").exists()
+    for pid in demo.child_pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+@pytest.mark.integration
+def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -> None:
+    video = tmp_path / "quick.mp4"
+    result = subprocess.run(
+        [
+            "framewisp",
+            "--session",
+            str(tmp_path / "session"),
+            "run",
+            "--record",
+            str(video),
+            "--",
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; assert Path(sys.argv[1]).stat().st_size > 0",
+            str(video),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    recording_frames(video)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_recorder_failure_stops_session(demo: Demo) -> None:
+    state = json.loads((demo.directory / "session.json").read_text())
+    os.kill(state["processes"]["recorder"], signal.SIGKILL)
+    assert demo.process.wait(timeout=20) != 0
+    assert "recorder.log" in (demo.directory.parent / "runner.log").read_text()
+    assert not demo.runtime.exists()
+    for pid in demo.child_pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+@pytest.mark.integration
+def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
+    session = tmp_path / "session"
+    marker = tmp_path / "app-started"
+    result = subprocess.run(
+        [
+            "framewisp",
+            "--session",
+            str(session),
+            "run",
+            "--record",
+            str(tmp_path / "missing" / "capture.mp4"),
+            "--",
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; Path(sys.argv[1]).touch()",
+            str(marker),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode != 0
+    assert "recorder.log" in result.stderr
+    assert not marker.exists()
+    assert not (session / "session.json").exists()

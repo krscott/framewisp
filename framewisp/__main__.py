@@ -17,6 +17,9 @@ def main() -> None:
         "run", help="run an app until it exits or you interrupt it"
     )
     run.add_argument(
+        "--record", type=Path, metavar="FILE", help="record the session to MP4"
+    )
+    run.add_argument(
         "command", nargs=argparse.REMAINDER, help="-- executable [args...]"
     )
 
@@ -58,7 +61,7 @@ def main() -> None:
             command = command[1:]
         if not command:
             parser.error("run requires an application command after --")
-        result = run_session(session, command)
+        result = run_session(session, command, recording=args.record)
     elif args.action == "screenshot":
         if not math.isfinite(args.delay) or args.delay < 0:
             parser.error("--delay must be a finite, nonnegative number of seconds")

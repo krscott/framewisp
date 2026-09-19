@@ -37,7 +37,7 @@ These are notes for later issues, not requirements for this MVP.
 - MCP, RPC, background sessions, persistent framebuffer management, and concurrent sessions.
 - Scrolling, intermediate drag points and duration, additional mouse buttons, modifier chords, held keys,
   Unicode, input methods, clipboard support, and broader input validation.
-- Video/audio recording, encoder backpressure, video/event timestamp alignment,
+- Audio, streaming, recording profiles, encoder backpressure, video/event timestamp alignment,
   cursor rendering policy, and structured action/process event logs.
 - Screenshot frame metadata, input/render synchronization, visual stability,
   and application-specific readiness checks.

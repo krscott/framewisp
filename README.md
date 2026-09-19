@@ -1,6 +1,6 @@
 # framewisp
 
-Run a native Wayland app without a physical display, save PNG screenshots, and
+Run a native Wayland app without a physical display, save PNG screenshots or MP4 recordings, and
 send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
 development environment and includes a small GTK demo.
 
@@ -49,7 +49,7 @@ Every command takes `--session DIRECTORY` before the subcommand.
 
 | Command | Behavior |
 | --- | --- |
-| `run -- APP [ARGS...]` | Start Sway, wayvnc, and the application; stay in the foreground. |
+| `run [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
 | `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
 | `drag X1 Y1 X2 Y2` | Move to the start, hold the left button, move directly to the end, and release. |
@@ -73,6 +73,25 @@ framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Record a session
+
+Add `--record` before the application command to save a silent MP4:
+
+```sh
+framewisp --session /tmp/framewisp-demo run --record /tmp/demo.mp4 -- framewisp-demo
+```
+
+Recording starts before the app launches. Continue using the normal input and
+screenshot commands. Stop the runner with Ctrl+C or SIGTERM, or close the app,
+and wait for the runner to exit before playing the file. It finalizes the video
+before stopping the display. The recording uses H.264 at 1280 by 720 and 30 fps.
+
+Choose a new output path in an existing directory; existing files are not
+overwritten. Session log and metadata paths are reserved. Recorder startup,
+capture, or finalization failures fail the session
+and point to `recorder.log`. A forced kill may leave an incomplete MP4. Nix supplies
+the recorder and video inspection tools; recording is disabled unless requested.
 
 ## Flatpak game
 
@@ -122,12 +141,13 @@ points or configurable duration.
 
 ## Logs and cleanup
 
-The session directory contains `sway.log`, `wayvnc.log`, and `app.log`. During a
+The session directory contains `sway.log`, `wayvnc.log`, and `app.log`, plus
+`recorder.log` when recording. During a
 run, `session.json` records the private runtime directory, Wayland socket name,
 and managed process IDs. Normal shutdown removes the runtime sockets and
 `session.json`, and keeps the logs. Reusing the directory replaces its logs.
 
-The runner stops its three managed processes on Ctrl+C, SIGTERM, or application
+The runner stops its managed processes on Ctrl+C, SIGTERM, or application
 exit. It returns the application's exit code when the app exits on its own.
 It does not contain arbitrary descendants or recover from SIGKILL. If a stale
 `session.json` remains after a crash, use a fresh session directory.
@@ -146,7 +166,8 @@ python -m pyright
 ```
 
 Tests run a real compositor, VNC server, and GTK app. They check input through
-the demo's output, compare screenshot regions, and verify managed-process cleanup.
+the demo's output, compare screenshot regions, decode recordings, and verify
+managed-process cleanup.
 
 After changing Python dependencies or script entry points, refresh the existing
 virtual environment with `python -m pip install -e '.[dev]'` inside `nix develop`.

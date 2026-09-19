@@ -75,6 +75,8 @@
               pkgs.sway-unwrapped
               pkgs.wayvnc
               pkgs.grim
+              pkgs.wf-recorder
+              pkgs.ffmpeg
             ];
             venvDir = ".venv";
             postVenvCreation = ''
