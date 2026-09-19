@@ -16,6 +16,8 @@
   wf-recorder,
   wtype,
   ffmpeg,
+  gst_all_1,
+  pipewire,
   makeFontsConf,
   noto-fonts,
   noto-fonts-cjk-sans,
@@ -29,6 +31,12 @@ let
       noto-fonts-monochrome-emoji
     ];
   };
+  capturePlugins = lib.makeSearchPath "lib/gstreamer-1.0" [
+    gst_all_1.gstreamer
+    pipewire
+    gst_all_1.gst-plugins-base
+    gst_all_1.gst-plugins-good
+  ];
 in
 buildPythonPackage {
   name = "framewisp";
@@ -47,6 +55,7 @@ buildPythonPackage {
     makeWrapperArgs+=(
       "''${gappsWrapperArgs[@]}"
       --set FRAMEWISP_FONTCONFIG_FILE "${captionFonts}"
+      --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${capturePlugins}"
       --prefix PATH : "$out/bin:${
         lib.makeBinPath [
           sway-unwrapped
@@ -55,13 +64,14 @@ buildPythonPackage {
           wf-recorder
           wtype
           ffmpeg
+          gst_all_1.gstreamer
           vncdotool
         ]
       }"
     )
   '';
 
-  passthru.captionFonts = captionFonts;
+  passthru = { inherit captionFonts capturePlugins; };
 
   propagatedBuildInputs = [
     vncdotool

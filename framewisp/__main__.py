@@ -1,9 +1,12 @@
 import argparse
+import json
 import math
 import time
 from pathlib import Path
 
+from framewisp.attach import attach_session
 from framewisp.captions import log_input
+from framewisp.connection import request_attached
 from framewisp.lib import (
     CLICK_BUTTONS,
     MODIFIERS,
@@ -38,12 +41,19 @@ def positive_integer(value: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run and interact with a headless Wayland app."
+        description="Run a headless Wayland app or attach to your desktop."
     )
     parser.add_argument(
         "session", type=Path, metavar="SESSION", help="session directory"
     )
     commands = parser.add_subparsers(dest="action", required=True)
+
+    commands.add_parser(
+        "attach", help="share an existing desktop through its permission dialog"
+    )
+    commands.add_parser(
+        "detach", help="stop an attached session without closing the app"
+    )
 
     run = commands.add_parser(
         "run", help="run an app until it exits or you interrupt it"
@@ -180,7 +190,28 @@ def main() -> None:
         args.modifier
     ):
         parser.error("each --modifier may only be specified once")
-    if args.action == "run":
+    if args.action == "scroll" and args.steps < 1:
+        parser.error("--steps must be a positive integer")
+    if args.action == "type" and any(not char.isprintable() for char in args.text):
+        parser.error(
+            "type supports printable characters only; use key for Return or Tab"
+        )
+    if args.action == "key" and key_commands(args.chord) is None:
+        parser.error(
+            "unsupported key combination; use key --help for supported keys and modifiers"
+        )
+    state_path = session / "session.json"
+    if args.action not in {"run", "attach"} and not state_path.exists():
+        parser.exit(1, "Session is disconnected. Start run or attach to reconnect.\n")
+    attached = (
+        state_path.exists()
+        and json.loads(state_path.read_text()).get("kind") == "attached"
+    )
+    if args.action == "attach":
+        result = attach_session(session)
+    elif args.action == "detach":
+        result = request_attached(session, "detach", {})
+    elif args.action == "run":
         command: list[str] = args.command
         if command[:1] == ["--"]:
             command = command[1:]
@@ -196,33 +227,35 @@ def main() -> None:
             size=(args.width, args.height),
         )
     elif args.action in {"record-start", "record-stop"}:
-        result = recording_command(
-            session,
-            args.path if args.action == "record-start" else None,
-            captions=not getattr(args, "no_captions", False),
+        result = (
+            request_attached(session, args.action, {})
+            if attached
+            else recording_command(
+                session,
+                args.path if args.action == "record-start" else None,
+                captions=not getattr(args, "no_captions", False),
+            )
         )
     elif args.action == "screenshot":
         if args.delay:
             time.sleep(args.delay)
-        result = screenshot(session, args.path)
+        result = (
+            request_attached(session, "screenshot", {"path": str(args.path.resolve())})
+            if attached
+            else screenshot(session, args.path)
+        )
     else:
-        if args.action == "scroll" and args.steps < 1:
-            parser.error("--steps must be a positive integer")
-        if args.action == "type" and any(not char.isprintable() for char in args.text):
-            parser.error(
-                "type supports printable characters only; use key for Return or Tab"
-            )
-        if args.action == "key" and key_commands(args.chord) is None:
-            parser.error(
-                "unsupported key combination; use key --help for supported keys and modifiers"
-            )
         parameters = {
             key: value
             for key, value in vars(args).items()
             if key not in {"session", "action"}
         }
         with log_input(session, args.action, parameters) as action:
-            result = perform_input(session, args)
+            result = (
+                request_attached(session, args.action, parameters)
+                if attached
+                else perform_input(session, args)
+            )
             action.returncode = result
     raise SystemExit(result)
 

@@ -118,6 +118,8 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | Command | Behavior |
 | --- | --- |
 | `run [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
+| `detach` | End attached access and leave your apps running. |
 | `record-start [--no-captions] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
@@ -155,6 +157,55 @@ framewisp /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Attach to an existing desktop
+
+Use this when an app is already running on your desktop and you want an agent to
+inspect its current state. The initial target is COSMIC on Wayland. Your desktop
+must provide the RemoteDesktop and ScreenCast portals; framewisp supplies its own
+capture tools through the Nix package.
+
+Before sharing, configure a desktop shortcut that runs:
+
+```sh
+framewisp /tmp/debug-app detach
+```
+
+In COSMIC Settings, open **Input devices > Keyboard > Keyboard shortcuts** and add
+a custom shortcut with that command and Ctrl+Alt+Escape. Use the absolute path to
+the installed `framewisp` executable if your desktop does not have it on PATH.
+The session path in the binding must match the one you share.
+
+Then start sharing from a terminal on your desktop:
+
+```sh
+framewisp /tmp/debug-app attach
+```
+
+Approve keyboard/pointer access and select one monitor in the desktop dialog.
+Wait for `Attached:`. An agent running under the same user account can now use
+another terminal:
+
+```sh
+framewisp /tmp/debug-app screenshot /tmp/current.png
+framewisp /tmp/debug-app click 400 300
+framewisp /tmp/debug-app type 'Hello'
+```
+
+Coordinates refer to pixels in the selected monitor's screenshot. Input shares
+your live pointer and keyboard focus. Keyboard input goes to the focused app,
+even if that app is on another monitor. Screenshots include everything visible
+on the shared monitor.
+
+Ctrl+Alt+Escape runs the disconnect command. Ctrl+C in the attach terminal or
+revoking sharing through the desktop also ends access. Disconnecting cancels
+ongoing input and releases framewisp's held keys and buttons. Your app stays
+open in its current state. Reconnecting requires running `attach` and approving
+the dialog again. Test your binding before handing control to an agent.
+
+Attached sessions support screenshots and input commands, including input logs.
+Keyboard shortcuts currently assume a US keyboard layout.
+Recording attached sessions is not implemented yet.
 
 ## Hover feedback
 

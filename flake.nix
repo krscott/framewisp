@@ -94,12 +94,14 @@
               pkgs.wf-recorder
               pkgs.wtype
               pkgs.ffmpeg
+              pkgs.gst_all_1.gstreamer
             ];
             venvDir = ".venv";
             postVenvCreation = ''
               pip install -e '.[dev]'
             '';
             shellHook = ''
+              export GST_PLUGIN_SYSTEM_PATH_1_0=${pkgs.framewisp.capturePlugins}
               export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.captionFonts}
               runHook venvShellHook
               export PYTHONPATH="''${PYTHONPATH:-}:."

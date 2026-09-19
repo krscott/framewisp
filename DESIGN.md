@@ -303,3 +303,38 @@ full-range color, and no audio. `record-stop` waits for rendering, as does norma
 session cleanup. With `--no-captions`, rendering and timestamp extraction are
 skipped, but input logging remains enabled. Caption formatting cannot affect
 app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session paths.
+
+
+## Attached desktop sessions
+
+`attach.py` owns a foreground connection to the user's existing desktop. It does
+not launch or own that desktop's app or compositor. `portal.py` uses Gio on the
+user's session bus to create a RemoteDesktop session, select keyboard and pointer
+devices, select one monitor through ScreenCast, and request consent with Start.
+The connection stays open until detach, SIGINT, SIGTERM, or the portal's Closed
+signal. Permission is requested on every new connection.
+
+After consent, session.json records `kind: attached`, the private runtime
+directory, and the attach PID. `connection.py` sends newline-delimited JSON
+requests over that directory's attach.sock. The existing CLI dispatches attached
+input and screenshots there; isolated sessions keep their existing tools.
+Workers serialize actions with a lock, while the main thread keeps dispatching
+portal signals and accepting disconnect requests. Detach sets a shared Event
+without waiting for the action lock. Paced typing and drags use interruptible
+Event waits. Queued workers check the Event before executing. Held buttons and
+keys release during action cleanup; shutdown closes the portal and removes the
+socket and session metadata. It never signals the user's app or compositor.
+
+Pointer coordinates use screenshot pixels and the portal stream node. Portal
+Notify methods deliver absolute motion, buttons, wheel steps, and keyboard
+keycodes for held keys and shortcuts, with keysyms for literal text. Keycode
+names currently assume the tested desktop's US layout. Each screenshot opens a PipeWire remote file descriptor through the
+portal and passes it to a one-frame GStreamer pipewiresrc pipeline. videoconvert
+and pngenc write the PNG. Cancellation stops that capture process; a ten-second
+limit reports capture failures with capture.log. Nix supplies GStreamer and the
+PipeWire, base, and good plugins in both the installed wrapper and dev shell.
+
+The user configures a desktop binding for `framewisp SESSION detach`. COSMIC on
+this host does not expose the GlobalShortcuts portal. The binding is independent
+of which app has focus. Attached recording is explicitly rejected; input JSONL
+logging still happens in the command client.
