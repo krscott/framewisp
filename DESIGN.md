@@ -86,8 +86,21 @@ pace; it has no random variation or easing.
 `type --interval SECONDS TEXT` sends one `vncdo type CHARACTER` command per
 printable ASCII character, with explicit pauses only between characters.
 The default interval is 0.08 seconds; zero disables pauses. Empty text sends
-no keys and adds no duration. `key` maps Return to `enter`, Tab to `tab`, and
-BackSpace to `bsp`. The CLI rejects negative and nonfinite timing values.
+no keys and adds no duration. The CLI rejects negative and nonfinite timing values.
+
+`key CHORD` accepts one letter, digit, or named key, prefixed by zero or more
+`Ctrl+`, `Shift+`, or `Alt+` modifiers. Names are case-insensitive, and letter case
+does not imply Shift. Named keys are Space, Return, Tab, BackSpace, Escape,
+Delete, Left, Right, Up, and Down. `key_commands` validates the complete
+combination before input, rejecting unknown keys, empty components, and repeated
+modifiers. It maps names to vncdotool's vocabulary (`enter`, `bsp`, `esc`, etc.),
+then emits `keydown` for each modifier, `key` for the final key, and `keyup` for
+each modifier in reverse order. With Shift held, letters and digits use the
+shifted US-layout symbol, and Tab uses ISO_Left_Tab. wayvnc otherwise adjusts
+modifier state to produce the unshifted symbol, removing the intended shortcut
+modifiers. vncdotool lacks a name for ISO_Left_Tab, so this one keysym is encoded
+as `chr(0xFE20)`; its single-character path sends the ordinal as the RFB keysym.
+There are no held keys across commands.
 
 All steps of one input operation use one VNC connection. Each operation presses
 and releases its buttons or keys within that connection. vncdotool's implicit
@@ -149,7 +162,9 @@ check changing frames, and cover app exit, both shutdown signals, startup failur
 and recorder failure. A separate GTK input probe logs received pointer events, button releases, and
 text changes with monotonic timestamps. Tests check the drag path and timing,
 character spacing, zero timing, and typing that exceeds the base timeouts without
-an extra interval after the final character. Both mypy and pyright check the
+an extra interval after the final character. The probe also checks shortcut
+press/release order and modifier state, followed by an unmodified key. Entry
+editing tests exercise Ctrl+A, Shift+Right, arrows, Delete, and BackSpace. Both mypy and pyright check the
 Python code.
 
 ## Recording decision

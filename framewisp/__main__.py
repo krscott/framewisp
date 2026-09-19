@@ -4,8 +4,8 @@ import time
 from pathlib import Path
 
 from framewisp.lib import (
-    KEYS,
     drag_pointer,
+    key_commands,
     run_session,
     screenshot,
     send_input,
@@ -80,8 +80,16 @@ def main() -> None:
         help="time between characters (default: 0.08; 0 types immediately)",
     )
 
-    key = commands.add_parser("key", help="press and release a named key")
-    key.add_argument("name", choices=KEYS)
+    key = commands.add_parser(
+        "key",
+        help="press and release a key or shortcut",
+        description="Send a key with optional Ctrl, Shift, and Alt modifiers. "
+        "Names are case-insensitive; letter case does not imply Shift. "
+        "Keys: a-z, 0-9, Space, Return, Tab, BackSpace, Escape, Delete, Left, Right, Up, Down.",
+    )
+    key.add_argument(
+        "chord", metavar="CHORD", help="for example: Return, Ctrl+a, Ctrl+Shift+z"
+    )
 
     args = parser.parse_args()
     session = args.session.resolve()
@@ -107,7 +115,12 @@ def main() -> None:
             parser.error("type supports printable ASCII only")
         result = type_text(session, args.text, interval=args.interval)
     else:
-        result = send_input(session, ["key", KEYS[args.name]])
+        arguments = key_commands(args.chord)
+        if arguments is None:
+            parser.error(
+                "unsupported key combination; use key --help for supported keys and modifiers"
+            )
+        result = send_input(session, arguments)
     raise SystemExit(result)
 
 
