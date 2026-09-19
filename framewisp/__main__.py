@@ -4,10 +4,12 @@ import time
 from pathlib import Path
 
 from framewisp.lib import (
+    SCROLL_BUTTONS,
     drag_pointer,
     key_commands,
     run_session,
     screenshot,
+    scroll_pointer,
     send_input,
     type_text,
 )
@@ -56,6 +58,16 @@ def main() -> None:
     )
     click.add_argument("x", type=int)
     click.add_argument("y", type=int)
+
+    scroll = commands.add_parser(
+        "scroll", help="send wheel steps at display coordinates"
+    )
+    scroll.add_argument("x", type=int)
+    scroll.add_argument("y", type=int)
+    scroll.add_argument("direction", choices=SCROLL_BUTTONS)
+    scroll.add_argument(
+        "--steps", type=int, default=1, help="positive wheel step count (default: 1)"
+    )
 
     drag = commands.add_parser("drag", help="drag with the left mouse button")
     drag.add_argument("x1", type=int)
@@ -109,6 +121,12 @@ def main() -> None:
     elif args.action == "drag":
         result = drag_pointer(
             session, args.x1, args.y1, args.x2, args.y2, duration=args.duration
+        )
+    elif args.action == "scroll":
+        if args.steps < 1:
+            parser.error("--steps must be a positive integer")
+        result = scroll_pointer(
+            session, args.x, args.y, direction=args.direction, steps=args.steps
         )
     elif args.action == "type":
         if any(not 32 <= ord(char) <= 126 for char in args.text):

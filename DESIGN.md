@@ -75,6 +75,17 @@ invoking capture. The grim process still has its own ten-second deadline; the
 delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
 
+`scroll X Y DIRECTION --steps N` moves the pointer to `(X, Y)` and sends `N`
+wheel-button press/release pairs on the same VNC connection. The VNC buttons are
+4 for up, 5 for down, 6 for left, and 7 for right. After the last release, the
+connection stays open for 100 ms. Without that pause, GTK sometimes discarded
+queued wheel events after wayvnc removed the pointer device, logging an invalid
+seat error. This is a measured workaround, not an input-delivery acknowledgement. `N` is a positive integer,
+defaulting to one. The widget under the pointer determines the amount scrolled;
+there is no pixel-distance guarantee or smooth scrolling. The CLI rejects invalid
+counts and directions before input. A two-pane GTK test checks received wheel
+counts, axis direction, pane targeting, and returning to the starting position.
+
 `click` invokes `vncdo move X Y click 1`. `drag --duration SECONDS X1 Y1 X2 Y2`
 moves to the start, presses the left button, and sends linearly interpolated
 integer coordinates at approximately 60 steps per second before releasing at

@@ -35,6 +35,7 @@ KEYS = {
     "space": "space",
 } | {character: character for character in ascii_lowercase + digits}
 MODIFIERS = {"ctrl", "shift", "alt"}
+SCROLL_BUTTONS = {"up": 4, "down": 5, "left": 6, "right": 7}
 
 
 def key_commands(chord: str) -> list[str] | None:
@@ -337,6 +338,17 @@ def drag_pointer(
         arguments.extend(["move", str(x), str(y)])
     arguments.extend(["mouseup", "1"])
     return send_input(session, arguments, duration=duration)
+
+
+def scroll_pointer(session: Path, x: int, y: int, *, direction: str, steps: int) -> int:
+    # GTK resolves queued scroll events through their input device. Give it time
+    # to consume them before wayvnc removes the pointer on disconnect.
+    return send_input(
+        session,
+        ["move", str(x), str(y)]
+        + ["click", str(SCROLL_BUTTONS[direction])] * steps
+        + ["pause", "0.1"],
+    )
 
 
 def type_text(session: Path, text: str, *, interval: float) -> int:
