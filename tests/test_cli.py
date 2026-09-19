@@ -16,6 +16,56 @@ def test_cli_help() -> None:
     assert result.returncode == 0
     assert "SESSION" in result.stdout
     assert "screenshot" in result.stdout
+    assert "--agent-skill" in result.stdout
+
+
+def test_agent_skill_without_runtime_dependencies(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    script = (
+        "import runpy, sys; "
+        f"sys.path.insert(0, {str(root)!r}); "
+        "sys.argv = ['framewisp', '--agent-skill']; "
+        "runpy.run_module('framewisp', run_name='__main__'); "
+        "assert 'gi' not in sys.modules; "
+        "assert 'framewisp.cli' not in sys.modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-E", "-S", "-c", script],
+        cwd=tmp_path,
+        env={"PATH": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (root / "framewisp" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert result.stderr == ""
+    assert not list(tmp_path.iterdir())
+
+
+def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--agent-skill",
+            str(tmp_path / "session"),
+            "run",
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "--agent-skill must be used alone" in result.stderr
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("delay", ["-1", "nan", "inf", "nope"])

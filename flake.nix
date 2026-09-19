@@ -63,6 +63,9 @@
         checks.package = pkgs.runCommand "framewisp-package-test" { } ''
           export HOME="$TMPDIR"
           ${pkgs.coreutils}/bin/env -i \
+            ${pkgs.framewisp}/bin/framewisp --agent-skill > agent-skill.md
+          ${pkgs.diffutils}/bin/diff ${./framewisp/SKILL.md} agent-skill.md
+          ${pkgs.coreutils}/bin/env -i \
             HOME="$HOME" \
             PATH="${pkgs.framewisp}/bin:${pkgs.ffmpeg}/bin" \
             ${

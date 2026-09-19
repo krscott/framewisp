@@ -33,7 +33,7 @@ build-backend = "setuptools.build_meta"
 packages = ["framewisp"]
 
 [tool.setuptools.package-data]
-"framewisp" = ["py.typed"]
+"framewisp" = ["py.typed", "SKILL.md"]
 
 [tool.isort]
 profile = "black"

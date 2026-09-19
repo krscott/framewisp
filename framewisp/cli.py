@@ -45,6 +45,12 @@ def main() -> None:
         description="Run a headless Wayland or X11 app, or attach to your desktop."
     )
     parser.add_argument(
+        "--agent-skill",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="print the bundled agent skill Markdown and exit (use alone)",
+    )
+    parser.add_argument(
         "--detach",
         action="store_true",
         help="stop the active desktop attachment, regardless of session",
@@ -191,12 +197,16 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if getattr(args, "agent_skill", False):
+        parser.error("--agent-skill must be used alone")
     if args.detach:
         if args.session is not None or args.action is not None:
             parser.error("--detach takes no session or command")
         raise SystemExit(detach_desktop())
     if args.session is None or args.action is None:
-        parser.error("SESSION and COMMAND are required (or use --detach)")
+        parser.error(
+            "SESSION and COMMAND are required (or use --detach or --agent-skill)"
+        )
     session = args.session.resolve()
     if args.action in {"click", "drag"} and len(set(args.modifier)) != len(
         args.modifier
