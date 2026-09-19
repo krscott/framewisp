@@ -15,7 +15,21 @@
   grim,
   wf-recorder,
   wtype,
+  ffmpeg,
+  makeFontsConf,
+  noto-fonts,
+  noto-fonts-cjk-sans,
+  noto-fonts-monochrome-emoji,
 }:
+let
+  captionFonts = makeFontsConf {
+    fontDirectories = [
+      noto-fonts
+      noto-fonts-cjk-sans
+      noto-fonts-monochrome-emoji
+    ];
+  };
+in
 buildPythonPackage {
   name = "framewisp";
   src = lib.cleanSource ./.;
@@ -32,6 +46,7 @@ buildPythonPackage {
   preFixup = ''
     makeWrapperArgs+=(
       "''${gappsWrapperArgs[@]}"
+      --set FRAMEWISP_FONTCONFIG_FILE "${captionFonts}"
       --prefix PATH : "$out/bin:${
         lib.makeBinPath [
           sway-unwrapped
@@ -39,11 +54,14 @@ buildPythonPackage {
           grim
           wf-recorder
           wtype
+          ffmpeg
           vncdotool
         ]
       }"
     )
   '';
+
+  passthru.captionFonts = captionFonts;
 
   propagatedBuildInputs = [
     vncdotool

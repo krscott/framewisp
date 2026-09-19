@@ -259,7 +259,7 @@ any active recorder before stopping the display.
 
 The runner listens on `control.sock` in its private runtime directory. Each
 recording CLI call sends one newline-terminated JSON request with a `destination`
-(an absolute path for start, null for stop), then waits for a JSON response with
+(an absolute path for start, null for stop), and a `captions` boolean, then waits for a JSON response with
 an `error` string or null. The runner handles requests serially in its monitoring
 loop. It replies only after capture is ready or finalization has finished.
 Validation/startup errors are returned to the caller without stopping the app.
@@ -270,3 +270,36 @@ map includes `recorder` only while recording. Both metadata filenames are reserv
 along with the session logs when choosing recording destinations. Recording
 requests reject odd display dimensions, existing/reserved output paths, a start
 while already active, and a stop while inactive. Each start replaces `recorder.log`.
+
+## Input logs and captions
+
+The CLI validates input arguments, then appends a start event to `inputs.jsonl`
+before dispatch and an end event afterward. Each JSONL event carries an ID,
+`event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
+`error`. Exceptions are logged and re-raised with their traceback. Normal
+nonzero returns are recorded as failures. Input logging is independent of
+recording. The runner truncates the log when creating a new session.
+
+For captioned recordings, only wf-recorder receives `WAYLAND_DEBUG=client`.
+The first screencopy `ready` event in `recorder.log` supplies the first captured
+frame's timestamp. The pinned Sway backend uses the monotonic clock, and the
+pinned wf-recorder makes this frame time zero. This establishes each clip's
+origin without guessing from subprocess startup or MP4-header detection.
+The diagnostic log grows throughout capture and is replaced for each clip.
+
+After recorder finalization, `captions.py` selects commands started between that
+origin and the stop request. Commands that began before the clip are excluded,
+even if they finish during it. Each caption spans its command, or at least 0.8
+seconds for quick commands, capped at the next action or clip stop. An unfinished
+command spans to clip stop. Captions show requested actions; they do not claim
+application acknowledgement. The video keeps its original idle and input timing.
+
+FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the requested
+output. Caption rendering uses a bundled Fontconfig configuration passed only to
+FFmpeg, including Noto Sans, CJK, and monochrome emoji. On success, the rendered
+file replaces the raw recording; on failure, the raw MP4 remains and the command
+fails with the `captions.log` path. The final video preserves dimensions, 30 fps,
+full-range color, and no audio. `record-stop` waits for rendering, as does normal
+session cleanup. With `--no-captions`, rendering and timestamp extraction are
+skipped, but input logging remains enabled. Caption formatting cannot affect
+app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session paths.

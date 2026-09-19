@@ -118,7 +118,7 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | Command | Behavior |
 | --- | --- |
 | `run [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
-| `record-start FILE` | Start a clip in the running session. |
+| `record-start [--no-captions] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
@@ -279,6 +279,42 @@ an invalid recording request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
 Keep the runner alive until shutdown completes so it can finalize the MP4.
 The development shell includes FFmpeg for video inspection.
+
+## Input logs and recording captions
+
+Every accepted input command appends start and end records to `SESSION/inputs.jsonl`,
+even without a recording. Records include an action ID, monotonic timestamp in
+seconds, the command and its parameters, and its return code or exception. They
+record what framewisp attempted and whether the input command completed, not
+whether the app responded as intended. A start without an end indicates an
+unfinished command. Reusing a session directory starts a fresh log.
+
+Recordings show input captions by default, including shortcuts, pointer gestures,
+and typed text. Captions stay visible during paced input and briefly after quick
+commands, until the next action. Long text is abbreviated in the video; the log
+keeps the full text. Inputs between clips are excluded from the next clip.
+Captions appear only in recordings, never in app screenshots.
+
+Disable captions for a clip with:
+
+```sh
+framewisp /tmp/framewisp-demo record-start --no-captions /tmp/plain.mp4
+# Or start the session with an uncaptioned recording:
+framewisp /tmp/framewisp-demo run --record /tmp/plain.mp4 --no-captions -- framewisp-demo
+```
+
+Input logging remains enabled. Captions are rendered into the video frames so
+GitHub's inline player displays them; viewers cannot toggle them off afterward.
+`record-stop` and normal session shutdown wait for caption rendering to finish.
+This adds encoding time when stopping a captioned clip. If rendering fails, the
+command fails and leaves the uncaptioned MP4 at the requested path; see
+`captions.log` for details.
+
+The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
+and monochrome emoji. The app keeps its own font configuration. Caption text uses
+fullwidth equivalents for braces and backslashes to prevent subtitle formatting;
+the input log preserves the original characters. Typed text is stored verbatim in
+the log and can appear in recordings, so review these artifacts before sharing.
 
 ## Flatpak game
 

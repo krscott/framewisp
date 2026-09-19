@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -49,10 +50,16 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session with spaces"
     runner_log = tmp_path / "runner.log"
     mode = getattr(request, "param", None)
-    recording = tmp_path / "session.mp4" if mode is True or mode == "large" else None
+    recording = (
+        tmp_path / "session.mp4"
+        if mode is True or mode in {"large", "uncaptioned"}
+        else None
+    )
     command = ["framewisp", str(directory), "run"]
     if recording is not None:
         command.extend(["--record", str(recording)])
+        if mode == "uncaptioned":
+            command.append("--no-captions")
     if mode in {"large", "odd"}:
         width, height = (1600, 900) if mode == "large" else (1601, 901)
         command.extend(["--width", str(width), "--height", str(height)])
@@ -209,7 +216,7 @@ def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
+@pytest.mark.parametrize("demo", [True, "uncaptioned"], indirect=True)
 @pytest.mark.parametrize("stop_signal", [signal.SIGINT, signal.SIGTERM])
 def test_recording_finalizes_on_shutdown(
     demo: Demo, stop_signal: signal.Signals
@@ -813,3 +820,102 @@ def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
     assert "even" in result.stderr
     assert not destination.exists()
     assert demo.process.poll() is None
+
+
+def video_patch(path: Path, second: float) -> bytes:
+    return subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(second),
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "crop=600:64:340:644",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+
+
+@pytest.mark.integration
+def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "Setup outside the clip")
+    cli(demo.directory, "key", "Ctrl+a")
+    cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
+    # This region is below the demo controls and remains unchanged by input.
+    with Image.open(tmp_path / "before.png") as screenshot:
+        patch = screenshot.convert("RGB").crop((340, 644, 940, 708)).tobytes()
+    for captions in [True, True, False]:
+        index = len(list(tmp_path.glob("clip-*.mp4")))
+        clip = tmp_path / f"clip-{index}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            str(clip),
+            *([] if captions else ["--no-captions"]),
+        )
+        cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "idle.png"))
+        cli(demo.directory, "type", "--interval", "0.12", "café 日本語 😀")
+        cli(demo.directory, "key", "Return")
+        cli(demo.directory, "screenshot", "--delay", "1", str(tmp_path / "after.png"))
+        cli(demo.directory, "record-stop")
+        assert demo.process.poll() is None
+        events = [
+            json.loads(line)
+            for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        ]
+        assert all(
+            event["returncode"] == 0 for event in events if event["event"] == "end"
+        )
+        if captions:
+            # Use the recorder's captured-frame timestamp, not the command's launch time.
+            timestamp = re.search(
+                r"\.ready\((\d+), (\d+), (\d+)\)",
+                (demo.directory / "recorder.log").read_text(),
+            )
+            assert timestamp is not None
+            high, low, nanos = map(int, timestamp.groups())
+            origin = (high << 32) + low + nanos / 1e9
+            typed = next(
+                event
+                for event in reversed(events)
+                if event["event"] == "start" and event["action"] == "type"
+            )
+            second = typed["time"] - origin + 0.4
+            assert (
+                max(
+                    abs(a - b) for a, b in zip(video_patch(clip, 0), patch, strict=True)
+                )
+                <= 3
+            )
+            changed = video_patch(clip, second)
+            assert (
+                sum(abs(a - b) > 20 for a, b in zip(changed, patch, strict=True)) > 1000
+            )
+        else:
+            assert (
+                max(
+                    abs(a - b)
+                    for a, b in zip(video_patch(clip, 0.8), patch, strict=True)
+                )
+                <= 3
+            )
+        with Image.open(tmp_path / "after.png") as screenshot:
+            assert (
+                screenshot.convert("RGB").crop((340, 644, 940, 708)).tobytes() == patch
+            )
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "type", "Between clips")
+    assert "Entered: café 日本語 😀" in (demo.directory / "app.log").read_text()
