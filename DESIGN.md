@@ -99,14 +99,24 @@ backend class so tests and recordings distinguish X11 from Wayland.
 ASCII and shortcuts still use VNC. Non-ASCII text uses X11 directly because wtype's
 Wayland keymaps do not reach Xwayland correctly. `xmodmap` assigns each distinct
 non-ASCII character one of 128 reserved upper codes (120 through 255, skipping
-the US modifier codes), above the supported US keyboard and navigation keys. These mappings stay installed after typing; xdotool's
-transient mappings otherwise disappear before GTK processes the events at zero
-delay. The helper reasserts the current X window focus before XTest input so GTK receives
-the first character after pointer input. `xdotool key --delay 0` sends numeric codes for these characters and literal
+the US modifier codes), above the supported US keyboard and navigation keys.
+The runtime directory's `x11-keymap.json` records allocated codes. Mappings stay
+installed for the session and never change meaning, so an app with a blocked event
+loop can consume queued keys after later commands finish. xdotool's transient
+mappings otherwise disappear before GTK processes the events at zero delay.
+The helper first sends `keyup Shift_L` and waits 100 ms to initialize Xwayland's
+XTest keyboard; sending text as its first event loses the first character.
+`xdotool key --delay 0` sends numeric codes for these characters and literal
 hexadecimal ASCII keysyms for the rest. `sleep` commands add the requested interval
-only between characters. More than 128 distinct non-ASCII characters returns an
-error before changing the keymap or sending input. Commands remain sequential;
-concurrent typing or arbitrary custom X11 keymaps are unsupported.
+only between characters. More than 128 distinct non-ASCII characters across the
+session returns an
+error before changing the keymap or sending input. A new session starts with an
+empty allocation. Commands remain sequential; concurrent typing or arbitrary custom X11 keymaps are unsupported.
+
+For VNC pointer commands, a new connection first moves one pixel beside the
+requested point and waits 100 ms, then sends the requested motion and buttons.
+Xwayland drops the first pointer motion in the tested setup; without this step,
+an initial drag can disappear. The requested drag timing starts after its press.
 
 Integration tests force GTK onto X11, poison inherited display credentials, check
 the rendered demo and input state, and exercise pacing, Unicode, clips and captions.

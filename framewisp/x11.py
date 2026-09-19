@@ -1,38 +1,46 @@
 """X11 text input in the private Xwayland server."""
 
+import json
 import subprocess
 import sys
+from pathlib import Path
 
 
 def type_text(text: str, *, interval: float, env: dict[str, str]) -> int:
-    # X11 clients look up keysyms after receiving key events. xdotool's temporary
-    # Unicode mappings can disappear before that lookup, losing characters.
-    # Keep mappings in the private server until the next text command instead.
-    characters = list(dict.fromkeys(char for char in text if not char.isascii()))
-    if len(characters) > 128:
+    # Applications resolve queued keycodes later. Never reuse a code for a
+    # different character, even across completed commands while an app is busy.
+    path = Path(env["XDG_RUNTIME_DIR"]) / "x11-keymap.json"
+    codes: dict[str, int] = json.loads(path.read_text()) if path.exists() else {}
+    characters = [
+        char for char in dict.fromkeys(text) if not char.isascii() and char not in codes
+    ]
+    if len(codes) + len(characters) > 128:
         print(
-            "X11 typing supports at most 128 distinct non-ASCII characters per command. "
-            "Split this text into smaller type commands.",
+            "X11 typing supports at most 128 distinct non-ASCII characters per session. "
+            "Start a new session to use a different character set.",
             file=sys.stderr,
         )
         return 1
-    # These codes are above the US letters, modifiers and navigation keys used
-    # by framewisp. Send numeric codes so xdotool cannot remap these symbols.
+    # Upper US keycodes, excluding the modifier aliases. Numeric xdotool codes
+    # avoid its temporary Unicode remappings, which lose queued characters.
     available = [
         code for code in range(120, 256) if code not in {133, 134, 203, 204, 205, 206}
     ]
-    codes = dict(zip(characters, available))
-    mapping = "".join(
-        f"keycode {code} = U{ord(char):04X}\n" for char, code in codes.items()
-    )
-    result = subprocess.run(
-        ["xmodmap", "-"], input=mapping, text=True, env=env, check=False, timeout=10
-    )
-    if result.returncode:
-        return result.returncode
-    # Reassert the current X focus before XTest input; otherwise GTK loses the
-    # first character after pointer input in the tested Xwayland setup.
-    arguments = ["xdotool", "getwindowfocus", "windowfocus", "--sync"]
+    added = dict(zip(characters, available[len(codes) :]))
+    if added:
+        mapping = "".join(
+            f"keycode {code} = U{ord(char):04X}\n" for char, code in added.items()
+        )
+        result = subprocess.run(
+            ["xmodmap", "-"], input=mapping, text=True, env=env, check=False, timeout=10
+        )
+        if result.returncode:
+            return result.returncode
+        codes.update(added)
+        path.write_text(json.dumps(codes))
+    # The first XTest event initializes Xwayland's virtual keyboard. Release an
+    # already-up modifier, then allow focus to settle before typing real keys.
+    arguments = ["xdotool", "keyup", "Shift_L", "sleep", "0.1"]
     for index, character in enumerate(text):
         if index and interval:
             arguments.extend(["sleep", str(interval)])

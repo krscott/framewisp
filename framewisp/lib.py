@@ -653,6 +653,19 @@ def send_input(
 ) -> int:
     env = session_environment(session)
     socket = Path(env["XDG_RUNTIME_DIR"]) / "vnc.sock"
+    if json.loads((session / "session.json").read_text()).get(
+        "x11_display"
+    ) and arguments[:1] == ["move"]:
+        # Xwayland can discard a new pointer's first motion. Prime it one pixel
+        # beside the target, then move to the requested point before any button.
+        x = int(arguments[1])
+        arguments = [
+            "move",
+            str(x - 1 if x else 1),
+            arguments[2],
+            "pause",
+            "0.1",
+        ] + arguments
     arguments = (
         [part for modifier in modifiers for part in ("keydown", modifier)]
         + arguments

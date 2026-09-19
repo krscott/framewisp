@@ -98,7 +98,6 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             stderr=subprocess.STDOUT,
         )
     x11_children: list[int] = []
-    x11_socket: Path | None = None
     try:
 
         def ready() -> bool:
@@ -143,8 +142,6 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=20)
-        if x11_socket is not None:
-            assert not x11_socket.exists()
         for pid in x11_children:
             wait_until(lambda: not Path(f"/proc/{pid}").exists())
 
@@ -1110,8 +1107,36 @@ def test_x11_unicode_mapping_limit_and_reuse(demo: Demo) -> None:
     assert result.returncode == 1
     assert "128 distinct" in result.stderr
     assert "Text:" not in log.read_text()
-    for text in [too_many[:128], "é中🙂a", "ñàßΩ"]:
+    for text in [too_many[:128], too_many[:3], too_many[3:6]]:
         cli(demo.directory, "key", "Ctrl+a")
         cli(demo.directory, "type", "--interval", "0", text)
         cli(demo.directory, "key", "Return")
         wait_until(lambda: f"Entered: {text}\n" in log.read_text())
+
+    before = log.read_text()
+    rejected = subprocess.run(
+        ["framewisp", str(demo.directory), "type", "é"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert rejected.returncode == 1
+    assert "per session" in rejected.stderr
+    assert log.read_text() == before
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["x11"], indirect=True)
+def test_x11_busy_app_keeps_queued_unicode(demo: Demo) -> None:
+    state = json.loads((demo.directory / "session.json").read_text())
+    app_pid = state["processes"]["app"]
+    cli(demo.directory, "click", "120", "100")
+    os.kill(app_pid, signal.SIGSTOP)
+    try:
+        cli(demo.directory, "type", "é", "--interval", "0")
+        cli(demo.directory, "type", "中", "--interval", "0")
+    finally:
+        os.kill(app_pid, signal.SIGCONT)
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Entered: é中\n" in (demo.directory / "app.log").read_text())

@@ -514,7 +514,9 @@ it down when the session ends.
 
 The bundled GTK demo is the tested X11 target. GPU/game support, desktop services,
 and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
-launching has not been verified.
+launching has not been verified. X11 pointer commands prime a new virtual pointer
+one pixel beside the target before moving to it; this adds 100 ms before the
+requested action to avoid losing its first motion.
 
 ## Unicode text
 
@@ -534,11 +536,13 @@ up to whole milliseconds; `wtype` also adds about 4 ms per character for key
 press/release. `--interval 0` removes the between-character pauses.
 
 In an X11 session, Unicode text uses persistent mappings in the private server
-and `xdotool` key events. Pauses occur only between characters, with no added
-pause at `--interval 0`. Each command can contain at most 128 distinct non-ASCII
-characters; repeated characters do not count again. Split text with more distinct
-characters into separate commands. An oversized command fails before sending any
-input. These mappings use upper keycodes reserved by framewisp; ordinary US keys
+and `xdotool` key events. A 100 ms pause initializes XTest input before typing;
+then pauses occur between characters. `--interval 0` removes
+the between-character pauses. Each session supports at most 128 distinct
+non-ASCII characters across its text commands; repeats do not count again.
+Start a new session to use a different character set once that limit is reached.
+A command that would exceed the limit fails before sending any input. These
+mappings use upper keycodes reserved by framewisp; ordinary US keys
 and the supported shortcuts retain their mappings.
 
 LibreOffice Writer was tested as a Flatpak with a private D-Bus session:
