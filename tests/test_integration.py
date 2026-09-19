@@ -29,13 +29,19 @@ def wait_until(predicate: Callable[[], bool]) -> None:
 
 
 def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         ["framewisp", "--session", str(directory), *arguments],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=20,
     )
+    assert (
+        result.returncode == 0
+    ), f"{arguments}: {result.stdout}\n{result.stderr}\n" + "\n".join(
+        f"{log.name}:\n{log.read_text()}" for log in directory.glob("*.log")
+    )
+    return result
 
 
 @pytest.fixture
