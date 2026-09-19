@@ -10,6 +10,7 @@ from framewisp.lib import (
     click_pointer,
     drag_pointer,
     key_commands,
+    recording_command,
     run_session,
     screenshot,
     scroll_pointer,
@@ -63,6 +64,12 @@ def main() -> None:
     )
     run.add_argument(
         "command", nargs=argparse.REMAINDER, help="-- executable [args...]"
+    )
+
+    record_start = commands.add_parser("record-start", help="start recording a clip")
+    record_start.add_argument("path", type=Path, metavar="FILE")
+    commands.add_parser(
+        "record-stop", help="finalize the active clip and keep the app running"
     )
 
     capture = commands.add_parser(
@@ -176,6 +183,10 @@ def main() -> None:
             parser.error("--record requires even --width and --height")
         result = run_session(
             session, command, recording=args.record, size=(args.width, args.height)
+        )
+    elif args.action in {"record-start", "record-stop"}:
+        result = recording_command(
+            session, args.path if args.action == "record-start" else None
         )
     elif args.action == "screenshot":
         if args.delay:

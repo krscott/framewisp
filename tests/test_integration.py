@@ -733,3 +733,83 @@ def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
     wait_until(
         lambda: any(event.get("text") == "replaced" for event in input_events(demo))
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, True], indirect=True)
+def test_record_multiple_clips_without_restarting_app(
+    demo: Demo, tmp_path: Path
+) -> None:
+    state_path = demo.directory / "session.json"
+    app_pid = json.loads(state_path.read_text())["processes"]["app"]
+    if demo.recording is not None:
+        cli(demo.directory, "record-stop")
+        recording_frames(demo.recording)
+
+    def rejected(*arguments: str) -> str:
+        result = subprocess.run(
+            ["framewisp", str(demo.directory), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert result.returncode == 1, result.stderr
+        assert demo.process.poll() is None
+        return result.stderr
+
+    assert "No recording" in rejected("record-stop")
+    assert "recorder.log" in rejected(
+        "record-start", str(tmp_path / "missing" / "bad.mp4")
+    )
+    assert "reserved" in rejected("record-start", str(state_path))
+    existing = tmp_path / "existing.mp4"
+    existing.write_bytes(b"keep")
+    assert "already exists" in rejected("record-start", str(existing))
+    assert existing.read_bytes() == b"keep"
+    for index in range(2):
+        cli(demo.directory, "click", "120", "100")
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "type", f"Setup {index}")
+        clip = tmp_path / f"clip {index}.mp4"
+        cli(demo.directory, "record-start", str(clip))
+        assert clip.stat().st_size > 0
+        assert "recorder" in json.loads(state_path.read_text())["processes"]
+        refused = tmp_path / "refused.mp4"
+        assert "already active" in rejected("record-start", str(refused))
+        assert not refused.exists()
+        cli(demo.directory, "type", " recording")
+        cli(demo.directory, "key", "Return")
+        cli(
+            demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "during.png")
+        )
+        cli(demo.directory, "record-stop")
+        assert len(recording_frames(clip)) > 1
+        state = json.loads(state_path.read_text())
+        assert state["processes"]["app"] == app_pid
+        assert "recorder" not in state["processes"]
+        assert demo.process.poll() is None
+        cli(demo.directory, "screenshot", str(tmp_path / "between.png"))
+
+    final_clip = tmp_path / "shutdown.mp4"
+    cli(demo.directory, "record-start", str(final_clip))
+    demo.process.terminate()
+    assert demo.process.wait(timeout=20) == 0
+    recording_frames(final_clip)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["odd"], indirect=True)
+def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
+    destination = tmp_path / "odd.mp4"
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "record-start", str(destination)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert "even" in result.stderr
+    assert not destination.exists()
+    assert demo.process.poll() is None
