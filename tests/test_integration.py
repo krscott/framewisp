@@ -143,8 +143,8 @@ def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
         )
 
     wait_until(result_is_visible)
-    # Tab focuses the entry and GTK selects its text, so typing replaces it.
-    cli(demo.directory, "key", "Tab")
+    # Shift+Tab moves back from Apply to the entry and selects its text.
+    cli(demo.directory, "key", "Shift+Tab")
     cli(demo.directory, "type", "?")
     cli(demo.directory, "key", "Return")
     wait_until(lambda: "Entered: ?\n" in (demo.directory / "app.log").read_text())
@@ -919,3 +919,92 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
         cli(demo.directory, "key", "Ctrl+a")
         cli(demo.directory, "type", "Between clips")
     assert "Entered: café 日本語 😀" in (demo.directory / "app.log").read_text()
+
+
+@pytest.mark.integration
+def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
+    log = demo.directory / "app.log"
+    wait_until(lambda: "Demo ready" in log.read_text())
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "alpha beta")
+    cli(demo.directory, "click", "80", "100", "--count", "2")
+    cli(demo.directory, "type", "café")
+    wait_until(lambda: "Text: café beta\n" in log.read_text())
+    cli(demo.directory, "click", "80", "100", "--button", "right")
+    cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "menu.png"))
+    # GTK's entry menu opens at the pointer; Select All is below Delete.
+    cli(demo.directory, "click", "120", "265")
+    cli(demo.directory, "key", "BackSpace")
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Entered: \n" in log.read_text())
+
+
+@pytest.mark.integration
+def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
+    log = demo.directory / "app.log"
+    wait_until(lambda: "Demo ready" in log.read_text())
+    cli(demo.directory, "click", "54", "266")
+    wait_until(lambda: "Option: True" in log.read_text())
+    cli(demo.directory, "drag", "147", "382", "350", "382", "--duration", "0.4")
+
+    def value() -> int:
+        return int(re.findall(r"Value: (\d+)", log.read_text())[-1])
+
+    wait_until(lambda: "Value:" in log.read_text() and value() > 70)
+    before = value()
+    cli(demo.directory, "key", "Right")
+    wait_until(lambda: value() == before + 1)
+
+    def position() -> tuple[int, int]:
+        matches = re.findall(r"Scroll: x=(\d+) y=(\d+)", log.read_text())
+        if not matches:
+            return (0, 0)
+        x, y = matches[-1]
+        return int(x), int(y)
+
+    for direction in ["down", "right"]:
+        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "3")
+    wait_until(lambda: all(coordinate > 0 for coordinate in position()))
+    for direction in ["up", "left"]:
+        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "8")
+    wait_until(lambda: position() == (0, 0))
+    for direction in ["down", "right"]:
+        cli(demo.directory, "scroll", "700", "250", direction)
+    wait_until(lambda: all(coordinate > 0 for coordinate in position()))
+    cli(demo.directory, "click", "120", "100")
+    # Submitting a long result must not push the neighboring Reset offscreen.
+    text = "W" * 150
+    cli(demo.directory, "type", "--interval", "0", text)
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: f"Entered: {text}\n" in log.read_text())
+    cli(demo.directory, "click", "700", "513")
+    wait_until(lambda: "Reset\n" in log.read_text())
+    assert value() == 25
+    assert position() == (0, 0)
+    assert "Option: False\n" in log.read_text()
+    assert "Text: \n" in log.read_text()
+    # Reset returns focus to the entry, so the next keyboard-only action works.
+    cli(demo.directory, "type", "fresh")
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Entered: fresh\n" in log.read_text())
+
+
+@pytest.mark.integration
+def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
+    log = demo.directory / "app.log"
+    wait_until(lambda: "Demo ready" in log.read_text())
+    cli(demo.directory, "move", "1100", "600")
+    cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
+    cli(demo.directory, "move", "150", "266")
+    cli(demo.directory, "screenshot", "--delay", "1", str(tmp_path / "tip.png"))
+    with (
+        Image.open(tmp_path / "before.png") as before,
+        Image.open(tmp_path / "tip.png") as after,
+    ):
+        # The tooltip appears below the option, outside the checkbox's hover styling.
+        region = (20, 290, 480, 335)
+        assert ImageChops.difference(before.crop(region), after.crop(region)).getbbox()
+    cli(demo.directory, "click", "54", "266")
+    wait_until(lambda: "Option: True\n" in log.read_text())
+    cli(demo.directory, "key", "Space")
+    wait_until(lambda: "Option: False\n" in log.read_text())
