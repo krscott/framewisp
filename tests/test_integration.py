@@ -123,6 +123,18 @@ def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_screenshot_waits_before_capture(demo: Demo, tmp_path: Path) -> None:
+    destination = tmp_path / "delayed.png"
+    started = time.time()
+    cli(demo.directory, "screenshot", "--delay", "0.5", str(destination))
+    # Check the file's write time so sleeping after capture would fail this test.
+    assert destination.stat().st_mtime >= started + 0.5
+    with Image.open(destination) as image:
+        assert image.format == "PNG"
+        assert image.size == (1280, 720)
+
+
+@pytest.mark.integration
 def test_interrupt_stops_session(demo: Demo) -> None:
     demo.process.send_signal(signal.SIGINT)
     assert demo.process.wait(timeout=20) == 0

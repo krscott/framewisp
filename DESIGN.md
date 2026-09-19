@@ -59,8 +59,11 @@ of `sway`, `wayvnc`, and `app` to their PIDs; no inherited environment is saved.
 
 `screenshot` invokes grim for `HEADLESS-1` with PNG output. It obtains a new
 capture from the compositor, but makes no claim that preceding input has finished
-changing the application. Consumers poll for their expected visual result when
-needed. Capture commands have a ten-second deadline.
+changing the application. The CLI accepts an optional `--delay SECONDS`, a finite,
+nonnegative number defaulting to zero, and sleeps for that duration before
+invoking capture. The grim process still has its own ten-second deadline; the
+delay does not count toward it. Consumers choose the delay and capture again
+when needed; there is no automatic animation detection.
 
 `click` invokes `vncdo move X Y click 1`. `type` invokes `vncdo type TEXT`, keeping
 the text as one argument; it accepts printable ASCII. `key` maps Return to

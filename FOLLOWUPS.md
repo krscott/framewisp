@@ -4,6 +4,12 @@ These are notes for later issues, not requirements for this MVP.
 
 ## Observed during implementation
 
+- Swell Foop 50.0 runs as a Flatpak without runtime changes. An immediate
+  screenshot after clicking Let's Play still showed the welcome screen; a later
+  capture showed the board. Subsequent move, Undo, and Redo captures worked with
+  a 0.5-second wait. Use this game to investigate input/render synchronization
+  when a fixed delay becomes insufficient.
+
 - Replace the 100 ms VNC connection-settling delay if broader reliability is
   needed. Without it, Sway dropped the first character and single named-key
   operations on new connections. The MVP waits before sending input. Consider
