@@ -209,6 +209,37 @@ def test_recording_finalizes_on_shutdown(
     demo.process.send_signal(stop_signal)
     assert demo.process.wait(timeout=20) == 0
     assert len(recording_frames(demo.recording)) > 1
+    # Check a uniform background patch against the screenshot. A range mismatch
+    # can produce a playable video with visibly shifted brightness.
+    with Image.open(screenshot) as image:
+        expected = image.convert("RGB").crop((1000, 600, 1002, 602)).tobytes()
+    samples = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(demo.recording),
+            "-vf",
+            "fps=10,crop=2:2:1000:600",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+    assert any(
+        max(
+            abs(a - b)
+            for a, b in zip(samples[offset : offset + 12], expected, strict=True)
+        )
+        <= 3
+        for offset in range(0, len(samples), 12)
+    )
     assert not demo.runtime.exists()
     assert not (demo.directory / "session.json").exists()
     for pid in demo.child_pids:

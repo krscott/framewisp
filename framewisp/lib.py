@@ -132,6 +132,8 @@ def start_recording(
         "libx264",
         "-x",
         "yuv420p",
+        "-F",
+        "scale=out_range=full",
         "-m",
         "mp4",
         "-f",

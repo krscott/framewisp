@@ -49,7 +49,8 @@ The foreground `run` command is the lifetime owner.
 7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
    the private runtime directory. Wait up to ten seconds for that socket.
 8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
-   30 fps, software `libx264`, `yuv420p`, and the MP4 muxer. Wait up to ten seconds
+   30 fps, software `libx264`, `yuv420p` with explicit full-range conversion, and
+   the MP4 muxer. Wait up to ten seconds
    for a nonempty output file, checking for recorder exit. With the pinned
    wf-recorder, the MP4 header is written after the first frame is received.
 9. Launch the application with the private environment and no shell expansion.
@@ -130,6 +131,11 @@ encoding and frame timestamps. Continuous capture keeps idle periods in the vide
 and lets the recorder continue receiving frames during shutdown. Framewisp owns
 its process alongside the display tools; it does not implement a frame queue or
 feed repeated PNG screenshots into an encoder.
+
+The pinned recorder tags H.264 as full-range. Its default conversion produced
+a white canvas decoded as RGB 235 instead of 255. `scale=out_range=full` keeps
+the conversion consistent with that tag; recording tests compare a decoded
+background patch with the screenshot to catch brightness shifts.
 
 ## Capture decision
 
