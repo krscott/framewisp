@@ -14,6 +14,8 @@ from string import ascii_lowercase, digits
 from threading import Event
 from types import FrameType
 
+from vncdotool import api
+
 SWAY_CONFIG = """\
 xwayland disable
 output HEADLESS-1 mode 1280x720@60Hz
@@ -35,6 +37,7 @@ KEYS = {
     "space": "space",
 } | {character: character for character in ascii_lowercase + digits}
 MODIFIERS = {"ctrl", "shift", "alt"}
+CLICK_BUTTONS = {"left": 1, "right": 3}
 SCROLL_BUTTONS = {"up": 4, "down": 5, "left": 6, "right": 7}
 
 
@@ -145,6 +148,17 @@ def start_sway(
             runtime, "wayland-*", process=process, log=log, stop=stop
         )
         yield (process, display.name) if display is not None else None
+
+
+@contextmanager
+def keep_input_devices(runtime: Path) -> Generator[None, None, None]:
+    """Keep the seat's keyboard and pointer present between CLI connections."""
+    try:
+        with api.connect(str(runtime / "vnc.sock"), timeout=10) as connection:
+            connection.pause(0)
+            yield
+    finally:
+        api.shutdown()
 
 
 @contextmanager
@@ -263,6 +277,7 @@ def run_session(
             )
             if vnc is None:
                 return 0
+            stack.enter_context(keep_input_devices(runtime))
 
             backends = {"sway": sway, "wayvnc": vnc}
             if recording is not None:
@@ -323,6 +338,15 @@ def screenshot(session: Path, destination: Path) -> int:
         check=False,
         timeout=10,
     ).returncode
+
+
+def click_pointer(session: Path, x: int, y: int, *, button: str, count: int) -> int:
+    arguments = ["move", str(x), str(y)]
+    for index in range(count):
+        if index:
+            arguments.extend(["pause", "0.1"])
+        arguments.extend(["click", str(CLICK_BUTTONS[button])])
+    return send_input(session, arguments)
 
 
 def drag_pointer(

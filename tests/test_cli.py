@@ -189,3 +189,38 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "--steps" in result.stderr
     assert "session.json" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "option,value",
+    [
+        ("--button", "middle"),
+        ("--button", "nope"),
+        ("--count", "0"),
+        ("--count", "-1"),
+        ("--count", "3"),
+        ("--count", "1.5"),
+        ("--count", "nope"),
+    ],
+)
+def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "missing"),
+            "click",
+            f"{option}={value}",
+            "100",
+            "100",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert option in result.stderr
+    assert "session.json" not in result.stderr

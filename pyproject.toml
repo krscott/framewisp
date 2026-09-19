@@ -61,6 +61,6 @@ markers = [
     "integration: black-box integration tests that require installed executables",
 ]
 
-# [[tool.mypy.overrides]]
-# module = ["example"]
-# ignore_missing_imports = true
+[[tool.mypy.overrides]]
+module = ["vncdotool", "vncdotool.*"]
+ignore_missing_imports = true

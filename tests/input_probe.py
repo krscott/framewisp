@@ -23,7 +23,18 @@ def main() -> None:
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Input probe")
     window.connect("close-request", lambda *_: loop.quit())
-    window.connect("map", lambda *_: log("ready"))
+    seat = window.get_display().get_default_seat()
+    assert seat is not None
+
+    def log_devices(event: str) -> None:
+        log(
+            event,
+            pointer=seat.get_pointer() is not None,
+            keyboard=seat.get_keyboard() is not None,
+        )
+
+    window.connect("map", lambda *_: log_devices("ready"))
+    seat.connect("device-removed", lambda *_: log_devices("device-removed"))
     keyboard = Gtk.EventControllerKey()
     keyboard.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 
@@ -65,12 +76,12 @@ def main() -> None:
     motion.connect("motion", on_motion)
     area.add_controller(motion)
     click = Gtk.GestureClick()
-    click.set_button(1)
+    click.set_button(0)
 
     def on_button(
-        event: str, _gesture: Gtk.GestureClick, _count: int, x: float, y: float
+        event: str, gesture: Gtk.GestureClick, count: int, x: float, y: float
     ) -> None:
-        log(event, x=x, y=y)
+        log(event, x=x, y=y, button=gesture.get_current_button(), count=count)
 
     click.connect("pressed", partial(on_button, "press"))
     click.connect("released", partial(on_button, "release"))

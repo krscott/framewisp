@@ -4,7 +4,9 @@ import time
 from pathlib import Path
 
 from framewisp.lib import (
+    CLICK_BUTTONS,
     SCROLL_BUTTONS,
+    click_pointer,
     drag_pointer,
     key_commands,
     run_session,
@@ -54,10 +56,23 @@ def main() -> None:
     )
 
     click = commands.add_parser(
-        "click", help="send a left click at display coordinates"
+        "click", help="send one or two clicks at display coordinates"
     )
     click.add_argument("x", type=int)
     click.add_argument("y", type=int)
+    click.add_argument(
+        "--button",
+        choices=CLICK_BUTTONS,
+        default="left",
+        help="mouse button (default: left)",
+    )
+    click.add_argument(
+        "--count",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="click count, with 0.1 seconds between clicks (default: 1)",
+    )
 
     scroll = commands.add_parser(
         "scroll", help="send wheel steps at display coordinates"
@@ -117,7 +132,9 @@ def main() -> None:
             time.sleep(args.delay)
         result = screenshot(session, args.path)
     elif args.action == "click":
-        result = send_input(session, ["move", str(args.x), str(args.y), "click", "1"])
+        result = click_pointer(
+            session, args.x, args.y, button=args.button, count=args.count
+        )
     elif args.action == "drag":
         result = drag_pointer(
             session, args.x1, args.y1, args.x2, args.y2, duration=args.duration

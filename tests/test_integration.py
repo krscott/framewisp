@@ -338,6 +338,56 @@ def input_events(demo: Demo) -> list[dict[str, str | float | bool]]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("button", [None, "right"])
+@pytest.mark.parametrize("count", [None, 2])
+def test_click_delivers_button_and_recognized_count(
+    demo: Demo, button: str | None, count: int | None
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    options = [] if button is None else ["--button", button]
+    if count is not None:
+        options.extend(["--count", str(count)])
+    cli(demo.directory, "click", *options, "200", "150")
+    expected_count = count or 1
+    wait_until(
+        lambda: sum(event["event"] == "release" for event in input_events(demo))
+        == expected_count
+    )
+    events = [
+        event for event in input_events(demo) if event["event"] in {"press", "release"}
+    ]
+    assert [event["event"] for event in events] == ["press", "release"] * expected_count
+    assert [event["count"] for event in events] == [
+        n for n in range(1, expected_count + 1) for _ in range(2)
+    ]
+    for event in events:
+        assert event["button"] == (3 if button == "right" else 1)
+        assert (event["x"], event["y"]) == (200, 150)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_input_devices_remain_between_commands(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    ready = next(event for event in input_events(demo) if event["event"] == "ready")
+    assert ready["pointer"] and ready["keyboard"]
+    cli(demo.directory, "click", "--button", "right", "200", "150")
+    cli(demo.directory, "key", "a")
+    wait_until(
+        lambda: any(event["event"] == "key-release" for event in input_events(demo))
+    )
+    cli(
+        demo.directory,
+        "screenshot",
+        "--delay",
+        "0.2",
+        str(demo.directory / "after.png"),
+    )
+    assert not any(event["event"] == "device-removed" for event in input_events(demo))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
 @pytest.mark.parametrize("duration", [None, 0, 0.6])
 def test_drag_delivers_paced_motion_and_release(
     demo: Demo, duration: float | None
