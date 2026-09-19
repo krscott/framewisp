@@ -1,108 +1,132 @@
-"""Black-box integration tests for the CLI using subprocess.
-
-These tests invoke the CLI as a real process to verify the end-to-end user experience.
-"""
-
+import json
 import os
+import signal
 import subprocess
+import time
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
+from PIL import Image, ImageChops
+
+
+@dataclass(frozen=True)
+class Demo:
+    directory: Path
+    process: subprocess.Popen[bytes]
+    runtime: Path
+    child_pids: list[int]
+
+
+def wait_until(predicate: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + 10
+    while not predicate():
+        assert time.monotonic() < deadline, "Demo did not reach the expected state"
+        time.sleep(0.05)
+
+
+def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["framewisp", "--session", str(directory), *arguments],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=20,
+    )
+
+
+@pytest.fixture
+def demo(tmp_path: Path) -> Iterator[Demo]:
+    directory = tmp_path / "session"
+    runner_log = tmp_path / "runner.log"
+    with runner_log.open("w") as output:
+        process = subprocess.Popen(
+            ["framewisp", "--session", str(directory), "run", "--", "framewisp-demo"],
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+
+        def ready() -> bool:
+            assert process.poll() is None, runner_log.read_text()
+            return "Session ready:" in runner_log.read_text()
+
+        wait_until(ready)
+        state = json.loads((directory / "session.json").read_text())
+        yield Demo(
+            directory=directory,
+            process=process,
+            runtime=Path(state["runtime_directory"]),
+            child_pids=list(state["processes"].values()),
+        )
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=20)
 
 
 @pytest.mark.integration
-def test_cli_basic_argument() -> None:
-    """Test CLI with a basic name argument."""
-    result = subprocess.run(
-        ["framewisp", "Alice"],
-        capture_output=True,
-        text=True,
+def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+
+    def app_is_visible() -> bool:
+        cli(demo.directory, "screenshot", str(before))
+        with Image.open(before) as image:
+            assert image.format == "PNG"
+            assert image.size == (1280, 720)
+            # The label contains text once the app has painted, unlike the empty output.
+            return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
+
+    wait_until(app_is_visible)
+    with Image.open(before) as image:
+        original_entry = image.crop((50, 85, 400, 115))
+        original_label = image.crop((40, 210, 440, 240))
+
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "Hello Wayland!")
+    cli(demo.directory, "key", "BackSpace")
+    cli(demo.directory, "key", "Return")
+    wait_until(
+        lambda: "Entered: Hello Wayland\n" in (demo.directory / "app.log").read_text()
     )
-    assert result.returncode == 0
-    assert "Hello, Alice!" in result.stdout
+    cli(demo.directory, "click", "120", "170")
+    wait_until(
+        lambda: "Applied: Hello Wayland\n" in (demo.directory / "app.log").read_text()
+    )
+
+    def result_is_visible() -> bool:
+        cli(demo.directory, "screenshot", str(after))
+        with Image.open(after) as image:
+            entry = image.crop((50, 85, 400, 115))
+            label = image.crop((40, 210, 440, 240))
+        return (
+            ImageChops.difference(original_entry, entry).getbbox() is not None
+            and ImageChops.difference(original_label, label).getbbox() is not None
+        )
+
+    wait_until(result_is_visible)
+    # Tab focuses the entry and GTK selects its text, so typing replaces it.
+    cli(demo.directory, "key", "Tab")
+    cli(demo.directory, "type", "?")
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Entered: ?\n" in (demo.directory / "app.log").read_text())
+
+    demo.process.send_signal(signal.SIGTERM)
+    assert demo.process.wait(timeout=20) == 0
+    assert not (demo.directory / "session.json").exists()
+    assert not demo.runtime.exists()
+    for pid in demo.child_pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
 
 @pytest.mark.integration
-def test_cli_default_name() -> None:
-    """Test CLI with no arguments uses default name."""
-    result = subprocess.run(
-        ["framewisp"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "Hello, World!" in result.stdout
-
-
-@pytest.mark.integration
-def test_cli_verbose_flag() -> None:
-    """Test CLI with --verbose flag shows debug output."""
-    result = subprocess.run(
-        ["framewisp", "--verbose", "Bob"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "Hello, Bob!" in result.stdout
-    assert "Greeting user..." in result.stderr
-
-
-@pytest.mark.integration
-def test_cli_verbose_short_flag() -> None:
-    """Test CLI with -v short flag shows debug output."""
-    result = subprocess.run(
-        ["framewisp", "-v", "Charlie"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "Hello, Charlie!" in result.stdout
-    assert "Greeting user..." in result.stderr
-
-
-@pytest.mark.integration
-def test_cli_verbose_env_var() -> None:
-    """Test CLI with FRAMEWISP_VERBOSE environment variable."""
-    env = os.environ.copy()
-    env["FRAMEWISP_VERBOSE"] = "1"
-    result = subprocess.run(
-        ["framewisp", "David"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert result.returncode == 0
-    assert "Hello, David!" in result.stdout
-    assert "Greeting user..." in result.stderr
-
-
-@pytest.mark.integration
-def test_cli_verbose_env_var_false() -> None:
-    """Test that FRAMEWISP_VERBOSE=0 does not enable debug output."""
-    env = os.environ.copy()
-    env["FRAMEWISP_VERBOSE"] = "0"
-    result = subprocess.run(
-        ["framewisp", "David"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert result.returncode == 0
-    assert "Hello, David!" in result.stdout
-    assert "Greeting user..." not in result.stderr
-
-
-@pytest.mark.integration
-def test_cli_flag_overrides_env_var() -> None:
-    """Test that command line flag works even when env var is not set."""
-    env = os.environ.copy()
-    # Ensure the env var is not set
-    env.pop("FRAMEWISP_VERBOSE", None)
-    result = subprocess.run(
-        ["framewisp", "--verbose", "Eve"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert result.returncode == 0
-    assert "Hello, Eve!" in result.stdout
-    assert "Greeting user..." in result.stderr
+def test_interrupt_stops_session(demo: Demo) -> None:
+    demo.process.send_signal(signal.SIGINT)
+    assert demo.process.wait(timeout=20) == 0
+    assert not demo.runtime.exists()
+    for pid in demo.child_pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)

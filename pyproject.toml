@@ -4,8 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.10.12"
 
 dependencies = [
-    "python-dotenv~=1.0",
-    "setproctitle~=1.3",
+    "vncdotool~=1.2",
+    "PyGObject",
 ]
 
 [project.optional-dependencies]
@@ -15,10 +15,13 @@ dev = [
     "mypy~=1.9",
     "pyright",
     "pytest",
+    "pygobject-stubs",
+    "pillow",
 ]
 
 [project.scripts]
 framewisp = "framewisp.__main__:main"
+framewisp-demo = "framewisp.demo:main"
 
 [build-system]
 requires = ["setuptools >= 61.2"]
@@ -33,6 +36,9 @@ packages = ["framewisp"]
 [tool.isort]
 profile = "black"
 skip = [".direnv", "result", ".venv"]
+
+[tool.black]
+target-version = ["py310"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
