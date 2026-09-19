@@ -48,6 +48,10 @@ The foreground `run` command is the lifetime owner.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
 7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
    the private runtime directory. Wait up to ten seconds for that socket.
+   Open one idle connection through vncdotool's threaded API and wait up to ten
+   seconds for its handshake by calling `pause(0)`. Keep it connected for the
+   session so the seat retains a keyboard and pointer between CLI commands.
+   Without it, Qt dismisses context menus when the last input client disconnects.
 8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
    30 fps, software `libx264`, `yuv420p` with explicit full-range conversion, and
    the MP4 muxer. Wait up to ten seconds
@@ -59,6 +63,8 @@ The foreground `run` command is the lifetime owner.
 
 Each child runs in its own process session with stdin disconnected and combined
 stdout/stderr directed to its log. The runner monitors all managed children.
+The idle VNC connection runs in the runner's process. Cleanup disconnects it and
+stops its Twisted reactor thread before stopping wayvnc.
 
 ## Interaction
 
@@ -181,6 +187,8 @@ and recorder failure. A separate GTK input probe logs received pointer events, b
 text changes with monotonic timestamps. Click tests check coordinates, left and
 right button identity, paired releases, and GTK's recognized click count for
 single and double clicks. Tests also check the drag path and timing,
+and verify that the app has pointer and keyboard devices before the first input
+and receives no device removal between commands. Other tests check
 character spacing, zero timing, and typing that exceeds the base timeouts without
 an extra interval after the final character. The probe also checks shortcut
 press/release order and modifier state, followed by an unmodified key. Entry

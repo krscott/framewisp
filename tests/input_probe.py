@@ -23,7 +23,18 @@ def main() -> None:
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Input probe")
     window.connect("close-request", lambda *_: loop.quit())
-    window.connect("map", lambda *_: log("ready"))
+    seat = window.get_display().get_default_seat()
+    assert seat is not None
+
+    def log_devices(event: str) -> None:
+        log(
+            event,
+            pointer=seat.get_pointer() is not None,
+            keyboard=seat.get_keyboard() is not None,
+        )
+
+    window.connect("map", lambda *_: log_devices("ready"))
+    seat.connect("device-removed", lambda *_: log_devices("device-removed"))
     keyboard = Gtk.EventControllerKey()
     keyboard.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
 

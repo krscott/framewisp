@@ -367,6 +367,27 @@ def test_click_delivers_button_and_recognized_count(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_input_devices_remain_between_commands(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    ready = next(event for event in input_events(demo) if event["event"] == "ready")
+    assert ready["pointer"] and ready["keyboard"]
+    cli(demo.directory, "click", "--button", "right", "200", "150")
+    cli(demo.directory, "key", "a")
+    wait_until(
+        lambda: any(event["event"] == "key-release" for event in input_events(demo))
+    )
+    cli(
+        demo.directory,
+        "screenshot",
+        "--delay",
+        "0.2",
+        str(demo.directory / "after.png"),
+    )
+    assert not any(event["event"] == "device-removed" for event in input_events(demo))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
 @pytest.mark.parametrize("duration", [None, 0, 0.6])
 def test_drag_delivers_paced_motion_and_release(
     demo: Demo, duration: float | None

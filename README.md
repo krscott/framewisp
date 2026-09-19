@@ -156,6 +156,10 @@ between them. Every click presses and releases the chosen button. The target
 app's settings and the control under the pointer determine how it responds.
 Plain `click X Y` still sends one left click.
 
+The runner keeps an idle input connection open for the session. This keeps the
+keyboard and pointer available between commands, so Qt context menus remain open
+for a later screenshot or click.
+
 ## Scrolling
 
 Move the pointer to the pane you want to scroll, then send wheel steps:

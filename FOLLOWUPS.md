@@ -17,6 +17,9 @@ These are notes for later issues, not requirements for this MVP.
   Scroll commands also wait 100 ms before disconnecting: GTK otherwise sometimes
   dropped queued wheel events after the transient pointer device was removed,
   reporting `gdk_seat_get_pointer: GDK_IS_SEAT (seat)` failures.
+  The runner now keeps an idle VNC connection open because Qt context menus
+  disappeared when the last client disconnected. Reassess the existing delays
+  with this persistent keyboard and pointer before changing them.
 
 - Investigate VNC screenshots with Sway 1.12, wlroots 0.20.2, wayvnc 0.10.1, and
   vncdotool 1.2.0 under Pixman. The RFB handshake and input worked, but full-frame

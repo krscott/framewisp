@@ -14,6 +14,8 @@ from string import ascii_lowercase, digits
 from threading import Event
 from types import FrameType
 
+from vncdotool import api
+
 SWAY_CONFIG = """\
 xwayland disable
 output HEADLESS-1 mode 1280x720@60Hz
@@ -149,6 +151,17 @@ def start_sway(
 
 
 @contextmanager
+def keep_input_devices(runtime: Path) -> Generator[None, None, None]:
+    """Keep the seat's keyboard and pointer present between CLI connections."""
+    try:
+        with api.connect(str(runtime / "vnc.sock"), timeout=10) as connection:
+            connection.pause(0)
+            yield
+    finally:
+        api.shutdown()
+
+
+@contextmanager
 def start_wayvnc(
     runtime: Path, *, log: Path, env: dict[str, str], stop: Event
 ) -> Generator[subprocess.Popen[bytes] | None, None, None]:
@@ -264,6 +277,7 @@ def run_session(
             )
             if vnc is None:
                 return 0
+            stack.enter_context(keep_input_devices(runtime))
 
             backends = {"sway": sway, "wayvnc": vnc}
             if recording is not None:
