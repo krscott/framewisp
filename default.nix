@@ -7,7 +7,7 @@
   setuptools,
 }:
 buildPythonPackage {
-  name = "py-start";
+  name = "framewisp";
   src = lib.cleanSource ./.;
   pyproject = true;
 
@@ -25,10 +25,10 @@ buildPythonPackage {
   # Skip integration tests during build (they require the installed executable)
   disabledTestMarks = [ "integration" ];
 
-  # pythonImportsCheck = [ "py_start" ];
+  # pythonImportsCheck = [ "framewisp" ];
 
   meta = {
-    mainProgram = "pystart";
+    mainProgram = "framewisp";
     # description = "A short description of my application";
     # homepage = "https://github.com";
     # license = lib.licenses.mit;

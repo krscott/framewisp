@@ -1,10 +1,26 @@
-# py-start
+# framewisp
 
-My rather opinionated Python project template.
+Project description goes here.
 
-To start a project with this template, run:
+## Documentation Structure
+
+This repository contains several documentation files for different audiences:
+
+- **README.md** - User-facing project documentation for developers using or deploying this project
+- [**AGENTS.md**](AGENTS.md) - Comprehensive development guidelines for AI agents,
+  including code style, conventions, and workflows
+  (Note: CLAUDE.md is symlinked to AGENTS.md in nix dev shell)
+
+## Development
+
+Update dependencies
 ```
-./init-template.sh new_project_name
+nix flake update
 ```
 
-See README_TEMPLATE.md
+Start nix dev shell
+```
+nix develop
+```
+
+NOTE: If you rename scripts in pyproject.toml, you may need to delete and recreate .venv

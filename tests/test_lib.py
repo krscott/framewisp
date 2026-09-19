@@ -1,6 +1,6 @@
 import pytest
 
-from py_start.lib import Options, greet
+from framewisp.lib import Options, greet
 
 
 def test_greet(capsys: pytest.CaptureFixture[str]) -> None:

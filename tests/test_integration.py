@@ -13,7 +13,7 @@ import pytest
 def test_cli_basic_argument() -> None:
     """Test CLI with a basic name argument."""
     result = subprocess.run(
-        ["pystart", "Alice"],
+        ["framewisp", "Alice"],
         capture_output=True,
         text=True,
     )
@@ -25,7 +25,7 @@ def test_cli_basic_argument() -> None:
 def test_cli_default_name() -> None:
     """Test CLI with no arguments uses default name."""
     result = subprocess.run(
-        ["pystart"],
+        ["framewisp"],
         capture_output=True,
         text=True,
     )
@@ -37,7 +37,7 @@ def test_cli_default_name() -> None:
 def test_cli_verbose_flag() -> None:
     """Test CLI with --verbose flag shows debug output."""
     result = subprocess.run(
-        ["pystart", "--verbose", "Bob"],
+        ["framewisp", "--verbose", "Bob"],
         capture_output=True,
         text=True,
     )
@@ -50,7 +50,7 @@ def test_cli_verbose_flag() -> None:
 def test_cli_verbose_short_flag() -> None:
     """Test CLI with -v short flag shows debug output."""
     result = subprocess.run(
-        ["pystart", "-v", "Charlie"],
+        ["framewisp", "-v", "Charlie"],
         capture_output=True,
         text=True,
     )
@@ -61,11 +61,11 @@ def test_cli_verbose_short_flag() -> None:
 
 @pytest.mark.integration
 def test_cli_verbose_env_var() -> None:
-    """Test CLI with PYSTART_VERBOSE environment variable."""
+    """Test CLI with FRAMEWISP_VERBOSE environment variable."""
     env = os.environ.copy()
-    env["PYSTART_VERBOSE"] = "1"
+    env["FRAMEWISP_VERBOSE"] = "1"
     result = subprocess.run(
-        ["pystart", "David"],
+        ["framewisp", "David"],
         capture_output=True,
         text=True,
         env=env,
@@ -77,11 +77,11 @@ def test_cli_verbose_env_var() -> None:
 
 @pytest.mark.integration
 def test_cli_verbose_env_var_false() -> None:
-    """Test that PYSTART_VERBOSE=0 does not enable debug output."""
+    """Test that FRAMEWISP_VERBOSE=0 does not enable debug output."""
     env = os.environ.copy()
-    env["PYSTART_VERBOSE"] = "0"
+    env["FRAMEWISP_VERBOSE"] = "0"
     result = subprocess.run(
-        ["pystart", "David"],
+        ["framewisp", "David"],
         capture_output=True,
         text=True,
         env=env,
@@ -96,9 +96,9 @@ def test_cli_flag_overrides_env_var() -> None:
     """Test that command line flag works even when env var is not set."""
     env = os.environ.copy()
     # Ensure the env var is not set
-    env.pop("PYSTART_VERBOSE", None)
+    env.pop("FRAMEWISP_VERBOSE", None)
     result = subprocess.run(
-        ["pystart", "--verbose", "Eve"],
+        ["framewisp", "--verbose", "Eve"],
         capture_output=True,
         text=True,
         env=env,

@@ -28,7 +28,7 @@
           overlays = [ localOverlay ];
         };
 
-        pythonDev = pkgs.python3.pkgs.py-start.pythonModule.withPackages (
+        pythonDev = pkgs.python3.pkgs.framewisp.pythonModule.withPackages (
           ps:
           with ps;
           [
@@ -37,8 +37,8 @@
             mypy
             pytest
           ]
-          ++ pkgs.py-start.propagatedBuildInputs
-          ++ pkgs.py-start.nativeBuildInputs
+          ++ pkgs.framewisp.propagatedBuildInputs
+          ++ pkgs.framewisp.nativeBuildInputs
         );
 
         mkApp = text: {
@@ -58,13 +58,13 @@
       in
       {
         packages = {
-          inherit (pkgs) py-start;
-          default = pkgs.py-start;
+          inherit (pkgs) framewisp;
+          default = pkgs.framewisp;
         };
 
         devShells = {
           default = pkgs.mkShell {
-            inputsFrom = [ pkgs.py-start ];
+            inputsFrom = [ pkgs.framewisp ];
             nativeBuildInputs = [
               pythonDev
               pkgs.pyright

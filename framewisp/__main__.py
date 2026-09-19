@@ -7,11 +7,11 @@ from typing import Any
 from dotenv import find_dotenv, load_dotenv
 from setproctitle import setproctitle
 
-from py_start.lib import Options, greet
+from framewisp.lib import Options, greet
 
 
 def main() -> None:
-    setproctitle("pystart")
+    setproctitle("framewisp")
     load_dotenv(find_dotenv(usecwd=True))
 
     cli_opts = CliOpts.parse_args()
@@ -41,7 +41,7 @@ class CliOpts:
             "-v",
             "--verbose",
             action=EnvAction,
-            env_var="PYSTART_VERBOSE",
+            env_var="FRAMEWISP_VERBOSE",
             nargs=0,
             help="show more detailed log messages",
         )

@@ -4,7 +4,7 @@ default:
     just --list
 
 run *args:
-    pystart "$@"
+    framewisp "$@"
 
 test *args:
     python -m pytest "$@"

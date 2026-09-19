@@ -34,7 +34,7 @@ jobs:
       run: nix run -L .#lint
 
     - name: Check Develop Shell
-      run: nix develop --command bash -c 'pystart --help'
+      run: nix develop --command bash -c 'framewisp --help'
 
     - name: Test CLI and library
       run: nix develop --command python -m pytest

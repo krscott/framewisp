@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-from py_start.__main__ import EnvAction
+from framewisp.__main__ import EnvAction
 
 
 def test_env_action_basic(monkeypatch: pytest.MonkeyPatch) -> None:
