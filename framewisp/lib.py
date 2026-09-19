@@ -1,6 +1,7 @@
 """Run one headless Wayland app and control it with existing command-line tools."""
 
 import json
+import math
 import os
 import signal
 import subprocess
@@ -281,7 +282,31 @@ def screenshot(session: Path, destination: Path) -> int:
     ).returncode
 
 
-def send_input(session: Path, arguments: list[str]) -> int:
+def drag_pointer(
+    session: Path, x1: int, y1: int, x2: int, y2: int, *, duration: float
+) -> int:
+    arguments = ["move", str(x1), str(y1), "mousedown", "1"]
+    steps = max(1, math.ceil(duration * 60))
+    for step in range(1, steps + 1):
+        if duration:
+            arguments.extend(["pause", str(duration / steps)])
+        x = round(x1 + (x2 - x1) * step / steps)
+        y = round(y1 + (y2 - y1) * step / steps)
+        arguments.extend(["move", str(x), str(y)])
+    arguments.extend(["mouseup", "1"])
+    return send_input(session, arguments, duration=duration)
+
+
+def type_text(session: Path, text: str, *, interval: float) -> int:
+    arguments: list[str] = []
+    for index, character in enumerate(text):
+        if index and interval:
+            arguments.extend(["pause", str(interval)])
+        arguments.extend(["type", character])
+    return send_input(session, arguments, duration=max(0, len(text) - 1) * interval)
+
+
+def send_input(session: Path, arguments: list[str], *, duration: float = 0) -> int:
     env = session_environment(session)
     socket = Path(env["XDG_RUNTIME_DIR"]) / "vnc.sock"
     # Sway needs time to focus wayvnc's newly created keyboard. Without this,
@@ -292,12 +317,14 @@ def send_input(session: Path, arguments: list[str]) -> int:
             "--server",
             str(socket),
             "--timeout",
-            "10",
+            str(math.ceil(10 + duration)),
+            "--delay",
+            "0",
             "--",
             "pause",
             "0.1",
             *arguments,
         ],
         check=False,
-        timeout=15,
+        timeout=15 + duration,
     ).returncode

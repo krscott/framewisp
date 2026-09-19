@@ -99,3 +99,32 @@ def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None
     assert result.returncode != 0
     assert "reserved for session files" in result.stderr
     assert not session.exists()
+
+
+@pytest.mark.parametrize("value", ["-1", "nan", "inf", "nope"])
+@pytest.mark.parametrize(
+    "action,option,arguments",
+    [("drag", "--duration", ["0", "0", "100", "100"]), ("type", "--interval", ["abc"])],
+)
+def test_invalid_input_timing(
+    value: str, action: str, option: str, arguments: list[str], tmp_path: Path
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "missing"),
+            action,
+            f"{option}={value}",
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert option in result.stderr
+    assert "session.json" not in result.stderr

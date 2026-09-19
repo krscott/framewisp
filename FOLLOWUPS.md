@@ -35,7 +35,10 @@ These are notes for later issues, not requirements for this MVP.
 - X11 plus a window manager; Cage and other compositors; more toolkit coverage
   beyond the GTK demo, Swell Foop, and KolourPaint.
 - MCP, RPC, background sessions, persistent framebuffer management, and concurrent sessions.
-- Scrolling, intermediate drag points and duration, additional mouse buttons, modifier chords, held keys,
+- Smooth movement before clicks (including tracking the pointer across CLI calls),
+  standalone movement, distance-based speed, easing, press durations, and random
+  timing or paths if a real test needs them.
+- Scrolling, additional mouse buttons, modifier chords, held keys,
   Unicode, input methods, clipboard support, and broader input validation.
 - Audio, streaming, recording profiles, encoder backpressure, video/event timestamp alignment,
   cursor rendering policy, and structured action/process event logs.

@@ -3,7 +3,23 @@ import math
 import time
 from pathlib import Path
 
-from framewisp.lib import KEYS, run_session, screenshot, send_input
+from framewisp.lib import (
+    KEYS,
+    drag_pointer,
+    run_session,
+    screenshot,
+    send_input,
+    type_text,
+)
+
+
+def seconds(value: str) -> float:
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise argparse.ArgumentTypeError(
+            "must be a finite, nonnegative number of seconds"
+        )
+    return result
 
 
 def main() -> None:
@@ -29,7 +45,7 @@ def main() -> None:
     capture.add_argument("path", type=Path)
     capture.add_argument(
         "--delay",
-        type=float,
+        type=seconds,
         default=0.0,
         metavar="SECONDS",
         help="wait this many seconds before capturing (default: 0)",
@@ -46,9 +62,23 @@ def main() -> None:
     drag.add_argument("y1", type=int)
     drag.add_argument("x2", type=int)
     drag.add_argument("y2", type=int)
+    drag.add_argument(
+        "--duration",
+        type=seconds,
+        default=0.4,
+        metavar="SECONDS",
+        help="time spent dragging (default: 0.4; 0 moves immediately)",
+    )
 
     typing = commands.add_parser("type", help="type printable ASCII text")
     typing.add_argument("text")
+    typing.add_argument(
+        "--interval",
+        type=seconds,
+        default=0.08,
+        metavar="SECONDS",
+        help="time between characters (default: 0.08; 0 types immediately)",
+    )
 
     key = commands.add_parser("key", help="press and release a named key")
     key.add_argument("name", choices=KEYS)
@@ -63,33 +93,19 @@ def main() -> None:
             parser.error("run requires an application command after --")
         result = run_session(session, command, recording=args.record)
     elif args.action == "screenshot":
-        if not math.isfinite(args.delay) or args.delay < 0:
-            parser.error("--delay must be a finite, nonnegative number of seconds")
         if args.delay:
             time.sleep(args.delay)
         result = screenshot(session, args.path)
     elif args.action == "click":
         result = send_input(session, ["move", str(args.x), str(args.y), "click", "1"])
     elif args.action == "drag":
-        result = send_input(
-            session,
-            [
-                "move",
-                str(args.x1),
-                str(args.y1),
-                "mousedown",
-                "1",
-                "move",
-                str(args.x2),
-                str(args.y2),
-                "mouseup",
-                "1",
-            ],
+        result = drag_pointer(
+            session, args.x1, args.y1, args.x2, args.y2, duration=args.duration
         )
     elif args.action == "type":
         if any(not 32 <= ord(char) <= 126 for char in args.text):
             parser.error("type supports printable ASCII only")
-        result = send_input(session, ["type", args.text])
+        result = type_text(session, args.text, interval=args.interval)
     else:
         result = send_input(session, ["key", KEYS[args.name]])
     raise SystemExit(result)

@@ -69,9 +69,10 @@
               (pkgs.python3.withPackages (ps: [
                 ps.pytest
                 ps.pillow
+                ps.pygobject3
               ]))
             }/bin/python \
-            -m pytest -c ${./pyproject.toml} ${./tests/test_integration.py} --basetemp "$TMPDIR/tests"
+            -m pytest -c ${./pyproject.toml} ${./tests}/test_integration.py --basetemp "$TMPDIR/tests"
           touch "$out"
         '';
 
