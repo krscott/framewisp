@@ -44,7 +44,7 @@ For this private repository, use an SSH flake URL with an authorized GitHub key:
 
 ```sh
 nix run 'git+ssh://git@github.com/krscott/framewisp' -- \
-  --session /tmp/framewisp-demo run -- framewisp-demo
+  /tmp/framewisp-demo run -- framewisp-demo
 ```
 
 Repeat the same `nix run ... --` prefix for input and screenshot commands.
@@ -80,25 +80,25 @@ needed.
 After installation, in the first terminal:
 
 ```sh
-framewisp --session /tmp/framewisp-demo run -- framewisp-demo
+framewisp /tmp/framewisp-demo run -- framewisp-demo
 ```
 
 Wait for `Session ready:`. Keep that process running. In a second terminal, run:
 
 ```sh
-framewisp --session /tmp/framewisp-demo screenshot /tmp/before.png
+framewisp /tmp/framewisp-demo screenshot /tmp/before.png
 ```
 
 Open the PNG, or have the agent inspect it with its image-viewing tool. The demo
 has a text field near `(120, 100)` and an "Apply text" button near `(120, 170)`.
 
 ```sh
-framewisp --session /tmp/framewisp-demo click 120 100
-framewisp --session /tmp/framewisp-demo type 'Hello Wayland!'
-framewisp --session /tmp/framewisp-demo key BackSpace
-framewisp --session /tmp/framewisp-demo key Return
-framewisp --session /tmp/framewisp-demo click 120 170
-framewisp --session /tmp/framewisp-demo screenshot /tmp/after.png
+framewisp /tmp/framewisp-demo click 120 100
+framewisp /tmp/framewisp-demo type 'Hello Wayland!'
+framewisp /tmp/framewisp-demo key BackSpace
+framewisp /tmp/framewisp-demo key Return
+framewisp /tmp/framewisp-demo click 120 170
+framewisp /tmp/framewisp-demo screenshot /tmp/after.png
 ```
 
 The final screenshot should show `Hello Wayland` in the field and
@@ -112,7 +112,8 @@ these commands inside `nix develop` when working on the source.
 
 ## Commands
 
-Every command takes `--session DIRECTORY` before the subcommand.
+Every command takes a session directory before the subcommand: `framewisp SESSION COMMAND ...`.
+The session directory is required; the former `--session DIRECTORY` spelling is no longer supported.
 
 | Command | Behavior |
 | --- | --- |
@@ -146,7 +147,7 @@ to input automatically. To allow time for an animation, choose a delay before
 capture:
 
 ```sh
-framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
+framewisp /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 ```
 
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
@@ -158,8 +159,8 @@ Capture again when necessary.
 Move over a control, then allow time for its tooltip to appear:
 
 ```sh
-framewisp --session /tmp/framewisp-paint move 510 50
-framewisp --session /tmp/framewisp-paint screenshot --delay 1 /tmp/tooltip.png
+framewisp /tmp/framewisp-paint move 510 50
+framewisp /tmp/framewisp-paint screenshot --delay 1 /tmp/tooltip.png
 ```
 
 `move` sends no button presses. Coordinates start at the display's top left.
@@ -170,8 +171,8 @@ Movement is immediate; the app decides what hover feedback to show and when.
 Choose the mouse button and click count:
 
 ```sh
-framewisp --session /tmp/framewisp-paint click --button right 500 400
-framewisp --session /tmp/framewisp-paint click --count 2 500 400
+framewisp /tmp/framewisp-paint click --button right 500 400
+framewisp /tmp/framewisp-paint click --count 2 500 400
 ```
 
 `--button` accepts `left` (default) or `right`. `--count` accepts `1` (default)
@@ -191,9 +192,9 @@ Clicks and drags accept `--modifier ctrl`, `--modifier shift`, or
 different modifiers; duplicates are rejected.
 
 ```sh
-framewisp --session /tmp/framewisp-drawing click --modifier shift 480 330
-framewisp --session /tmp/framewisp-drawing drag --modifier ctrl 310 330 410 330
-framewisp --session /tmp/framewisp-drawing drag --button right 300 300 500 300
+framewisp /tmp/framewisp-drawing click --modifier shift 480 330
+framewisp /tmp/framewisp-drawing drag --modifier ctrl 310 330 410 330
+framewisp /tmp/framewisp-drawing drag --button right 300 300 500 300
 ```
 
 Modifiers stay pressed for the entire gesture, then release in reverse order
@@ -206,8 +207,8 @@ combination does.
 Move the pointer to the pane you want to scroll, then send wheel steps:
 
 ```sh
-framewisp --session /tmp/framewisp-paint scroll 500 400 down --steps 3
-framewisp --session /tmp/framewisp-paint scroll 500 400 up --steps 3
+framewisp /tmp/framewisp-paint scroll 500 400 down --steps 3
+framewisp /tmp/framewisp-paint scroll 500 400 up --steps 3
 ```
 
 Directions are `up`, `down`, `left`, and `right`. The step count must be a positive
@@ -221,13 +222,13 @@ held. There is no smooth scrolling or momentum control.
 Use `key` for a key or modifier combination:
 
 ```sh
-framewisp --session /tmp/framewisp-demo key Ctrl+a
-framewisp --session /tmp/framewisp-demo type 'Replacement text'
-framewisp --session /tmp/framewisp-demo key Shift+Left
-framewisp --session /tmp/framewisp-demo key Escape
-framewisp --session /tmp/framewisp-paint key Ctrl+z
-framewisp --session /tmp/framewisp-paint key Ctrl+Shift+z
-framewisp --session /tmp/framewisp-paint key Ctrl+s
+framewisp /tmp/framewisp-demo key Ctrl+a
+framewisp /tmp/framewisp-demo type 'Replacement text'
+framewisp /tmp/framewisp-demo key Shift+Left
+framewisp /tmp/framewisp-demo key Escape
+framewisp /tmp/framewisp-paint key Ctrl+z
+framewisp /tmp/framewisp-paint key Ctrl+Shift+z
+framewisp /tmp/framewisp-paint key Ctrl+s
 ```
 
 Accepted keys are `a` through `z`, `0` through `9`, `Space`, `Return`, `Tab`,
@@ -247,7 +248,7 @@ before connecting. Shortcut behavior depends on the focused app and control.
 Add `--record` before the application command to save a silent MP4:
 
 ```sh
-framewisp --session /tmp/framewisp-demo run --record /tmp/demo.mp4 -- framewisp-demo
+framewisp /tmp/framewisp-demo run --record /tmp/demo.mp4 -- framewisp-demo
 ```
 
 Recording starts before the app launches. Continue using the normal input and
@@ -267,7 +268,7 @@ includes FFmpeg for video inspection.
 With the `org.gnome.SwellFoop` Flatpak installed, run:
 
 ```sh
-framewisp --session /tmp/framewisp-swell run -- \
+framewisp /tmp/framewisp-swell run -- \
   flatpak run --socket=wayland org.gnome.SwellFoop
 ```
 
@@ -288,7 +289,7 @@ This is not a general animation-completion guarantee.
 With the `org.kde.kolourpaint` Flatpak installed, run:
 
 ```sh
-framewisp --session /tmp/framewisp-paint run -- \
+framewisp /tmp/framewisp-paint run -- \
   flatpak run --socket=wayland --env=QT_QPA_PLATFORM=wayland org.kde.kolourpaint
 ```
 
@@ -296,11 +297,11 @@ In the tested default layout, select the Rectangle tool, drag across the blank
 canvas, and capture the result:
 
 ```sh
-framewisp --session /tmp/framewisp-paint click 57 301
-framewisp --session /tmp/framewisp-paint drag 150 130 400 300
-framewisp --session /tmp/framewisp-paint screenshot --delay 0.5 /tmp/rectangle.png
-framewisp --session /tmp/framewisp-paint click 310 50  # Undo
-framewisp --session /tmp/framewisp-paint screenshot --delay 0.5 /tmp/undone.png
+framewisp /tmp/framewisp-paint click 57 301
+framewisp /tmp/framewisp-paint drag 150 130 400 300
+framewisp /tmp/framewisp-paint screenshot --delay 0.5 /tmp/rectangle.png
+framewisp /tmp/framewisp-paint click 310 50  # Undo
+framewisp /tmp/framewisp-paint screenshot --delay 0.5 /tmp/undone.png
 ```
 
 Inspect a screenshot first if your toolbar or canvas layout differs. The manual
@@ -309,8 +310,8 @@ left button. By default it takes about 0.4 seconds. Choose a duration for slower
 or faster gestures:
 
 ```sh
-framewisp --session /tmp/framewisp-paint drag --duration 1.2 150 130 400 300
-framewisp --session /tmp/framewisp-demo type --interval 0.15 'Slower typing'
+framewisp /tmp/framewisp-paint drag --duration 1.2 150 130 400 300
+framewisp /tmp/framewisp-demo type --interval 0.15 'Slower typing'
 ```
 
 Typing waits 0.08 seconds between characters by default, with no extra pause
@@ -327,7 +328,7 @@ before capture; it does not change input timing.
 ## Unicode text
 
 ```sh
-framewisp --session /tmp/framewisp-writer type 'café Ελληνικά Русский 日本語 😀'
+framewisp /tmp/framewisp-writer type 'café Ελληνικά Русский 日本語 😀'
 ```
 
 `type` accepts characters that Python classifies as printable, including combining
@@ -344,7 +345,7 @@ press/release. `--interval 0` removes the between-character pauses.
 LibreOffice Writer was tested as a Flatpak with a private D-Bus session:
 
 ```sh
-framewisp --session /tmp/framewisp-writer run -- \
+framewisp /tmp/framewisp-writer run -- \
   dbus-run-session -- flatpak run --socket=wayland --nosocket=x11 \
   --env=SAL_USE_VCLPLUGIN=gtk3 org.libreoffice.LibreOffice --writer
 ```

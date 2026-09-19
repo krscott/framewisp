@@ -74,6 +74,9 @@ stops its Twisted reactor thread before stopping wayvnc.
 
 ## Interaction
 
+All CLI commands use `framewisp SESSION COMMAND ...`, with a required positional
+session directory before the subcommand. There is no default session.
+
 CLI calls read `session.json` to locate the display and VNC socket. The JSON has
 `runtime_directory`, `wayland_display`, and `processes` keys. The last is a map
 of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
