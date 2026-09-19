@@ -13,9 +13,6 @@
     let
       supportedSystems = [
         "x86_64-linux"
-        "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
       ];
     in
     flake-utils.lib.eachSystem supportedSystems (
@@ -36,6 +33,7 @@
             isort
             mypy
             pytest
+            pygobject-stubs
           ]
           ++ pkgs.framewisp.propagatedBuildInputs
           ++ pkgs.framewisp.nativeBuildInputs
@@ -69,8 +67,15 @@
               pythonDev
               pkgs.pyright
               pkgs.nodejs # For missing libatomic in some environments
+              pkgs.gobject-introspection
             ];
-            packages = [ pkgs.python3.pkgs.venvShellHook ];
+            buildInputs = [ pkgs.gtk4 ];
+            packages = [
+              pkgs.python3.pkgs.venvShellHook
+              pkgs.sway-unwrapped
+              pkgs.wayvnc
+              pkgs.grim
+            ];
             venvDir = ".venv";
             postVenvCreation = ''
               pip install -e '.[dev]'
@@ -84,7 +89,7 @@
 
         apps = {
           format = mkApp "just format";
-          lint = mkApp "just lint";
+          lint = mkApp "${pkgs.nix}/bin/nix develop --command ${pkgs.just}/bin/just lint";
         };
 
         formatter = pkgs.nixfmt;

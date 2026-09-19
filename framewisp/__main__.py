@@ -1,108 +1,61 @@
 import argparse
-import logging
-import os
-from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
 
-from dotenv import find_dotenv, load_dotenv
-from setproctitle import setproctitle
-
-from framewisp.lib import Options, greet
+from framewisp.lib import KEYS, run_session, screenshot, send_input
 
 
 def main() -> None:
-    setproctitle("framewisp")
-    load_dotenv(find_dotenv(usecwd=True))
+    parser = argparse.ArgumentParser(
+        description="Run and interact with a headless Wayland app."
+    )
+    parser.add_argument("--session", type=Path, required=True, help="session directory")
+    commands = parser.add_subparsers(dest="action", required=True)
 
-    cli_opts = CliOpts.parse_args()
-
-    logging.basicConfig(
-        level=logging.DEBUG if cli_opts.verbose else logging.INFO,
-        format="%(message)s",
+    run = commands.add_parser(
+        "run", help="run an app until it exits or you interrupt it"
+    )
+    run.add_argument(
+        "command", nargs=argparse.REMAINDER, help="-- executable [args...]"
     )
 
-    greet(cli_opts.app_opts)
+    capture = commands.add_parser(
+        "screenshot", help="save the current display as a PNG"
+    )
+    capture.add_argument("path", type=Path)
+
+    click = commands.add_parser(
+        "click", help="send a left click at display coordinates"
+    )
+    click.add_argument("x", type=int)
+    click.add_argument("y", type=int)
+
+    typing = commands.add_parser("type", help="type printable ASCII text")
+    typing.add_argument("text")
+
+    key = commands.add_parser("key", help="press and release a named key")
+    key.add_argument("name", choices=KEYS)
+
+    args = parser.parse_args()
+    session = args.session.resolve()
+    if args.action == "run":
+        command: list[str] = args.command
+        if command[:1] == ["--"]:
+            command = command[1:]
+        if not command:
+            parser.error("run requires an application command after --")
+        result = run_session(session, command)
+    elif args.action == "screenshot":
+        result = screenshot(session, args.path)
+    elif args.action == "click":
+        result = send_input(session, ["move", str(args.x), str(args.y), "click", "1"])
+    elif args.action == "type":
+        if any(not 32 <= ord(char) <= 126 for char in args.text):
+            parser.error("type supports printable ASCII only")
+        result = send_input(session, ["type", args.text])
+    else:
+        result = send_input(session, ["key", KEYS[args.name]])
+    raise SystemExit(result)
 
 
-@dataclass(kw_only=True, frozen=True)
-class CliOpts:
-    app_opts: Options
-    verbose: bool
-
-    @staticmethod
-    def parse_args() -> "CliOpts":
-        parser = argparse.ArgumentParser()
-
-        # App options
-        parser.add_argument("name", nargs="?", default="World", help="Your name")
-
-        # CLI-specific options
-        parser.add_argument(
-            "-v",
-            "--verbose",
-            action=EnvAction,
-            env_var="FRAMEWISP_VERBOSE",
-            nargs=0,
-            help="show more detailed log messages",
-        )
-
-        args = parser.parse_args()
-
-        return CliOpts(
-            app_opts=Options(
-                name=args.name,
-            ),
-            verbose=bool(args.verbose),
-        )
-
-
-class EnvAction(argparse.Action):
-    """ArgumentParser Action for options with an env var fallback"""
-
-    def __init__(
-        self,
-        help: str,
-        env_var: str = "",
-        required: bool = True,
-        default: Any = None,
-        nargs: str | int | None = None,
-        **kwargs: Any,
-    ) -> None:
-        if default is not None and env_var:
-            help += f" (default: {default}, env: {env_var})"
-        elif default is not None:
-            help += f" (default: {default})"
-        elif env_var:
-            help += f" (env: {env_var})"
-
-        if env_var and env_var in os.environ:
-            default = os.environ[env_var]
-            if default == "":
-                default = None
-            elif nargs == 0:
-                default = default.lower() not in {"0", "false", "no", "off"}
-
-        if default is not None or nargs == 0:
-            required = False
-
-        super(EnvAction, self).__init__(
-            help=help,
-            default=default,
-            required=required,
-            nargs=nargs,
-            **kwargs,
-        )
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: Any,
-        option_string: str | None = None,
-    ) -> None:
-        _ = parser
-        _ = option_string
-        if self.nargs == 0:
-            setattr(namespace, self.dest, True)
-        else:
-            setattr(namespace, self.dest, values)
+if __name__ == "__main__":
+    main()

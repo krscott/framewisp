@@ -2,9 +2,11 @@
   buildPythonPackage,
   lib,
   pytestCheckHook,
-  python-dotenv,
-  setproctitle,
   setuptools,
+  vncdotool,
+  pygobject3,
+  pygobject-stubs,
+  pillow,
 }:
 buildPythonPackage {
   name = "framewisp";
@@ -14,12 +16,14 @@ buildPythonPackage {
   nativeBuildInputs = [ setuptools ];
 
   propagatedBuildInputs = [
-    python-dotenv
-    setproctitle
+    vncdotool
+    pygobject3
   ];
 
   nativeCheckInputs = [
     pytestCheckHook
+    pygobject-stubs
+    pillow
   ];
 
   # Skip integration tests during build (they require the installed executable)

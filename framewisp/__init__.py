@@ -1,3 +1,1 @@
-from framewisp.lib import greet
-
-__all__ = ["greet"]
+"""Headless Wayland sessions for CLI-driven GUI interaction."""
