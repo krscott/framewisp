@@ -89,6 +89,7 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | --- | --- |
 | `run [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
+| `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
 | `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
 | `drag [--duration SECONDS] X1 Y1 X2 Y2` | Hold the left button while moving along a straight path (default: 0.4 seconds). |
 | `type [--interval SECONDS] TEXT` | Send printable ASCII with a pause between characters (default: 0.08 seconds). |
@@ -111,6 +112,21 @@ framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Scrolling
+
+Move the pointer to the pane you want to scroll, then send wheel steps:
+
+```sh
+framewisp --session /tmp/framewisp-paint scroll 500 400 down --steps 3
+framewisp --session /tmp/framewisp-paint scroll 500 400 up --steps 3
+```
+
+Directions are `up`, `down`, `left`, and `right`. The step count must be a positive
+integer and defaults to one. Steps are discrete wheel ticks, not pixels; the
+widget under the pointer determines how far content moves. Each step presses and
+releases its wheel button. All steps use one connection, with no buttons left
+held. There is no smooth scrolling or momentum control.
 
 ## Keyboard shortcuts
 

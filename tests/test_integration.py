@@ -53,9 +53,10 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     command = ["framewisp", "--session", str(directory), "run"]
     if recording is not None:
         command.extend(["--record", str(recording)])
+    probes = {"probe": "input_probe.py", "scroll": "scroll_probe.py"}
     app = (
-        [sys.executable, str(Path(__file__).with_name("input_probe.py"))]
-        if mode == "probe"
+        [sys.executable, str(Path(__file__).with_name(probes[mode]))]
+        if mode in probes
         else ["framewisp-demo"]
     )
     command.extend(["--", *app])
@@ -464,3 +465,43 @@ def test_key_combination_events(
     final_press = keyboard_events()[-2]
     assert final_press["key"] == "q"
     assert not any(final_press[name] for name in ["ctrl", "shift", "alt"])
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["scroll"], indirect=True)
+@pytest.mark.parametrize(
+    "direction,reverse,axis", [("down", "up", "y"), ("right", "left", "x")]
+)
+def test_scroll_targets_pane_and_returns_to_start(
+    demo: Demo, direction: str, reverse: str, axis: str
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "scroll", "900", "300", direction, "--steps", "3")
+
+    def position(pane: str) -> float:
+        events = [
+            event
+            for event in input_events(demo)
+            if event["event"] == "position"
+            and event["pane"] == pane
+            and event["axis"] == axis
+        ]
+        return float(events[-1]["value"]) if events else 0.0
+
+    wait_until(lambda: position("right") > 0)
+    assert position("left") == 0
+    events = [event for event in input_events(demo) if event["event"] == "scroll"]
+    assert all(event["pane"] == "right" for event in events)
+    assert sum(float(event[f"d{axis}"]) for event in events) == 3
+    cli(demo.directory, "scroll", "900", "300", reverse, "--steps", "3")
+    wait_until(lambda: position("right") == 0)
+    # Move to the other pane and use the default one-step count.
+    cli(demo.directory, "scroll", "300", "300", direction)
+    wait_until(lambda: position("left") > 0)
+    events = [
+        event
+        for event in input_events(demo)
+        if event["event"] == "scroll" and event["pane"] == "left"
+    ]
+    assert sum(float(event[f"d{axis}"]) for event in events) == 1
+    assert position("right") == 0

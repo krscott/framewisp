@@ -164,3 +164,28 @@ def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "unsupported key combination" in result.stderr
     assert "session.json" not in result.stderr
+
+
+@pytest.mark.parametrize("steps", ["0", "-1", "1.5", "nope"])
+def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(tmp_path / "missing"),
+            "scroll",
+            "100",
+            "100",
+            "down",
+            f"--steps={steps}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "--steps" in result.stderr
+    assert "session.json" not in result.stderr
