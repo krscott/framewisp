@@ -42,7 +42,7 @@ These are notes for later issues, not requirements for this MVP.
   beyond the GTK demo, Swell Foop, and KolourPaint.
 - MCP, RPC, background sessions, persistent framebuffer management, and concurrent sessions.
 - Smooth movement before clicks (including tracking the pointer across CLI calls),
-  standalone movement, distance-based speed, easing, press durations, and random
+  distance-based speed, easing, press durations, and random
   timing or paths if a real test needs them.
 - Configurable double-click timing, smooth scrolling, mouse buttons beyond left
   and right, more named keys, held keys,

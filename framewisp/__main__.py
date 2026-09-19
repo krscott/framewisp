@@ -55,6 +55,10 @@ def main() -> None:
         help="wait this many seconds before capturing (default: 0)",
     )
 
+    move = commands.add_parser("move", help="move the pointer without pressing buttons")
+    move.add_argument("x", type=int)
+    move.add_argument("y", type=int)
+
     click = commands.add_parser(
         "click", help="send one or two clicks at display coordinates"
     )
@@ -131,6 +135,8 @@ def main() -> None:
         if args.delay:
             time.sleep(args.delay)
         result = screenshot(session, args.path)
+    elif args.action == "move":
+        result = send_input(session, ["move", str(args.x), str(args.y)])
     elif args.action == "click":
         result = click_pointer(
             session, args.x, args.y, button=args.button, count=args.count

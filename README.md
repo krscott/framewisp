@@ -117,6 +117,7 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | --- | --- |
 | `run [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
+| `move X Y` | Move the pointer immediately without pressing any button. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
 | `click [--button left\|right] [--count 1\|2] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
 | `drag [--duration SECONDS] X1 Y1 X2 Y2` | Hold the left button while moving along a straight path (default: 0.4 seconds). |
@@ -140,6 +141,18 @@ framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Hover feedback
+
+Move over a control, then allow time for its tooltip to appear:
+
+```sh
+framewisp --session /tmp/framewisp-paint move 510 50
+framewisp --session /tmp/framewisp-paint screenshot --delay 1 /tmp/tooltip.png
+```
+
+`move` sends no button presses. Coordinates start at the display's top left.
+Movement is immediate; the app decides what hover feedback to show and when.
 
 ## Right-click and double-click
 
