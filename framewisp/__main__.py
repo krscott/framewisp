@@ -38,6 +38,12 @@ def main() -> None:
     click.add_argument("x", type=int)
     click.add_argument("y", type=int)
 
+    drag = commands.add_parser("drag", help="drag with the left mouse button")
+    drag.add_argument("x1", type=int)
+    drag.add_argument("y1", type=int)
+    drag.add_argument("x2", type=int)
+    drag.add_argument("y2", type=int)
+
     typing = commands.add_parser("type", help="type printable ASCII text")
     typing.add_argument("text")
 
@@ -61,6 +67,22 @@ def main() -> None:
         result = screenshot(session, args.path)
     elif args.action == "click":
         result = send_input(session, ["move", str(args.x), str(args.y), "click", "1"])
+    elif args.action == "drag":
+        result = send_input(
+            session,
+            [
+                "move",
+                str(args.x1),
+                str(args.y1),
+                "mousedown",
+                "1",
+                "move",
+                str(args.x2),
+                str(args.y2),
+                "mouseup",
+                "1",
+            ],
+        )
     elif args.action == "type":
         if any(not 32 <= ord(char) <= 126 for char in args.text):
             parser.error("type supports printable ASCII only")

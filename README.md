@@ -1,7 +1,7 @@
 # framewisp
 
 Run a native Wayland app without a physical display, save PNG screenshots, and
-send clicks and keystrokes from the CLI. The MVP targets this repo's NixOS
+send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
 development environment and includes a small GTK demo.
 
 ## Try it
@@ -52,11 +52,12 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | `run -- APP [ARGS...]` | Start Sway, wayvnc, and the application; stay in the foreground. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
 | `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
+| `drag X1 Y1 X2 Y2` | Move to the start, hold the left button, move directly to the end, and release. |
 | `type TEXT` | Send printable ASCII characters to the focused widget. |
 | `key NAME` | Press/release `Return`, `Tab`, or `BackSpace`. |
 
-The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 has
-also been tested manually as a Flatpak (see below). X11 and GPU-dependent apps
+The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
+KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below). X11 and GPU-dependent apps
 are outside this MVP.
 
 `Session ready:` means the display and input sockets exist and the application
@@ -93,6 +94,31 @@ immediate screenshot after clicking Let's Play still showed the welcome screen;
 later captures showed the board. Waiting 0.5 seconds after subsequent moves was
 enough for this test; use `screenshot --delay 0.5 PATH` to request that wait.
 This is not a general animation-completion guarantee.
+
+## Drawing with a drag
+
+With the `org.kde.kolourpaint` Flatpak installed, run this inside `nix develop`:
+
+```sh
+framewisp --session /tmp/framewisp-paint run -- \
+  flatpak run --socket=wayland --env=QT_QPA_PLATFORM=wayland org.kde.kolourpaint
+```
+
+In the tested default layout, select the Rectangle tool, drag across the blank
+canvas, and capture the result:
+
+```sh
+framewisp --session /tmp/framewisp-paint click 57 301
+framewisp --session /tmp/framewisp-paint drag 150 130 400 300
+framewisp --session /tmp/framewisp-paint screenshot --delay 0.5 /tmp/rectangle.png
+framewisp --session /tmp/framewisp-paint click 310 50  # Undo
+framewisp --session /tmp/framewisp-paint screenshot --delay 0.5 /tmp/undone.png
+```
+
+Inspect a screenshot first if your toolbar or canvas layout differs. The manual
+test used KolourPaint 26.04.3 with KDE runtime 6.10. The gesture sends one move
+between its endpoints while holding the left button; it has no intermediate
+points or configurable duration.
 
 ## Logs and cleanup
 
