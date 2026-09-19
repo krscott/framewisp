@@ -35,6 +35,7 @@ KEYS = {
     "space": "space",
 } | {character: character for character in ascii_lowercase + digits}
 MODIFIERS = {"ctrl", "shift", "alt"}
+CLICK_BUTTONS = {"left": 1, "right": 3}
 SCROLL_BUTTONS = {"up": 4, "down": 5, "left": 6, "right": 7}
 
 
@@ -323,6 +324,15 @@ def screenshot(session: Path, destination: Path) -> int:
         check=False,
         timeout=10,
     ).returncode
+
+
+def click_pointer(session: Path, x: int, y: int, *, button: str, count: int) -> int:
+    arguments = ["move", str(x), str(y)]
+    for index in range(count):
+        if index:
+            arguments.extend(["pause", "0.1"])
+        arguments.extend(["click", str(CLICK_BUTTONS[button])])
+    return send_input(session, arguments)
 
 
 def drag_pointer(

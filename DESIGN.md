@@ -86,7 +86,14 @@ there is no pixel-distance guarantee or smooth scrolling. The CLI rejects invali
 counts and directions before input. A two-pane GTK test checks received wheel
 counts, axis direction, pane targeting, and returning to the starting position.
 
-`click` invokes `vncdo move X Y click 1`. `drag --duration SECONDS X1 Y1 X2 Y2`
+`click [--button left|right] [--count 1|2] X Y` moves to the requested position
+and sends one or two complete button press/release pairs. Left maps to VNC
+button 1 and right to button 3. Defaults are left and one. A double-click uses
+one connection with a 0.1-second pause between clicks; recognition depends on
+the target app's settings. Unsupported buttons and counts are rejected before
+reading the session. Plain `click` invokes `vncdo move X Y click 1`.
+
+`drag --duration SECONDS X1 Y1 X2 Y2`
 moves to the start, presses the left button, and sends linearly interpolated
 integer coordinates at approximately 60 steps per second before releasing at
 the endpoint. The number of steps is `max(1, ceil(duration * 60))`, with a pause
@@ -171,7 +178,9 @@ Shutdown tests check that the recorded child PIDs and private sockets are gone
 after SIGTERM and SIGINT. Recording tests decode the resulting MP4s with FFmpeg,
 check changing frames, and cover app exit, both shutdown signals, startup failure,
 and recorder failure. A separate GTK input probe logs received pointer events, button releases, and
-text changes with monotonic timestamps. Tests check the drag path and timing,
+text changes with monotonic timestamps. Click tests check coordinates, left and
+right button identity, paired releases, and GTK's recognized click count for
+single and double clicks. Tests also check the drag path and timing,
 character spacing, zero timing, and typing that exceeds the base timeouts without
 an extra interval after the final character. The probe also checks shortcut
 press/release order and modifier state, followed by an unmodified key. Entry

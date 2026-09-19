@@ -118,7 +118,7 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | `run [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
-| `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
+| `click [--button left\|right] [--count 1\|2] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
 | `drag [--duration SECONDS] X1 Y1 X2 Y2` | Hold the left button while moving along a straight path (default: 0.4 seconds). |
 | `type [--interval SECONDS] TEXT` | Send printable ASCII with a pause between characters (default: 0.08 seconds). |
 | `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
@@ -140,6 +140,21 @@ framewisp --session /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Right-click and double-click
+
+Choose the mouse button and click count:
+
+```sh
+framewisp --session /tmp/framewisp-paint click --button right 500 400
+framewisp --session /tmp/framewisp-paint click --count 2 500 400
+```
+
+`--button` accepts `left` (default) or `right`. `--count` accepts `1` (default)
+or `2`. Two clicks use the same connection and position, with a 0.1-second pause
+between them. Every click presses and releases the chosen button. The target
+app's settings and the control under the pointer determine how it responds.
+Plain `click X Y` still sends one left click.
 
 ## Scrolling
 
