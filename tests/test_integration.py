@@ -658,3 +658,18 @@ def test_scroll_targets_pane_and_returns_to_start(
     ]
     assert sum(float(event[f"d{axis}"]) for event in events) == 1
     assert position("right") == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "425")
+    for text in ["one", "two", "three"]:
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "type", "--interval", "0", text)
+        for chord in ["Ctrl+a", "Ctrl+c", "Right", "Ctrl+v"]:
+            cli(demo.directory, "key", chord)
+        wait_until(
+            lambda: any(event.get("text") == text * 2 for event in input_events(demo))
+        )

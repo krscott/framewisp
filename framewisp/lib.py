@@ -18,6 +18,7 @@ from vncdotool import api
 
 SWAY_CONFIG = """\
 xwayland disable
+primary_selection disabled
 output HEADLESS-1 mode 1280x720@60Hz
 seat seat0 fallback true
 input * xkb_layout us

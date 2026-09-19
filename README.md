@@ -128,6 +128,11 @@ The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
 KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below). X11 and GPU-dependent apps
 are outside this MVP.
 
+Automatic copy-on-selection (the primary clipboard) is disabled. It triggered a
+wayvnc clipboard-offer crash during ordinary text selection. Ctrl+C/Ctrl+V remain
+available; the underlying clipboard issue is tracked in
+[#30](https://github.com/krscott/framewisp/issues/30).
+
 `Session ready:` means the display and input sockets exist and the application
 process has started. The app may still be drawing its first frame. A screenshot
 captures the current display; it does not wait for the app to finish responding

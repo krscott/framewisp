@@ -43,7 +43,9 @@ The foreground `run` command is the lifetime owner.
    and `GSK_RENDERER=cairo`.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at 1280x720 and 60 Hz, a fallback seat, US keyboard layout,
-   and no window borders. Load no host Sway configuration.
+   and no window borders. Disable primary selection to avoid the observed wayvnc
+   crash on automatic selection offers; ordinary clipboard copy/paste stays enabled.
+   Load no host Sway configuration.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
 7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
