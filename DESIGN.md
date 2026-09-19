@@ -344,8 +344,10 @@ logging still happens in the command client.
 The tested COSMIC portal initializes its EI sender lazily on the first Notify
 call. Attach sends zero relative motion and allows 100 ms for that setup before
 announcing readiness. Clicks, drags, and wheel input allow 50 ms between initial
-pointer placement and button/wheel events; immediate combined motion and clicking
-missed the intended widget in the live test. These waits are interruptible.
+pointer placement and button/wheel events. Drags also pause after pressing
+the button and before releasing it, so a zero-duration move stays inside the
+held-button interval. Immediate combined motion and clicking missed the
+intended widget in the live test. These waits are interruptible.
 
 COSMIC matches the current modifier combination, including injected modifiers.
 A Ctrl+Alt+Escape binding alone did not stop a Shift-drag. The user must also bind

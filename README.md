@@ -217,8 +217,9 @@ even if that app is on another monitor. Screenshots include everything visible
 on the shared monitor.
 
 Ctrl+Alt+Escape runs the disconnect command. Ctrl+C in the attach terminal or
-revoking sharing through the desktop also ends access. Disconnecting cancels
-ongoing input and releases framewisp's held keys and buttons. Your app stays
+portal revocation also ends access. No separate stop-sharing control was visible
+on the tested COSMIC desktop; use the configured shortcut or Ctrl+C.
+Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
 open in its current state. Reconnecting requires running `attach` and approving
 the dialog again. Test your binding before handing control to an agent.
 

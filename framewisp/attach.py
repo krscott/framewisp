@@ -142,6 +142,7 @@ class AttachedInput:
                 ):
                     raise ValueError("Drag endpoint is outside the shared monitor.")
                 self.button(p["button"], True)
+                self.wait(0.05)
                 count = max(1, math.ceil(p["duration"] * 60))
                 for step in range(1, count + 1):
                     self.wait(p["duration"] / count)
@@ -149,6 +150,7 @@ class AttachedInput:
                         round(p["x1"] + (p["x2"] - p["x1"]) * step / count),
                         round(p["y1"] + (p["y2"] - p["y1"]) * step / count),
                     )
+                self.wait(0.05)
                 self.button(p["button"], False)
             elif action == "scroll":
                 self.move(p["x"], p["y"])
