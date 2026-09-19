@@ -3,6 +3,7 @@ import math
 import time
 from pathlib import Path
 
+from framewisp.captions import log_input
 from framewisp.lib import (
     CLICK_BUTTONS,
     MODIFIERS,
@@ -68,6 +69,12 @@ def main() -> None:
 
     record_start = commands.add_parser("record-start", help="start recording a clip")
     record_start.add_argument("path", type=Path, metavar="FILE")
+    for recording_parser in (run, record_start):
+        recording_parser.add_argument(
+            "--no-captions",
+            action="store_true",
+            help="record without input captions (input logging stays enabled)",
+        )
     commands.add_parser(
         "record-stop", help="finalize the active clip and keep the app running"
     )
@@ -182,17 +189,46 @@ def main() -> None:
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
         result = run_session(
-            session, command, recording=args.record, size=(args.width, args.height)
+            session,
+            command,
+            recording=args.record,
+            captions=not args.no_captions,
+            size=(args.width, args.height),
         )
     elif args.action in {"record-start", "record-stop"}:
         result = recording_command(
-            session, args.path if args.action == "record-start" else None
+            session,
+            args.path if args.action == "record-start" else None,
+            captions=not getattr(args, "no_captions", False),
         )
     elif args.action == "screenshot":
         if args.delay:
             time.sleep(args.delay)
         result = screenshot(session, args.path)
-    elif args.action == "move":
+    else:
+        if args.action == "scroll" and args.steps < 1:
+            parser.error("--steps must be a positive integer")
+        if args.action == "type" and any(not char.isprintable() for char in args.text):
+            parser.error(
+                "type supports printable characters only; use key for Return or Tab"
+            )
+        if args.action == "key" and key_commands(args.chord) is None:
+            parser.error(
+                "unsupported key combination; use key --help for supported keys and modifiers"
+            )
+        parameters = {
+            key: value
+            for key, value in vars(args).items()
+            if key not in {"session", "action"}
+        }
+        with log_input(session, args.action, parameters) as action:
+            result = perform_input(session, args)
+            action.returncode = result
+    raise SystemExit(result)
+
+
+def perform_input(session: Path, args: argparse.Namespace) -> int:
+    if args.action == "move":
         result = send_input(session, ["move", str(args.x), str(args.y)])
     elif args.action == "click":
         result = click_pointer(
@@ -215,25 +251,16 @@ def main() -> None:
             modifiers=tuple(args.modifier),
         )
     elif args.action == "scroll":
-        if args.steps < 1:
-            parser.error("--steps must be a positive integer")
         result = scroll_pointer(
             session, args.x, args.y, direction=args.direction, steps=args.steps
         )
     elif args.action == "type":
-        if any(not char.isprintable() for char in args.text):
-            parser.error(
-                "type supports printable characters only; use key for Return or Tab"
-            )
         result = type_text(session, args.text, interval=args.interval)
     else:
         arguments = key_commands(args.chord)
-        if arguments is None:
-            parser.error(
-                "unsupported key combination; use key --help for supported keys and modifiers"
-            )
+        assert arguments is not None
         result = send_input(session, arguments)
-    raise SystemExit(result)
+    return result
 
 
 if __name__ == "__main__":

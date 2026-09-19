@@ -69,7 +69,17 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["session.json", "sway.log", "wayvnc.log", "recorder.log", "app.log"]
+    "name",
+    [
+        "session.json",
+        ".session.json",
+        "sway.log",
+        "wayvnc.log",
+        "recorder.log",
+        "app.log",
+        "inputs.jsonl",
+        "captions.log",
+    ],
 )
 def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None:
     session = tmp_path / "session"

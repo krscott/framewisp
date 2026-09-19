@@ -100,6 +100,7 @@
               pip install -e '.[dev]'
             '';
             shellHook = ''
+              export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.captionFonts}
               runHook venvShellHook
               export PYTHONPATH="''${PYTHONPATH:-}:."
             '';

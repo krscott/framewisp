@@ -19,6 +19,8 @@ from types import FrameType
 
 from vncdotool import api
 
+from framewisp.captions import capture_origin, render_captions
+
 SWAY_CONFIG = """\
 xwayland disable
 primary_selection disabled
@@ -180,7 +182,7 @@ def start_wayvnc(
 
 @contextmanager
 def start_recording(
-    destination: Path, *, log: Path, env: dict[str, str], stop: Event
+    destination: Path, *, log: Path, env: dict[str, str], stop: Event, captions: bool
 ) -> Generator[subprocess.Popen[bytes] | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
     command = [
@@ -201,7 +203,8 @@ def start_recording(
         "-f",
         str(destination),
     ]
-    with managed_process(command, log=log, env=env) as process:
+    recorder_env = env | {"WAYLAND_DEBUG": "client"} if captions else env
+    with managed_process(command, log=log, env=recorder_env) as process:
         deadline = time.monotonic() + 10
         while not stop.is_set():
             if process.poll() is not None:
@@ -217,9 +220,21 @@ def start_recording(
         else:
             yield None
             return
-        yield process
+        origin = capture_origin(log) if captions else 0.0
+        try:
+            yield process
+        finally:
+            stopped = time.monotonic()
     if process.returncode != 0:
         raise RuntimeError(f"Recorder failed to finalize {destination}. See {log}")
+    if captions:
+        render_captions(
+            destination,
+            input_log=log.parent / "inputs.jsonl",
+            origin=origin,
+            stopped=stopped,
+            log=log.parent / "captions.log",
+        )
 
 
 def recording_path_error(session: Path, destination: Path) -> str | None:
@@ -232,6 +247,8 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
             "wayvnc.log",
             "recorder.log",
             "app.log",
+            "inputs.jsonl",
+            "captions.log",
         )
     }
     if destination in reserved:
@@ -252,7 +269,7 @@ class Recordings:
     process: subprocess.Popen[bytes] | None = None
     resources: ExitStack = field(default_factory=ExitStack)
 
-    def start(self, destination: Path) -> str | None:
+    def start(self, destination: Path, *, captions: bool = True) -> str | None:
         if self.process is not None:
             return "A recording is already active. Use record-stop first."
         if any(dimension % 2 for dimension in self.size):
@@ -267,6 +284,7 @@ class Recordings:
                     log=self.session / "recorder.log",
                     env=self.env,
                     stop=self.stop_requested,
+                    captions=captions,
                 )
             )
         except (RuntimeError, OSError) as error:
@@ -289,9 +307,14 @@ class Recordings:
             self.process = None
 
 
-def recording_command(session: Path, destination: Path | None) -> int:
+def recording_command(
+    session: Path, destination: Path | None, *, captions: bool = True
+) -> int:
     state = json.loads((session / "session.json").read_text())
-    request = {"destination": str(destination.resolve()) if destination else None}
+    request = {
+        "destination": str(destination.resolve()) if destination else None,
+        "captions": captions,
+    }
     with socket.socket(socket.AF_UNIX) as connection:
         connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
         connection.sendall((json.dumps(request) + "\n").encode())
@@ -321,11 +344,12 @@ def handle_recording_command(
         connection.settimeout(2)
         with connection.makefile("r") as request:
             try:
-                destination = json.loads(request.readline())["destination"]
+                command = json.loads(request.readline())
+                destination = command["destination"]
             except (ValueError, OSError):
                 return
         error = (
-            recordings.start(Path(destination))
+            recordings.start(Path(destination), captions=command["captions"])
             if destination is not None
             else recordings.finish()
         )
@@ -342,6 +366,7 @@ def run_session(
     command: list[str],
     *,
     recording: Path | None = None,
+    captions: bool = True,
     size: tuple[int, int] = (1280, 720),
 ) -> int:
     if recording is not None:
@@ -356,6 +381,7 @@ def run_session(
             f"{state} already exists. Use a different session directory."
         )
 
+    (session / "inputs.jsonl").write_text("", encoding="utf-8")
     stop = Event()
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
@@ -393,7 +419,7 @@ def run_session(
             recordings = Recordings(session, env, stop, size)
             stack.callback(recordings.close)
             if recording is not None:
-                error = recordings.start(recording)
+                error = recordings.start(recording, captions=captions)
                 if error is not None:
                     if stop.is_set():
                         return 0
