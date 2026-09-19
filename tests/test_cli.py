@@ -68,3 +68,34 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "already exists" in result.stderr
     assert destination.read_bytes() == b"keep this recording"
+
+
+@pytest.mark.parametrize(
+    "name", ["session.json", "sway.log", "wayvnc.log", "recorder.log", "app.log"]
+)
+def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None:
+    session = tmp_path / "session"
+    destination = session / name
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(session),
+            "run",
+            "--record",
+            str(destination),
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode != 0
+    assert "reserved for session files" in result.stderr
+    assert not session.exists()

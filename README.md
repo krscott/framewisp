@@ -88,7 +88,8 @@ and wait for the runner to exit before playing the file. It finalizes the video
 before stopping the display. The recording uses H.264 at 1280 by 720 and 30 fps.
 
 Choose a new output path in an existing directory; existing files are not
-overwritten. Recorder startup, capture, or finalization failures fail the session
+overwritten. Session log and metadata paths are reserved. Recorder startup,
+capture, or finalization failures fail the session
 and point to `recorder.log`. A forced kill may leave an incomplete MP4. Nix supplies
 the recorder and video inspection tools; recording is disabled unless requested.
 

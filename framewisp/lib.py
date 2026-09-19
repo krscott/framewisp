@@ -163,6 +163,20 @@ def run_session(
 ) -> int:
     if recording is not None:
         recording = recording.resolve()
+        reserved = {
+            (session / name).resolve()
+            for name in (
+                "session.json",
+                "sway.log",
+                "wayvnc.log",
+                "recorder.log",
+                "app.log",
+            )
+        }
+        if recording in reserved:
+            raise RuntimeError(
+                f"{recording} is reserved for session files. Choose a new recording path."
+            )
         if recording.exists():
             raise RuntimeError(
                 f"{recording} already exists. Choose a new recording path."

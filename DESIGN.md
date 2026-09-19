@@ -31,7 +31,8 @@ The foreground `run` command is the lifetime owner.
 
 1. Create or reuse the requested session directory. Refuse an existing
    `session.json`; concurrent runs and stale-session recovery are unsupported.
-   Refuse an existing recording destination before starting any children.
+   Refuse existing recording destinations and paths reserved for session logs or
+   metadata before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
 3. Create a temporary runtime directory. It holds the compositor configuration
    and sockets and is removed when the runner exits normally. Its short path
