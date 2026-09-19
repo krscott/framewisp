@@ -4,6 +4,34 @@ Run a native Wayland app without a physical display, save PNG screenshots or MP4
 send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
 development environment and includes a small GTK demo.
 
+## Stack
+
+Framewisp's Python CLI manages the session and calls these tools:
+
+| Component | Role |
+| --- | --- |
+| Sway / wlroots | Runs the headless Wayland display with Pixman software rendering. |
+| wayvnc | Provides virtual pointer and keyboard devices through a VNC server on a private Unix socket. |
+| vncdotool (`vncdo`) | Sends clicks, drags, scrolling, and keyboard input to wayvnc. |
+| grim | Captures the Wayland display as a PNG. Screenshots do not use VNC. |
+| wf-recorder | Records the display as silent H.264 MP4 when requested, using its FFmpeg libraries. |
+| GTK 4, GLib, and PyGObject | Provide the bundled demo and test apps, their event loops, and Python bindings. |
+
+The Nix flake pins and packages these dependencies and wraps the installed
+commands with their runtime environment. Target applications, including Flatpaks,
+are installed separately.
+
+Development uses pytest and Pillow to run real GUI tests and compare screenshots.
+FFmpeg's `ffmpeg` and `ffprobe` commands decode and inspect recordings in tests;
+they are supplied by the development shell and package check, not exposed by the
+installed framewisp package. Mypy and Pyright check types; Black, isort, and
+nixfmt format the source. Setuptools builds the Python package, and Just provides
+development command recipes.
+
+See [DESIGN.md](DESIGN.md) for how the components communicate and
+[flake.nix](flake.nix), [default.nix](default.nix), and
+[pyproject.toml](pyproject.toml) for dependency declarations.
+
 ## Install or run with Nix
 
 The flake supports `x86_64-linux`. The package supplies framewisp's display,
