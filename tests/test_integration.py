@@ -29,24 +29,36 @@ def wait_until(predicate: Callable[[], bool]) -> None:
 
 
 def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         ["framewisp", "--session", str(directory), *arguments],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=20,
     )
+    assert (
+        result.returncode == 0
+    ), f"{arguments}: {result.stdout}\n{result.stderr}\n" + "\n".join(
+        f"{log.name}:\n{log.read_text()}" for log in directory.glob("*.log")
+    )
+    return result
 
 
 @pytest.fixture
 def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session"
     runner_log = tmp_path / "runner.log"
-    recording = tmp_path / "session.mp4" if getattr(request, "param", False) else None
+    mode = getattr(request, "param", None)
+    recording = tmp_path / "session.mp4" if mode is True else None
     command = ["framewisp", "--session", str(directory), "run"]
     if recording is not None:
         command.extend(["--record", str(recording)])
-    command.extend(["--", "framewisp-demo"])
+    app = (
+        [sys.executable, str(Path(__file__).with_name("input_probe.py"))]
+        if mode == "probe"
+        else ["framewisp-demo"]
+    )
+    command.extend(["--", *app])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
             command,
@@ -313,3 +325,65 @@ def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
     assert "recorder.log" in result.stderr
     assert not marker.exists()
     assert not (session / "session.json").exists()
+
+
+def input_events(demo: Demo) -> list[dict[str, str | float | bool]]:
+    return [
+        json.loads(line)
+        for line in (demo.directory / "app.log").read_text().splitlines()
+        if line.startswith('{"event":')
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("duration", [None, 0, 0.6])
+def test_drag_delivers_paced_motion_and_release(
+    demo: Demo, duration: float | None
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    options = [] if duration is None else ["--duration", str(duration)]
+    cli(demo.directory, "drag", *options, "100", "100", "500", "300")
+    wait_until(lambda: any(event["event"] == "release" for event in input_events(demo)))
+    events = input_events(demo)
+    press = next(event for event in events if event["event"] == "press")
+    release = next(event for event in events if event["event"] == "release")
+    assert (press["x"], press["y"]) == (100, 100)
+    assert (release["x"], release["y"]) == (500, 300)
+    expected_duration = 0.4 if duration is None else duration
+    elapsed = float(release["time"]) - float(press["time"])
+    assert expected_duration * 0.9 <= elapsed < expected_duration + 2
+    motion = [
+        event for event in events if event["event"] == "motion" and event["pressed"]
+    ]
+    if expected_duration:
+        intermediate = [event for event in motion if 100 < float(event["x"]) < 500]
+        assert len(intermediate) >= 3
+        for event in intermediate:
+            # The path is straight, within integer-coordinate rounding.
+            assert abs(float(event["y"]) - (100 + (float(event["x"]) - 100) / 2)) <= 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("interval,text", [(None, "Ab c"), (0, "Ab c"), (5.5, "Ab c")])
+def test_typing_paces_received_characters(
+    demo: Demo, interval: float | None, text: str
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "425")
+    options = [] if interval is None else ["--interval", str(interval)]
+    cli(demo.directory, "type", *options, text)
+    finished = time.monotonic()
+    wait_until(lambda: any(event.get("text") == text for event in input_events(demo)))
+    events = [event for event in input_events(demo) if event["event"] == "text"]
+    assert [event["text"] for event in events] == [
+        text[:end] for end in range(1, len(text) + 1)
+    ]
+    expected_interval = 0.08 if interval is None else interval
+    for previous, current in zip(events, events[1:]):
+        elapsed = float(current["time"]) - float(previous["time"])
+        assert expected_interval * 0.9 <= elapsed < expected_interval + 2
+    # A 16.5-second action exceeds both original deadlines. It must also return
+    # without sleeping for another 5.5 seconds after the final character.
+    assert finished - float(events[-1]["time"]) < 3

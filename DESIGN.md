@@ -75,18 +75,34 @@ invoking capture. The grim process still has its own ten-second deadline; the
 delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
 
-`click` invokes `vncdo move X Y click 1`. `drag X1 Y1 X2 Y2` invokes
-`vncdo move X1 Y1 mousedown 1 move X2 Y2 mouseup 1` on one connection. It moves
-directly between the endpoints, without intermediate points or timing options.
-`type` invokes `vncdo type TEXT`, keeping
-the text as one argument; it accepts printable ASCII. `key` maps Return to
-`enter`, Tab to `tab`, and BackSpace to `bsp`. Each operation presses and releases
-its buttons or keys within one connection. Each connection waits 100 ms before
-sending input: without that delay, Sway dropped the first key while focusing
-the newly created virtual keyboard in the tested environment. This is a measured
-workaround for this setup, not a general readiness guarantee.
-VNC operations have a ten-second
-client deadline and a fifteen-second subprocess deadline.
+`click` invokes `vncdo move X Y click 1`. `drag --duration SECONDS X1 Y1 X2 Y2`
+moves to the start, presses the left button, and sends linearly interpolated
+integer coordinates at approximately 60 steps per second before releasing at
+the endpoint. The number of steps is `max(1, ceil(duration * 60))`, with a pause
+of `duration / steps` before each move. Zero duration sends one endpoint move
+without a pause. The default is 0.4 seconds. This is a straight path at a steady
+pace; it has no random variation or easing.
+
+`type --interval SECONDS TEXT` sends one `vncdo type CHARACTER` command per
+printable ASCII character, with explicit pauses only between characters.
+The default interval is 0.08 seconds; zero disables pauses. Empty text sends
+no keys and adds no duration. `key` maps Return to `enter`, Tab to `tab`, and
+BackSpace to `bsp`. The CLI rejects negative and nonfinite timing values.
+
+All steps of one input operation use one VNC connection. Each operation presses
+and releases its buttons or keys within that connection. vncdotool's implicit
+command delay is disabled so only our explicit pauses control pacing. Each
+connection waits 100 ms before sending input: without that delay, Sway dropped
+the first key while focusing the newly created virtual keyboard in the tested
+environment. This is a measured workaround for this setup, not a general
+readiness guarantee.
+
+The requested input duration is the drag duration or `(len(text) - 1) * interval`
+for nonempty text. VNC's client deadline is ten seconds plus that duration,
+rounded up to whole seconds. The subprocess deadline is fifteen seconds plus
+that duration. These allow paced input to exceed the base deadlines while
+retaining timeouts for stalled tools. Timing is approximate and includes process,
+connection, and scheduling overhead.
 
 ## Shutdown and errors
 
@@ -130,7 +146,11 @@ and drags across the entry to select and replace text, then clicks the button.
 Shutdown tests check that the recorded child PIDs and private sockets are gone
 after SIGTERM and SIGINT. Recording tests decode the resulting MP4s with FFmpeg,
 check changing frames, and cover app exit, both shutdown signals, startup failure,
-and recorder failure. Both mypy and pyright check the Python code.
+and recorder failure. A separate GTK input probe logs received pointer events, button releases, and
+text changes with monotonic timestamps. Tests check the drag path and timing,
+character spacing, zero timing, and typing that exceeds the base timeouts without
+an extra interval after the final character. Both mypy and pyright check the
+Python code.
 
 ## Recording decision
 

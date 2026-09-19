@@ -90,8 +90,8 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | `run [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
 | `click X Y` | Move the pointer and press/release the left button. Coordinates start at the top left. |
-| `drag X1 Y1 X2 Y2` | Move to the start, hold the left button, move directly to the end, and release. |
-| `type TEXT` | Send printable ASCII characters to the focused widget. |
+| `drag [--duration SECONDS] X1 Y1 X2 Y2` | Hold the left button while moving along a straight path (default: 0.4 seconds). |
+| `type [--interval SECONDS] TEXT` | Send printable ASCII with a pause between characters (default: 0.08 seconds). |
 | `key NAME` | Press/release `Return`, `Tab`, or `BackSpace`. |
 
 The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
@@ -174,9 +174,25 @@ framewisp --session /tmp/framewisp-paint screenshot --delay 0.5 /tmp/undone.png
 ```
 
 Inspect a screenshot first if your toolbar or canvas layout differs. The manual
-test used KolourPaint 26.04.3 with KDE runtime 6.10. The gesture sends one move
-between its endpoints while holding the left button; it has no intermediate
-points or configurable duration.
+test used KolourPaint 26.04.3 with KDE runtime 6.10. The gesture sends intermediate positions along a straight path while holding the
+left button. By default it takes about 0.4 seconds. Choose a duration for slower
+or faster gestures:
+
+```sh
+framewisp --session /tmp/framewisp-paint drag --duration 1.2 150 130 400 300
+framewisp --session /tmp/framewisp-demo type --interval 0.15 'Slower typing'
+```
+
+Typing waits 0.08 seconds between characters by default, with no extra pause
+after the last character. Both options accept finite, nonnegative seconds;
+use zero for immediate input. Input timeouts allow for the requested duration.
+These defaults provide a readable pace, not a simulation of human behavior.
+Scheduling and app rendering can affect the observed timing.
+
+A drag still moves immediately to its starting point, and clicks still move
+immediately to their destination. Smooth movement before clicks, random timing,
+and curved paths are deferred. `screenshot --delay` remains a separate wait
+before capture; it does not change input timing.
 
 ## Logs and cleanup
 
