@@ -118,6 +118,8 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | Command | Behavior |
 | --- | --- |
 | `run [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
+| `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
 | `record-start [--no-captions] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
@@ -155,6 +157,88 @@ framewisp /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
 The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
+
+## Attach to an existing desktop
+
+Use this when an app is already running on your desktop and you want an agent to
+inspect its current state. The initial target is COSMIC on Wayland. Your desktop
+must provide the RemoteDesktop and ScreenCast portals; framewisp supplies its own
+capture tools through the Nix package.
+
+Before sharing, configure a desktop shortcut that runs:
+
+```sh
+framewisp --detach
+```
+
+In COSMIC Settings, open **Input devices > Keyboard > Keyboard shortcuts** and add
+custom shortcuts with that command for both Ctrl+Alt+Escape and
+Ctrl+Alt+Shift+Escape. The second binding lets physical Ctrl+Alt+Escape stop
+access while framewisp holds Shift for a gesture. Use the absolute path to
+the installed `framewisp` executable if your desktop does not have it on PATH.
+The same bindings work for every session. Only one desktop attachment can run
+at a time.
+Verify the shortcuts appear in the saved list. On the tested COSMIC version,
+the custom-shortcut form displayed the chord without saving it. The equivalent
+entries in `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` are:
+
+```ron
+(
+    modifiers: [Ctrl, Alt], key: "Escape",
+    description: Some("framewisp-detach"),
+): Spawn("framewisp --detach"),
+(
+    modifiers: [Ctrl, Alt, Shift], key: "Escape",
+    description: Some("framewisp-detach-held-shift"),
+): Spawn("framewisp --detach"),
+```
+
+Close Settings before editing that file. Add the entries inside its existing
+outer braces, keeping your other bindings.
+
+The user must start sharing from an interactive terminal on their desktop:
+
+```sh
+framewisp /tmp/debug-app attach
+```
+
+Read the instructions and type `ATTACH` to confirm your stop bindings are configured
+and you understand the access. Then approve keyboard/pointer access and select one
+monitor in the desktop dialog.
+Keep that terminal open. Do not background or suspend the command. Agents must ask
+the user to run it, never allocate a terminal to bypass the startup check. The
+terminal check prevents accidental agent startup; it is not a security boundary
+against programs running under the same user account.
+
+Wait for `Attached:`. An agent running under the same user account can now use
+another terminal:
+
+```sh
+framewisp /tmp/debug-app screenshot /tmp/current.png
+framewisp /tmp/debug-app click 400 300
+framewisp /tmp/debug-app type 'Hello'
+```
+
+Coordinates refer to pixels in the selected monitor's screenshot. Input shares
+your live pointer and keyboard focus. Keyboard input goes to the focused app,
+even if that app is on another monitor. Screenshots include everything visible
+on the shared monitor.
+
+Ctrl+Alt+Escape runs `framewisp --detach`. Ctrl+C, loss of the controlling terminal,
+pressing Ctrl+Z, or portal revocation also ends access. Detaching from tmux
+or screen can leave that terminal and the attach process running. Use `--detach`
+before disconnecting from a terminal multiplexer. If the attach
+process crashes or is killed, its private portal connection and capture handles
+close with it. The stop command escalates to killing an unresponsive attach process
+after half a second. It uses Linux 6.5 or newer to identify the socket owner safely. No separate stop-sharing control was visible
+on the tested COSMIC desktop; use the configured shortcut or Ctrl+C.
+Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
+open in its current state. Reconnecting requires running `attach` and approving
+the dialog again. Test your binding before handing control to an agent.
+
+Attached sessions support screenshots and input commands, including input logs.
+Keyboard shortcuts currently assume a US keyboard layout.
+Recording attached sessions is not implemented yet.
 
 ## Hover feedback
 

@@ -303,3 +303,74 @@ full-range color, and no audio. `record-stop` waits for rendering, as does norma
 session cleanup. With `--no-captions`, rendering and timestamp extraction are
 skipped, but input logging remains enabled. Caption formatting cannot affect
 app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session paths.
+
+
+## Attached desktop sessions
+
+`attach.py` owns a foreground connection to the user's existing desktop. It does
+not launch or own that desktop's app or compositor. The CLI requires a controlling
+terminal with this process group in the foreground, prints stop-binding and access
+instructions, and requires the exact typed confirmation ATTACH before creating any
+portal connection. Agents receiving a rejection must ask the user to run the
+command in another terminal. There is no noninteractive override. This prevents
+accidental startup, not deliberate bypass by another program under the same UID.
+
+`portal.py` uses a private Gio connection to the user's session bus to create a
+RemoteDesktop session, select keyboard and pointer devices, select one monitor
+through ScreenCast, and request consent with Start. Every attachment requests fresh
+permission. Closing the private bus connection revokes all its portal sessions;
+process death also closes that connection. No access-owning child processes exist.
+SIGINT, SIGTERM, SIGHUP, and SIGTSTP request shutdown. Loss of terminal foreground
+ownership or the portal's Closed signal also stops access.
+
+An exclusive flock on $XDG_RUNTIME_DIR/framewisp/desktop.lock limits desktop access
+to one owner per user runtime directory, including while permission is pending.
+The directory must be private and owned by the user. The lock inode is never
+removed. After acquiring the lock, a new owner removes stale socket and global
+metadata files. Atomic JSON writes publish global desktop.json and session.json;
+the latter records kind, the runtime directory, an attachment token, and the PID
+for inspection. Commands carry the token, so stale session metadata cannot direct
+input to a later attachment using the same global socket.
+
+`connection.py` sends newline-delimited JSON requests over control.sock. A listener
+thread accepts requests; workers serialize actions with a lock. Before portal
+consent they reject input. Paced actions and queued workers check a shared stop
+Event. Unexpected worker errors stop access and print a traceback. Shutdown closes
+the portal before bounded waits for workers, then removes state under the ownership
+lock. Held buttons and keys release during action cleanup; on connection loss the
+compositor removes the virtual input devices and releases their held inputs.
+
+`framewisp --detach` connects to a separate detach.sock, checks its peer UID, and
+uses Linux SO_PEERPIDFD (6.5+) to obtain a stable handle to the socket owner. It
+sends SIGTERM and waits up to 500 ms, then SIGKILL if needed, and reports success
+only after process exit. This avoids PID reuse and works when the owner is stopped
+or its command workers are blocked. The emergency socket never queues behind
+ordinary commands. Stale files after SIGKILL do not hold the kernel lock. Detach
+never signals the user's apps or compositor.
+
+Pointer coordinates use screenshot pixels and the portal stream node. Portal
+Notify methods deliver absolute motion, buttons, wheel steps, and keyboard
+keycodes for held keys and shortcuts, with keysyms for literal text. Keycode
+names currently assume the tested desktop's US layout. Each screenshot opens a PipeWire remote file descriptor through the
+portal and passes it to an in-process one-frame GStreamer pipewiresrc pipeline.
+videoconvert and pngenc write the PNG. Cancellation tears down the pipeline; process
+death closes every capture descriptor. A ten-second limit reports capture failures
+with capture.log. Nix supplies GStreamer and the
+PipeWire, base, and good plugins in both the installed wrapper and dev shell.
+
+The user configures a desktop binding for `framewisp --detach`. COSMIC on
+this host does not expose the GlobalShortcuts portal. The binding is independent
+of which app has focus. Attached recording is explicitly rejected; input JSONL
+logging still happens in the command client.
+
+The tested COSMIC portal initializes its EI sender lazily on the first Notify
+call. Attach sends zero relative motion and allows 100 ms for that setup before
+announcing readiness. Clicks, drags, and wheel input allow 50 ms between initial
+pointer placement and button/wheel events. Drags also pause after pressing
+the button and before releasing it, so a zero-duration move stays inside the
+held-button interval. Immediate combined motion and clicking missed the
+intended widget in the live test. These waits are interruptible.
+
+COSMIC matches the current modifier combination, including injected modifiers.
+A Ctrl+Alt+Escape binding alone did not stop a Shift-drag. The user must also bind
+Ctrl+Alt+Shift+Escape to the same detach command.
