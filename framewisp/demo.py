@@ -7,7 +7,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib, Gtk  # isort: skip
+from gi.repository import GLib, Gtk, Pango  # isort: skip
 
 
 def main() -> None:
@@ -42,6 +42,8 @@ def main() -> None:
 
     status = Gtk.Label(label="Waiting for input")
     status.set_xalign(0)
+    status.set_ellipsize(Pango.EllipsizeMode.END)
+    status.set_max_width_chars(40)
     content.append(status)
 
     def show_text(action: str) -> None:

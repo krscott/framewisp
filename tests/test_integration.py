@@ -972,7 +972,11 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
         cli(demo.directory, "scroll", "700", "250", direction)
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
     cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "reset me")
+    # Submitting a long result must not push the neighboring Reset offscreen.
+    text = "W" * 150
+    cli(demo.directory, "type", "--interval", "0", text)
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: f"Entered: {text}\n" in log.read_text())
     cli(demo.directory, "click", "700", "513")
     wait_until(lambda: "Reset\n" in log.read_text())
     assert value() == 25
