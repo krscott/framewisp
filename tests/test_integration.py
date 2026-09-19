@@ -415,6 +415,61 @@ def test_click_delivers_button_and_recognized_count(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize(
+    "action,button,modifiers",
+    [
+        ("click", "left", ("shift",)),
+        ("click", "right", ("ctrl", "shift")),
+        ("drag", "left", ("ctrl",)),
+        ("drag", "right", ("alt",)),
+        ("drag", "right", ("ctrl", "shift", "alt")),
+    ],
+)
+def test_pointer_gesture_holds_and_releases_modifiers(
+    demo: Demo, action: str, button: str, modifiers: tuple[str, ...]
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    options = ["--button", button]
+    for modifier in modifiers:
+        options.extend(["--modifier", modifier.upper()])
+    coordinates = ["200", "150"] if action == "click" else ["100", "100", "500", "300"]
+    cli(demo.directory, action, *options, *coordinates)
+    wait_until(lambda: any(event["event"] == "release" for event in input_events(demo)))
+    events = input_events(demo)
+    buttons = [event for event in events if event["event"] in {"press", "release"}]
+    assert [event["event"] for event in buttons] == ["press", "release"]
+    for event in buttons:
+        assert event["button"] == (1 if button == "left" else 3)
+        for modifier in ("ctrl", "shift", "alt"):
+            assert event[modifier] == (modifier in modifiers)
+    names = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L"}
+    assert [event["key"] for event in events if event["event"] == "key-press"] == [
+        names[modifier] for modifier in modifiers
+    ]
+    assert [event["key"] for event in events if event["event"] == "key-release"] == [
+        names[modifier] for modifier in reversed(modifiers)
+    ]
+    if action == "drag":
+        motion = [
+            event for event in events if event["event"] == "motion" and event["pressed"]
+        ]
+        assert len(motion) > 2
+        for event in motion:
+            assert event["right"] == (button == "right")
+            for modifier in ("ctrl", "shift", "alt"):
+                assert event[modifier] == (modifier in modifiers)
+        assert (buttons[-1]["x"], buttons[-1]["y"]) == (500, 300)
+    cli(demo.directory, "click", "600", "100")
+    wait_until(
+        lambda: sum(event["event"] == "release" for event in input_events(demo)) == 2
+    )
+    plain = [event for event in input_events(demo) if event["event"] == "press"][-1]
+    assert plain["button"] == 1
+    assert not any(plain[modifier] for modifier in ("ctrl", "shift", "alt"))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_input_devices_remain_between_commands(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     ready = next(event for event in input_events(demo) if event["event"] == "ready")

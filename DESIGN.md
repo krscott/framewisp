@@ -104,8 +104,14 @@ one connection with a 0.1-second pause between clicks; recognition depends on
 the target app's settings. Unsupported buttons and counts are rejected before
 reading the session. Plain `click` invokes `vncdo move X Y click 1`.
 
-`drag --duration SECONDS X1 Y1 X2 Y2`
-moves to the start, presses the left button, and sends linearly interpolated
+Clicks and drags accept repeatable `--modifier ctrl|shift|alt`. The CLI
+normalizes case and rejects unknown or duplicate modifiers before reading the
+session. `send_input` prefixes the gesture with modifier keydowns and suffixes
+it with keyups in reverse order, all on the same connection. GTK tests verify
+modifier state during the gesture, release order, and a subsequent plain click.
+
+`drag [--button left|right] --duration SECONDS X1 Y1 X2 Y2`
+moves to the start, presses the chosen button (default: left), and sends linearly interpolated
 integer coordinates at approximately 60 steps per second before releasing at
 the endpoint. The number of steps is `max(1, ceil(duration * 60))`, with a pause
 of `duration / steps` before each move. Zero duration sends one endpoint move

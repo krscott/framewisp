@@ -119,8 +119,8 @@ Every command takes `--session DIRECTORY` before the subcommand.
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the 1280 by 720 display. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
-| `click [--button left\|right] [--count 1\|2] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
-| `drag [--duration SECONDS] X1 Y1 X2 Y2` | Hold the left button while moving along a straight path (default: 0.4 seconds). |
+| `click [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
+| `drag [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
 | `type [--interval SECONDS] TEXT` | Send printable ASCII with a pause between characters (default: 0.08 seconds). |
 | `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
@@ -172,6 +172,23 @@ Plain `click X Y` still sends one left click.
 The runner keeps an idle input connection open for the session. This keeps the
 keyboard and pointer available between commands, so Qt context menus remain open
 for a later screenshot or click.
+
+## Pointer gestures with modifiers
+
+Clicks and drags accept `--modifier ctrl`, `--modifier shift`, or
+`--modifier alt`. Names are case-insensitive. Repeat the option to combine
+different modifiers; duplicates are rejected.
+
+```sh
+framewisp --session /tmp/framewisp-drawing click --modifier shift 480 330
+framewisp --session /tmp/framewisp-drawing drag --modifier ctrl 310 330 410 330
+framewisp --session /tmp/framewisp-drawing drag --button right 300 300 500 300
+```
+
+Modifiers stay pressed for the entire gesture, then release in reverse order
+on the same connection. They do not remain held for the next command. Drags
+accept the same left/right button choices as clicks. The app decides what each
+combination does.
 
 ## Scrolling
 

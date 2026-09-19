@@ -18,6 +18,14 @@ def log(event: str, **values: str | float | bool) -> None:
     print(json.dumps({"event": event, "time": time.monotonic(), **values}), flush=True)
 
 
+def modifier_state(state: Gdk.ModifierType) -> dict[str, bool]:
+    return {
+        "ctrl": bool(state & Gdk.ModifierType.CONTROL_MASK),
+        "shift": bool(state & Gdk.ModifierType.SHIFT_MASK),
+        "alt": bool(state & Gdk.ModifierType.ALT_MASK),
+    }
+
+
 def main() -> None:
     Gtk.init()
     loop = GLib.MainLoop()
@@ -48,9 +56,7 @@ def main() -> None:
         log(
             event,
             key=Gdk.keyval_name(keyval) or "unknown",
-            ctrl=bool(state & Gdk.ModifierType.CONTROL_MASK),
-            shift=bool(state & Gdk.ModifierType.SHIFT_MASK),
-            alt=bool(state & Gdk.ModifierType.ALT_MASK),
+            **modifier_state(state),
         )
         return False
 
@@ -74,13 +80,16 @@ def main() -> None:
     motion = Gtk.EventControllerMotion()
 
     def on_motion(controller: Gtk.EventControllerMotion, x: float, y: float) -> None:
+        state = controller.get_current_event_state()
         log(
             "motion",
             x=x,
             y=y,
             pressed=bool(
-                controller.get_current_event_state() & Gdk.ModifierType.BUTTON1_MASK
+                state & (Gdk.ModifierType.BUTTON1_MASK | Gdk.ModifierType.BUTTON3_MASK)
             ),
+            right=bool(state & Gdk.ModifierType.BUTTON3_MASK),
+            **modifier_state(state),
         )
 
     motion.connect("motion", on_motion)
@@ -91,7 +100,14 @@ def main() -> None:
     def on_button(
         event: str, gesture: Gtk.GestureClick, count: int, x: float, y: float
     ) -> None:
-        log(event, x=x, y=y, button=gesture.get_current_button(), count=count)
+        log(
+            event,
+            x=x,
+            y=y,
+            button=gesture.get_current_button(),
+            count=count,
+            **modifier_state(gesture.get_current_event_state()),
+        )
 
     click.connect("pressed", partial(on_button, "press"))
     click.connect("released", partial(on_button, "release"))
