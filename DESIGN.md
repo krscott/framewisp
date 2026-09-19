@@ -66,9 +66,10 @@ The foreground `run` command is the lifetime owner.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
 7. Start wayvnc with an empty configuration, US layout, `--disable-clipboard`, and a Unix socket in
    the private runtime directory. Wait up to ten seconds for that socket.
-   The Nix overlay patches wayvnc with this option. It skips per-client data-control
-   devices, disabling VNC clipboard forwarding while keeping keyboard and pointer
-   input. Short-lived clients can otherwise destroy their devices before pending
+   The Nix overlay applies `patches/wayvnc-disable-clipboard.patch` for this option.
+   It skips per-client data-control devices, disabling VNC clipboard forwarding
+   while keeping keyboard and pointer input. Short-lived clients can otherwise
+   destroy their devices before pending
    clipboard offers arrive. Libwayland discards those offers, leaving gaps in its
    server object map that can make a later offer fail with an invalid object ID.
    Application clipboard and primary-selection transfers do not use these devices.
