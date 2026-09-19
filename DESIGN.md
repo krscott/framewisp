@@ -2,7 +2,7 @@
 
 ## Scope
 
-Framewisp gives an agent a CLI loop for one native Wayland application on the
+Framewisp gives an agent a CLI loop for one Wayland or X11 application on the
 current x86_64 NixOS environment: launch, screenshot, click, drag, type, screenshot,
 stop. Sessions can optionally record a silent MP4. The included GTK 4 demo is the
 acceptance application.
@@ -28,6 +28,8 @@ acceptance application.
 - Sway provides the headless Wayland display using the Pixman software renderer.
 - wayvnc creates virtual pointer and keyboard devices. vncdotool's `vncdo`
   command sends input over a private Unix socket, connecting once per CLI call.
+- Xwayland supplies the optional X11 server, owned by Sway. `framewisp/x11.py`
+  uses xmodmap and xdotool for Unicode text in that server.
 - wtype supplies a temporary Wayland keyboard/keymap for non-ASCII text.
 - grim captures the headless output directly to PNG.
 - wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
@@ -80,13 +82,45 @@ stdout/stderr directed to its log. The runner monitors all managed children.
 The idle VNC connection runs in the runner's process. Cleanup disconnects it and
 stops its Twisted reactor thread before stopping wayvnc.
 
+## X11 mode
+
+`run --x11` changes the generated Sway configuration to `xwayland force`.
+A Sway `exec` child writes its `DISPLAY` to a file in the private runtime directory.
+The runner waits up to ten seconds for that file, checking shutdown and compositor
+exit. It never guesses an X display or uses the host's address. Sway allocates the
+X sockets and owns the Xwayland process; stopping Sway removes them.
+
+The app environment omits `WAYLAND_DISPLAY`, sets the discovered `DISPLAY`, uses
+`XAUTHORITY=/dev/null` to bypass inherited and home-directory credentials, and
+selects X11 for GTK, Qt and SDL. The compositor, VNC server and capture tools keep
+the private Wayland environment. The demo prints and displays its actual GDK
+backend class so tests and recordings distinguish X11 from Wayland.
+
+ASCII and shortcuts still use VNC. Non-ASCII text uses X11 directly because wtype's
+Wayland keymaps do not reach Xwayland correctly. `xmodmap` assigns each distinct
+non-ASCII character one of 128 reserved upper codes (120 through 255, skipping
+the US modifier codes), above the supported US keyboard and navigation keys. These mappings stay installed after typing; xdotool's
+transient mappings otherwise disappear before GTK processes the events at zero
+delay. The helper reasserts the current X window focus before XTest input so GTK receives
+the first character after pointer input. `xdotool key --delay 0` sends numeric codes for these characters and literal
+hexadecimal ASCII keysyms for the rest. `sleep` commands add the requested interval
+only between characters. More than 128 distinct non-ASCII characters returns an
+error before changing the keymap or sending input. Commands remain sequential;
+concurrent typing or arbitrary custom X11 keymaps are unsupported.
+
+Integration tests force GTK onto X11, poison inherited display credentials, check
+the rendered demo and input state, and exercise pacing, Unicode, clips and captions.
+They also check that private X server processes and sockets disappear on shutdown
+and failed application startup. The package check runs these tests without a host
+display, development shell or external app installation.
+
 ## Interaction
 
 All CLI commands use `framewisp SESSION COMMAND ...`, with a required positional
 session directory before the subcommand. There is no default session.
 
 CLI calls read `session.json` to locate the display and VNC socket. The JSON has
-`runtime_directory`, `wayland_display`, and `processes` keys. The last is a map
+`runtime_directory`, `wayland_display`, `x11_display` (null for Wayland), and `processes` keys. The last is a map
 of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
 environment is saved.
 
@@ -203,7 +237,7 @@ deferred.
 
 The standalone Nix package wraps both entry points with Python dependencies,
 GTK libraries and introspection data, and a PATH containing Sway, wayvnc, grim,
-wf-recorder, vncdotool, wtype, and its own bin directory (for the bundled demo). The
+wf-recorder, vncdotool, wtype, Xwayland, xmodmap, xdotool, Bash (for Sway exec), and its own bin directory (for the bundled demo). The
 flake exports this package as `packages.x86_64-linux.default` and `framewisp`,
 with `meta.mainProgram` selecting the CLI for `nix run`. NixOS and Home Manager
 can install the same package onto PATH. No system service is required.

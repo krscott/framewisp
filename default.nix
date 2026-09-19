@@ -15,6 +15,10 @@
   grim,
   wf-recorder,
   wtype,
+  bash,
+  xwayland,
+  xdotool,
+  xmodmap,
   ffmpeg,
   gst_all_1,
   pipewire,
@@ -66,6 +70,10 @@ buildPythonPackage {
           grim
           wf-recorder
           wtype
+          bash
+          xwayland
+          xdotool
+          xmodmap
           ffmpeg
           gst_all_1.gstreamer
           vncdotool

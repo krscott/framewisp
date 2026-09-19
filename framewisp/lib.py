@@ -1,8 +1,9 @@
-"""Run one headless Wayland app and control it with existing command-line tools."""
+"""Run one headless app and control it with existing command-line tools."""
 
 import json
 import math
 import os
+import shlex
 import signal
 import socket
 import subprocess
@@ -20,6 +21,7 @@ from types import FrameType
 from vncdotool import api
 
 from framewisp.captions import capture_origin, render_captions
+from framewisp.x11 import type_text as type_x11_text
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -126,6 +128,7 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
     env = os.environ.copy()
     for key in (
         "DISPLAY",
+        "XAUTHORITY",
         "WAYLAND_DISPLAY",
         "SWAYSOCK",
         "DBUS_SESSION_BUS_ADDRESS",
@@ -144,16 +147,52 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
 
 @contextmanager
 def start_sway(
-    runtime: Path, *, log: Path, env: dict[str, str], stop: Event, size: tuple[int, int]
+    runtime: Path,
+    *,
+    log: Path,
+    env: dict[str, str],
+    stop: Event,
+    size: tuple[int, int],
+    x11: bool = False,
 ) -> Generator[tuple[subprocess.Popen[bytes], str] | None, None, None]:
     """Yield the process and display name, or None if startup is interrupted."""
     config = runtime / "sway.conf"
-    config.write_text(SWAY_CONFIG.format(width=size[0], height=size[1]))
+    contents = SWAY_CONFIG.format(width=size[0], height=size[1])
+    if x11:
+        # Sway chooses a free X display. Read its environment from a child,
+        # rather than guessing a number or inheriting the host desktop's DISPLAY.
+        probe = shlex.join(
+            [
+                sys.executable,
+                "-c",
+                "import os; from pathlib import Path; "
+                f"Path({str(runtime / 'x11-display')!r}).write_text(os.environ['DISPLAY'])",
+            ]
+        )
+        contents = contents.replace("xwayland disable", "xwayland force")
+        contents += f"exec {probe}\n"
+    config.write_text(contents)
     with managed_process(["sway", "-c", str(config)], log=log, env=env) as process:
         display = wait_for_socket(
             runtime, "wayland-*", process=process, log=log, stop=stop
         )
         yield (process, display.name) if display is not None else None
+
+
+def wait_for_x11(
+    runtime: Path, *, process: subprocess.Popen[bytes], log: Path, stop: Event
+) -> str | None:
+    deadline = time.monotonic() + 10
+    path = runtime / "x11-display"
+    while not stop.is_set():
+        if process.poll() is not None:
+            raise RuntimeError(f"Compositor exited during X11 startup. See {log}")
+        if path.exists() and (display := path.read_text()):
+            return display
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Waiting for Xwayland timed out. See {log}")
+        stop.wait(0.05)
+    return None
 
 
 @contextmanager
@@ -368,6 +407,7 @@ def run_session(
     recording: Path | None = None,
     captions: bool = True,
     size: tuple[int, int] = (1280, 720),
+    x11: bool = False,
 ) -> int:
     if recording is not None:
         recording = recording.resolve()
@@ -400,13 +440,34 @@ def run_session(
             env = session_environment_for_run(runtime)
             compositor = stack.enter_context(
                 start_sway(
-                    runtime, log=session / "sway.log", env=env, stop=stop, size=size
+                    runtime,
+                    log=session / "sway.log",
+                    env=env,
+                    stop=stop,
+                    size=size,
+                    x11=x11,
                 )
             )
             if compositor is None:
                 return 0
             sway, display = compositor
             env["WAYLAND_DISPLAY"] = display
+            x11_display = None
+            app_env = env.copy()
+            if x11:
+                x11_display = wait_for_x11(
+                    runtime, process=sway, log=session / "sway.log", stop=stop
+                )
+                if x11_display is None:
+                    return 0
+                app_env.pop("WAYLAND_DISPLAY", None)
+                app_env.update(
+                    DISPLAY=x11_display,
+                    XAUTHORITY="/dev/null",
+                    GDK_BACKEND="x11",
+                    QT_QPA_PLATFORM="xcb",
+                    SDL_VIDEODRIVER="x11",
+                )
 
             vnc = stack.enter_context(
                 start_wayvnc(runtime, log=session / "wayvnc.log", env=env, stop=stop)
@@ -426,7 +487,7 @@ def run_session(
                     raise RuntimeError(error)
 
             app = stack.enter_context(
-                managed_process(command, log=session / "app.log", env=env)
+                managed_process(command, log=session / "app.log", env=app_env)
             )
             listener = stack.enter_context(socket.socket(socket.AF_UNIX))
             listener.bind(str(runtime / "control.sock"))
@@ -443,6 +504,7 @@ def run_session(
                         {
                             "runtime_directory": directory,
                             "wayland_display": display,
+                            "x11_display": x11_display,
                             "processes": {
                                 name: process.pid for name, process in processes.items()
                             },
@@ -556,6 +618,13 @@ def type_text(session: Path, text: str, *, interval: float) -> int:
 
 
 def type_unicode(session: Path, text: str, *, interval: float) -> int:
+    state = json.loads((session / "session.json").read_text())
+    if display := state.get("x11_display"):
+        env = session_environment(session) | {
+            "DISPLAY": display,
+            "XAUTHORITY": "/dev/null",
+        }
+        return type_x11_text(text, interval=interval, env=env)
     # wtype uploads a keymap containing the requested characters; wayvnc's US
     # keymap cannot represent arbitrary Unicode. Use keysyms so text never
     # becomes a wtype option, and sleep only between characters.

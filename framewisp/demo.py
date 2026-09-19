@@ -1,4 +1,4 @@
-"""A native Wayland app for trying framewisp's screenshot and input commands."""
+"""A GTK app for trying framewisp's screenshot and input commands."""
 
 # GI loads these modules from GTK's typelibs, not Python source files.
 # pyright: reportMissingModuleSource=false
@@ -14,6 +14,8 @@ def main() -> None:
     Gtk.init()
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Framewisp demo")
+    backend = type(window.get_display()).__name__
+    print(f"Display: {backend}", flush=True)
     window.set_default_size(960, 640)
     window.connect("close-request", lambda *_: loop.quit())
     window.connect("map", lambda *_: print("Demo ready", flush=True))
@@ -27,7 +29,7 @@ def main() -> None:
     content.set_halign(Gtk.Align.START)
     content.set_valign(Gtk.Align.START)
 
-    title = Gtk.Label(label="Framewisp demo")
+    title = Gtk.Label(label=f"Framewisp demo ({backend})")
     title.set_xalign(0)
     content.append(title)
 
