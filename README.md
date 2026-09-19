@@ -158,6 +158,30 @@ The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
 
+## Demo controls
+
+`framewisp-demo` includes controls for every input command. At the default
+1280x720 session size, use these targets:
+
+| Interaction | Target and result |
+| --- | --- |
+| Type, Return, Ctrl+A, Shift+arrows | Entry near `(120, 100)`; Return displays `Entered: TEXT`. |
+| Click | Apply near `(120, 170)` displays `Applied: TEXT`; the option near `(54, 266)` toggles. |
+| Double-click | A word in the entry, for example `(80, 100)` after typing `alpha beta`; replacement typing changes only that word. |
+| Right-click | The entry opens GTK's text menu. Select All followed by BackSpace clears the entry. |
+| Move / hover | Move to `(150, 266)` and capture with `--delay 1` to see the option's tooltip. |
+| Drag | Move the slider from `(147, 382)` toward `(350, 382)`; its number changes. The entry also supports selection drags and Shift-click. |
+| Key | Space toggles a focused option; arrow keys adjust the focused slider. Tab and Shift+Tab move between controls. |
+| Scroll | At `(700, 250)`, scroll down/up or right/left. Row/column labels and the `Scroll: x=... y=...` label show the position. |
+| Reset | Click `(700, 513)` to clear text, turn the option off, restore the slider to 25, scroll to the origin, and focus the entry. |
+
+Coordinates apply to the packaged demo in the default headless session. Inspect a
+screenshot when using a different window size, desktop theme, or display scale.
+Use `--duration` for paced drags, `--interval` for paced typing, and screenshot
+`--delay` when a tooltip or scroll animation needs time. The demo logs resulting
+widget state to `app.log`; screenshots show the same values. Run `framewisp-demo`
+directly to use these controls on your desktop.
+
 ## Attach to an existing desktop
 
 Use this when an app is already running on your desktop and you want an agent to

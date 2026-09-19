@@ -17,7 +17,13 @@ acceptance application.
   yields `None` if shutdown is requested while waiting.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
   changes the label to `Entered: TEXT`; clicking the button changes it to
-  `Applied: TEXT`. It also prints those messages to stdout for integration tests.
+  `Applied: TEXT`. A check button with a tooltip, a numbered slider, and a
+  two-axis scrolled grid provide visible input feedback. The entry's native
+  context menu and word selection cover right/double clicks. Reset restores
+  empty text, unchecked option, slider value 25, scroll origin, and entry focus.
+  Two columns keep the text/apply controls at their documented coordinates.
+  Widget state changes print to stdout for integration tests; no desktop service
+  or third-party app is required.
 - Sway provides the headless Wayland display using the Pixman software renderer.
 - wayvnc creates virtual pointer and keyboard devices. vncdotool's `vncdo`
   command sends input over a private Unix socket, connecting once per CLI call.
@@ -210,8 +216,11 @@ loop and runs without a D-Bus session.
 
 The integration test starts the real CLI, waits for the app's initial screenshot,
 types text, sends BackSpace and Return, clicks the button, and verifies both the
-demo's emitted messages and changed screenshot regions. It also exercises Tab
+demo's emitted messages and changed screenshot regions. It also exercises Shift+Tab
 and drags across the entry to select and replace text, then clicks the button.
+Demo widget tests exercise the native context menu, double-click word selection,
+slider drag and arrow adjustment, both scroll axes and reversal, tooltip appearance,
+Space activation, and reset. Assertions inspect resulting widget state and screenshots.
 Shutdown tests check that the recorded child PIDs and private sockets are gone
 after SIGTERM and SIGINT. Recording tests decode the resulting MP4s with FFmpeg,
 check changing frames, and cover app exit, both shutdown signals, startup failure,
