@@ -2,6 +2,8 @@
 name = "framewisp"
 version = "0.1.0"
 requires-python = ">=3.10.12"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 
 dependencies = [
     "vncdotool~=1.2",
@@ -24,7 +26,7 @@ framewisp = "framewisp.__main__:main"
 framewisp-demo = "framewisp.demo:main"
 
 [build-system]
-requires = ["setuptools >= 61.2"]
+requires = ["setuptools >= 77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

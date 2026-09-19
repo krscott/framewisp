@@ -63,6 +63,6 @@ buildPythonPackage {
     mainProgram = "framewisp";
     # description = "A short description of my application";
     # homepage = "https://github.com";
-    # license = lib.licenses.mit;
+    license = lib.licenses.gpl3Only;
   };
 }
