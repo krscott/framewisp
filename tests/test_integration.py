@@ -113,6 +113,13 @@ def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
     cli(demo.directory, "key", "Return")
     wait_until(lambda: "Entered: ?\n" in (demo.directory / "app.log").read_text())
 
+    # Drag across the entry to select its text, then replace the selection.
+    cli(demo.directory, "type", "abcdef")
+    cli(demo.directory, "drag", "400", "100", "50", "100")
+    cli(demo.directory, "type", "dragged")
+    cli(demo.directory, "click", "120", "170")
+    wait_until(lambda: "Applied: dragged\n" in (demo.directory / "app.log").read_text())
+
     demo.process.send_signal(signal.SIGTERM)
     assert demo.process.wait(timeout=20) == 0
     assert not (demo.directory / "session.json").exists()

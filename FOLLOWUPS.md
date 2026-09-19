@@ -32,9 +32,10 @@ These are notes for later issues, not requirements for this MVP.
 
 ## Capabilities
 
-- X11 plus a window manager; Cage and other compositors; Qt and other toolkits.
+- X11 plus a window manager; Cage and other compositors; more toolkit coverage
+  beyond the GTK demo, Swell Foop, and KolourPaint.
 - MCP, RPC, background sessions, persistent framebuffer management, and concurrent sessions.
-- Scrolling, dragging, additional mouse buttons, modifier chords, held keys,
+- Scrolling, intermediate drag points and duration, additional mouse buttons, modifier chords, held keys,
   Unicode, input methods, clipboard support, and broader input validation.
 - Video/audio recording, encoder backpressure, video/event timestamp alignment,
   cursor rendering policy, and structured action/process event logs.

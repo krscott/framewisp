@@ -3,7 +3,7 @@
 ## Scope
 
 Framewisp gives an agent a CLI loop for one native Wayland application on the
-current x86_64 NixOS environment: launch, screenshot, click, type, screenshot,
+current x86_64 NixOS environment: launch, screenshot, click, drag, type, screenshot,
 stop. The included GTK 4 demo is the acceptance application.
 
 ## Components
@@ -65,7 +65,10 @@ invoking capture. The grim process still has its own ten-second deadline; the
 delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
 
-`click` invokes `vncdo move X Y click 1`. `type` invokes `vncdo type TEXT`, keeping
+`click` invokes `vncdo move X Y click 1`. `drag X1 Y1 X2 Y2` invokes
+`vncdo move X1 Y1 mousedown 1 move X2 Y2 mouseup 1` on one connection. It moves
+directly between the endpoints, without intermediate points or timing options.
+`type` invokes `vncdo type TEXT`, keeping
 the text as one argument; it accepts printable ASCII. `key` maps Return to
 `enter`, Tab to `tab`, and BackSpace to `bsp`. Each operation presses and releases
 its buttons or keys within one connection. Each connection waits 100 ms before
@@ -99,7 +102,8 @@ loop and runs without a D-Bus session.
 
 The integration test starts the real CLI, waits for the app's initial screenshot,
 types text, sends BackSpace and Return, clicks the button, and verifies both the
-demo's emitted messages and changed screenshot regions. It also exercises Tab.
+demo's emitted messages and changed screenshot regions. It also exercises Tab
+and drags across the entry to select and replace text, then clicks the button.
 Shutdown tests check that the recorded child PIDs and private sockets are gone
 after SIGTERM and SIGINT. Both mypy and pyright check the Python code.
 
