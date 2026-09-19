@@ -3,6 +3,8 @@
 # GI loads these modules from GTK's typelibs, not Python source files.
 # pyright: reportMissingModuleSource=false
 
+import os
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -11,7 +13,13 @@ from gi.repository import GLib, Gtk, Pango  # isort: skip
 
 
 def main() -> None:
+    # Keep the documented input targets stable across desktop font settings.
+    if fonts := os.environ.get("FRAMEWISP_FONTCONFIG_FILE"):
+        os.environ["FONTCONFIG_FILE"] = fonts
     Gtk.init()
+    settings = Gtk.Settings.get_default()
+    assert settings is not None
+    settings.set_property("gtk-font-name", "DejaVu Sans 11")
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Framewisp demo")
     backend = type(window.get_display()).__name__

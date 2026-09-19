@@ -23,6 +23,8 @@ acceptance application.
   empty text, unchecked option, slider value 25, scroll origin, and entry focus.
   Two columns keep the text/apply controls at their documented coordinates. The
   result label ellipsizes long text so it cannot push the other controls offscreen.
+  The demo uses the bundled font configuration and DejaVu Sans 11 so a fresh HOME
+  or different desktop font setting cannot move its documented targets.
   Widget state changes print to stdout for integration tests; no desktop service
   or third-party app is required.
 - Sway provides the headless Wayland display using the Pixman software renderer.

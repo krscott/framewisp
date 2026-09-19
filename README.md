@@ -162,7 +162,7 @@ Capture again when necessary.
 
 ## Demo controls
 
-`framewisp-demo` includes controls for every input command. At the default
+`framewisp-demo` includes controls for every input command. The demo uses bundled DejaVu Sans 11 to keep its control positions stable. At the default
 1280x720 session size, use these targets:
 
 | Interaction | Target and result |
