@@ -9,7 +9,8 @@ acceptance application.
 
 ## Components
 
-- `framewisp/__main__.py` parses the CLI and dispatches to the runner or a tool.
+- `framewisp/__main__.py` handles standalone skill output and emergency detach
+  before importing the GUI command dispatcher in `framewisp/cli.py`.
 - `framewisp/lib.py` owns process lifetime and invokes existing display tools.
   `run_session` coordinates startup, monitoring, and shutdown. Separate helpers
   prepare its environment and manage Sway, wayvnc, and optional recorder startup,
@@ -41,6 +42,14 @@ The runner accepts recording commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
 
 ## Startup
+
+`framewisp --agent-skill` reads the UTF-8 body from `framewisp/SKILL.md`, writes it
+unchanged to stdout, and exits successfully before importing GUI/session tools.
+Setuptools includes that file in package data. The flag takes no session or other
+arguments; normal CLI help lists it. A test runs this path without site packages
+or external commands. The Nix package check compares its output in an empty
+environment against the source file. The skill covers the public Nix URL fallback,
+basic GUI workflows, user-started attachment, and permission before filing issues.
 
 1. Create or reuse the requested session directory. Refuse an existing
    `session.json`; concurrent runs and stale-session recovery are unsupported.

@@ -42,10 +42,10 @@ input, screenshot, and recording tools, plus the bundled GTK demo. No developmen
 shell, checkout, virtual environment, or sudo is needed for `nix run`. External
 applications such as Flatpaks still need their own installation.
 
-For this private repository, use an SSH flake URL with an authorized GitHub key:
+Run directly from the public repository:
 
 ```sh
-nix run 'git+ssh://git@github.com/krscott/framewisp' -- \
+nix run github:krscott/framewisp -- \
   /tmp/framewisp-demo run -- framewisp-demo
 ```
 
@@ -56,7 +56,7 @@ To put `framewisp` and `framewisp-demo` on PATH, add the flake to your NixOS or
 Home Manager configuration's inputs:
 
 ```nix
-inputs.framewisp.url = "git+ssh://git@github.com/krscott/framewisp";
+inputs.framewisp.url = "github:krscott/framewisp";
 ```
 
 Pass `inputs` to your modules through `specialArgs` (NixOS) or
@@ -76,6 +76,19 @@ Pass `inputs` to your modules through `specialArgs` (NixOS) or
 
 Apply your configuration normally. No framewisp service or dedicated module is
 needed.
+
+## Agent instructions
+
+Print a short agent skill with launch, screenshot, input, and recording examples:
+
+```sh
+framewisp --agent-skill
+# Without framewisp on PATH:
+nix run github:krscott/framewisp -- --agent-skill
+```
+
+This prints the bundled [skill body](framewisp/SKILL.md) as plain Markdown and
+exits. It needs no session or display and does not start an app.
 
 ## Try it
 
