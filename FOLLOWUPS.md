@@ -60,7 +60,7 @@ These are notes for later issues, not requirements for this MVP.
   startup; define ownership and cancellation during overlapping operations.
 - Add private app profiles, config isolation, and a D-Bus policy for real apps.
 - Decide authentication and isolation requirements for shared machines or remote use.
-- Configure resolution, DPI, fonts, themes, locale, and keyboard layout for
+- Configure DPI, fonts, themes, locale, and keyboard layout for
   reproducible screenshots across hosts.
 - Measure startup/input/capture costs before adding caches or persistent connections.
 - Broaden package compatibility beyond the tested x86_64 Linux environment.

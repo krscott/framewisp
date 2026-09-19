@@ -260,3 +260,59 @@ def test_invalid_pointer_gesture(
     assert result.returncode == 2
     assert options[0] in result.stderr
     assert "session.json" not in result.stderr
+
+
+@pytest.mark.parametrize("option", ["--width", "--height"])
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "nope"])
+def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
+    session = tmp_path / "session"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(session),
+            "run",
+            f"{option}={value}",
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert option in result.stderr
+    assert not session.exists()
+
+
+@pytest.mark.parametrize("option", ["--width", "--height"])
+def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
+    session = tmp_path / "session"
+    recording = tmp_path / "recording.mp4"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            "--session",
+            str(session),
+            "run",
+            option,
+            "901",
+            "--record",
+            str(recording),
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "even" in result.stderr
+    assert not session.exists()
+    assert not recording.exists()

@@ -42,10 +42,13 @@ The foreground `run` command is the lifetime owner.
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
    and `GSK_RENDERER=cairo`.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
-   `HEADLESS-1` output at 1280x720 and 60 Hz, a fallback seat, US keyboard layout,
+   `HEADLESS-1` output at the requested width and height (default 1280x720) and
+   60 Hz, a fallback seat, US keyboard layout,
    and no window borders. Disable primary selection to avoid the observed wayvnc
    crash on automatic selection offers; ordinary clipboard copy/paste stays enabled.
-   Load no host Sway configuration.
+   Load no host Sway configuration. The CLI validates positive integer dimensions
+   before starting the session. Recording requires even dimensions, since
+   wf-recorder otherwise crops the last row or column.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
 7. Start wayvnc with an empty configuration, US layout, and a Unix socket in
