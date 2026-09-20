@@ -10,16 +10,10 @@ These are notes for later issues, not requirements for this MVP.
   a 0.5-second wait. Use this game to investigate input/render synchronization
   when a fixed delay becomes insufficient.
 
-- Replace the 100 ms VNC connection delays if broader reliability is
-  needed. Without it, Sway dropped the first character and single named-key
-  operations on new connections. The MVP waits before sending input. Consider
-  an explicit focus/readiness signal or a persistent input connection later.
-  Scroll commands also wait 100 ms before disconnecting: GTK otherwise sometimes
-  dropped queued wheel events after the transient pointer device was removed,
-  reporting `gdk_seat_get_pointer: GDK_IS_SEAT (seat)` failures.
-  The runner now keeps an idle VNC connection open because Qt context menus
-  disappeared when the last client disconnected. Reassess the existing delays
-  with this persistent keyboard and pointer before changing them.
+- Replace the initial 100 ms VNC focus delay with an explicit readiness signal
+  if broader reliability is needed. The runner now reuses that connection for
+  input. Scroll needs no disconnect pause; Xwayland pointer priming and XTest
+  keyboard initialization still wait 100 ms per action.
 
 - Investigate VNC screenshots with Sway 1.12, wlroots 0.20.2, wayvnc 0.10.1, and
   vncdotool 1.2.0 under Pixman. The RFB handshake and input worked, but full-frame

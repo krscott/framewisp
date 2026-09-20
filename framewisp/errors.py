@@ -3,6 +3,8 @@
 import json
 import subprocess
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -39,6 +41,7 @@ def display_command(
     env: dict[str, str] | None = None,
     display: str | None = None,
     input_text: str | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
     context = (
@@ -46,15 +49,40 @@ def display_command(
         f"runtime directory {state['runtime_directory']}"
     )
     try:
-        result = subprocess.run(
+        with subprocess.Popen(
             command,
             env=env,
-            input=input_text,
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            check=False,
-            timeout=timeout,
-        )
+        ) as process:
+            deadline = time.monotonic() + timeout
+            try:
+                while True:
+                    if cancelled is not None and cancelled():
+                        raise InterruptedError(
+                            "Input cancelled; caller disconnected or session stopped."
+                        )
+                    if time.monotonic() >= deadline:
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    try:
+                        _, stderr = process.communicate(input_text, timeout=0.05)
+                        break
+                    except subprocess.TimeoutExpired:
+                        input_text = None
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+            result = subprocess.CompletedProcess(
+                command, process.returncode, stderr=stderr
+            )
+    except InterruptedError:
+        raise
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SessionError(f"{context}: {error}\n{SOCKET_ACCESS_HINT}") from None
     if result.returncode:

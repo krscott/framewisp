@@ -60,6 +60,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-probe": "probe",
             "x11-record": True,
             "x11-clipboard": "clipboard",
+            "x11-qt": "qt",
         }[mode]
     recording = (
         tmp_path / "session.mp4"
@@ -88,11 +89,24 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode in probes
         else ["framewisp-demo"]
     )
+    if mode == "qt":
+        app = ["qml", str(Path(__file__).with_name("menu_probe.qml"))]
     command.extend(["--", *app])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
             command,
             env=os.environ
+            | (
+                {
+                    "QT_QUICK_BACKEND": "software",
+                    "QT_QPA_PLATFORMTHEME": "",
+                    "QT_IM_MODULE": "",
+                    "QT_LOGGING_RULES": "qml.debug=true",
+                    "QT_LOGGING_TO_CONSOLE": "1",
+                }
+                if mode == "qt"
+                else {}
+            )
             | ({"WAYLAND_DEBUG": "client"} if mode == "clipboard" else {})
             | (
                 {
@@ -136,7 +150,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert b"WAYLAND_DISPLAY=host-display-do-not-use" not in app_env
             assert b"XAUTHORITY=/dev/null" in app_env
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
-            if mode not in {"probe", "clipboard"}:
+            if mode not in {"probe", "clipboard", "qt"}:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
                 )
@@ -354,6 +368,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
 def test_x11_unicode_connection_failure_has_context(
     tmp_path: Path, mapped: bool
 ) -> None:
+    # Test the retained X11 helper directly; CLI input now requires a live runner.
     session = tmp_path / "disconnected-x11"
     session.mkdir()
     display = ":framewisp-missing"
@@ -368,19 +383,18 @@ def test_x11_unicode_connection_failure_has_context(
     )
     if mapped:
         (tmp_path / "x11-keymap.json").write_text(json.dumps({"é": 120}))
+    script = (
+        "from framewisp.inputs import type_unicode; from pathlib import Path; "
+        + f"type_unicode(Path({str(session)!r}), 'é', interval=0)"
+    )
     result = subprocess.run(
-        ["framewisp", str(session), "type", "é"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=15,
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=15
     )
     assert result.returncode == 1
     assert ("xdotool" if mapped else "xmodmap") in result.stderr
     assert display in result.stderr
     assert str(session) in result.stderr and str(tmp_path) in result.stderr
     assert "sandbox" in result.stderr
-    assert "Traceback" not in result.stderr
 
 
 def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
@@ -594,7 +608,7 @@ def test_move_shows_tooltip_without_clicking(demo: Demo, tmp_path: Path) -> None
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("button", [None, "right"])
 @pytest.mark.parametrize("count", [None, 2])
 def test_click_delivers_button_and_recognized_count(
@@ -1331,3 +1345,218 @@ def test_x11_busy_app_keeps_queued_unicode(demo: Demo) -> None:
         os.kill(app_pid, signal.SIGCONT)
     cli(demo.directory, "key", "Return")
     wait_until(lambda: "Entered: é中\n" in (demo.directory / "app.log").read_text())
+
+
+def input_request(
+    demo: Demo, action: str, parameters: dict[str, object]
+) -> socket.socket:
+    connection = socket.socket(socket.AF_UNIX)
+    connection.settimeout(5)
+    connection.connect(str(demo.runtime / "control.sock"))
+    connection.sendall(
+        (
+            json.dumps(
+                {
+                    "session": str(demo.directory),
+                    "action": action,
+                    "parameters": parameters,
+                }
+            )
+            + "\n"
+        ).encode()
+    )
+    return connection
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    with input_request(
+        demo,
+        "drag",
+        {
+            "x1": 100,
+            "y1": 100,
+            "x2": 500,
+            "y2": 300,
+            "duration": 30,
+            "button": "left",
+            "modifier": ["ctrl", "shift"],
+        },
+    ) as drag:
+        wait_until(
+            lambda: any(event["event"] == "press" for event in input_events(demo))
+        )
+        with input_request(
+            demo,
+            "click",
+            {"x": 600, "y": 100, "button": "right", "count": 1, "modifier": []},
+        ) as click:
+            started = time.monotonic()
+            assert (
+                json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+            )
+            assert time.monotonic() - started < 2
+            assert (
+                len(
+                    [event for event in input_events(demo) if event["event"] == "press"]
+                )
+                == 1
+            )
+            drag.close()
+            response = json.loads(click.recv(4096))
+            assert response["error"] is None
+        wait_until(
+            lambda: len(
+                [event for event in input_events(demo) if event["event"] == "release"]
+            )
+            == 2
+        )
+    buttons = [
+        event for event in input_events(demo) if event["event"] in {"press", "release"}
+    ]
+    assert [event["event"] for event in buttons] == [
+        "press",
+        "release",
+        "press",
+        "release",
+    ]
+    assert buttons[0]["ctrl"] and buttons[0]["shift"]
+    assert buttons[2]["button"] == 3
+    assert not buttons[2]["ctrl"] and not buttons[2]["shift"]
+    logged = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert [(event["action"], event["event"]) for event in logged] == [
+        ("drag", "start"),
+        ("drag", "end"),
+        ("click", "start"),
+        ("click", "end"),
+    ]
+    assert "cancelled" in logged[1]["error"]
+    assert logged[3]["returncode"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("text", ["abcd", "é中🙂a"])
+def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "425")
+    with subprocess.Popen(
+        ["framewisp", str(demo.directory), "type", text, "--interval", "30"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as typing:
+        wait_until(
+            lambda: any(event.get("text") == text[0] for event in input_events(demo))
+        )
+        started = time.monotonic()
+        typing.terminate()
+        typing.wait(timeout=2)
+        cli(demo.directory, "key", "b")
+        assert time.monotonic() - started < 2
+    wait_until(
+        lambda: any(event.get("text") == text[0] + "b" for event in input_events(demo))
+    )
+    with input_request(
+        demo,
+        "drag",
+        {
+            "x1": 100,
+            "y1": 100,
+            "x2": 500,
+            "y2": 300,
+            "duration": 30,
+            "button": "left",
+            "modifier": ["ctrl"],
+        },
+    ) as drag:
+        wait_until(
+            lambda: any(
+                event["event"] == "press" and event["ctrl"]
+                for event in input_events(demo)
+            )
+        )
+        started = time.monotonic()
+        cli(demo.directory, "stop")
+        assert time.monotonic() - started < 3
+        assert "cancelled" in json.loads(drag.recv(4096))["error"]
+    assert demo.process.wait(timeout=2) == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_reject_invalid_input_without_poisoning_connection(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    invalid: list[tuple[str, dict[str, object]]] = [
+        ("key", {"chord": "ctrl+unsupported"}),
+        (
+            "drag",
+            {
+                "x1": 1,
+                "y1": 1,
+                "x2": 100,
+                "y2": 100,
+                "duration": -1,
+                "button": "left",
+                "modifier": ["ctrl"],
+            },
+        ),
+        ("click", {"x": 1, "y": 1, "count": 1, "button": [], "modifier": []}),
+        ("type", {"text": "a\nb", "interval": 0}),
+    ]
+    for action, parameters in invalid:
+        with input_request(demo, action, parameters) as connection:
+            assert json.loads(connection.recv(4096))["error"] is not None
+    cli(demo.directory, "key", "a")
+    wait_until(lambda: any(event.get("key") == "a" for event in input_events(demo)))
+    assert not any(event.get("key") == "Control_L" for event in input_events(demo))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_lost_vnc_connection_does_not_replay_input(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    with input_request(
+        demo,
+        "drag",
+        {
+            "x1": 100,
+            "y1": 100,
+            "x2": 500,
+            "y2": 300,
+            "duration": 30,
+            "button": "left",
+            "modifier": ["ctrl"],
+        },
+    ) as drag:
+        wait_until(
+            lambda: any(event["event"] == "press" for event in input_events(demo))
+        )
+        with input_request(demo, "key", {"chord": "z"}) as queued:
+            state = json.loads((demo.directory / "session.json").read_text())
+            os.kill(state["processes"]["wayvnc"], signal.SIGTERM)
+            demo.process.wait(timeout=5)
+            assert json.loads(drag.recv(4096))["error"] is not None
+            assert json.loads(queued.recv(4096))["error"] is not None
+    assert not any(event.get("key") == "z" for event in input_events(demo))
+    assert not (demo.directory / "session.json").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["qt", "x11-qt"], indirect=True)
+def test_qt_menu_survives_between_commands(demo: Demo, tmp_path: Path) -> None:
+    log = demo.directory / "app.log"
+    wait_until(lambda: "Menu probe ready" in log.read_text())
+    # The QML component can finish before the compositor maps its window.
+    cli(demo.directory, "screenshot", "--delay", "0.3", str(tmp_path / "ready.png"))
+    cli(demo.directory, "click", "200", "150", "--button", "right")
+    wait_until(lambda: "Menu opened" in log.read_text())
+    cli(demo.directory, "screenshot", "--delay", "0.3", str(tmp_path / "menu.png"))
+    assert "Menu closed" not in log.read_text()
+    cli(demo.directory, "key", "Down")
+    cli(demo.directory, "key", "Return")
+    wait_until(lambda: "Item chosen" in log.read_text())
