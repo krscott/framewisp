@@ -17,6 +17,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | --- | --- |
 | `run [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
 | `screenshot [--delay SECONDS] PATH` | Save the current display as a PNG. Default delay: 0. |
+| `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 2/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move immediately without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
@@ -50,8 +51,8 @@ Names are case-insensitive; `A` does not imply Shift. Use `Shift+a` for that cho
 or `key Tab` separately. X11 sessions support 128 distinct non-ASCII characters
 across text commands; start a fresh session if that limit is reached.
 
-All timing values are finite, nonnegative seconds, including fractions. Zero
-disables the requested delay. Input completion does not mean animation completion;
+Timing values are finite seconds, including fractions. Input/capture delays may
+be zero; inspection requires a positive timeout. Input completion does not mean animation completion;
 use `screenshot --delay 0.5 PATH` when the app needs time to respond.
 
 ## Example workflow
@@ -80,6 +81,43 @@ Inspect the result before choosing the next action. Use
 `framewisp /tmp/framewisp-demo stop` when finished. Ctrl+C or SIGTERM to the runner
 also stops it. `status` and `stop` require a connected headless session;
 `--detach` is for desktop attachments only.
+
+## Accessible text and state
+
+For supported headless apps, use a bounded query to discover controls or read
+state without interpreting an image:
+
+```sh
+framewisp /tmp/framewisp-demo inspect --json --role button --name 'Apply text'
+framewisp /tmp/framewisp-demo inspect --json --role 'text box'
+framewisp /tmp/framewisp-demo inspect --json --role label --text 'Applied:'
+```
+
+Role is a case-insensitive exact toolkit name. Name/text are case-insensitive
+substrings; filters combine with AND. GTK demo roles include `button`, `text box`,
+`checkbox`, and `slider`. Qt may use different names.
+
+Read JSON even when the command exits 1. Only `status: "ok"` exits zero. A complete
+empty result means no match in the exposed tree. `partial` reports traversal or
+text limits and failed objects; `timeout` reports an exhausted budget;
+`unsupported` means no app has registered yet; `unavailable` means the bus or
+registry could not be reached. Startup can temporarily appear unsupported.
+Do not treat incomplete results as proof of absence. Narrow filters or raise
+explicit limits when appropriate; use a screenshot when accessibility is missing.
+
+Check all matches. A button and its child label can share a name; add a role
+filter instead of choosing the first. IDs are scoped to that snapshot and cannot
+be reused. Re-query after input. Reads are fresh but not atomic. State flags and
+listed actions are what the app advertises, not proof that an action will succeed.
+GTK may expose `sensitive` without `enabled` for an enabled control.
+
+Bounds use window-relative toolkit coordinates. Use a screenshot for pointer
+targets unless the window-to-screenshot transform is known. Native GTK demo
+controls work on Wayland and Xwayland. Qt Quick buttons work, but the tested
+separate popup menu does not appear in its accessible tree. KolourPaint Flatpak
+menus expose names/state, but its canvas still needs screenshots. Keep images
+for appearance, layout, custom drawing, and omitted controls. Inspection is
+unavailable on attached desktops and does not supply semantic clicks or waits.
 
 ## Batch known actions
 

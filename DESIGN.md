@@ -544,3 +544,69 @@ intended widget in the live test. These waits are interruptible.
 COSMIC matches the current modifier combination, including injected modifiers.
 A Ctrl+Alt+Escape binding alone did not stop a Shift-drag. The user must also bind
 Ctrl+Alt+Shift+Escape to the same detach command.
+
+## Structured UI inspection
+
+`inspect --json` is a read-only AT-SPI prototype for headless sessions. Every
+runner starts two private `dbus-daemon --nofork` processes and an
+`at-spi2-registryd` before the display/app. Bus configuration has no service
+activation directories. The runner replaces inherited session/accessibility bus
+addresses and sets `AT_SPI_BUS_ADDRESS`, `GTK_A11Y=atspi`, and
+`QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` for its children. It monitors all three
+processes and closes them after the application/display during ordinary cleanup.
+Their sockets live in the private runtime directory, and their logs are reserved
+session files. This separates sessions from each other and the user's desktop;
+it is not a security boundary against other processes with the same UID.
+
+Metadata carries `inspection_protocol: 1` and the private accessibility address.
+The CLI requires that address to equal the runtime directory's accessibility
+socket. It never uses the caller's desktop bus, autolaunches a bus, or inspects
+attached sessions. Gio, already a dependency, connects directly to this address
+and calls read-only AT-SPI methods. No additional Python package is needed.
+
+The CLI owns each query connection independently of the input/control socket.
+A Gio cancellable with a deadline timer bounds connection setup and requests;
+each synchronous call also receives the remaining request budget. An unresponsive
+application produces a timeout observation without blocking runner status/stop.
+There is no persistent AT-SPI object cache or background observer.
+
+Traversal is breadth-first, starting with application objects at depth 1. It
+fetches individual child references rather than an unbounded tree. Defaults are
+8 levels, 20 returned matches, 256 visited nodes, and 2 seconds. Hard CLI maxima
+are 32 levels, 100 matches, 4096 nodes, and 10 seconds. Role filtering compares
+case-insensitive exact toolkit role names; name/text filtering uses
+case-insensitive substrings. Filters combine with AND. Strings and text reads
+are capped at 1024 characters, and actions at 16 per match. Truncation anywhere
+that could affect the observation makes it partial, including when no match is
+found. The private buses reject messages over 1 MiB.
+
+Schema version 1 returns `snapshot_id`, `status`, `matches`, `match_count`,
+`visited`, `applications`, `reasons`, `errors`, and `elapsed_ms`. Each match has
+`id`, `role`, `name`, `text`, `states`, `actions`, `bounds`, `value`, and `depth`.
+Unavailable optional interfaces produce null text/value/bounds or empty actions.
+Errors while reading advertised interfaces make the whole observation partial;
+already read fields remain available. State names reproduce AT-SPI flags, not a
+normalized toolkit-independent enabled/disabled assertion. GTK's tested backend
+reports `sensitive` without `enabled` even for usable controls.
+
+Only `ok` exits zero. An `ok` empty list means no match in the fully traversed
+exposed tree. `unsupported` means no accessible application has registered yet;
+it can also occur while an app is starting. `partial` reports limits or vanished
+objects, `timeout` reports an exhausted budget, and `unavailable` reports failure
+to reach the bus/registry. Non-ok observations still print JSON and exit 1.
+Invalid command arguments exit 2. Toolkit omissions cannot be detected from a
+successful traversal, so `ok` does not certify that every visual widget exists
+in the accessibility tree.
+
+IDs are unique only within that snapshot. They cannot be passed back as selectors
+or reused across queries. Duplicate matches are returned separately; ordering is
+not a selection rule. Every query reads fresh state, but the reads are not atomic:
+the app can change between objects or fields, or after the response. Failed or
+defunct references are reported as partial, never converted into proof of absence.
+Bounds, when valid, use AT-SPI's window-relative coordinate system, in toolkit
+units. They are not screenshot coordinates, especially for popups and scaled
+windows. No automatic coordinate conversion or semantic input action is provided.
+Use screenshots to choose pointer targets when the window transform is unknown.
+
+The tested toolkit matrix, timings, reproducible benchmark, and decision about
+conditional waits are in [docs/ui-inspection.md](docs/ui-inspection.md).

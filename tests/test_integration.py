@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image, ImageChops
@@ -1551,6 +1552,198 @@ def test_qt_menu_survives_between_commands(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Item chosen" in log.read_text())
 
 
+def inspect(demo: Demo, *arguments: str) -> dict[str, Any]:
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "inspect", "--json", *arguments],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode in {0, 1}, result.stderr
+    observation: dict[str, Any] = json.loads(result.stdout)
+    assert result.returncode == (0 if observation["status"] == "ok" else 1)
+    return observation
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    button = inspect(demo, "--role", "button", "--name", "Apply text")
+    assert button["status"] == "ok", button
+    assert button["match_count"] == 1
+    nodes = button["matches"]
+    assert isinstance(nodes, list)
+    assert nodes[0]["name"] == "Apply text"
+    assert "click" in nodes[0]["actions"]
+    assert nodes[0]["bounds"]["coordinate_space"] == "window"
+    assert nodes[0]["bounds"]["width"] == 400
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "--interval", "0", "Inspected text")
+    cli(demo.directory, "click", "120", "170")
+    entry = inspect(demo, "--role", "text box", "--text", "Inspected text")
+    assert entry["status"] == "ok", entry
+    assert entry["match_count"] == 1
+    label = inspect(demo, "--role", "label", "--text", "Applied: Inspected text")
+    assert label["status"] == "ok", label
+    assert label["match_count"] == 1
+    cli(demo.directory, "click", "54", "266")
+    toggle = inspect(demo, "--role", "checkbox")
+    toggles = toggle["matches"]
+    assert isinstance(toggles, list)
+    assert "checked" in toggles[0]["states"]
+    slider = inspect(demo, "--role", "slider")
+    sliders = slider["matches"]
+    assert isinstance(sliders, list)
+    assert sliders[0]["value"] == 25
+    # A fresh request rereads the app; snapshot IDs are never reusable selectors.
+    cli(demo.directory, "click", "700", "513")
+    reset = inspect(demo, "--text", "Applied: Inspected text")
+    assert reset["status"] == "ok", reset
+    assert reset["match_count"] == 0
+    assert reset["snapshot_id"] != label["snapshot_id"]
+
+
+@pytest.mark.integration
+def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    # GTK exposes both the button and its child label with the same name.
+    duplicates = inspect(demo, "--name", "Apply text")
+    assert duplicates["status"] == "ok", duplicates
+    assert duplicates["match_count"] == 2
+    for args, reason in (
+        (("--limit", "1"), "limit"),
+        (("--max-depth", "1"), "max-depth"),
+        (("--max-nodes", "2"), "max-nodes"),
+    ):
+        bounded = inspect(demo, *args)
+        assert bounded["status"] == "partial", bounded
+        assert reason in bounded["reasons"]
+    missing = inspect(demo, "--name", "No such widget")
+    assert missing["status"] == "ok", missing
+    assert missing["matches"] == []
+    cli(demo.directory, "type", "--interval", "0", "z" * 1100)
+    wait_until(
+        lambda: "Text: " + "z" * 1100 + "\n" in (demo.directory / "app.log").read_text()
+    )
+    truncated = inspect(demo, "--role", "text box")
+    assert truncated["status"] == "partial", truncated
+    assert "text-limit" in truncated["reasons"]
+    nodes: list[dict[str, Any]] = truncated["matches"]
+    text = nodes[0]["text"]
+    assert isinstance(text, str)
+    assert len(text) == 1024
+    assert len(json.dumps(truncated)) < 10000
+
+
+@pytest.mark.integration
+def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    assert inspect(demo, "--name", "Apply text")["status"] == "ok"
+    state = json.loads((demo.directory / "session.json").read_text())
+    pid = state["processes"]["app"]
+    os.kill(pid, signal.SIGSTOP)
+    try:
+        started = time.monotonic()
+        timed_out = inspect(demo, "--timeout", "0.2")
+        assert timed_out["status"] == "timeout", timed_out
+        assert time.monotonic() - started < 2
+        assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+    finally:
+        os.kill(pid, signal.SIGCONT)
+    assert inspect(demo, "--name", "Apply text")["status"] == "ok"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["qt", "x11-qt"], indirect=True)
+def test_inspect_qt_controls_and_popup_gap(demo: Demo) -> None:
+    wait_until(lambda: "Menu probe ready" in (demo.directory / "app.log").read_text())
+    cli(demo.directory, "click", "--button", "right", "500", "300")
+    wait_until(lambda: "Menu opened" in (demo.directory / "app.log").read_text())
+    item = inspect(demo, "--name", "Inspection button")
+    assert item["status"] == "ok", item
+    assert item["match_count"] == 1
+    # The tested Qt Quick Popup.Window is omitted from the accessible tree.
+    popup = inspect(demo, "--name", "Choose this item")
+    assert popup["status"] == "ok", popup
+    assert popup["match_count"] == 0
+    cli(demo.directory, "key", "Escape")
+    cli(demo.directory, "click", "--button", "right", "500", "300")
+    again = inspect(demo, "--name", "Inspection button")
+    assert again["status"] == "ok", again
+    assert again["snapshot_id"] != item["snapshot_id"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("app", ["framewisp-demo", "sleep"])
+def test_inspection_private_buses_and_unsupported_apps(
+    demo: Demo, tmp_path: Path, app: str
+) -> None:
+    first = json.loads((demo.directory / "session.json").read_text())
+    second = tmp_path / "second"
+    log = tmp_path / "second-runner.log"
+    command = (
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+        if app == "sleep"
+        else [app]
+    )
+    with log.open("w") as output:
+        runner = subprocess.Popen(
+            [
+                "framewisp",
+                str(second),
+                "run",
+                "--",
+                *command,
+            ],
+            env=os.environ
+            | {
+                "AT_SPI_BUS_ADDRESS": first["accessibility_bus"],
+                "DBUS_SESSION_BUS_ADDRESS": first["accessibility_bus"],
+            },
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+
+        def ready() -> bool:
+            assert runner.poll() is None, log.read_text()
+            return "Session ready:" in log.read_text()
+
+        wait_until(ready)
+        state = json.loads((second / "session.json").read_text())
+        assert state["accessibility_bus"] != first["accessibility_bus"]
+        if app == "framewisp-demo":
+            wait_until(lambda: "Demo ready" in (second / "app.log").read_text())
+            cli(second, "type", "--interval", "0", "Second session only")
+            result = json.loads(
+                cli(second, "inspect", "--json", "--text", "Second session only").stdout
+            )
+            assert result["match_count"] == 1
+            assert inspect(demo, "--text", "Second session only")["match_count"] == 0
+        else:
+            result = subprocess.run(
+                ["framewisp", str(second), "inspect", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            assert result.returncode == 1
+            assert json.loads(result.stdout)["status"] == "unsupported"
+        cli(second, "stop")
+        assert runner.wait(timeout=10) == 0
+        assert not Path(state["runtime_directory"]).exists()
+        for pid in state["processes"].values():
+            assert not Path(f"/proc/{pid}").exists()
+        assert (
+            inspect(demo, "--role", "button", "--name", "Apply text")["status"] == "ok"
+        )
+    finally:
+        if runner.poll() is None:
+            runner.terminate()
+        runner.wait(timeout=20)
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
@@ -1927,3 +2120,26 @@ def test_lost_vnc_during_batch_reports_partial_result(
     assert result["status"] == "failed"
     assert not any(event.get("key") == "z" for event in input_events(demo))
     assert not (tmp_path / "never.png").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    plan = tmp_path / "inspect-batch.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {"action": "click", "x": 120, "y": 100},
+                    {"action": "type", "text": "HelloBatch", "interval": 0},
+                    {"action": "click", "x": 120, "y": 170},
+                ]
+            }
+        )
+    )
+    batch = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    assert batch["status"] == "completed"
+    result = inspect(demo, "--role", "label", "--text", "Applied: HelloBatch")
+    assert result["status"] == "ok", result
+    assert result["match_count"] == 1

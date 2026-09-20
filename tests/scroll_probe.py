@@ -8,8 +8,9 @@ from functools import partial
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 
-from gi.repository import GLib, Gtk  # isort: skip
+from gi.repository import Gdk, GLib, Gtk  # isort: skip
 
 
 def log(event: str, **values: str | float) -> None:
@@ -32,7 +33,27 @@ def main() -> None:
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Scroll probe")
     window.connect("close-request", lambda *_: loop.quit())
-    window.connect("map", lambda *_: log("ready"))
+    adjustments: list[Gtk.Adjustment] = []
+
+    def mapped(widget: Gtk.Window) -> None:
+        clock = widget.get_frame_clock()
+        assert clock is not None
+
+        def painted(clock: Gdk.FrameClock) -> None:
+            # Fixed-coordinate input needs the final layout and scroll ranges.
+            if widget.get_width() != 1280 or widget.get_height() != 720:
+                return
+            if not all(
+                adjustment.get_upper() > adjustment.get_page_size() > 0
+                for adjustment in adjustments
+            ):
+                return
+            clock.disconnect(handler)
+            log("ready")
+
+        handler = clock.connect("after-paint", painted)
+
+    window.connect("map", mapped)
     content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
     for name in ["left", "right"]:
         pane = Gtk.ScrolledWindow()
@@ -55,6 +76,7 @@ def main() -> None:
         pane.add_controller(controller)
         pane.get_hadjustment().connect("value-changed", partial(adjusted, name, "x"))
         pane.get_vadjustment().connect("value-changed", partial(adjusted, name, "y"))
+        adjustments.extend([pane.get_hadjustment(), pane.get_vadjustment()])
         content.append(pane)
     window.set_child(content)
     window.present()

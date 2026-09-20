@@ -108,6 +108,11 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
         "WAYLAND_DISPLAY",
         "SWAYSOCK",
         "DBUS_SESSION_BUS_ADDRESS",
+        "DBUS_STARTER_ADDRESS",
+        "DBUS_STARTER_BUS_TYPE",
+        "AT_SPI_BUS_ADDRESS",
+        "GTK_A11Y",
+        "NO_AT_BRIDGE",
     ):
         env.pop(key, None)
     env.update(
@@ -119,6 +124,57 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
         GSK_RENDERER="cairo",
     )
     return env
+
+
+def start_inspection_buses(
+    stack: ExitStack, runtime: Path, session: Path, env: dict[str, str], stop: Event
+) -> dict[str, subprocess.Popen[bytes]] | None:
+    """Own both buses and the registry; never activate host desktop services."""
+    config = runtime / "bus.conf"
+    config.write_text(
+        "<busconfig><type>session</type><auth>EXTERNAL</auth><listen>unix:tmpdir=/tmp</listen>"
+        '<policy context="default"><allow send_destination="*"/>'
+        '<allow receive_sender="*"/><allow own="*"/></policy>'
+        '<limit name="max_message_size">1048576</limit></busconfig>'
+    )
+    processes: dict[str, subprocess.Popen[bytes]] = {}
+    for name, variable in (
+        ("dbus", "DBUS_SESSION_BUS_ADDRESS"),
+        ("accessibility", "AT_SPI_BUS_ADDRESS"),
+    ):
+        address = f"unix:path={runtime / (name + '.sock')}"
+        log = session / (name + ".log")
+        process = stack.enter_context(
+            managed_process(
+                [
+                    "dbus-daemon",
+                    "--nofork",
+                    f"--config-file={config}",
+                    f"--address={address}",
+                ],
+                log=log,
+                env=env,
+            )
+        )
+        processes[name] = process
+        if (
+            wait_for_socket(
+                runtime, name + ".sock", process=process, log=log, stop=stop
+            )
+            is None
+        ):
+            return None
+        env[variable] = address
+    env.update(GTK_A11Y="atspi", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1")
+    registry = os.environ.get("FRAMEWISP_ATSPI_REGISTRY", "at-spi2-registryd")
+    processes["registry"] = stack.enter_context(
+        managed_process([registry], log=session / "registry.log", env=env)
+    )
+    # Wait for the registry's bus name before launching apps that register with it.
+    from framewisp.inspection import wait_for_registry
+
+    wait_for_registry(env["AT_SPI_BUS_ADDRESS"], stop)
+    return processes
 
 
 @contextmanager
@@ -300,6 +356,9 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
             "app.log",
             "inputs.jsonl",
             "captions.log",
+            "dbus.log",
+            "accessibility.log",
+            "registry.log",
         )
     }
     if destination in reserved:
@@ -600,6 +659,9 @@ def run_session(
         ):
             runtime = Path(directory)
             env = session_environment_for_run(runtime)
+            buses = start_inspection_buses(stack, runtime, session, env, stop)
+            if buses is None:
+                return 0
             compositor = stack.enter_context(
                 start_sway(
                     runtime,
@@ -638,7 +700,7 @@ def run_session(
                 return 0
             input_client = stack.enter_context(keep_input_devices(runtime, stop))
 
-            backends = {"sway": sway, "wayvnc": vnc}
+            backends = buses | {"sway": sway, "wayvnc": vnc}
             recordings = Recordings(session, env, stop, size)
             stack.callback(recordings.close)
             if recording is not None:
@@ -677,6 +739,8 @@ def run_session(
                         {
                             "control_protocol": 1,
                             "persistent_input": True,
+                            "inspection_protocol": 1,
+                            "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
                             "batch_input": True,
                             "runtime_directory": directory,
                             "wayland_display": display,

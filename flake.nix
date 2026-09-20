@@ -99,6 +99,7 @@
               pkgs.wf-recorder
               pkgs.wtype
               pkgs.bash
+              pkgs.dbus
               pkgs.xwayland
               pkgs.xdotool
               pkgs.xmodmap
@@ -113,6 +114,7 @@
             shellHook = ''
               export GST_PLUGIN_SYSTEM_PATH_1_0=${pkgs.framewisp.capturePlugins}
               export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.captionFonts}
+              export FRAMEWISP_ATSPI_REGISTRY=${pkgs.framewisp.atspiRegistry}
               export QML_IMPORT_PATH=${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
               export QT_PLUGIN_PATH=${pkgs.qt6.qtbase}/lib/qt-6/plugins
               runHook venvShellHook
