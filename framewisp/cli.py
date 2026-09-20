@@ -5,6 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import log_input
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
@@ -88,6 +89,20 @@ def main() -> None:
         type=seconds,
         default=2.0,
         help="query budget, >0 to 10 seconds (default: 2)",
+    )
+
+    batch = commands.add_parser(
+        "batch",
+        help="run ordered headless inputs and optional capture from JSON",
+        description="Validate all inputs, execute without interleaving, and print JSON results. "
+        "Stop at the first failure; completed actions cannot be rolled back. "
+        "Use interval 0 for unpaced typing. Capture is not an app acknowledgement.",
+    )
+    batch.add_argument(
+        "--file",
+        type=Path,
+        required=True,
+        help="JSON file with actions and optional capture",
     )
 
     commands.add_parser(
@@ -253,6 +268,15 @@ def main() -> None:
             )
         except ValueError as error:
             parser.error(str(error))
+    if args.action == "batch":
+        try:
+            with args.file.open("rb") as source:
+                content = source.read(MAX_REQUEST_BYTES + 1)
+            if len(content) > MAX_REQUEST_BYTES:
+                raise ValueError("Batch file exceeds the 1 MiB limit.")
+            args.batch = Batch.parse(json.loads(content), directory=Path.cwd())
+        except (OSError, ValueError, TypeError, OverflowError, RecursionError) as error:
+            parser.error(f"Invalid batch: {error}")
     if args.action in {"click", "drag"} and len(set(args.modifier)) != len(
         args.modifier
     ):
@@ -299,6 +323,11 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
         observation = inspect_session(session, args.query)
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         result = 0 if observation["status"] == "ok" else 1
+    elif args.action == "batch":
+        if attached:
+            raise SessionError("batch supports headless sessions only.")
+        batch: Batch = args.batch
+        result = session_command(session, "batch", parameters=batch.parameters())
     elif args.action == "attach":
         # Desktop portal imports are only needed by the foreground attach owner.
         from framewisp.attach import attach_session

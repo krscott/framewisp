@@ -141,6 +141,7 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
 | `stop` | Stop the headless session and wait for cleanup and recording finalization. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
+| `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
 | `click [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
@@ -316,6 +317,49 @@ for a later screenshot or click. Disconnecting an input CLI cancels its queued
 or running action and releases held keys/buttons before the next action. Status
 and stop remain available during paced input. Connection failures stop the session
 without replaying input; restart the session before trying again.
+
+## Batch known actions
+
+Save an ordered input sequence and optional final capture as JSON:
+
+```json
+{
+  "actions": [
+    {"action": "click", "x": 120, "y": 100},
+    {"action": "type", "text": "HelloGUI", "interval": 0},
+    {"action": "key", "chord": "Return"}
+  ],
+  "capture": {"path": "/tmp/result.png"}
+}
+```
+
+```sh
+framewisp /tmp/framewisp-demo batch --file check.json
+```
+
+The headless runner validates the complete sequence, then executes it without
+interleaving other clients' input, including during capture. Defaults match the
+individual commands. `interval: 0` removes deliberate typing pauses; explicit
+pacing remains available. An optional capture `delay` waits before the screenshot.
+Relative capture paths use the CLI's working directory. Use a new filename in an
+existing directory. The PNG appears only after successful capture.
+
+The CLI prints structured results, timing, completed-action count, and artifact
+paths. On runtime failure it exits with status 1 and reports the zero-based
+`failed_index` and `failed_phase`. Capture failure has a null failed index.
+Execution stops at that point; completed inputs cannot be rolled back, and even
+the failed action may have sent partial input. Never replay a failed batch without
+inspecting the app first. Disconnecting cancels queued or remaining work and
+releases held input. A missing reply leaves completion uncertain; consult the app
+and per-action input log. Capture does not prove the app has finished processing.
+
+Batches require 1 to 256 inputs, at most 16,384 typed characters and 10,000 scroll
+steps, and at most 300 seconds of requested pacing. File and wire request sizes
+are limited to 1 MiB each. Supported actions are `move`, `click`, `drag`, `scroll`,
+`type`, and `key`; capture is separate. No attached desktops, loops, lifecycle
+commands, or assertions. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
+for the schema and error handling, and [batch measurements](docs/batch-latency.md)
+for complete CLI timings with app acknowledgements.
 
 ## Pointer gestures with modifiers
 

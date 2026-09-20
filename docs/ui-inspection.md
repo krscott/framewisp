@@ -52,7 +52,8 @@ failure, SIGINT, SIGTERM, and recording tests also exercise the new bus lifetime
 
 The reproducible script is [benchmark_inspection.py](benchmark_inspection.py).
 It performs one warm-up per case, then 40 sequential samples against the same
-running GTK demo after the review fixes. These are shared-host measurements;
+running GTK demo with the inspection implementation at `03efe67`, before
+integrating the batch command from #61. These are shared-host measurements;
 the end of the regression run and package checks overlapped part of sampling. Setup types `HelloGUI` and applies it before timing. A button
 query discovers the Apply control, a label query reads `Applied: HelloGUI`, and
 a screenshot contains both. Complete CLI timings include Python/Gio startup,

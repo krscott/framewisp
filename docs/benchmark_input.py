@@ -90,6 +90,50 @@ def main() -> None:
                             run(session, *arguments)
                             values.append(time.perf_counter() - start)
                         samples[name] = values
+                    plan = Path(temporary) / "batch.json"
+                    for name in ("sequence_separate", "sequence_batch"):
+                        values = []
+                        for index in range(args.samples + 1):
+                            run(session, "click", "700", "513")
+                            offset = app_log.stat().st_size
+                            capture = Path(temporary) / f"{name}-{index}.png"
+                            plan.write_text(
+                                json.dumps(
+                                    {
+                                        "actions": [
+                                            {"action": "click", "x": 120, "y": 100},
+                                            {
+                                                "action": "type",
+                                                "text": "HelloGUI",
+                                                "interval": 0,
+                                            },
+                                            {"action": "key", "chord": "Return"},
+                                        ],
+                                        "capture": {"path": str(capture)},
+                                    }
+                                )
+                            )
+                            start = time.perf_counter()
+                            if name == "sequence_batch":
+                                run(session, "batch", "--file", str(plan))
+                            else:
+                                run(session, "click", "120", "100")
+                                run(session, "type", "--interval", "0", "HelloGUI")
+                                run(session, "key", "Return")
+                                run(session, "screenshot", str(capture))
+                            deadline = time.monotonic() + 2
+                            while (
+                                b"Entered: HelloGUI\n"
+                                not in app_log.read_bytes()[offset:]
+                            ):
+                                if time.monotonic() >= deadline:
+                                    raise RuntimeError(
+                                        "Demo did not acknowledge the sequence"
+                                    )
+                                time.sleep(0.005)
+                            if index:
+                                values.append(time.perf_counter() - start)
+                        samples[name] = values
                 finally:
                     runner.terminate()
                     runner.wait(timeout=20)

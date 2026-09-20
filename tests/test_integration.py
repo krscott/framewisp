@@ -1742,3 +1742,404 @@ def test_inspection_private_buses_and_unsupported_apps(
         if runner.poll() is None:
             runner.terminate()
         runner.wait(timeout=20)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "ready.png"))
+    plan = tmp_path / "batch.json"
+    capture = tmp_path / "result.png"
+    actions = [
+        {"action": "click", "x": 120, "y": 100},
+        {"action": "type", "text": "HelloGUI é中", "interval": 0},
+        {"action": "key", "chord": "Return"},
+    ]
+    plan.write_text(json.dumps({"actions": actions, "capture": {"path": str(capture)}}))
+    result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    assert result["status"] == "completed"
+    assert result["completed_actions"] == 3
+    assert result["failed_index"] is None
+    assert result["failed_phase"] is None
+    assert result["artifacts"] == [str(capture)]
+    assert result["duration_seconds"] >= sum(
+        item["duration_seconds"] for item in result["results"]
+    )
+    assert result["capture_seconds"] > 0
+    with Image.open(capture) as image:
+        assert image.size == (1280, 720)
+    wait_until(
+        lambda: "Entered: HelloGUI é中\n" in (demo.directory / "app.log").read_text()
+    )
+    logged = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert [(event["action"], event["event"]) for event in logged] == [
+        (name, phase) for name in ("click", "type", "key") for phase in ("start", "end")
+    ]
+    assert all(event["returncode"] == 0 for event in logged if event["event"] == "end")
+    assert all(a["time"] <= b["time"] for a, b in zip(logged, logged[1:]))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> None:
+    before = (demo.directory / "inputs.jsonl").read_text()
+    invalid: list[dict[str, object]] = [
+        {
+            "actions": [
+                {"action": "key", "chord": "a"},
+                {"action": "key", "chord": "bad"},
+            ]
+        },
+        {
+            "actions": [{"action": "key", "chord": "a"}],
+            "capture": {"path": str(demo.directory / "session.json")},
+        },
+        {
+            "actions": [{"action": "key", "chord": "a"}],
+            "capture": {"path": str(demo.directory / "missing" / "image.png")},
+        },
+    ]
+    for parameters in invalid:
+        with input_request(demo, "batch", parameters) as connection:
+            assert json.loads(connection.recv(4096))["error"] is not None
+    assert (demo.directory / "inputs.jsonl").read_text() == before
+    cli(demo.directory, "key", "a")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_no_interleaving_through_final_capture(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    cli(demo.directory, "click", "120", "100")
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [
+                {"action": "type", "text": "ab", "interval": 0.3},
+                {"action": "key", "chord": "Return"},
+            ],
+            "capture": {"path": str(tmp_path / "batch.png"), "delay": 0.3},
+        },
+    ) as first:
+        wait_until(
+            lambda: '"action": "type"' in (demo.directory / "inputs.jsonl").read_text()
+        )
+        with input_request(
+            demo, "batch", {"actions": [{"action": "type", "text": "c", "interval": 0}]}
+        ) as second:
+            assert (
+                json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+            )
+            assert json.loads(first.recv(8192))["error"] is None
+            assert json.loads(second.recv(8192))["error"] is None
+    logged = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert [event["action"] for event in logged if event["event"] == "start"] == [
+        "click",
+        "type",
+        "key",
+        "type",
+    ]
+    assert logged[-2]["time"] - logged[-3]["time"] >= 0.3
+    wait_until(lambda: "Entered: ab\n" in (demo.directory / "app.log").read_text())
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["x11"], indirect=True)
+@pytest.mark.parametrize(
+    "existing,first,second,failed", [(0, 129, 0, 1), (0, 64, 65, 2), (1, 64, 64, 2)]
+)
+def test_batch_checks_x11_capacity_before_input(
+    demo: Demo, tmp_path: Path, existing: int, first: int, second: int, failed: int
+) -> None:
+    if existing:
+        cli(demo.directory, "type", "é", "--interval", "0")
+    before = (demo.directory / "inputs.jsonl").read_text()
+    plan = tmp_path / "batch.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {"action": "key", "chord": "a"},
+                    {
+                        "action": "type",
+                        "text": "".join(chr(0x4E00 + i) for i in range(first)),
+                        "interval": 0,
+                    },
+                    {
+                        "action": "type",
+                        "text": "".join(chr(0x4F00 + i) for i in range(second)),
+                        "interval": 0,
+                    },
+                    {"action": "key", "chord": "z"},
+                ],
+                "capture": {"path": str(tmp_path / "never.png")},
+            }
+        )
+    )
+    response = subprocess.run(
+        ["framewisp", str(demo.directory), "batch", "--file", str(plan)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert response.returncode == 1
+    result = json.loads(response.stdout)
+    assert result["status"] == "failed"
+    assert result["completed_actions"] == 0
+    assert result["failed_index"] == failed
+    assert result["failed_phase"] == "validation"
+    assert result["results"] == []
+    assert (demo.directory / "inputs.jsonl").read_text() == before
+    assert "per session" in result["error"]
+    assert result["artifacts"] == []
+    assert not (tmp_path / "never.png").exists()
+    cli(demo.directory, "key", "b")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_capture_failure_keeps_completed_results(
+    demo: Demo, tmp_path: Path
+) -> None:
+    parent = tmp_path / "removed"
+    parent.mkdir()
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [{"action": "key", "chord": "a"}],
+            "capture": {"path": str(parent / "image.png"), "delay": 0.5},
+        },
+    ) as connection:
+        wait_until(
+            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+        )
+        parent.rmdir()
+        response = json.loads(connection.recv(8192))
+    result = response["data"]
+    assert response["error"] is not None
+    assert result["completed_actions"] == 1
+    assert result["failed_index"] is None
+    assert result["failed_phase"] == "capture"
+    assert result["artifacts"] == []
+    cli(demo.directory, "key", "b")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_batch_disconnect_releases_gesture_and_skips_tail(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [
+                {
+                    "action": "drag",
+                    "x1": 100,
+                    "y1": 100,
+                    "x2": 500,
+                    "y2": 300,
+                    "duration": 30,
+                    "modifier": ["ctrl", "shift"],
+                },
+                {"action": "key", "chord": "z"},
+            ],
+            "capture": {"path": str(tmp_path / "never.png")},
+        },
+    ) as batch:
+        wait_until(
+            lambda: any(event["event"] == "press" for event in input_events(demo))
+        )
+        batch.close()
+        cli(demo.directory, "click", "600", "100", "--button", "right")
+    wait_until(
+        lambda: len([e for e in input_events(demo) if e["event"] == "release"]) == 2
+    )
+    presses = [e for e in input_events(demo) if e["event"] == "press"]
+    assert not presses[1]["ctrl"] and not presses[1]["shift"]
+    assert not any(e.get("key") == "z" for e in input_events(demo))
+    assert not (tmp_path / "never.png").exists()
+    logged = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert [e["action"] for e in logged if e["event"] == "start"] == ["drag", "click"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_stop_cancels_batch_capture_delay(demo: Demo, tmp_path: Path) -> None:
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [{"action": "key", "chord": "a"}],
+            "capture": {"path": str(tmp_path / "never.png"), "delay": 30},
+        },
+    ) as connection:
+        wait_until(
+            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+        )
+        start = time.monotonic()
+        cli(demo.directory, "stop")
+        assert time.monotonic() - start < 3
+        result = json.loads(connection.recv(8192))["data"]
+    assert result["completed_actions"] == 1
+    assert result["failed_phase"] == "capture"
+    assert "cancelled" in result["error"]
+    assert not (tmp_path / "never.png").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
+    with input_request(
+        demo, "batch", {"actions": [{"action": "type", "text": "ab", "interval": 30}]}
+    ) as first:
+        wait_until(
+            lambda: '"event": "start"' in (demo.directory / "inputs.jsonl").read_text()
+        )
+        with input_request(
+            demo, "batch", {"actions": [{"action": "key", "chord": "z"}]}
+        ) as queued:
+            cli(demo.directory, "status")
+            queued.close()
+        first.close()
+        cli(demo.directory, "key", "c")
+    logged = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert [
+        event["parameters"].get("chord")
+        for event in logged
+        if event["event"] == "start"
+    ] == [None, "c"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_disconnect_during_capture(demo: Demo, tmp_path: Path) -> None:
+    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
+    state = json.loads((demo.directory / "session.json").read_text())
+    sway_pid = state["processes"]["sway"]
+    os.kill(sway_pid, signal.SIGSTOP)
+    try:
+        with input_request(
+            demo,
+            "batch",
+            {
+                "actions": [{"action": "type", "text": "", "interval": 0}],
+                "capture": {"path": str(tmp_path / "cancelled.png")},
+            },
+        ) as connection:
+            wait_until(lambda: bool(list(tmp_path.glob(".framewisp-capture-*"))))
+            connection.close()
+            started = time.monotonic()
+            wait_until(lambda: not list(tmp_path.glob(".framewisp-capture-*")))
+            assert time.monotonic() - started < 2
+    finally:
+        os.kill(sway_pid, signal.SIGCONT)
+    assert not (tmp_path / "cancelled.png").exists()
+    cli(demo.directory, "key", "a")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_capture_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> None:
+    capture = tmp_path / "result.png"
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [{"action": "type", "text": "", "interval": 0}],
+            "capture": {"path": str(capture), "delay": 0.5},
+        },
+    ) as connection:
+        wait_until(
+            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+        )
+        capture.write_bytes(b"another client's artifact")
+        response = json.loads(connection.recv(8192))
+    assert response["data"]["failed_phase"] == "capture"
+    assert response["data"]["artifacts"] == []
+    assert capture.read_bytes() == b"another client's artifact"
+    assert not list(tmp_path.glob(".framewisp-capture-*"))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_lost_vnc_during_batch_reports_partial_result(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [
+                {"action": "key", "chord": "a"},
+                {
+                    "action": "drag",
+                    "x1": 100,
+                    "y1": 100,
+                    "x2": 500,
+                    "y2": 300,
+                    "duration": 30,
+                    "modifier": ["ctrl"],
+                },
+                {"action": "key", "chord": "z"},
+            ],
+            "capture": {"path": str(tmp_path / "never.png")},
+        },
+    ) as connection:
+        wait_until(
+            lambda: any(event["event"] == "press" for event in input_events(demo))
+        )
+        state = json.loads((demo.directory / "session.json").read_text())
+        os.kill(state["processes"]["wayvnc"], signal.SIGTERM)
+        demo.process.wait(timeout=5)
+        result = json.loads(connection.recv(8192))["data"]
+    assert result["completed_actions"] == 1
+    assert result["failed_index"] == 1
+    assert result["status"] == "failed"
+    assert not any(event.get("key") == "z" for event in input_events(demo))
+    assert not (tmp_path / "never.png").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    plan = tmp_path / "inspect-batch.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {"action": "click", "x": 120, "y": 100},
+                    {"action": "type", "text": "HelloBatch", "interval": 0},
+                    {"action": "click", "x": 120, "y": 170},
+                ]
+            }
+        )
+    )
+    batch = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    assert batch["status"] == "completed"
+    result = inspect(demo, "--role", "label", "--text", "Applied: HelloBatch")
+    assert result["status"] == "ok", result
+    assert result["match_count"] == 1
