@@ -344,6 +344,9 @@ and a `captions` boolean. Replies carry an `error` string or null and optional
 `data`. The runner checks the session directory against its own before acting,
 so copied metadata cannot control another session. It handles requests serially
 in its monitoring loop. It replies only after capture is ready or finalization has finished.
+Metadata includes `control_protocol: 1`. The CLI rejects an absent or unknown
+version before connecting; a legacy recording-only runner would otherwise
+interpret new status or stop requests as recording-stop requests.
 Validation/startup errors are returned to the caller without stopping the app.
 Unexpected recorder exit or finalization failure still fails the session.
 

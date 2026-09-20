@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -67,6 +68,26 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "--agent-skill must be used alone" in result.stderr
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("action", ["status", "stop", "record-stop"])
+def test_control_commands_reject_legacy_session_before_connecting(
+    tmp_path: Path, action: str
+) -> None:
+    # A legacy runner treats any request with destination=null as record-stop.
+    # No runtime path is needed: rejection must precede even resolving its socket.
+    (tmp_path / "session.json").write_text(json.dumps({"processes": {"recorder": 123}}))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), action],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "older or unsupported control protocol" in result.stderr
+    assert "start a new session" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 @pytest.mark.parametrize("delay", ["-1", "nan", "inf", "nope"])

@@ -592,6 +592,9 @@ last recording summary, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
 These commands manage headless sessions; use `framewisp --detach` for desktop
 attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
+After upgrading from a recording-only control protocol, stop the old runner with
+Ctrl+C or SIGTERM and start a fresh session. New control commands reject that old
+protocol before sending a request.
 
 The session directory contains `sway.log`, `wayvnc.log`, and `app.log`, plus
 `recorder.log` when recording. During a

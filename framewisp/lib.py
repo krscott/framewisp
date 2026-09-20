@@ -433,6 +433,12 @@ def session_command(
     captions: bool = True,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
+    if state.get("control_protocol") != 1:
+        raise SessionError(
+            "This session uses an older or unsupported control protocol. "
+            "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
+            "with this version of framewisp."
+        )
     request = {
         "action": action,
         "session": str(session),
@@ -646,6 +652,7 @@ def run_session(
                 temporary.write_text(
                     json.dumps(
                         {
+                            "control_protocol": 1,
                             "runtime_directory": directory,
                             "wayland_display": display,
                             "x11_display": x11_display,

@@ -296,12 +296,35 @@ def test_status_and_stop_reject_copied_session_metadata(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_stop_reports_recording_finalization_failure(demo: Demo) -> None:
+    cli(demo.directory, "type", "caption this")
+    (demo.directory / "captions.log").mkdir()
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "stop"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert "captions.log" in result.stderr
+    assert result.stdout == ""
+    assert demo.process.wait(timeout=5) == 1
+    assert not demo.runtime.exists()
+    assert not (demo.directory / "session.json").exists()
+    assert demo.recording is not None
+    recording_frames(demo.recording)
+
+
+@pytest.mark.integration
 def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
     session = tmp_path / "disconnected"
     session.mkdir()
     (session / "session.json").write_text(
         json.dumps(
             {
+                "control_protocol": 1,
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
             }
