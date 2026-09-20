@@ -49,7 +49,8 @@ Setuptools includes that file in package data. The flag takes no session or othe
 arguments; normal CLI help lists it. A test runs this path without site packages
 or external commands. The Nix package check compares its output in an empty
 environment against the source file. The skill covers the public Nix URL fallback,
-basic GUI workflows, user-started attachment, and permission before filing issues.
+all commands and options, GUI workflows, user-started attachment, and permission
+before filing issues.
 
 1. Create or reuse the requested session directory. Refuse an existing
    `session.json`; concurrent runs and stale-session recovery are unsupported.

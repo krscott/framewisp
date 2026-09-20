@@ -79,7 +79,7 @@ needed.
 
 ## Agent instructions
 
-Print a short agent skill with launch, screenshot, input, and recording examples:
+Print an agent skill with every command's syntax, options, and workflow examples:
 
 ```sh
 framewisp --agent-skill
