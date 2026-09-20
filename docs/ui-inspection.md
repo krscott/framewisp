@@ -1,8 +1,8 @@
 # UI inspection prototype
 
 Issue [#56](https://github.com/krscott/framewisp/issues/56) adds read-only
-`inspect --json` observations. It does not add selectors for input, assertions,
-or conditional waits. [DESIGN.md](../DESIGN.md#structured-ui-inspection) defines
+`inspect --json` observations. Inspection supplies observations for [conditional batch checks](conditional-checks.md).
+It does not add selectors for input. [DESIGN.md](../DESIGN.md#structured-ui-inspection) defines
 the response and its bounds.
 
 ## Toolkit coverage

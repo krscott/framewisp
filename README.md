@@ -357,7 +357,9 @@ Batches require 1 to 256 inputs, at most 16,384 typed characters and 10,000 scro
 steps, and at most 300 seconds of requested pacing. File and wire request sizes
 are limited to 1 MiB each. Supported actions are `move`, `click`, `drag`, `scroll`,
 `type`, and `key`; capture is separate. No attached desktops, loops, lifecycle
-commands, or assertions. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
+commands. Checks support known accessible text, name, value, and checked/enabled
+state. See [conditional checks](docs/conditional-checks.md) for waits, assertions,
+transition baselines, and failure screenshots. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
 for the schema and error handling, and [batch measurements](docs/batch-latency.md)
 for complete CLI timings with app acknowledgements.
 

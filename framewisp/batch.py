@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import cast
 
 from framewisp.actions import InputAction
+from framewisp.checks import Check
 
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_ACTIONS = 256
@@ -31,23 +32,26 @@ class Capture:
 
 @dataclass(frozen=True)
 class Batch:
-    actions: tuple[InputAction, ...]
+    actions: tuple[InputAction | Check, ...]
     capture: Capture | None
+    failure_capture: Capture | None = None
 
     @staticmethod
     def parse(raw: object, *, directory: Path | None = None) -> "Batch":
         if not isinstance(raw, dict):
             raise ValueError("Batch must be an object.")
         data = cast(dict[str, object], raw)
-        if data.keys() - {"actions", "capture"}:
-            raise ValueError("Batch supports only actions and capture.")
+        if data.keys() - {"actions", "capture", "failure_capture"}:
+            raise ValueError(
+                "Batch supports only actions, capture, and failure_capture."
+            )
         entries = data.get("actions")
         if (
             not isinstance(entries, list)
             or not 1 <= len(cast(list[object], entries)) <= MAX_ACTIONS
         ):
             raise ValueError(f"actions must contain 1 to {MAX_ACTIONS} inputs.")
-        actions: list[InputAction] = []
+        actions: list[InputAction | Check] = []
         pacing = 0.0
         characters = 0
         scroll_steps = 0
@@ -57,6 +61,26 @@ class Batch:
                     raise ValueError("Expected an action object.")
                 item = cast(dict[str, object], entry)
                 name = item.get("action")
+                if name in ("assert", "wait", "baseline"):
+                    assert isinstance(name, str)
+                    check = Check.parse(name, item)
+                    if check.after is not None:
+                        if check.after >= index:
+                            raise ValueError(
+                                "after must reference an earlier baseline."
+                            )
+                        baseline = actions[check.after]
+                        if (
+                            not isinstance(baseline, Check)
+                            or baseline.action != "baseline"
+                            or baseline.condition != check.condition
+                        ):
+                            raise ValueError(
+                                "after must reference a baseline with the same condition."
+                            )
+                    actions.append(check)
+                    pacing += check.timeout
+                    continue
                 if not isinstance(name, str) or name not in DEFAULTS:
                     raise ValueError("Unsupported batch action.")
                 parameters = DEFAULTS[name] | {
@@ -76,9 +100,11 @@ class Batch:
                     scroll_steps += cast(int, parameters["steps"])
             except (ValueError, TypeError, OverflowError) as error:
                 raise ValueError(f"actions[{index}]: {error}") from None
-        capture = None
-        if "capture" in data:
-            raw_capture = data["capture"]
+        captures: dict[str, Capture] = {}
+        for kind in ("capture", "failure_capture"):
+            if kind not in data:
+                continue
+            raw_capture = data[kind]
             if not isinstance(raw_capture, dict):
                 raise ValueError(
                     "capture must be an object with path and optional delay."
@@ -103,7 +129,7 @@ class Batch:
             ):
                 raise ValueError("capture.delay must be finite and nonnegative.")
             pacing += delay
-            capture = Capture(destination, delay)
+            captures[kind] = Capture(destination, delay)
         if characters > MAX_TEXT or scroll_steps > MAX_SCROLL_STEPS:
             raise ValueError(
                 f"Batch exceeds {MAX_TEXT} text characters or {MAX_SCROLL_STEPS} scroll steps."
@@ -112,7 +138,9 @@ class Batch:
             raise ValueError(
                 f"Batch exceeds {MAX_PACING_SECONDS} seconds of requested pacing."
             )
-        return Batch(tuple(actions), capture)
+        return Batch(
+            tuple(actions), captures.get("capture"), captures.get("failure_capture")
+        )
 
     def parameters(self) -> dict[str, object]:
         result: dict[str, object] = {
@@ -121,9 +149,10 @@ class Batch:
                 for action in self.actions
             ]
         }
-        if self.capture is not None:
-            result["capture"] = {
-                "path": str(self.capture.path),
-                "delay": self.capture.delay,
-            }
+        for name, capture in (
+            ("capture", self.capture),
+            ("failure_capture", self.failure_capture),
+        ):
+            if capture is not None:
+                result[name] = {"path": str(capture.path), "delay": capture.delay}
         return result

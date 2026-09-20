@@ -117,7 +117,7 @@ controls work on Wayland and Xwayland. Qt Quick buttons work, but the tested
 separate popup menu does not appear in its accessible tree. KolourPaint Flatpak
 menus expose names/state, but its canvas still needs screenshots. Keep images
 for appearance, layout, custom drawing, and omitted controls. Inspection is
-unavailable on attached desktops and does not supply semantic clicks or waits.
+unavailable on attached desktops and does not supply semantic clicks.
 
 ## Batch known actions
 
@@ -144,12 +144,11 @@ individual commands. Set `interval: 0` for unpaced checks; omit it for the usual
 
 The whole request is validated before input. Unknown fields are errors. Limits
 per batch are 256 actions, 16,384 typed characters, 10,000 scroll steps, and 300
-seconds of requested typing/drag/capture pacing. The file and serialized request
+seconds of requested typing/drag/capture pacing and check deadlines. The file and serialized request
 must each fit in 1 MiB. At least one action is required. Capture is optional;
 its delay defaults to zero. Relative capture paths use the CLI's working directory.
 Use a new PNG filename in an existing directory; session files and existing files
-are rejected. Recording, lifecycle commands, loops, and assertions cannot go inside
-a batch. Attached desktops do not support batches.
+are rejected. Recording, lifecycle commands, and loops cannot go inside a batch. Attached desktops do not support batches.
 
 The runner serializes the whole batch, including capture, with other input jobs.
 JSON on stdout includes `status`, `results` (zero-based index, action, status,
@@ -176,6 +175,51 @@ Before an X11 batch sends input, the worker checks all its Unicode characters
 against the session's 128-character mapping limit, including mappings allocated
 by earlier queued jobs. A capacity failure returns no action results, zero completed
 actions, `failed_phase: "validation"`, and the index that exceeds the limit.
+
+## Verify known outcomes
+
+When the expected accessible result is known, include a `wait` after input instead
+of choosing a fixed sleep and interpreting a screenshot. Use `assert` for a single
+observation. Both require an explicit timeout greater than 0 and at most 10 seconds:
+
+```json
+{
+  "actions": [
+    {"action": "type", "text": "HelloGUI", "interval": 0},
+    {"action": "key", "chord": "Return"},
+    {"action": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
+  ],
+  "failure_capture": {"path": "/tmp/failed.png"}
+}
+```
+
+Conditions select by role and/or name using inspection's matching rules. Exactly
+one match in a complete observation is required. Duplicate matches fail; narrow
+the selector rather than selecting the first. Text/name equality is exact and
+case-sensitive. `value` compares a finite number. `checked` compares a boolean on
+a checkable control; indeterminate is unknown. `enabled` compares a boolean using
+either AT-SPI sensitive or enabled. This rule covers the demonstrated GTK/Qt
+controls, not every toolkit. Missing or stale objects, unsupported apps, partial
+observations, and timeouts cannot satisfy a check. There is no absence assertion.
+Wait retries incomplete/missing observations within its deadline; assert does not.
+Queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
+
+A state check may pass immediately on an existing value. To require a transition,
+put `{"action": "baseline", "timeout": 2, "condition": ...}` before the input,
+then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
+Use the identical condition in both. The baseline must read a unique nonmatching
+value, or the batch stops before input. The wait resolves the selector afresh,
+allowing a replacement control. Snapshot IDs are diagnostic, not reusable handles.
+This proves observed nonmatching then matching state, not input causation.
+
+Read `verified` as well as `status`. True means all requested checks passed; null
+means no wait/assert verified app state. Failure stops the batch and sets verified
+to false. Each check returns its condition, last observation, observation count,
+and duration. `failed_phase: "check"` identifies failed checks. Optional
+`failure_capture` uses capture's path/delay schema, runs only on failure, and is
+skipped on cancellation. Its errors appear separately in `failure_capture_error`.
+Checks retain per-input results and do not create captions. Keep screenshots for
+visual-only state and accessibility gaps.
 
 ## Recording
 

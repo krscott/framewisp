@@ -62,6 +62,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-record": True,
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
+            "x11-waits": "waits",
         }[mode]
     recording = (
         tmp_path / "session.mp4"
@@ -80,6 +81,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--width", str(width), "--height", str(height)])
     probes = {
         "probe": "input_probe.py",
+        "waits": "wait_probe.py",
         "clipboard": "input_probe.py",
         "scroll": "scroll_probe.py",
         "large": "input_probe.py",
@@ -151,7 +153,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert b"WAYLAND_DISPLAY=host-display-do-not-use" not in app_env
             assert b"XAUTHORITY=/dev/null" in app_env
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
-            if mode not in {"probe", "clipboard", "qt"}:
+            if mode not in {"probe", "clipboard", "qt", "waits"}:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
                 )
@@ -2143,3 +2145,162 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
     result = inspect(demo, "--role", "label", "--text", "Applied: HelloBatch")
     assert result["status"] == "ok", result
     assert result["match_count"] == 1
+
+
+def wait_condition(text: str) -> dict[str, object]:
+    return {"role": "label", "name": "Result", "field": "text", "equals": text}
+
+
+def check_step(action: str, text: str, timeout: float = 5) -> dict[str, object]:
+    return {"action": action, "condition": wait_condition(text), "timeout": timeout}
+
+
+def checked_batch(
+    demo: Demo, tmp_path: Path, actions: list[dict[str, object]], **options: object
+) -> dict[str, Any]:
+    path = tmp_path / "checks.json"
+    path.write_text(json.dumps({"actions": actions, **options}))
+    response = subprocess.run(
+        ["framewisp", str(demo.directory), "batch", "--file", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert response.returncode in (0, 1), response.stderr
+    data: dict[str, Any] = json.loads(response.stdout)
+    assert (response.returncode == 0) == (data["status"] == "completed"), data
+    return data
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["waits", "x11-waits"], indirect=True)
+@pytest.mark.parametrize("text", ["Done", "replace"])
+def test_checks_submit_delayed_and_replaced_widgets(
+    demo: Demo, tmp_path: Path, text: str
+) -> None:
+    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    data = checked_batch(
+        demo,
+        tmp_path,
+        [
+            check_step("wait", "Waiting"),
+            check_step("baseline", text),
+            {"action": "type", "text": text, "interval": 0},
+            {"action": "key", "chord": "Return"},
+            check_step("wait", text) | {"after": 1},
+            check_step("assert", text),
+        ],
+    )
+    assert data["verified"] is True, data
+    assert data["completed_actions"] == 6
+    assert data["results"][0]["observations"] == 1
+    assert data["results"][4]["observations"] > 1
+    baseline = data["results"][1]["observation"]["snapshot_id"]
+    assert data["results"][4]["baseline_snapshot_id"] == baseline
+    assert data["results"][4]["observation"]["snapshot_id"] != baseline
+    assert data["results"][5]["observation"]["matches"][0]["text"] == text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["waits"], indirect=True)
+@pytest.mark.parametrize(
+    "action,text,timeout",
+    [("wait", "Never", 0.3), ("assert", "Never", 2), ("baseline", "Waiting", 2)],
+)
+def test_failed_checks_stop_and_capture(
+    demo: Demo, tmp_path: Path, action: str, text: str, timeout: float
+) -> None:
+    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    capture = tmp_path / "failed.png"
+    data = checked_batch(
+        demo,
+        tmp_path,
+        [
+            check_step("wait", "Waiting"),
+            check_step(action, text, timeout),
+            {"action": "type", "text": "should-not-run"},
+        ],
+        failure_capture={"path": str(capture)},
+    )
+    assert data["verified"] is False
+    assert data["completed_actions"] == 1
+    assert data["failed_index"] == 1
+    assert data["failed_phase"] == "check"
+    assert data["results"][1]["condition"] == wait_condition(text)
+    observation = data["results"][1]["observation"]
+    if observation["status"] == "ok":
+        assert observation["matches"][0]["text"] == "Waiting"
+    else:
+        assert observation["status"] == "timeout"
+    assert data["results"][1]["duration_seconds"] < 3
+    assert data["artifacts"] == [str(capture)]
+    with Image.open(capture) as image:
+        assert image.size == (1280, 720)
+    assert (demo.directory / "inputs.jsonl").read_text() == ""
+    cli(demo.directory, "key", "a")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["waits"], indirect=True)
+def test_wait_duplicate_matches_fail(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    cli(demo.directory, "type", "--interval", "0", "duplicate")
+    cli(demo.directory, "key", "Return")
+    wait_until(
+        lambda: inspect(demo, "--role", "label", "--name", "Result")["match_count"] == 2
+    )
+    data = checked_batch(demo, tmp_path, [check_step("wait", "duplicate")])
+    assert data["verified"] is False
+    assert "ambiguous" in data["error"]
+    assert data["results"][-1]["observation"]["match_count"] == 2
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["waits"], indirect=True)
+@pytest.mark.parametrize("ending", ["disconnect", "stop", "exit"])
+def test_wait_cancellation_and_app_exit(
+    demo: Demo, tmp_path: Path, ending: str
+) -> None:
+    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    state = json.loads((demo.directory / "session.json").read_text())
+    app = state["processes"]["app"]
+    os.kill(app, signal.SIGSTOP)
+    try:
+        with input_request(
+            demo,
+            "batch",
+            {
+                "actions": [
+                    check_step("wait", "Never", 10),
+                    {"action": "key", "chord": "z"},
+                ],
+                "failure_capture": {"path": str(tmp_path / "never.png")},
+            },
+        ) as connection:
+            time.sleep(0.15)
+            assert (
+                json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+            )
+            started = time.monotonic()
+            if ending == "disconnect":
+                connection.close()
+                # The following input must leave the queue even while AT-SPI is blocked.
+                cli(demo.directory, "key", "a")
+            elif ending == "stop":
+                os.kill(app, signal.SIGCONT)
+                cli(demo.directory, "stop")
+            else:
+                os.kill(app, signal.SIGKILL)
+                demo.process.wait(timeout=3)
+            assert time.monotonic() - started < 3
+            if ending != "disconnect":
+                with connection.makefile("r") as response:
+                    data = json.loads(response.readline())["data"]
+                assert data["verified"] is False
+                assert data["failed_index"] == 0
+                assert "cancelled" in data["error"]
+    finally:
+        if Path(f"/proc/{app}").exists():
+            os.kill(app, signal.SIGCONT)
+    assert not (tmp_path / "never.png").exists()
+    assert '"chord": "z"' not in (demo.directory / "inputs.jsonl").read_text()

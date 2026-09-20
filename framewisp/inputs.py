@@ -16,6 +16,7 @@ from typing import Protocol, cast
 from framewisp.actions import InputAction
 from framewisp.batch import Batch
 from framewisp.captions import log_input
+from framewisp.checks import Check, perform_check
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
@@ -99,6 +100,8 @@ class InputWorker:
                 if data is not None:
                     data["status"] = "completed" if error is None else "failed"
                     data["error"] = error
+                    if error is not None:
+                        data["verified"] = False
                 reply(connection, error=error, data=data)
 
     def cancelled(self, connection: socket.socket) -> bool:
@@ -134,6 +137,8 @@ class InputWorker:
             failed_index=None,
             failed_phase=None,
             capture_seconds=None,
+            verified=None,
+            failure_capture_error=None,
         )
         try:
             self.wait(connection)
@@ -159,15 +164,36 @@ class InputWorker:
                     "error": None,
                 }
                 try:
-                    self.perform(connection, action)
+                    if isinstance(action, Check):
+                        if action.after is not None:
+                            result["baseline_snapshot_id"] = results[action.after][
+                                "baseline_snapshot_id"
+                            ]
+                        perform_check(
+                            self.session,
+                            action,
+                            result,
+                            cancelled=lambda: self.cancelled(connection),
+                            wait=lambda seconds: self.wait(connection, seconds),
+                        )
+                    else:
+                        self.perform(connection, action)
                 except Exception as error:
                     result.update(status="failed", error=str(error))
-                    data.update(failed_index=index, failed_phase="action")
+                    data.update(
+                        failed_index=index,
+                        failed_phase="check" if isinstance(action, Check) else "action",
+                    )
                     raise
                 finally:
                     result["duration_seconds"] = time.monotonic() - action_started
                     results.append(result)
                 data["completed_actions"] = index + 1
+            if any(
+                isinstance(action, Check) and action.action != "baseline"
+                for action in batch.actions
+            ):
+                data["verified"] = True
             if batch.capture is not None:
                 capture_started = time.monotonic()
                 try:
@@ -179,6 +205,18 @@ class InputWorker:
                     raise
                 finally:
                     data["capture_seconds"] = time.monotonic() - capture_started
+        except (SessionError, InterruptedError):
+            data["verified"] = False
+            if batch.failure_capture is not None and not self.cancelled(connection):
+                try:
+                    self.wait(connection, batch.failure_capture.delay)
+                    self.capture(
+                        batch.failure_capture.path, lambda: self.cancelled(connection)
+                    )
+                    artifacts.append(str(batch.failure_capture.path))
+                except (SessionError, InterruptedError, OSError) as error:
+                    data["failure_capture_error"] = str(error)
+            raise
         finally:
             data["duration_seconds"] = time.monotonic() - started
 

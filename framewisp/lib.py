@@ -566,13 +566,15 @@ def handle_session_command(
                 input_action: InputAction | Batch
                 if action == "batch":
                     input_action = Batch.parse(command.get("parameters"))
-                    if input_action.capture is not None:
-                        if not input_action.capture.path.parent.is_dir():
+                    for capture in (input_action.capture, input_action.failure_capture):
+                        if capture is None:
+                            continue
+                        if not capture.path.parent.is_dir():
                             raise ValueError(
                                 "capture.path requires an existing parent directory."
                             )
                         path_error = recording_path_error(
-                            recordings.session, input_action.capture.path.resolve()
+                            recordings.session, capture.path.resolve()
                         )
                         if path_error is not None:
                             raise ValueError(
