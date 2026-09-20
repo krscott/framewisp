@@ -7,9 +7,10 @@ import math
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event, Timer
+from threading import Event, Thread, Timer
 from typing import cast
 
 from gi.repository import Gio, GLib
@@ -59,12 +60,26 @@ class Query:
 
 
 class Bus:
-    def __init__(self, address: str, timeout: float):
+    def __init__(
+        self, address: str, timeout: float, cancelled: Callable[[], bool] | None = None
+    ):
         self.deadline = time.monotonic() + timeout
         self.cancel = Gio.Cancellable()
         self.timer = Timer(timeout, self.cancel.cancel)
         self.timer.daemon = True
         self.timer.start()
+        self.finished = Event()
+        self.watcher: Thread | None = None
+        if cancelled is not None:
+
+            def watch() -> None:
+                while not self.finished.wait(0.02):
+                    if cancelled():
+                        self.cancel.cancel()
+                        return
+
+            self.watcher = Thread(target=watch, daemon=True)
+            self.watcher.start()
         try:
             self.connection = Gio.DBusConnection.new_for_address_sync(
                 address,
@@ -75,11 +90,17 @@ class Bus:
             )
             self.connection.set_exit_on_close(False)
         except BaseException:
-            self.timer.cancel()
+            self.finish()
             raise
 
-    def close(self) -> None:
+    def finish(self) -> None:
         self.timer.cancel()
+        self.finished.set()
+        if self.watcher is not None:
+            self.watcher.join()
+
+    def close(self) -> None:
+        self.finish()
         try:
             self.connection.close_sync(None)
         except GLib.Error as error:
@@ -138,7 +159,9 @@ def wait_for_registry(address: str, stop: Event) -> None:
         bus.close()
 
 
-def inspect_session(session: Path, query: Query) -> dict[str, object]:
+def inspect_session(
+    session: Path, query: Query, *, cancelled: Callable[[], bool] | None = None
+) -> dict[str, object]:
     state = json.loads((session / "session.json").read_text())
     if state.get("kind") == "attached":
         raise SessionError(
@@ -153,10 +176,12 @@ def inspect_session(session: Path, query: Query) -> dict[str, object]:
     expected = f"unix:path={Path(state['runtime_directory']) / 'accessibility.sock'}"
     if state.get("accessibility_bus") != expected:
         raise SessionError("Invalid private accessibility bus in session metadata")
-    return inspect_bus(expected, query)
+    return inspect_bus(expected, query, cancelled=cancelled)
 
 
-def inspect_bus(address: str, query: Query) -> dict[str, object]:
+def inspect_bus(
+    address: str, query: Query, *, cancelled: Callable[[], bool] | None = None
+) -> dict[str, object]:
     started = time.monotonic()
     snapshot = uuid.uuid4().hex
     matches: list[dict[str, object]] = []
@@ -173,7 +198,11 @@ def inspect_bus(address: str, query: Query) -> dict[str, object]:
         return value[:TEXT_LIMIT]
 
     try:
-        bus = Bus(address, query.timeout)
+        bus = (
+            Bus(address, query.timeout)
+            if cancelled is None
+            else Bus(address, query.timeout, cancelled)
+        )
         applications = cast(int, bus.prop(ROOT, ACCESSIBLE, "ChildCount"))
         # Queue parent/index pairs instead of fetching an unbounded GetChildren reply.
         pending = deque(

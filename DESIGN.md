@@ -262,14 +262,14 @@ initialization retain their separate 100 ms waits.
 ## Batched input
 
 `batch --file FILE` loads at most 1 MiB of JSON. `batch.py` parses an object with
-`actions` and optional `capture`. Each action is a flat object with an `action`
+`actions` and optional `capture` and `failure_capture`. Each action is a flat object with an `action`
 name and the same named parameters as its individual CLI command. Batch defaults
 match CLI defaults; modifier arrays use lowercase names. Shared `InputAction`
 validation lives in `actions.py`. Reject unknown fields, invalid types, unsupported
 inputs, more than 256 actions, more than 16,384 total text characters or 10,000
-scroll steps, and more than 300 seconds of requested typing/drag/capture pacing.
-At least one action is required. There are no loops, lifecycle operations, or
-conditional checks. Capture accepts a path and optional finite nonnegative delay.
+scroll steps, and more than 300 seconds of requested pacing and check deadlines.
+At least one action is required. There are no loops or lifecycle operations.
+Conditional checks are specified below. Capture accepts a path and optional finite nonnegative delay.
 The CLI resolves its path against its own working directory. The runner requires
 an absolute path with an existing parent directory and rejects existing
 destinations and reserved session paths.
@@ -610,3 +610,27 @@ Use screenshots to choose pointer targets when the window transform is unknown.
 
 The tested toolkit matrix, timings, reproducible benchmark, and decision about
 conditional waits are in [docs/ui-inspection.md](docs/ui-inspection.md).
+
+
+## Conditional checks
+
+`checks.py` defines conditions and `Check` steps alongside `InputAction` in a
+batch. Parsing validates all selectors, typed expected values, positive bounded
+deadlines, and backward baseline references before any input. The worker executes
+checks in sequence and retains the last observation in each result. Each query
+resolves the selector afresh; no accessible object handle survives an observation.
+Only a complete observation with exactly one readable match can verify state.
+A baseline must establish a nonmatching value before a transition wait can run.
+Replacement widgets are allowed under the same logical selector.
+
+`inspection.Bus` accepts a cancellation callback. A watcher checks it every 20 ms
+and cancels the Gio cancellable, interrupting connection setup and in-flight calls.
+The existing deadline timer independently bounds each observation. Both stop on
+connection cleanup. Polls open private connections and close them after traversal;
+there is no observer cache or notification subscription. The runner's control loop
+remains responsive while its serialized input worker polls.
+
+The complete schema, state/transition semantics, result fields, limits, and
+failure-capture rules are in [conditional checks](docs/conditional-checks.md).
+That document is part of this design specification. Input completion and successful
+PNG capture alone never set batch `verified` to true.
