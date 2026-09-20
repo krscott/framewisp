@@ -45,19 +45,20 @@ and requires a partial response.
 Two simultaneous headless sessions start with deliberately conflicting inherited
 bus addresses. Inspection stays within each session, and stopping one removes
 its buses, registry, children, and sockets while the other remains usable.
-An app without accessibility returns unsupported. Existing app-exit, startup
+An app without accessibility returns unsupported. A real private-bus disconnect test checks cleanup races. Existing app-exit, startup
 failure, SIGINT, SIGTERM, and recording tests also exercise the new bus lifetime.
 
 ## Measurements
 
 The reproducible script is [benchmark_inspection.py](benchmark_inspection.py).
 It performs one warm-up per case, then 40 sequential samples against the same
-running GTK demo. Setup types `HelloGUI` and applies it before timing. A button
+running GTK demo after the review fixes. These are shared-host measurements;
+the end of the regression run and package checks overlapped part of sampling. Setup types `HelloGUI` and applies it before timing. A button
 query discovers the Apply control, a label query reads `Applied: HelloGUI`, and
 a screenshot contains both. Complete CLI timings include Python/Gio startup,
 D-Bus connection, traversal, JSON serialization, and process exit. They exclude
 Nix environment startup, application startup, model inference, and tool scheduling.
-The raw samples are in [inspection-samples.json](inspection-samples.json).
+The raw samples are in the [PR benchmark comment](https://github.com/krscott/framewisp/pull/62#issuecomment-5751650842).
 
 ```sh
 framewisp /tmp/fw-inspection-bench run -- framewisp-demo
@@ -68,16 +69,17 @@ framewisp /tmp/fw-inspection-bench stop
 
 | Complete CLI operation | p50 | p95 | Median response bytes |
 | --- | ---: | ---: | ---: |
-| Find Apply button | 776 ms | 822 ms | 516 |
-| Read applied result | 908 ms | 1260 ms | 642 |
-| Capture PNG containing both | 151 ms | 173 ms | 62,670 |
+| Find Apply button | 570 ms | 624 ms | 516 |
+| Read applied result | 750 ms | 900 ms | 642 |
+| Capture PNG containing both | 154 ms | 171 ms | 62,670 |
 
 Queries currently read each object through several D-Bus calls. Inspection is
 slower than capture in this small demo. It exchanges much less data and lets
 an agent read text/state without an image-viewing step. Neither response size
 nor these CLI measurements establish a model-latency speedup.
 
-One end-to-end agent trial on September 20, 2026 used Codex (GPT-6), its shell
+One end-to-end agent trial at revision `bfb5c75` on September 20, 2026 used
+Codex (GPT-6), its shell
 and image-viewing tools, and the same demo state. The task was to locate the Apply
 button and read the applied result. Both paths correctly found `Apply text` and
 `Applied: HelloGUI` without retries.

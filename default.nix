@@ -102,7 +102,12 @@ buildPythonPackage {
     pytestCheckHook
     pygobject-stubs
     pillow
+    dbus
   ];
+
+  preCheck = ''
+    export FRAMEWISP_ATSPI_REGISTRY="${at-spi2-core}/libexec/at-spi2-registryd"
+  '';
 
   # Skip integration tests during build (they require the installed executable)
   disabledTestMarks = [ "integration" ];

@@ -80,7 +80,12 @@ class Bus:
 
     def close(self) -> None:
         self.timer.cancel()
-        self.connection.close_sync(None)
+        try:
+            self.connection.close_sync(None)
+        except GLib.Error as error:
+            # Session shutdown can close the bus before or during client cleanup.
+            if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CLOSED):
+                raise
 
     def call(
         self,
@@ -195,6 +200,15 @@ def inspect_bus(address: str, query: Query) -> dict[str, object]:
                 if ref in visited:
                     continue
                 visited.add(ref)
+                bits = cast(list[int], bus.call(ref, ACCESSIBLE, "GetState"))
+                states = [
+                    name
+                    for i, name in enumerate(STATES)
+                    if i // 32 < len(bits) and bits[i // 32] & (1 << (i % 32))
+                ]
+                if "defunct" in states or "stale" in states:
+                    reasons.add("stale-object")
+                    continue
                 role = clipped(cast(str, bus.call(ref, ACCESSIBLE, "GetRoleName")))
                 name = clipped(cast(str, bus.prop(ref, ACCESSIBLE, "Name")))
                 count = cast(int, bus.prop(ref, ACCESSIBLE, "ChildCount"))
@@ -215,6 +229,20 @@ def inspect_bus(address: str, query: Query) -> dict[str, object]:
                     and query.name.casefold() not in name.casefold()
                 ):
                     continue
+                node: dict[str, object] = {
+                    "id": f"{snapshot}:{len(matches)}",
+                    "role": role,
+                    "name": name,
+                    "text": None,
+                    "states": states,
+                    "actions": [],
+                    "bounds": None,
+                    "value": None,
+                    "depth": depth,
+                }
+                # Append first so optional-interface failures retain readable fields.
+                if query.text is None:
+                    matches.append(node)
                 interfaces = cast(list[str], bus.call(ref, ACCESSIBLE, "GetInterfaces"))
                 text: str | None = None
                 if "org.a11y.atspi.Text" in interfaces:
@@ -239,28 +267,9 @@ def inspect_bus(address: str, query: Query) -> dict[str, object]:
                     text is None or query.text.casefold() not in text.casefold()
                 ):
                     continue
-                bits = cast(list[int], bus.call(ref, ACCESSIBLE, "GetState"))
-                states = [
-                    name
-                    for i, name in enumerate(STATES)
-                    if i // 32 < len(bits) and bits[i // 32] & (1 << (i % 32))
-                ]
-                if "defunct" in states or "stale" in states:
-                    reasons.add("stale-object")
-                    continue
-                node: dict[str, object] = {
-                    "id": f"{snapshot}:{len(matches)}",
-                    "role": role,
-                    "name": name,
-                    "text": text,
-                    "states": states,
-                    "actions": [],
-                    "bounds": None,
-                    "value": None,
-                    "depth": depth,
-                }
-                # Append first so optional-interface failures retain readable fields.
-                matches.append(node)
+                node["text"] = text
+                if query.text is not None:
+                    matches.append(node)
                 if "org.a11y.atspi.Action" in interfaces:
                     n = cast(int, bus.prop(ref, "org.a11y.atspi.Action", "NActions"))
                     node["actions"] = [
