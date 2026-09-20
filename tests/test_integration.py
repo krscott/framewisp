@@ -1682,6 +1682,11 @@ def test_inspection_private_buses_and_unsupported_apps(
     first = json.loads((demo.directory / "session.json").read_text())
     second = tmp_path / "second"
     log = tmp_path / "second-runner.log"
+    command = (
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+        if app == "sleep"
+        else [app]
+    )
     with log.open("w") as output:
         runner = subprocess.Popen(
             [
@@ -1689,8 +1694,7 @@ def test_inspection_private_buses_and_unsupported_apps(
                 str(second),
                 "run",
                 "--",
-                app,
-                *(["60"] if app == "sleep" else []),
+                *command,
             ],
             env=os.environ
             | {
