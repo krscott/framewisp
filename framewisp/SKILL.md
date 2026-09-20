@@ -136,7 +136,8 @@ Save this JSON to `check.json`, then run
 }
 ```
 
-Batch supports `move`, `click`, `drag`, `scroll`, `type`, and `key` on headless
+Batch supports `move`, `click`, `drag`, `scroll`, `type`, `key`, and the checks
+described below on headless
 Wayland and Xwayland. Parameters use the CLI names without `--`; `modifier` is
 an array of lowercase names, such as `["ctrl", "shift"]`. Defaults match the
 individual commands. Set `interval: 0` for unpaced checks; omit it for the usual

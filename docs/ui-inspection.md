@@ -101,12 +101,13 @@ about 15.5 seconds despite the large difference in response size.
 
 ## Decision for conditional waits
 
-This is enough to prototype positive text/state waits on the demonstrated GTK
-controls, provided a later caller re-runs bounded queries, handles ambiguity,
-and only accepts complete observations. No persistent object handles are needed.
-The serial traversal cost is too high for fast polling as-is. A later waits
-implementation should reuse a private query connection and measure its budget
-before promising subsecond workflows.
+The [conditional checks](conditional-checks.md) use this coverage for positive
+text/state assertions. They re-run bounded queries, reject ambiguity, and only
+accept complete observations. No persistent object handles are needed. Each
+observation opens and closes a private connection. Traversal dominates larger
+trees, so a 50 ms polling pause does not promise 50 ms detection or subsecond
+workflows. The small delayed-response probe measures the combined input/check
+path separately from the larger demo's traversal cost.
 
 It is not enough for general assertions of widget absence or a toolkit-independent
 selector/action API. Omitted Qt popup content, unknown canvas coverage,

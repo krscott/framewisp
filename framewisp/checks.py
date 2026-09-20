@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import cast
 
 from framewisp.errors import SessionError
-from framewisp.inspection import TEXT_LIMIT, Query, inspect_session
+
+MAX_CONDITION_TEXT = 1024
 
 
 @dataclass(frozen=True)
@@ -28,14 +29,15 @@ class Condition:
         role, name = data.get("role"), data.get("name")
         for selector in (role, name):
             if selector is not None and (
-                not isinstance(selector, str) or not 1 <= len(selector) <= TEXT_LIMIT
+                not isinstance(selector, str)
+                or not 1 <= len(selector) <= MAX_CONDITION_TEXT
             ):
                 raise ValueError("role/name must be nonempty bounded strings.")
         if role is None and name is None:
             raise ValueError("condition requires role or name.")
         field, equals = data.get("field"), data.get("equals")
         if field in ("text", "name"):
-            valid = isinstance(equals, str) and len(equals) <= TEXT_LIMIT
+            valid = isinstance(equals, str) and len(equals) <= MAX_CONDITION_TEXT
         elif field in ("checked", "enabled"):
             valid = type(equals) is bool
         elif field == "value":
@@ -143,6 +145,9 @@ def perform_check(
     cancelled: Callable[[], bool],
     wait: Callable[[float], None],
 ) -> None:
+    # Batch parsing also serves lightweight CLI commands; load Gio only for execution.
+    from framewisp.inspection import Query, inspect_session
+
     deadline = time.monotonic() + check.timeout
     result.update(
         condition=check.condition.parameters(),

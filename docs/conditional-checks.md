@@ -122,3 +122,21 @@ responses belong in a PR comment, not checked-in files.
 These local CLI measurements exclude tool scheduling and model processing.
 Tool/model turn counts and total agent wall time must come from separate agent
 trials, not inferred from process timings. No general end-to-end speedup is claimed.
+
+On NixOS x86_64 with Python 3.14.7 and the pinned Sway/Pixman/GTK stack, ten
+samples per path gave these median complete CLI times (no recording, 1280x720).
+Sampling overlapped regression tests on a shared host. At a 350 ms app delay,
+fixed sleep took 0.994 s, client polling 0.844 s, and conditional batching 0.640 s;
+all passed. At a 900 ms app delay, the 500 ms fixed-sleep path failed all ten
+checks. Client polling and conditional batching passed all ten, at 1.210 s and
+1.165 s respectively. Conditional batching used one CLI call per sample.
+[350 ms raw samples](https://github.com/krscott/framewisp/pull/64#issuecomment-5752423801)
+and [900 ms raw samples](https://github.com/krscott/framewisp/pull/64#issuecomment-5752423964)
+include every response and retry count.
+
+Separate single agent trials took 17.799 s for fixed sleep, 32.494 s for polling
+(one retry), and 13.692 s for the conditional batch. Each passed. The polling
+trial used four tool-result/model cycles; the others used two. These include Nix
+startup, tool dispatch, completion polls, and model processing, and do not
+establish a general speedup. The [agent trial report](https://github.com/krscott/framewisp/pull/64#issuecomment-5752415533)
+contains the reproduction script, timing boundary, and raw outputs.

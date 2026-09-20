@@ -1761,6 +1761,7 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
     plan.write_text(json.dumps({"actions": actions, "capture": {"path": str(capture)}}))
     result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
     assert result["status"] == "completed"
+    assert result["verified"] is None
     assert result["completed_actions"] == 3
     assert result["failed_index"] is None
     assert result["failed_phase"] is None
@@ -2136,12 +2137,58 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
                     {"action": "click", "x": 120, "y": 100},
                     {"action": "type", "text": "HelloBatch", "interval": 0},
                     {"action": "click", "x": 120, "y": 170},
+                    {
+                        "action": "wait",
+                        "timeout": 5,
+                        "condition": {
+                            "role": "label",
+                            "name": "Applied:",
+                            "field": "text",
+                            "equals": "Applied: HelloBatch",
+                        },
+                    },
+                    {
+                        "action": "assert",
+                        "timeout": 5,
+                        "condition": {
+                            "role": "button",
+                            "name": "Apply text",
+                            "field": "enabled",
+                            "equals": True,
+                        },
+                    },
+                    {
+                        "action": "assert",
+                        "timeout": 5,
+                        "condition": {"role": "slider", "field": "value", "equals": 25},
+                    },
+                    {
+                        "action": "baseline",
+                        "timeout": 5,
+                        "condition": {
+                            "role": "checkbox",
+                            "field": "checked",
+                            "equals": True,
+                        },
+                    },
+                    {"action": "click", "x": 54, "y": 266},
+                    {
+                        "action": "wait",
+                        "timeout": 5,
+                        "after": 6,
+                        "condition": {
+                            "role": "checkbox",
+                            "field": "checked",
+                            "equals": True,
+                        },
+                    },
                 ]
             }
         )
     )
     batch = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
     assert batch["status"] == "completed"
+    assert batch["verified"] is True
     result = inspect(demo, "--role", "label", "--text", "Applied: HelloBatch")
     assert result["status"] == "ok", result
     assert result["match_count"] == 1

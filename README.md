@@ -353,10 +353,10 @@ inspecting the app first. Disconnecting cancels queued or remaining work and
 releases held input. A missing reply leaves completion uncertain; consult the app
 and per-action input log. Capture does not prove the app has finished processing.
 
-Batches require 1 to 256 inputs, at most 16,384 typed characters and 10,000 scroll
-steps, and at most 300 seconds of requested pacing. File and wire request sizes
+Batches require 1 to 256 steps, at most 16,384 typed characters and 10,000 scroll
+steps, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
 are limited to 1 MiB each. Supported actions are `move`, `click`, `drag`, `scroll`,
-`type`, and `key`; capture is separate. No attached desktops, loops, lifecycle
+`type`, `key`, `wait`, `assert`, and `baseline`; capture is separate. No attached desktops, loops, lifecycle
 commands. Checks support known accessible text, name, value, and checked/enabled
 state. See [conditional checks](docs/conditional-checks.md) for waits, assertions,
 transition baselines, and failure screenshots. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
