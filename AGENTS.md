@@ -1,5 +1,10 @@
 # Agent Guide for framewisp
 
+framewisp is a tool that gives agents their own display to control GUI apps.
+
+It is early dev and has no users yet. Improving software quality is more
+important than maintaining backwards compatibility.
+
 ## Quick Reference
 
 | Action | Command |
