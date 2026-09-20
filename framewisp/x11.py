@@ -1,12 +1,13 @@
 """X11 text input in the private Xwayland server."""
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
+from framewisp.errors import display_command
 
-def type_text(text: str, *, interval: float, env: dict[str, str]) -> int:
+
+def type_text(session: Path, text: str, *, interval: float, env: dict[str, str]) -> int:
     # Applications resolve queued keycodes later. Never reuse a code for a
     # different character, even across completed commands while an app is busy.
     path = Path(env["XDG_RUNTIME_DIR"]) / "x11-keymap.json"
@@ -31,11 +32,14 @@ def type_text(text: str, *, interval: float, env: dict[str, str]) -> int:
         mapping = "".join(
             f"keycode {code} = U{ord(char):04X}\n" for char, code in added.items()
         )
-        result = subprocess.run(
-            ["xmodmap", "-"], input=mapping, text=True, env=env, check=False, timeout=10
+        display_command(
+            session,
+            ["xmodmap", "-"],
+            input_text=mapping,
+            env=env,
+            display=env["DISPLAY"],
+            timeout=10,
         )
-        if result.returncode:
-            return result.returncode
         codes.update(added)
         path.write_text(json.dumps(codes))
     # The first XTest event initializes Xwayland's virtual keyboard. Release an
@@ -46,9 +50,10 @@ def type_text(text: str, *, interval: float, env: dict[str, str]) -> int:
             arguments.extend(["sleep", str(interval)])
         key = str(codes[character]) if character in codes else f"0x{ord(character):02x}"
         arguments.extend(["key", "--delay", "0", key])
-    return subprocess.run(
+    return display_command(
+        session,
         arguments,
         env=env,
-        check=False,
+        display=env["DISPLAY"],
         timeout=15 + max(0, len(text) - 1) * interval,
-    ).returncode
+    )

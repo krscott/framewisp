@@ -17,10 +17,15 @@ from pathlib import Path
 from string import ascii_lowercase, digits
 from threading import Event
 from types import FrameType
+from typing import BinaryIO, cast
 
-from vncdotool import api
-
-from framewisp.captions import capture_origin, render_captions
+from framewisp.captions import capture_origin, recorder_output, render_captions
+from framewisp.errors import (
+    SOCKET_ACCESS_HINT,
+    SessionError,
+    display_command,
+    log_failure,
+)
 from framewisp.x11 import type_text as type_x11_text
 
 SWAY_CONFIG = """\
@@ -79,14 +84,21 @@ def key_commands(chord: str) -> list[str] | None:
 
 @contextmanager
 def managed_process(
-    command: list[str], *, log: Path, env: dict[str, str]
+    command: list[str],
+    *,
+    log: Path,
+    env: dict[str, str],
+    output: BinaryIO | None = None,
 ) -> Generator[subprocess.Popen[bytes], None, None]:
-    with log.open("w") as output:
+    with ExitStack() as stack:
+        destination = (
+            output if output is not None else stack.enter_context(log.open("wb"))
+        )
         process = subprocess.Popen(
             command,
             env=env,
             stdin=subprocess.DEVNULL,
-            stdout=output,
+            stdout=destination,
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -113,12 +125,20 @@ def wait_for_socket(
     deadline = time.monotonic() + 10
     while not stop.is_set():
         if process.poll() is not None:
-            raise RuntimeError(f"Process exited during startup. See {log}")
+            raise log_failure(
+                f"Process exited while starting display socket {runtime / pattern}",
+                log,
+                display=True,
+            )
         for path in runtime.glob(pattern):
             if path.is_socket():
                 return path
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"Waiting for {pattern} timed out. See {log}")
+            raise log_failure(
+                f"Waiting for display socket {runtime / pattern} timed out",
+                log,
+                display=True,
+            )
         stop.wait(0.05)
     return None
 
@@ -185,11 +205,11 @@ def wait_for_x11(
     path = runtime / "x11-display"
     while not stop.is_set():
         if process.poll() is not None:
-            raise RuntimeError(f"Compositor exited during X11 startup. See {log}")
+            raise log_failure("Compositor exited during X11 startup", log, display=True)
         if path.exists() and (display := path.read_text()):
             return display
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"Waiting for Xwayland timed out. See {log}")
+            raise log_failure("Waiting for Xwayland timed out", log, display=True)
         stop.wait(0.05)
     return None
 
@@ -197,6 +217,9 @@ def wait_for_x11(
 @contextmanager
 def keep_input_devices(runtime: Path) -> Generator[None, None, None]:
     """Keep the seat's keyboard and pointer present between CLI connections."""
+    # Only the runner needs Twisted; loading it in every control CLI adds latency.
+    from vncdotool import api
+
     try:
         with api.connect(str(runtime / "vnc.sock"), timeout=10) as connection:
             connection.pause(0)
@@ -250,29 +273,37 @@ def start_recording(
         str(destination),
     ]
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if captions else env
-    with managed_process(command, log=log, env=recorder_env) as process:
+    with (
+        recorder_output(log) as output,
+        managed_process(command, log=log, env=recorder_env, output=output) as process,
+    ):
         deadline = time.monotonic() + 10
+        origin = 0.0
         while not stop.is_set():
             if process.poll() is not None:
-                raise RuntimeError(f"Recorder exited during startup. See {log}")
+                raise log_failure("Recorder exited during startup", log)
             # wf-recorder opens and writes the MP4 header after receiving a frame.
             if destination.exists() and destination.stat().st_size > 0:
-                break
+                if not captions:
+                    break
+                try:
+                    origin = capture_origin(log)
+                    break
+                except RuntimeError:
+                    # The output reader may still be flushing the first frame event.
+                    pass
             if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"Waiting for recording to start timed out. See {log}"
-                )
+                raise log_failure("Waiting for recording to start timed out", log)
             stop.wait(0.05)
         else:
             yield None
             return
-        origin = capture_origin(log) if captions else 0.0
         try:
             yield process
         finally:
             stopped = time.monotonic()
     if process.returncode != 0:
-        raise RuntimeError(f"Recorder failed to finalize {destination}. See {log}")
+        raise log_failure(f"Recorder failed to finalize {destination}", log)
     if captions:
         render_captions(
             destination,
@@ -306,6 +337,39 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
     return None
 
 
+def recording_summary(destination: Path) -> dict[str, object]:
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "format=duration:stream=width,height",
+            "-of",
+            "json",
+            str(destination),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if result.returncode:
+        raise SessionError(
+            f"Could not inspect recording {destination}: {result.stderr.strip()}"
+        )
+    data = json.loads(result.stdout)
+    return {
+        "path": str(destination),
+        "duration_seconds": float(data["format"]["duration"]),
+        "width": data["streams"][0]["width"],
+        "height": data["streams"][0]["height"],
+        "size_bytes": destination.stat().st_size,
+    }
+
+
 @dataclass
 class Recordings:
     session: Path
@@ -314,6 +378,8 @@ class Recordings:
     size: tuple[int, int]
     process: subprocess.Popen[bytes] | None = None
     resources: ExitStack = field(default_factory=ExitStack)
+    destination: Path | None = None
+    last_summary: dict[str, object] | None = None
 
     def start(self, destination: Path, *, captions: bool = True) -> str | None:
         if self.process is not None:
@@ -338,6 +404,7 @@ class Recordings:
         if self.process is None:
             self.resources.close()
             return "Session stopped while starting recording."
+        self.destination = destination
         return None
 
     def finish(self) -> str | None:
@@ -349,62 +416,133 @@ class Recordings:
     def close(self) -> None:
         try:
             self.resources.close()
+            if self.destination is not None:
+                self.last_summary = recording_summary(self.destination)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            raise SessionError(str(error)) from None
         finally:
             self.process = None
+            self.destination = None
 
 
-def recording_command(
-    session: Path, destination: Path | None, *, captions: bool = True
+def session_command(
+    session: Path,
+    action: str,
+    destination: Path | None = None,
+    *,
+    captions: bool = True,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
+    if state.get("control_protocol") != 1:
+        raise SessionError(
+            "This session uses an older or unsupported control protocol. "
+            "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
+            "with this version of framewisp."
+        )
     request = {
+        "action": action,
+        "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
     }
-    with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
-        connection.sendall((json.dumps(request) + "\n").encode())
-        with connection.makefile("r") as response:
-            line = response.readline()
+    control = Path(state["runtime_directory"]) / "control.sock"
+    try:
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(str(control))
+            connection.sendall((json.dumps(request) + "\n").encode())
+            with connection.makefile("r") as response:
+                line = response.readline()
+    except OSError as connection_error:
+        raise SessionError(
+            f"Cannot reach session {session} at {control}: {connection_error}\n{SOCKET_ACCESS_HINT}"
+        ) from None
     if not line:
         print(
-            "Session disconnected before the recording command completed.",
+            f"Session {session} disconnected before {action} completed.",
             file=sys.stderr,
         )
         return 1
-    error = json.loads(line)["error"]
+    result = json.loads(line)
+    error = result["error"]
     if error is not None:
         print(error, file=sys.stderr)
         return 1
+    if result["data"] is not None:
+        print(json.dumps(result["data"]))
     return 0
 
 
-def handle_recording_command(
-    listener: socket.socket, recordings: Recordings, write_state: Callable[[], None]
+def reply(
+    connection: socket.socket,
+    *,
+    error: str | None = None,
+    data: dict[str, object] | None = None,
 ) -> None:
+    try:
+        connection.sendall((json.dumps({"error": error, "data": data}) + "\n").encode())
+    except (BrokenPipeError, ConnectionResetError):
+        # A caller can stop waiting while the runner is finalizing a recording.
+        pass
+
+
+def handle_session_command(
+    listener: socket.socket,
+    recordings: Recordings,
+    write_state: Callable[[], None],
+    status: Callable[[], dict[str, object]],
+) -> socket.socket | None:
+    """Return a stop caller's connection for the runner to reply after cleanup."""
     try:
         connection, _ = listener.accept()
     except TimeoutError:
-        return
-    with connection:
+        return None
+    stopping = False
+    try:
         connection.settimeout(2)
         with connection.makefile("r") as request:
             try:
-                command = json.loads(request.readline())
-                destination = command["destination"]
+                raw: object = json.loads(request.readline())
             except (ValueError, OSError):
-                return
-        error = (
-            recordings.start(Path(destination), captions=command["captions"])
-            if destination is not None
-            else recordings.finish()
-        )
+                return None
+        if not isinstance(raw, dict):
+            reply(connection, error="Expected a session command object.")
+            return None
+        command = cast(dict[str, object], raw)
+        if command.get("session") != str(recordings.session):
+            reply(
+                connection,
+                error="Session metadata points to a different session. Use the original session directory.",
+            )
+            return None
+        action = command.get("action")
+        error = None
+        data = None
+        if action == "stop":
+            stopping = True
+            return connection
+        if action == "status":
+            data = status()
+        elif action == "record-start":
+            destination = command.get("destination")
+            captions = command.get("captions", True)
+            if not isinstance(destination, str):
+                error = "record-start requires a destination"
+            elif not isinstance(captions, bool):
+                error = "captions must be true or false"
+            else:
+                error = recordings.start(Path(destination), captions=captions)
+        elif action == "record-stop":
+            error = recordings.finish()
+            if error is None:
+                data = recordings.last_summary
+        else:
+            error = "Unsupported headless session command."
         write_state()
-        try:
-            connection.sendall((json.dumps({"error": error}) + "\n").encode())
-        except BrokenPipeError:
-            # The CLI can be interrupted while a recording starts or finalizes.
-            pass
+        reply(connection, error=error, data=data)
+    finally:
+        if not stopping:
+            connection.close()
+    return None
 
 
 def run_session(
@@ -416,20 +554,24 @@ def run_session(
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
 ) -> int:
+    session = session.resolve()
     if recording is not None:
         recording = recording.resolve()
         error = recording_path_error(session, recording)
         if error is not None:
-            raise RuntimeError(error)
+            raise SessionError(error)
     session.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = session / "session.json"
     if state.exists():
-        raise RuntimeError(
+        raise SessionError(
             f"{state} already exists. Use a different session directory."
         )
 
     (session / "inputs.jsonl").write_text("", encoding="utf-8")
     stop = Event()
+    stop_connection: socket.socket | None = None
+    shutdown_error: str | None = None
+    recordings: Recordings | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -491,7 +633,7 @@ def run_session(
                 if error is not None:
                     if stop.is_set():
                         return 0
-                    raise RuntimeError(error)
+                    raise SessionError(error)
 
             app = stack.enter_context(
                 managed_process(command, log=session / "app.log", env=app_env)
@@ -502,6 +644,7 @@ def run_session(
             listener.settimeout(0.1)
 
             def write_state() -> None:
+                assert recordings is not None
                 processes = backends | {"app": app}
                 if recordings.process is not None:
                     processes["recorder"] = recordings.process
@@ -509,6 +652,7 @@ def run_session(
                 temporary.write_text(
                     json.dumps(
                         {
+                            "control_protocol": 1,
                             "runtime_directory": directory,
                             "wayland_display": display,
                             "x11_display": x11_display,
@@ -522,6 +666,28 @@ def run_session(
                 # Keep metadata reads complete while recording commands update it.
                 temporary.replace(state)
 
+            def status() -> dict[str, object]:
+                assert recordings is not None
+                return {
+                    "session": str(session),
+                    "status": "running",
+                    "backend": "x11" if x11 else "wayland",
+                    "wayland_display": display,
+                    "x11_display": x11_display,
+                    "width": size[0],
+                    "height": size[1],
+                    "app": {"pid": app.pid, "running": app.poll() is None},
+                    "recording": (
+                        {
+                            "path": str(recordings.destination),
+                            "pid": recordings.process.pid,
+                            "running": recordings.process.poll() is None,
+                        }
+                        if recordings.process is not None
+                        else None
+                    ),
+                }
+
             write_state()
             print(f"Session ready: {session}", flush=True)
             while not stop.is_set():
@@ -530,18 +696,35 @@ def run_session(
                     monitored["recorder"] = recordings.process
                 for name, process in monitored.items():
                     if process.poll() is not None:
-                        raise RuntimeError(
-                            f"{name} exited. See {session / (name + '.log')}"
-                        )
+                        raise log_failure(f"{name} exited", session / (name + ".log"))
                 result = app.poll()
                 if result is not None:
                     return result if result >= 0 else 128 - result
-                handle_recording_command(listener, recordings, write_state)
+                stop_connection = handle_session_command(
+                    listener, recordings, write_state, status
+                )
+                if stop_connection is not None:
+                    stop.set()
             return 0
+    except BaseException as error:
+        # A stop caller must not receive success when shutdown or encoding failed.
+        shutdown_error = str(error)
+        raise
     finally:
         state.unlink(missing_ok=True)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
+        if stop_connection is not None:
+            with stop_connection:
+                reply(
+                    stop_connection,
+                    error=shutdown_error,
+                    data={
+                        "session": str(session),
+                        "status": "stopped",
+                        "recording": recordings.last_summary if recordings else None,
+                    },
+                )
 
 
 def session_environment(session: Path) -> dict[str, str]:
@@ -553,12 +736,12 @@ def session_environment(session: Path) -> dict[str, str]:
 
 
 def screenshot(session: Path, destination: Path) -> int:
-    return subprocess.run(
+    return display_command(
+        session,
         ["grim", "-t", "png", "-o", "HEADLESS-1", str(destination)],
         env=session_environment(session),
-        check=False,
         timeout=10,
-    ).returncode
+    )
 
 
 def click_pointer(
@@ -631,7 +814,7 @@ def type_unicode(session: Path, text: str, *, interval: float) -> int:
             "DISPLAY": display,
             "XAUTHORITY": "/dev/null",
         }
-        return type_x11_text(text, interval=interval, env=env)
+        return type_x11_text(session, text, interval=interval, env=env)
     # wtype uploads a keymap containing the requested characters; wayvnc's US
     # keymap cannot represent arbitrary Unicode. Use keysyms so text never
     # becomes a wtype option, and sleep only between characters.
@@ -643,12 +826,12 @@ def type_unicode(session: Path, text: str, *, interval: float) -> int:
         arguments.extend(["-k", f"U{ord(character):04X}"])
     duration = max(0, len(text) - 1) * pause_ms / 1000
     # wtype also spends 2 ms on each key press and release.
-    return subprocess.run(
+    return display_command(
+        session,
         arguments,
         env=session_environment(session),
-        check=False,
         timeout=15 + duration + len(text) * 0.004,
-    ).returncode
+    )
 
 
 def send_input(
@@ -680,7 +863,8 @@ def send_input(
     )
     # Sway needs time to focus wayvnc's newly created keyboard. Without this,
     # the first character (or a single named key) is lost on each connection.
-    return subprocess.run(
+    return display_command(
+        session,
         [
             "vncdo",
             "--server",
@@ -694,6 +878,5 @@ def send_input(
             "0.1",
             *arguments,
         ],
-        check=False,
         timeout=15 + duration,
-    ).returncode
+    )

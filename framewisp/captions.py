@@ -9,10 +9,46 @@ import time
 import unicodedata
 import uuid
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import BinaryIO, Literal, TypedDict, cast
+
+
+def filter_recorder_output(source: BinaryIO, destination: BinaryIO) -> None:
+    """Keep diagnostics and the first frame's clock, discarding protocol chatter."""
+    kept_origin = False
+    protocol = re.compile(
+        rb"^\[[\d:. ]+\]\s+(?:\{[^}]*\}\s+)?(?:(?:->|discarded)\s+)?"
+        rb"\w+[#@]\d+\.\w+\(.*\)\s*$"
+    )
+    for line in source:
+        origin = re.search(rb"zwlr_screencopy_frame_v1[#@]\d+\.ready\(", line)
+        if origin and not kept_origin:
+            kept_origin = True
+        elif protocol.match(line):
+            continue
+        destination.write(line)
+        destination.flush()
+
+
+@contextmanager
+def recorder_output(log: Path) -> Generator[BinaryIO, None, None]:
+    """Drain recorder output continuously so protocol tracing cannot fill the log."""
+    reader, writer = os.pipe()
+    with (
+        os.fdopen(reader, "rb") as source,
+        os.fdopen(writer, "wb") as sink,
+        log.open("wb") as destination,
+        ThreadPoolExecutor(max_workers=1) as worker,
+    ):
+        task = worker.submit(filter_recorder_output, source, destination)
+        try:
+            yield sink
+        finally:
+            sink.close()
+            task.result()
 
 
 class InputEvent(TypedDict):

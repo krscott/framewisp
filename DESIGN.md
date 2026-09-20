@@ -11,6 +11,13 @@ acceptance application.
 
 - `framewisp/__main__.py` handles standalone skill output and emergency detach
   before importing the GUI command dispatcher in `framewisp/cli.py`.
+- `framewisp/errors.py` describes expected operational failures. The CLI reports
+  them without a Python traceback, with session context. Display startup errors
+  include the last 12 lines from at most 4096 bytes of the component log. Failed
+  headless display tools include their stderr, display/socket context, and a
+  conditional sandbox-access explanation. Unexpected programming errors still
+  propagate. Portal imports are deferred to `attach`; vncdotool's Twisted API
+  is imported only by the headless runner that keeps the idle input connection.
 - `framewisp/lib.py` owns process lifetime and invokes existing display tools.
   `run_session` coordinates startup, monitoring, and shutdown. Separate helpers
   prepare its environment and manage Sway, wayvnc, and optional recorder startup,
@@ -38,7 +45,7 @@ acceptance application.
 - wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
 
 There is no separate controller daemon or framebuffer cache.
-The runner accepts recording commands over a private Unix socket.
+The runner accepts recording, status, and stop commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
 
 ## Startup
@@ -331,12 +338,32 @@ and clears its process reference without stopping the app. Runner cleanup closes
 any active recorder before stopping the display.
 
 The runner listens on `control.sock` in its private runtime directory. Each
-recording CLI call sends one newline-terminated JSON request with a `destination`
-(an absolute path for start, null for stop), and a `captions` boolean, then waits for a JSON response with
-an `error` string or null. The runner handles requests serially in its monitoring
-loop. It replies only after capture is ready or finalization has finished.
+control CLI call sends one newline-terminated JSON request with `action`, the
+absolute `session` directory, a `destination` (absolute recording path or null),
+and a `captions` boolean. Replies carry an `error` string or null and optional
+`data`. The runner checks the session directory against its own before acting,
+so copied metadata cannot control another session. It handles requests serially
+in its monitoring loop. It replies only after capture is ready or finalization has finished.
+Metadata includes `control_protocol: 1`. The CLI rejects an absent or unknown
+version before connecting; a legacy recording-only runner would otherwise
+interpret new status or stop requests as recording-stop requests.
 Validation/startup errors are returned to the caller without stopping the app.
 Unexpected recorder exit or finalization failure still fails the session.
+
+`record-stop` returns a summary in `data`, printed as JSON by the CLI. After
+finalization and caption rendering, ffprobe supplies duration and dimensions;
+the file's stat supplies byte size. The summary also includes the absolute path.
+The runner retains the last completed summary until another clip completes.
+
+`status` queries the owner, rather than interpreting stale PIDs in metadata. It
+returns JSON describing the backend, display dimensions, application process
+state, and active recording path/process state. `stop` retains the request
+connection and sets the runner's stop event. The runner responds only after its
+resource stack, runtime directory, and metadata have been cleaned up, including
+any active recording's finalization. Cleanup errors produce a failure response.
+No stored PID is signaled. Stop requires a responsive owner; it does not recover
+from a suspended or dead runner. These commands reject attached sessions, which
+retain their independent emergency detach mechanism.
 
 State updates use `.session.json` followed by an atomic rename. The `processes`
 map includes `recorder` only while recording. Both metadata filenames are reserved
@@ -349,7 +376,8 @@ while already active, and a stop while inactive. Each start replaces `recorder.l
 The CLI validates input arguments, then appends a start event to `inputs.jsonl`
 before dispatch and an end event afterward. Each JSONL event carries an ID,
 `event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
-`error`. Exceptions are logged and re-raised with their traceback. Normal
+`error`. Exceptions are logged and re-raised; the CLI formats expected operational
+failures, while unexpected exceptions retain their traceback. Normal
 nonzero returns are recorded as failures. Input logging is independent of
 recording. The runner truncates the log when creating a new session.
 
@@ -358,7 +386,11 @@ The first screencopy `ready` event in `recorder.log` supplies the first captured
 frame's timestamp. The pinned Sway backend uses the monotonic clock, and the
 pinned wf-recorder makes this frame time zero. This establishes each clip's
 origin without guessing from subprocess startup or MP4-header detection.
-The diagnostic log grows throughout capture and is replaced for each clip.
+A pipe reader filters complete protocol-trace lines as the recorder emits them.
+It flushes the first screencopy `ready` line and preserves non-protocol diagnostics
+in `recorder.log`. A worker thread drains the pipe throughout capture and is joined
+after recorder shutdown. Startup waits for both the MP4 header and the retained
+origin before accepting captioned input. The log is replaced for each clip.
 
 After recorder finalization, `captions.py` selects commands started between that
 origin and the stop request. Commands that began before the clip are excluded,

@@ -1,9 +1,33 @@
 import json
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 
-from framewisp.captions import Caption, captions_for_clip, log_input, subtitle_script
+from framewisp.captions import (
+    Caption,
+    captions_for_clip,
+    capture_origin,
+    filter_recorder_output,
+    log_input,
+    subtitle_script,
+)
+
+
+def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
+    origin = b"[00:15:39.8] {Default Queue} zwlr_screencopy_frame_v1#6.ready(0, 123, 250000000)\n"
+    later = b"[00:15:40.8] {Default Queue} zwlr_screencopy_frame_v1#7.ready(0, 124, 250000000)\n"
+    diagnostic = b"[libx264 @ 0x123] encoding diagnostic\nUnable to open output file\n"
+    trace = b"[00:15:39.7] {Default Queue}  -> wl_display#1.get_registry(new id wl_registry#2)\n"
+    discarded = b"[00:15:40.9] {Default Queue} discarded wl_buffer#12.release()\n"
+    output = BytesIO()
+    filter_recorder_output(
+        BytesIO(trace + origin + (later + discarded) * 10000 + diagnostic), output
+    )
+    assert output.getvalue() == origin + diagnostic
+    log = tmp_path / "recorder.log"
+    log.write_bytes(output.getvalue())
+    assert capture_origin(log) == 123.25
 
 
 def test_log_records_nonzero_and_exception_outcomes(tmp_path: Path) -> None:

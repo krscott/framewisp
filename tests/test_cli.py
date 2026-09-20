@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +68,26 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "--agent-skill must be used alone" in result.stderr
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("action", ["status", "stop", "record-stop"])
+def test_control_commands_reject_legacy_session_before_connecting(
+    tmp_path: Path, action: str
+) -> None:
+    # A legacy runner treats any request with destination=null as record-stop.
+    # No runtime path is needed: rejection must precede even resolving its socket.
+    (tmp_path / "session.json").write_text(json.dumps({"processes": {"recorder": 123}}))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), action],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "older or unsupported control protocol" in result.stderr
+    assert "start a new session" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 @pytest.mark.parametrize("delay", ["-1", "nan", "inf", "nope"])
@@ -389,3 +411,35 @@ def test_type_rejects_nonprintable_text(text: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "printable" in result.stderr
     assert "session.json" not in result.stderr
+
+
+def test_compositor_failure_includes_log_excerpt(tmp_path: Path) -> None:
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    sway = shim / "sway"
+    sway.write_text(
+        f"#!{sys.executable}\nimport sys\nprint('Unable to open wayland socket', file=sys.stderr)\nsys.exit(1)\n"
+    )
+    sway.chmod(0o755)
+    # Invoke the source CLI directly: installed wrappers deliberately pin PATH.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "failed"),
+            "run",
+            "--",
+            "framewisp-demo",
+        ],
+        env=os.environ | {"PATH": str(shim) + os.pathsep + os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 1
+    assert "Unable to open wayland socket" in result.stderr
+    assert "sway.log" in result.stderr and "sandbox" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (tmp_path / "failed" / "session.json").exists()
