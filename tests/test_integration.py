@@ -241,6 +241,90 @@ def test_interrupt_stops_session(demo: Demo) -> None:
             os.kill(pid, 0)
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True, "x11-record"], indirect=True)
+def test_status_and_stop_finalize_recording(demo: Demo) -> None:
+    assert demo.recording is not None
+    state = json.loads(cli(demo.directory, "status").stdout)
+    assert state["status"] == "running"
+    assert state["backend"] in {"wayland", "x11"}
+    assert state["app"]["running"]
+    assert state["recording"]["running"]
+    assert state["recording"]["path"] == str(demo.recording)
+    cli(demo.directory, "type", "stop test")
+    stopped = json.loads(cli(demo.directory, "stop").stdout)
+    assert stopped["status"] == "stopped"
+    summary = stopped["recording"]
+    assert summary["path"] == str(demo.recording)
+    assert summary["width"] == 1280 and summary["height"] == 720
+    assert summary["duration_seconds"] > 0
+    assert summary["size_bytes"] == demo.recording.stat().st_size
+    # The reply comes after cleanup, rather than merely acknowledging the request.
+    assert not demo.runtime.exists()
+    assert not (demo.directory / "session.json").exists()
+    for pid in demo.child_pids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    assert demo.process.wait(timeout=5) == 0
+    recording_frames(demo.recording)
+    log = (demo.directory / "recorder.log").read_text()
+    assert len(re.findall(r"zwlr_screencopy_frame_v1[#@]\d+\.ready", log)) == 1
+    assert "get_registry" not in log
+    assert "libx264" in log
+
+
+@pytest.mark.integration
+def test_status_and_stop_reject_copied_session_metadata(
+    demo: Demo, tmp_path: Path
+) -> None:
+    other = tmp_path / "copied-session"
+    other.mkdir()
+    (other / "session.json").write_bytes((demo.directory / "session.json").read_bytes())
+    for action in ("status", "stop"):
+        result = subprocess.run(
+            ["framewisp", str(other), action],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        assert result.returncode == 1
+        assert "different session" in result.stderr
+        assert demo.process.poll() is None
+    assert json.loads(cli(demo.directory, "status").stdout)["recording"] is None
+
+
+@pytest.mark.integration
+def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
+    session = tmp_path / "disconnected"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps(
+            {
+                "runtime_directory": str(tmp_path),
+                "wayland_display": "wayland-does-not-exist",
+            }
+        )
+    )
+    for arguments in (
+        ("screenshot", str(tmp_path / "out.png")),
+        ("status",),
+        ("stop",),
+    ):
+        result = subprocess.run(
+            ["framewisp", str(session), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        assert result.returncode == 1
+        assert str(session) in result.stderr
+        assert str(tmp_path) in result.stderr
+        assert "sandbox" in result.stderr
+        assert "Traceback" not in result.stderr
+
+
 def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
@@ -881,7 +965,11 @@ def test_record_multiple_clips_without_restarting_app(
         cli(
             demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "during.png")
         )
-        cli(demo.directory, "record-stop")
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        assert summary["path"] == str(clip)
+        assert summary["width"] == 1280 and summary["height"] == 720
+        assert summary["duration_seconds"] > 0
+        assert summary["size_bytes"] == clip.stat().st_size
         assert len(recording_frames(clip)) > 1
         state = json.loads(state_path.read_text())
         assert state["processes"]["app"] == app_pid

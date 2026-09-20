@@ -1,13 +1,14 @@
 import argparse
 import json
 import math
+import subprocess
 import time
 from pathlib import Path
 
-from framewisp.attach import attach_session
 from framewisp.captions import log_input
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
+from framewisp.errors import SessionError
 from framewisp.lib import (
     CLICK_BUTTONS,
     MODIFIERS,
@@ -15,11 +16,11 @@ from framewisp.lib import (
     click_pointer,
     drag_pointer,
     key_commands,
-    recording_command,
     run_session,
     screenshot,
     scroll_pointer,
     send_input,
+    session_command,
     type_text,
 )
 
@@ -59,6 +60,11 @@ def main() -> None:
         "session", nargs="?", type=Path, metavar="SESSION", help="session directory"
     )
     commands = parser.add_subparsers(dest="action")
+
+    commands.add_parser(
+        "status", help="report live headless app and recording state as JSON"
+    )
+    commands.add_parser("stop", help="stop a headless session and wait for cleanup")
 
     commands.add_parser(
         "attach", help="share an existing desktop through its permission dialog"
@@ -222,6 +228,11 @@ def main() -> None:
         parser.error(
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
+    if args.action == "run":
+        if not args.command or args.command == ["--"]:
+            parser.error("run requires an application command after --")
+        if args.record is not None and (args.width % 2 or args.height % 2):
+            parser.error("--record requires even --width and --height")
     state_path = session / "session.json"
     if args.action not in {"run", "attach"} and not state_path.exists():
         parser.exit(
@@ -235,16 +246,23 @@ def main() -> None:
         )
     except (OSError, ValueError, AttributeError) as error:
         parser.exit(1, f"Cannot read session metadata: {error}\n")
+    try:
+        result = dispatch(session, args, attached=attached)
+    except (SessionError, OSError, subprocess.TimeoutExpired) as error:
+        parser.exit(1, f"Session {session}: {error}\n")
+    raise SystemExit(result)
+
+
+def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
     if args.action == "attach":
+        # Desktop portal imports are only needed by the foreground attach owner.
+        from framewisp.attach import attach_session
+
         result = attach_session(session)
     elif args.action == "run":
         command: list[str] = args.command
         if command[:1] == ["--"]:
             command = command[1:]
-        if not command:
-            parser.error("run requires an application command after --")
-        if args.record is not None and (args.width % 2 or args.height % 2):
-            parser.error("--record requires even --width and --height")
         result = run_session(
             session,
             command,
@@ -253,12 +271,17 @@ def main() -> None:
             size=(args.width, args.height),
             x11=args.x11,
         )
-    elif args.action in {"record-start", "record-stop"}:
+    elif args.action in {"record-start", "record-stop", "status", "stop"}:
+        if attached and args.action in {"status", "stop"}:
+            raise SessionError(
+                "status and stop manage headless sessions. Use framewisp --detach to stop desktop attachment."
+            )
         result = (
             request_attached(session, args.action, {})
             if attached
-            else recording_command(
+            else session_command(
                 session,
+                args.action,
                 args.path if args.action == "record-start" else None,
                 captions=not getattr(args, "no_captions", False),
             )
@@ -284,7 +307,7 @@ def main() -> None:
                 else perform_input(session, args)
             )
             action.returncode = result
-    raise SystemExit(result)
+    return result
 
 
 def perform_input(session: Path, args: argparse.Namespace) -> int:

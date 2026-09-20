@@ -25,9 +25,9 @@ commands with their runtime environment. Target applications, including Flatpaks
 are installed separately.
 
 Development uses pytest and Pillow to run real GUI tests and compare screenshots.
-FFmpeg's `ffmpeg` and `ffprobe` commands decode and inspect recordings in tests;
-they are supplied by the development shell and package check, not exposed by the
-installed framewisp package. Mypy and Pyright check types; Black, isort, and
+FFmpeg's `ffmpeg` and `ffprobe` commands render captions, inspect finished recordings,
+and decode recordings in tests. The package supplies them for Framewisp's internal
+use; the development shell also puts them on PATH. Mypy and Pyright check types; Black, isort, and
 nixfmt format the source. Setuptools builds the Python package, and Just provides
 development command recipes.
 
@@ -136,7 +136,9 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
 | `record-start [--no-captions] FILE` | Start a clip in the running session. |
-| `record-stop` | Finalize the clip without stopping the app. |
+| `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
+| `status` | Query the live headless runner and print app, display, and recording state as JSON. |
+| `stop` | Stop the headless session and wait for cleanup and recording finalization. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
@@ -145,9 +147,9 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | `type [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
 | `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
-The automated tests cover the bundled native Wayland demo. Swell Foop 50.0 and
-KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below). X11 and GPU-dependent apps
-are outside this MVP.
+The automated tests cover the bundled demo on Wayland and Xwayland. Swell Foop 50.0 and
+KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below).
+Native X11 desktop attachment and GPU-dependent apps are outside this MVP.
 
 Clipboard forwarding between VNC clients and the session is disabled. Applications
 can still use Ctrl+C/Ctrl+V and primary selection. Framewisp's Nix package patches
@@ -394,6 +396,10 @@ MP4 is finalized and playable, leaving the app running. It can also stop a clip
 started with `run --record FILE`. Only one recording can be active at a time;
 starting another or stopping when none is active reports an error.
 
+On success, `record-stop` prints JSON with the output `path`, `duration_seconds`,
+`width`, `height`, and `size_bytes`. Framewisp uses ffprobe and the completed file
+to measure these values after caption rendering; duration is not a wall-clock estimate.
+
 Recordings are silent H.264 MP4 files at 30 fps and the session's display size.
 Recording requires even width and height. Existing output files are never
 overwritten. The session runner owns the recorder and finalizes an active clip
@@ -432,6 +438,10 @@ GitHub's inline player displays them; viewers cannot toggle them off afterward.
 This adds encoding time when stopping a captioned clip. If rendering fails, the
 command fails and leaves the uncaptioned MP4 at the requested path; see
 `captions.log` for details.
+
+The recorder log retains diagnostics and the first frame's timestamp used for
+caption alignment. Framewisp filters the remaining Wayland protocol trace as it
+arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
 and monochrome emoji. The app keeps its own font configuration. Caption text uses
@@ -571,6 +581,18 @@ Papers 50.2 was tested with PDF navigation, zoom, and search at 1600x900.
 
 ## Logs and cleanup
 
+Use `framewisp SESSION status` to query the live headless runner. Its JSON output
+includes the backend, display dimensions, app PID and running state, and the
+active recording path/PID/running state (or null).
+
+Use `framewisp SESSION stop` to request normal shutdown. It waits for managed
+processes to exit, runtime sockets and session metadata to be removed, and any
+active clip to be finalized. Success prints JSON with `status: "stopped"` and the
+last recording summary, if one exists. Neither command sends signals to stored
+PIDs. Disconnected sessions and metadata copied from another session are rejected.
+These commands manage headless sessions; use `framewisp --detach` for desktop
+attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
+
 The session directory contains `sway.log`, `wayvnc.log`, and `app.log`, plus
 `recorder.log` when recording. During a
 run, `session.json` records the private runtime directory, Wayland socket name,
@@ -584,6 +606,14 @@ It does not contain arbitrary descendants or recover from SIGKILL. If a stale
 
 GTK currently logs a warning about the missing session bus. The demo works
 without it. No private D-Bus service is started.
+
+Expected startup failures include a bounded tail of the component log. Failed
+headless display commands identify the session, display/socket directory, and
+tool error. If running in an agent sandbox, both the runner and every control
+command need permission to access the private sockets. A successful launch
+outside the sandbox does not give later sandboxed calls access. Use your execution
+environment's normal permission process when needed. A connection failure can
+also mean the app or display exited; inspect the diagnostic before deciding.
 
 ## Development
 

@@ -25,6 +25,8 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
 | `record-start [--no-captions] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
+| `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
+| `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
 | `attach` | User-only: share an existing Wayland desktop through its permission dialog. See the attachment instructions below. |
 
 Standalone commands take no SESSION: `framewisp --detach` stops the active
@@ -72,8 +74,11 @@ framewisp /tmp/framewisp-demo key Return
 framewisp /tmp/framewisp-demo screenshot --delay 0.3 /tmp/after.png
 ```
 
-Inspect the result before choosing the next action. Stop the isolated runner
-with Ctrl+C or SIGTERM when finished; `--detach` is for desktop attachments only.
+Inspect the result before choosing the next action. Use
+`framewisp /tmp/framewisp-demo status` to check the session and
+`framewisp /tmp/framewisp-demo stop` when finished. Ctrl+C or SIGTERM to the runner
+also stops it. `status` and `stop` require a connected headless session;
+`--detach` is for desktop attachments only.
 
 ## Recording
 
@@ -92,6 +97,8 @@ shutdown also finalizes it. Input captions are embedded by default;
 `--no-captions` disables them for that clip. Every input is still logged to
 `SESSION/inputs.jsonl`, including full typed text. Review logs and videos for
 sensitive content before sharing them. Caption rendering adds time to stopping.
+On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
+`width`, `height`, and `size_bytes`, measured from the finished MP4.
 
 ## Desktop attachment
 
@@ -111,6 +118,11 @@ Screenshots cover the selected monitor. Recording attached sessions is unsupport
 
 Inspect the session's `app.log`, `sway.log`, and `wayvnc.log` for headless launch
 failures, or `recorder.log` and `captions.log` for recording failures.
+The runner and every screenshot/input/control invocation need access to the
+private display sockets. Launching outside a sandbox does not grant later
+sandboxed commands access. If the environment denies socket access, use its
+normal permission process for both launch and control commands. Connection
+errors can also mean the session exited; check the error and logs first.
 If something goes wrong, ask the user for permission before filing an issue at
 https://github.com/krscott/framewisp/issues. Agree on the report and any logs or
 screenshots to include before submitting it.
