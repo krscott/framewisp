@@ -17,6 +17,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | --- | --- |
 | `run [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
 | `screenshot [--delay SECONDS] PATH` | Save the current display as a PNG. Default delay: 0. |
+| `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move immediately without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
 | `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move immediately to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration: 0.4 seconds. |
@@ -79,6 +80,64 @@ Inspect the result before choosing the next action. Use
 `framewisp /tmp/framewisp-demo stop` when finished. Ctrl+C or SIGTERM to the runner
 also stops it. `status` and `stop` require a connected headless session;
 `--detach` is for desktop attachments only.
+
+## Batch known actions
+
+When targets are already known, use one batch for the inputs and final capture.
+Save this JSON to `check.json`, then run
+`framewisp /tmp/framewisp-demo batch --file check.json`:
+
+```json
+{
+  "actions": [
+    {"action": "click", "x": 120, "y": 100},
+    {"action": "type", "text": "HelloGUI", "interval": 0},
+    {"action": "key", "chord": "Return"}
+  ],
+  "capture": {"path": "/tmp/result.png", "delay": 0.1}
+}
+```
+
+Batch supports `move`, `click`, `drag`, `scroll`, `type`, and `key` on headless
+Wayland and Xwayland. Parameters use the CLI names without `--`; `modifier` is
+an array of lowercase names, such as `["ctrl", "shift"]`. Defaults match the
+individual commands. Set `interval: 0` for unpaced checks; omit it for the usual
+0.08 seconds between characters. Explicit pacing and capture delay stay in effect.
+
+The whole request is validated before input. Unknown fields are errors. Limits
+per batch are 256 actions, 16,384 typed characters, 10,000 scroll steps, and 300
+seconds of requested typing/drag/capture pacing. The file and serialized request
+must each fit in 1 MiB. At least one action is required. Capture is optional;
+its delay defaults to zero. Relative capture paths use the CLI's working directory.
+Use a new PNG filename in an existing directory; session files and existing files
+are rejected. Recording, lifecycle commands, loops, and assertions cannot go inside
+a batch. Attached desktops do not support batches.
+
+The runner serializes the whole batch, including capture, with other input jobs.
+JSON on stdout includes `status`, `results` (zero-based index, action, status,
+error, duration), `completed_actions`, `failed_index`, `failed_phase`,
+`duration_seconds`, `capture_seconds`, `artifacts` (absolute PNG paths), and `error`.
+Per-action durations use the key `duration_seconds`. Times exclude queue wait;
+capture time includes its requested delay. Exit code is 0 for completion, 1 for
+runtime/session failure, or 2 for invalid CLI/file input. Rejection before execution
+may report only an error on stderr, without result JSON.
+
+Execution stops at the first runtime failure. Inspect completed results and
+`failed_index`; the failed action may itself have sent some input. Capture failure
+has `failed_phase: "capture"` and a null failed index. No action is rolled back or
+retried. If the connection dies before a reply, the outcome may be partial: inspect
+the app and `inputs.jsonl` before deciding what to do next. Disconnecting cancels
+queued work or the remaining running batch and releases held keys/buttons. Session
+stop does the same. The completed inputs remain in the app.
+
+A successful capture is an artifact, not proof that the app finished processing.
+Inspect it or check an app-specific acknowledgement before claiming success.
+Each input retains its own log records and recording captions.
+
+Before an X11 batch sends input, the worker checks all its Unicode characters
+against the session's 128-character mapping limit, including mappings allocated
+by earlier queued jobs. A capacity failure returns no action results, zero completed
+actions, `failed_phase: "validation"`, and the index that exceeds the limit.
 
 ## Recording
 

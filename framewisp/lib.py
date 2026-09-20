@@ -17,6 +17,8 @@ from threading import Event
 from types import FrameType
 from typing import BinaryIO, cast
 
+from framewisp.actions import InputAction
+from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import capture_origin, recorder_output, render_captions
 from framewisp.connection import reply as reply
 from framewisp.errors import (
@@ -25,7 +27,7 @@ from framewisp.errors import (
     display_command,
     log_failure,
 )
-from framewisp.inputs import VNC, InputAction, InputWorker
+from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 
 SWAY_CONFIG = """\
@@ -423,11 +425,18 @@ def session_command(
         raise SessionError(
             "This runner does not support persistent input. Restart the session with this version of framewisp."
         )
+    if action == "batch" and state.get("batch_input") is not True:
+        raise SessionError(
+            "This runner does not support batches. Restart the session with this version of framewisp."
+        )
+    message = (json.dumps(request) + "\n").encode()
+    if len(message) > MAX_REQUEST_BYTES:
+        raise SessionError("Session request exceeds the 1 MiB limit.")
     control = Path(state["runtime_directory"]) / "control.sock"
     try:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(control))
-            connection.sendall((json.dumps(request) + "\n").encode())
+            connection.sendall(message)
             with connection.makefile("r") as response:
                 line = response.readline()
     except OSError as connection_error:
@@ -442,11 +451,11 @@ def session_command(
         return 1
     result = json.loads(line)
     error = result["error"]
+    if result["data"] is not None and (error is None or action == "batch"):
+        print(json.dumps(result["data"]))
     if error is not None:
         print(error, file=sys.stderr)
         return 1
-    if result["data"] is not None:
-        print(json.dumps(result["data"]))
     return 0
 
 
@@ -465,10 +474,14 @@ def handle_session_command(
     stopping = False
     try:
         connection.settimeout(2)
-        with connection.makefile("r") as request:
+        with connection.makefile("rb") as request:
             try:
-                raw: object = json.loads(request.readline())
-            except (ValueError, OSError):
+                line = request.readline(MAX_REQUEST_BYTES + 1)
+                if len(line) > MAX_REQUEST_BYTES:
+                    reply(connection, error="Session request exceeds the 1 MiB limit.")
+                    return None
+                raw: object = json.loads(line)
+            except (ValueError, OSError, RecursionError):
                 return None
         if not isinstance(raw, dict):
             reply(connection, error="Expected a session command object.")
@@ -489,10 +502,26 @@ def handle_session_command(
         if action == "stop":
             stopping = True
             return connection
-        if action in {"move", "click", "drag", "scroll", "type", "key"}:
+        if action in {"move", "click", "drag", "scroll", "type", "key", "batch"}:
             try:
-                input_action = InputAction.parse(action, command.get("parameters"))
-            except (ValueError, TypeError, OverflowError) as failure:
+                input_action: InputAction | Batch
+                if action == "batch":
+                    input_action = Batch.parse(command.get("parameters"))
+                    if input_action.capture is not None:
+                        if not input_action.capture.path.parent.is_dir():
+                            raise ValueError(
+                                "capture.path requires an existing parent directory."
+                            )
+                        path_error = recording_path_error(
+                            recordings.session, input_action.capture.path.resolve()
+                        )
+                        if path_error is not None:
+                            raise ValueError(
+                                path_error.replace("recording path", "capture path")
+                            )
+                else:
+                    input_action = InputAction.parse(action, command.get("parameters"))
+            except (ValueError, TypeError, OverflowError, OSError) as failure:
                 reply(connection, error=str(failure))
                 return None
             if inputs.submit(connection, input_action):
@@ -626,7 +655,15 @@ def run_session(
             listener.bind(str(runtime / "control.sock"))
             listener.listen()
             listener.settimeout(0.1)
-            inputs = InputWorker(session, input_client, stop, x11=x11)
+            inputs = InputWorker(
+                session,
+                input_client,
+                stop,
+                x11=x11,
+                capture=lambda path, cancelled: batch_screenshot(
+                    session, path, cancelled
+                ),
+            )
             stack.callback(inputs.close)
 
             def write_state() -> None:
@@ -640,6 +677,7 @@ def run_session(
                         {
                             "control_protocol": 1,
                             "persistent_input": True,
+                            "batch_input": True,
                             "runtime_directory": directory,
                             "wayland_display": display,
                             "x11_display": x11_display,
@@ -722,10 +760,35 @@ def session_environment(session: Path) -> dict[str, str]:
     }
 
 
-def screenshot(session: Path, destination: Path) -> int:
+def screenshot(
+    session: Path, destination: Path, *, cancelled: Callable[[], bool] | None = None
+) -> int:
     return display_command(
         session,
         ["grim", "-t", "png", "-o", "HEADLESS-1", str(destination)],
         env=session_environment(session),
         timeout=10,
+        cancelled=cancelled,
     )
+
+
+def batch_screenshot(
+    session: Path, destination: Path, cancelled: Callable[[], bool]
+) -> int:
+    """Publish only a complete PNG, without overwriting another client's artifact."""
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix=".framewisp-capture-", dir=destination.parent
+        ) as directory:
+            temporary = Path(directory) / "capture.png"
+            screenshot(session, temporary, cancelled=cancelled)
+            if cancelled():
+                raise InterruptedError(
+                    "Capture cancelled; caller disconnected or session stopped."
+                )
+            destination.hardlink_to(temporary)
+    except InterruptedError:
+        raise
+    except OSError as error:
+        raise SessionError(f"Cannot save capture to {destination}: {error}") from None
+    return 0
