@@ -1605,6 +1605,10 @@ def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> N
             "actions": [{"action": "key", "chord": "a"}],
             "capture": {"path": str(demo.directory / "session.json")},
         },
+        {
+            "actions": [{"action": "key", "chord": "a"}],
+            "capture": {"path": str(demo.directory / "missing" / "image.png")},
+        },
     ]
     for parameters in invalid:
         with input_request(demo, "batch", parameters) as connection:
@@ -1658,7 +1662,15 @@ def test_batch_no_interleaving_through_final_capture(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["x11"], indirect=True)
-def test_batch_partial_runtime_failure(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "existing,first,second,failed", [(0, 129, 0, 1), (0, 64, 65, 2), (1, 64, 64, 2)]
+)
+def test_batch_checks_x11_capacity_before_input(
+    demo: Demo, tmp_path: Path, existing: int, first: int, second: int, failed: int
+) -> None:
+    if existing:
+        cli(demo.directory, "type", "é", "--interval", "0")
+    before = (demo.directory / "inputs.jsonl").read_text()
     plan = tmp_path / "batch.json"
     plan.write_text(
         json.dumps(
@@ -1667,7 +1679,12 @@ def test_batch_partial_runtime_failure(demo: Demo, tmp_path: Path) -> None:
                     {"action": "key", "chord": "a"},
                     {
                         "action": "type",
-                        "text": "".join(chr(0x4E00 + i) for i in range(129)),
+                        "text": "".join(chr(0x4E00 + i) for i in range(first)),
+                        "interval": 0,
+                    },
+                    {
+                        "action": "type",
+                        "text": "".join(chr(0x4F00 + i) for i in range(second)),
                         "interval": 0,
                     },
                     {"action": "key", "chord": "z"},
@@ -1685,10 +1702,11 @@ def test_batch_partial_runtime_failure(demo: Demo, tmp_path: Path) -> None:
     assert response.returncode == 1
     result = json.loads(response.stdout)
     assert result["status"] == "failed"
-    assert result["completed_actions"] == 1
-    assert result["failed_index"] == 1
-    assert result["failed_phase"] == "action"
-    assert [item["status"] for item in result["results"]] == ["completed", "failed"]
+    assert result["completed_actions"] == 0
+    assert result["failed_index"] == failed
+    assert result["failed_phase"] == "validation"
+    assert result["results"] == []
+    assert (demo.directory / "inputs.jsonl").read_text() == before
     assert "per session" in result["error"]
     assert result["artifacts"] == []
     assert not (tmp_path / "never.png").exists()
@@ -1700,14 +1718,20 @@ def test_batch_partial_runtime_failure(demo: Demo, tmp_path: Path) -> None:
 def test_batch_capture_failure_keeps_completed_results(
     demo: Demo, tmp_path: Path
 ) -> None:
+    parent = tmp_path / "removed"
+    parent.mkdir()
     with input_request(
         demo,
         "batch",
         {
             "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": str(tmp_path / "missing" / "image.png")},
+            "capture": {"path": str(parent / "image.png"), "delay": 0.5},
         },
     ) as connection:
+        wait_until(
+            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+        )
+        parent.rmdir()
         response = json.loads(connection.recv(8192))
     result = response["data"]
     assert response["error"] is not None
@@ -1724,6 +1748,7 @@ def test_batch_disconnect_releases_gesture_and_skips_tail(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
     with input_request(
         demo,
         "batch",
@@ -1869,6 +1894,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
     with input_request(
         demo,
         "batch",

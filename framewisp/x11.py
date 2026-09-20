@@ -7,6 +7,19 @@ from pathlib import Path
 
 from framewisp.errors import SessionError, display_command
 
+MAX_UNICODE_CHARACTERS = 128
+UNICODE_CAPACITY_ERROR = (
+    "X11 typing supports at most 128 distinct non-ASCII characters per session. "
+    "Start a new session to use a different character set."
+)
+
+
+def mapped_characters(session: Path) -> set[str]:
+    state = json.loads((session / "session.json").read_text())
+    path = Path(state["runtime_directory"]) / "x11-keymap.json"
+    codes: dict[str, int] = json.loads(path.read_text()) if path.exists() else {}
+    return set(codes)
+
 
 def type_text(
     session: Path,
@@ -23,11 +36,8 @@ def type_text(
     characters = [
         char for char in dict.fromkeys(text) if not char.isascii() and char not in codes
     ]
-    if len(codes) + len(characters) > 128:
-        raise SessionError(
-            "X11 typing supports at most 128 distinct non-ASCII characters per session. "
-            "Start a new session to use a different character set.",
-        )
+    if len(codes) + len(characters) > MAX_UNICODE_CHARACTERS:
+        raise SessionError(UNICODE_CAPACITY_ERROR)
     # Upper US keycodes, excluding the modifier aliases. Numeric xdotool codes
     # avoid its temporary Unicode remappings, which lose queued characters.
     available = [

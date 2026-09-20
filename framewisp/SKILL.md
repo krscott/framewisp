@@ -134,6 +134,11 @@ A successful capture is an artifact, not proof that the app finished processing.
 Inspect it or check an app-specific acknowledgement before claiming success.
 Each input retains its own log records and recording captions.
 
+Before an X11 batch sends input, the worker checks all its Unicode characters
+against the session's 128-character mapping limit, including mappings allocated
+by earlier queued jobs. A capacity failure returns no action results, zero completed
+actions, `failed_phase: "validation"`, and the index that exceeds the limit.
+
 ## Recording
 
 To record just a demonstration, start recording after setup, perform the inputs,

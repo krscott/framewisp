@@ -271,7 +271,8 @@ scroll steps, and more than 300 seconds of requested typing/drag/capture pacing.
 At least one action is required. There are no loops, lifecycle operations, or
 conditional checks. Capture accepts a path and optional finite nonnegative delay.
 The CLI resolves its path against its own working directory. The runner requires
-an absolute path and rejects existing destinations and reserved session paths.
+an absolute path with an existing parent directory and rejects existing
+destinations and reserved session paths.
 
 The CLI sends one control request with `action: "batch"` and the normalized
 object in `parameters`. Metadata advertises `batch_input: true`; older runners
@@ -307,6 +308,11 @@ A disconnected caller cannot receive results; logs and application inspection
 are needed to resolve uncertain completion. Nothing is replayed or rolled back.
 Transport failure retains the existing stop-session behavior. Capture reports an
 artifact, not an application acknowledgement or rendering barrier.
+
+Before an X11 batch sends input, the worker checks all its Unicode characters
+against the session's 128-character mapping limit, including mappings allocated
+by earlier queued jobs. A capacity failure returns no action results, zero completed
+actions, `failed_phase: "validation"`, and the index that exceeds the limit.
 
 ## Shutdown and errors
 

@@ -451,7 +451,7 @@ def session_command(
         return 1
     result = json.loads(line)
     error = result["error"]
-    if result["data"] is not None:
+    if result["data"] is not None and (error is None or action == "batch"):
         print(json.dumps(result["data"]))
     if error is not None:
         print(error, file=sys.stderr)
@@ -508,6 +508,10 @@ def handle_session_command(
                 if action == "batch":
                     input_action = Batch.parse(command.get("parameters"))
                     if input_action.capture is not None:
+                        if not input_action.capture.path.parent.is_dir():
+                            raise ValueError(
+                                "capture.path requires an existing parent directory."
+                            )
                         path_error = recording_path_error(
                             recordings.session, input_action.capture.path.resolve()
                         )

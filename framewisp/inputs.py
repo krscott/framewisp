@@ -19,6 +19,11 @@ from framewisp.captions import log_input
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
+from framewisp.x11 import (
+    MAX_UNICODE_CHARACTERS,
+    UNICODE_CAPACITY_ERROR,
+    mapped_characters,
+)
 from framewisp.x11 import type_text as type_x11_text
 
 
@@ -131,6 +136,20 @@ class InputWorker:
             capture_seconds=None,
         )
         try:
+            self.wait(connection)
+            if self.x11:
+                # Check at dequeue time so mappings allocated by earlier jobs count.
+                characters = mapped_characters(self.session)
+                for index, action in enumerate(batch.actions):
+                    if action.action == "type":
+                        characters.update(
+                            char
+                            for char in cast(str, action.parameters["text"])
+                            if not char.isascii()
+                        )
+                        if len(characters) > MAX_UNICODE_CHARACTERS:
+                            data.update(failed_index=index, failed_phase="validation")
+                            raise SessionError(UNICODE_CAPACITY_ERROR)
             for index, action in enumerate(batch.actions):
                 action_started = time.monotonic()
                 result: dict[str, object] = {
