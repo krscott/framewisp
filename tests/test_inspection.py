@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -184,38 +185,39 @@ def test_failed_text_keeps_readable_matching_fields(
 
 @pytest.fixture
 def private_bus(tmp_path: Path) -> Iterator[tuple[subprocess.Popen[bytes], str]]:
-    path = tmp_path / "bus.sock"
-    address = f"unix:path={path}"
-    config = tmp_path / "bus.conf"
-    config.write_text(
-        "<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen>"
-        '<auth>EXTERNAL</auth><policy context="default">'
-        '<allow send_destination="*"/><allow receive_sender="*"/>'
-        '<allow own="*"/></policy></busconfig>'
-    )
-    log = tmp_path / "bus.log"
-    with log.open("wb") as output:
-        daemon = subprocess.Popen(
-            [
-                "dbus-daemon",
-                f"--config-file={config}",
-                "--nofork",
-                f"--address={address}",
-            ],
-            stdout=output,
-            stderr=subprocess.STDOUT,
+    with tempfile.TemporaryDirectory(prefix="fw-test-bus-") as directory:
+        path = Path(directory) / "bus.sock"
+        address = f"unix:path={path}"
+        config = tmp_path / "bus.conf"
+        config.write_text(
+            "<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen>"
+            '<auth>EXTERNAL</auth><policy context="default">'
+            '<allow send_destination="*"/><allow receive_sender="*"/>'
+            '<allow own="*"/></policy></busconfig>'
         )
-    try:
-        deadline = time.monotonic() + 5
-        while not path.exists():
-            assert daemon.poll() is None, log.read_text()
-            assert time.monotonic() < deadline
-            time.sleep(0.01)
-        yield daemon, address
-    finally:
-        if daemon.poll() is None:
-            daemon.terminate()
-        daemon.wait(timeout=5)
+        log = tmp_path / "bus.log"
+        with log.open("wb") as output:
+            daemon = subprocess.Popen(
+                [
+                    "dbus-daemon",
+                    f"--config-file={config}",
+                    "--nofork",
+                    f"--address={address}",
+                ],
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        try:
+            deadline = time.monotonic() + 5
+            while not path.exists():
+                assert daemon.poll() is None, log.read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            yield daemon, address
+        finally:
+            if daemon.poll() is None:
+                daemon.terminate()
+            daemon.wait(timeout=5)
 
 
 def test_inspection_cleanup_after_bus_disconnect(
