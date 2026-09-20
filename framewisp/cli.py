@@ -59,6 +59,37 @@ def main() -> None:
     )
     commands.add_parser("stop", help="stop a headless session and wait for cleanup")
 
+    inspect = commands.add_parser(
+        "inspect", help="query accessible UI objects in a headless session"
+    )
+    inspect.add_argument(
+        "--json",
+        action="store_true",
+        required=True,
+        help="print a structured observation",
+    )
+    inspect.add_argument("--role", help="case-insensitive exact AT-SPI role")
+    inspect.add_argument("--name", help="case-insensitive accessible name substring")
+    inspect.add_argument("--text", help="case-insensitive accessible text substring")
+    inspect.add_argument(
+        "--max-depth", type=int, default=8, help="tree depth, 1-32 (default: 8)"
+    )
+    inspect.add_argument(
+        "--limit", type=int, default=20, help="result count, 1-100 (default: 20)"
+    )
+    inspect.add_argument(
+        "--max-nodes",
+        type=int,
+        default=256,
+        help="visited nodes, 1-4096 (default: 256)",
+    )
+    inspect.add_argument(
+        "--timeout",
+        type=seconds,
+        default=2.0,
+        help="query budget, >0 to 10 seconds (default: 2)",
+    )
+
     commands.add_parser(
         "attach", help="share an existing desktop through its permission dialog"
     )
@@ -207,6 +238,21 @@ def main() -> None:
             "SESSION and COMMAND are required (or use --detach or --agent-skill)"
         )
     session = args.session.resolve()
+    if args.action == "inspect":
+        from framewisp.inspection import Query
+
+        try:
+            args.query = Query(
+                role=args.role,
+                name=args.name,
+                text=args.text,
+                max_depth=args.max_depth,
+                limit=args.limit,
+                max_nodes=args.max_nodes,
+                timeout=args.timeout,
+            )
+        except ValueError as error:
+            parser.error(str(error))
     if args.action in {"click", "drag"} and len(set(args.modifier)) != len(
         args.modifier
     ):
@@ -247,7 +293,13 @@ def main() -> None:
 
 
 def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
-    if args.action == "attach":
+    if args.action == "inspect":
+        from framewisp.inspection import inspect_session
+
+        observation = inspect_session(session, args.query)
+        print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
+        result = 0 if observation["status"] == "ok" else 1
+    elif args.action == "attach":
         # Desktop portal imports are only needed by the foreground attach owner.
         from framewisp.attach import attach_session
 

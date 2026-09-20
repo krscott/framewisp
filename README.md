@@ -138,6 +138,7 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | `record-start [--no-captions] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
+| `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
 | `stop` | Stop the headless session and wait for cleanup and recording finalization. |
 | `screenshot [--delay SECONDS] PATH` | Wait the requested seconds (default: 0), then write a PNG of the display. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
@@ -651,3 +652,30 @@ for deferred work.
 
 Framewisp is licensed under the GNU General Public License, version 3 only
 (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full text.
+
+## Inspect accessible controls
+
+Headless GTK and Qt apps can expose text and state without a screenshot:
+
+```sh
+framewisp /tmp/framewisp-demo inspect --json --role button --name 'Apply text'
+framewisp /tmp/framewisp-demo inspect --json --role 'text box'
+framewisp /tmp/framewisp-demo inspect --json --role label --text 'Applied:'
+```
+
+This is a read-only prototype. It returns roles, names, text, state flags,
+action names, numeric values, and window-relative bounds where the app exposes
+them. Filters combine with AND. Role names come from the toolkit; name/text
+filters match substrings without regard to case. Add `--limit`, `--max-depth`,
+`--max-nodes`, or `--timeout` to change the bounded defaults shown in `inspect --help`.
+
+Check `status` in the JSON. Only `ok` exits zero; an empty complete result means
+no match in the exposed tree. `partial`, `timeout`, `unsupported`, and `unavailable`
+exit 1 and include reasons. No registered accessible app can mean either an
+unsupported app or an app still starting. Duplicate matches remain separate.
+IDs belong to one observation and cannot be reused as selectors. Bounds are
+window-relative toolkit coordinates, not guaranteed screenshot pixels.
+
+Keep screenshots for appearance, canvases, omitted controls, and pointer targeting.
+Desktop attachment does not support inspection. See the [support matrix and
+measurements](docs/ui-inspection.md) before relying on a particular toolkit.

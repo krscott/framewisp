@@ -12,6 +12,11 @@ ApplicationWindow {
         acceptedButtons: Qt.RightButton
         onClicked: menu.popup()
     }
+    Button {
+        x: 20
+        y: 20
+        text: "Inspection button"
+    }
     Menu {
         id: menu
         popupType: Popup.Window

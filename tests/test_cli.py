@@ -151,6 +151,9 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
         "app.log",
         "inputs.jsonl",
         "captions.log",
+        "dbus.log",
+        "accessibility.log",
+        "registry.log",
     ],
 )
 def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None:

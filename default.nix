@@ -10,6 +10,8 @@
   wrapGAppsHook4,
   gobject-introspection,
   gtk4,
+  dbus,
+  at-spi2-core,
   sway-unwrapped,
   wayvnc,
   grim,
@@ -64,6 +66,7 @@ buildPythonPackage {
     makeWrapperArgs+=(
       "''${gappsWrapperArgs[@]}"
       --set FRAMEWISP_FONTCONFIG_FILE "${captionFonts}"
+      --set FRAMEWISP_ATSPI_REGISTRY "${at-spi2-core}/libexec/at-spi2-registryd"
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${capturePlugins}"
       --prefix PATH : "$out/bin:${
         lib.makeBinPath [
@@ -73,6 +76,7 @@ buildPythonPackage {
           wf-recorder
           wtype
           bash
+          dbus
           xwayland
           xdotool
           xmodmap
@@ -84,7 +88,10 @@ buildPythonPackage {
     )
   '';
 
-  passthru = { inherit captionFonts capturePlugins; };
+  passthru = {
+    inherit captionFonts capturePlugins;
+    atspiRegistry = "${at-spi2-core}/libexec/at-spi2-registryd";
+  };
 
   propagatedBuildInputs = [
     vncdotool
