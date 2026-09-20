@@ -20,7 +20,8 @@ def filter_recorder_output(source: BinaryIO, destination: BinaryIO) -> None:
     """Keep diagnostics and the first frame's clock, discarding protocol chatter."""
     kept_origin = False
     protocol = re.compile(
-        rb"^\[[\d:. ]+\]\s+(?:\{[^}]*\}\s+)?(?:->\s+)?" rb"\w+[#@]\d+\.\w+\(.*\)\s*$"
+        rb"^\[[\d:. ]+\]\s+(?:\{[^}]*\}\s+)?(?:(?:->|discarded)\s+)?"
+        rb"\w+[#@]\d+\.\w+\(.*\)\s*$"
     )
     for line in source:
         origin = re.search(rb"zwlr_screencopy_frame_v1[#@]\d+\.ready\(", line)

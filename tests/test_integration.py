@@ -270,6 +270,7 @@ def test_status_and_stop_finalize_recording(demo: Demo) -> None:
     log = (demo.directory / "recorder.log").read_text()
     assert len(re.findall(r"zwlr_screencopy_frame_v1[#@]\d+\.ready", log)) == 1
     assert "get_registry" not in log
+    assert "discarded wl_buffer" not in log
     assert "libx264" in log
 
 
@@ -323,6 +324,40 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
         assert str(tmp_path) in result.stderr
         assert "sandbox" in result.stderr
         assert "Traceback" not in result.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("mapped", [False, True])
+def test_x11_unicode_connection_failure_has_context(
+    tmp_path: Path, mapped: bool
+) -> None:
+    session = tmp_path / "disconnected-x11"
+    session.mkdir()
+    display = ":framewisp-missing"
+    (session / "session.json").write_text(
+        json.dumps(
+            {
+                "runtime_directory": str(tmp_path),
+                "wayland_display": "wayland-missing",
+                "x11_display": display,
+            }
+        )
+    )
+    if mapped:
+        (tmp_path / "x11-keymap.json").write_text(json.dumps({"é": 120}))
+    result = subprocess.run(
+        ["framewisp", str(session), "type", "é"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 1
+    assert ("xdotool" if mapped else "xmodmap") in result.stderr
+    assert display in result.stderr
+    assert str(session) in result.stderr and str(tmp_path) in result.stderr
+    assert "sandbox" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:

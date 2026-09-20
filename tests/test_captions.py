@@ -19,8 +19,11 @@ def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
     later = b"[00:15:40.8] {Default Queue} zwlr_screencopy_frame_v1#7.ready(0, 124, 250000000)\n"
     diagnostic = b"[libx264 @ 0x123] encoding diagnostic\nUnable to open output file\n"
     trace = b"[00:15:39.7] {Default Queue}  -> wl_display#1.get_registry(new id wl_registry#2)\n"
+    discarded = b"[00:15:40.9] {Default Queue} discarded wl_buffer#12.release()\n"
     output = BytesIO()
-    filter_recorder_output(BytesIO(trace + origin + later * 10000 + diagnostic), output)
+    filter_recorder_output(
+        BytesIO(trace + origin + (later + discarded) * 10000 + diagnostic), output
+    )
     assert output.getvalue() == origin + diagnostic
     log = tmp_path / "recorder.log"
     log.write_bytes(output.getvalue())

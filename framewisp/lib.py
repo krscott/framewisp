@@ -20,7 +20,12 @@ from types import FrameType
 from typing import BinaryIO, cast
 
 from framewisp.captions import capture_origin, recorder_output, render_captions
-from framewisp.errors import SOCKET_ACCESS_HINT, SessionError, log_failure
+from framewisp.errors import (
+    SOCKET_ACCESS_HINT,
+    SessionError,
+    display_command,
+    log_failure,
+)
 from framewisp.x11 import type_text as type_x11_text
 
 SWAY_CONFIG = """\
@@ -732,38 +737,6 @@ def screenshot(session: Path, destination: Path) -> int:
     )
 
 
-def display_command(
-    session: Path,
-    command: list[str],
-    *,
-    timeout: float,
-    env: dict[str, str] | None = None,
-) -> int:
-    state = json.loads((session / "session.json").read_text())
-    context = (
-        f"{command[0]} failed for session {session}, display {state['wayland_display']}, "
-        f"sockets in {state['runtime_directory']}"
-    )
-    try:
-        result = subprocess.run(
-            command,
-            env=env,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise SessionError(f"{context}: {error}\n{SOCKET_ACCESS_HINT}") from None
-    if result.returncode:
-        raise SessionError(
-            f"{context} (exit {result.returncode}):\n{result.stderr.strip()}\n{SOCKET_ACCESS_HINT}"
-        )
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
-    return 0
-
-
 def click_pointer(
     session: Path,
     x: int,
@@ -834,7 +807,7 @@ def type_unicode(session: Path, text: str, *, interval: float) -> int:
             "DISPLAY": display,
             "XAUTHORITY": "/dev/null",
         }
-        return type_x11_text(text, interval=interval, env=env)
+        return type_x11_text(session, text, interval=interval, env=env)
     # wtype uploads a keymap containing the requested characters; wayvnc's US
     # keymap cannot represent arbitrary Unicode. Use keysyms so text never
     # becomes a wtype option, and sleep only between characters.
