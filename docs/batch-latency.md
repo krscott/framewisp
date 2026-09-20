@@ -9,8 +9,8 @@ recording is off. No direct VNC calls bypass the production input path.
 Run each backend separately in the development environment:
 
 ```sh
-python docs/benchmark_input.py docs/batch-wayland.json --samples 40
-python docs/benchmark_input.py docs/batch-x11.json --samples 40 --x11
+python docs/benchmark_input.py /tmp/framewisp-batch-wayland.json --samples 40
+python docs/benchmark_input.py /tmp/framewisp-batch-x11.json --samples 40 --x11
 ```
 
 The script starts and cleans up its own sessions. It resets the demo outside
@@ -26,8 +26,8 @@ Measured on September 20, 2026 on NixOS x86_64, Linux 6.18.52, an Intel Core
 i7-8550U, Python 3.14.7, vncdotool 1.2.0, Sway 1.12, wayvnc 0.10.1, and
 Xwayland 24.1.13. Backends ran sequentially without other framewisp tests or
 benchmarks running locally. These are host-specific observations, not latency
-guarantees. Raw samples and versions are in [Wayland](batch-wayland.json) and
-[Xwayland](batch-x11.json).
+guarantees. Raw samples and versions for both backends are in the
+[PR comment](https://github.com/krscott/framewisp/pull/61#issuecomment-5751648069).
 
 | Backend | Four CLI calls p50 / p95 | One batch p50 / p95 | Median reduction |
 | --- | ---: | ---: | ---: |
