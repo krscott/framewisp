@@ -57,9 +57,8 @@ def type_text(
             arguments.extend(["sleep", str(interval)])
         key = str(codes[character]) if character in codes else f"0x{ord(character):02x}"
         arguments.extend(["key", "--delay", "0", key])
-    completed = False
     try:
-        result = display_command(
+        return display_command(
             session,
             arguments,
             env=env,
@@ -67,15 +66,15 @@ def type_text(
             timeout=15 + max(0, len(text) - 1) * interval,
             cancelled=cancelled,
         )
-        completed = True
-        return result
-    finally:
+    except BaseException as error:
         # XTest keys outlive xdotool if it is interrupted between press/release.
-        if not completed:
+        try:
             subprocess.run(
                 [
                     "xdotool",
                     "keyup",
+                    "--delay",
+                    "0",
                     *dict.fromkeys(
                         str(codes[c]) if c in codes else f"0x{ord(c):02x}" for c in text
                     ),
@@ -87,3 +86,10 @@ def type_text(
                 timeout=1,
                 capture_output=True,
             )
+        except (OSError, subprocess.SubprocessError) as cleanup_error:
+            # Keep the original display diagnostics, but make failed release
+            # fatal to the worker so subsequent input cannot inherit held keys.
+            raise RuntimeError(
+                f"{error}\nCould not release X11 keys: {cleanup_error}"
+            ) from cleanup_error
+        raise

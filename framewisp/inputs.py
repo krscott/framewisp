@@ -91,6 +91,15 @@ class InputAction:
             raise ValueError("type supports printable characters only.")
         if action == "key" and key_commands(cast(str, p["chord"])) is None:
             raise ValueError("Unsupported key combination.")
+        if action == "drag" and not math.isfinite(cast(float, p["duration"]) * 60):
+            raise ValueError("Drag duration is too large.")
+        if action == "type":
+            interval = cast(float, p["interval"])
+            length = len(cast(str, p["text"]))
+            if not math.isfinite(interval * 1000) or not math.isfinite(
+                15 + max(0, length - 1) * interval + length * 0.004
+            ):
+                raise ValueError("Typing interval or total duration is too large.")
         return InputAction(action, p)
 
 

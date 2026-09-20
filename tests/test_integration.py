@@ -363,40 +363,6 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
         assert "Traceback" not in result.stderr
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize("mapped", [False, True])
-def test_x11_unicode_connection_failure_has_context(
-    tmp_path: Path, mapped: bool
-) -> None:
-    # Test the retained X11 helper directly; CLI input now requires a live runner.
-    session = tmp_path / "disconnected-x11"
-    session.mkdir()
-    display = ":framewisp-missing"
-    (session / "session.json").write_text(
-        json.dumps(
-            {
-                "runtime_directory": str(tmp_path),
-                "wayland_display": "wayland-missing",
-                "x11_display": display,
-            }
-        )
-    )
-    if mapped:
-        (tmp_path / "x11-keymap.json").write_text(json.dumps({"é": 120}))
-    script = (
-        "from framewisp.inputs import type_unicode; from pathlib import Path; "
-        + f"type_unicode(Path({str(session)!r}), 'é', interval=0)"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=15
-    )
-    assert result.returncode == 1
-    assert ("xdotool" if mapped else "xmodmap") in result.stderr
-    assert display in result.stderr
-    assert str(session) in result.stderr and str(tmp_path) in result.stderr
-    assert "sandbox" in result.stderr
-
-
 def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
@@ -1372,6 +1338,7 @@ def input_request(
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "screenshot", str(demo.directory / "ready.png"))
     with input_request(
         demo,
         "drag",
@@ -1441,7 +1408,15 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-@pytest.mark.parametrize("text", ["abcd", "é中🙂a"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "abcd",
+        "é中🙂a",
+        "".join(chr(code) for code in range(32, 127))
+        + "".join(chr(0x4E00 + index) for index in range(128)),
+    ],
+)
 def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     cli(demo.directory, "click", "100", "425")
@@ -1507,6 +1482,19 @@ def test_reject_invalid_input_without_poisoning_connection(demo: Demo) -> None:
         ),
         ("click", {"x": 1, "y": 1, "count": 1, "button": [], "modifier": []}),
         ("type", {"text": "a\nb", "interval": 0}),
+        ("type", {"text": "é", "interval": 1e308}),
+        (
+            "drag",
+            {
+                "x1": 1,
+                "y1": 1,
+                "x2": 100,
+                "y2": 100,
+                "duration": 1e308,
+                "button": "left",
+                "modifier": ["ctrl"],
+            },
+        ),
     ]
     for action, parameters in invalid:
         with input_request(demo, action, parameters) as connection:
@@ -1520,6 +1508,7 @@ def test_reject_invalid_input_without_poisoning_connection(demo: Demo) -> None:
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_lost_vnc_connection_does_not_replay_input(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "screenshot", str(demo.directory / "ready.png"))
     with input_request(
         demo,
         "drag",

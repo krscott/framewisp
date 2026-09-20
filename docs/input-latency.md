@@ -19,6 +19,17 @@ baseline was slower than the earlier #53 sample of about 750 ms; host load and
 measurement runs differ. Some baseline samples overlapped regression testing.
 The samples describe this host, not a latency guarantee or agent inference time.
 
+| Xwayland operation | Before p50 / p95 (ms) | Persistent p50 / p95 (ms) | Median speedup |
+| --- | ---: | ---: | ---: |
+| Click | 930 / 982 | 278 / 438 | 3.3x |
+| Key | 826 / 931 | 133 / 158 | 6.2x |
+| Eight ASCII characters, interval 0 | 820 / 896 | 139 / 169 | 5.9x |
+
+Xwayland clicks exceed the ordinary-input estimate, with a wider observed tail.
+They retain the 100 ms pointer priming pause. Its cold-start median was 651 ms
+before and 758 ms afterward, across six launches each (maxima 724 and 830 ms).
+Some Xwayland samples overlapped type checks and targeted GUI tests.
+
 Cold startup is measured separately, from launching the runner to session
 metadata appearing. Across six launches, the median was 567 ms before and
 667 ms afterward; maxima were 609 and 703 ms. Six launches are not enough to
