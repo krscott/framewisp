@@ -9,19 +9,12 @@ from framewisp.captions import log_input
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError
+from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.lib import (
-    CLICK_BUTTONS,
-    MODIFIERS,
-    SCROLL_BUTTONS,
-    click_pointer,
-    drag_pointer,
     key_commands,
     run_session,
     screenshot,
-    scroll_pointer,
-    send_input,
     session_command,
-    type_text,
 )
 
 
@@ -300,47 +293,10 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             for key, value in vars(args).items()
             if key not in {"session", "action"}
         }
-        with log_input(session, args.action, parameters) as action:
-            result = (
-                request_attached(session, args.action, parameters)
-                if attached
-                else perform_input(session, args)
-            )
-            action.returncode = result
-    return result
-
-
-def perform_input(session: Path, args: argparse.Namespace) -> int:
-    if args.action == "move":
-        result = send_input(session, ["move", str(args.x), str(args.y)])
-    elif args.action == "click":
-        result = click_pointer(
-            session,
-            args.x,
-            args.y,
-            button=args.button,
-            count=args.count,
-            modifiers=tuple(args.modifier),
-        )
-    elif args.action == "drag":
-        result = drag_pointer(
-            session,
-            args.x1,
-            args.y1,
-            args.x2,
-            args.y2,
-            duration=args.duration,
-            button=args.button,
-            modifiers=tuple(args.modifier),
-        )
-    elif args.action == "scroll":
-        result = scroll_pointer(
-            session, args.x, args.y, direction=args.direction, steps=args.steps
-        )
-    elif args.action == "type":
-        result = type_text(session, args.text, interval=args.interval)
-    else:
-        arguments = key_commands(args.chord)
-        assert arguments is not None
-        result = send_input(session, arguments)
+        if attached:
+            with log_input(session, args.action, parameters) as action:
+                result = request_attached(session, args.action, parameters)
+                action.returncode = result
+        else:
+            result = session_command(session, args.action, parameters=parameters)
     return result

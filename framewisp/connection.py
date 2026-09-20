@@ -1,4 +1,4 @@
-"""CLI requests to a foreground attach process; no desktop libraries required."""
+"""Session socket messages; no desktop libraries required."""
 
 import json
 import socket
@@ -48,3 +48,16 @@ def request_attached(session: Path, action: str, parameters: dict[str, object]) 
             file=sys.stderr,
         )
         return 1
+
+
+def reply(
+    connection: socket.socket,
+    *,
+    error: str | None = None,
+    data: dict[str, object] | None = None,
+) -> None:
+    try:
+        connection.sendall((json.dumps({"error": error, "data": data}) + "\n").encode())
+    except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        # A caller can stop waiting while an action or recording finishes.
+        pass

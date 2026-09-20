@@ -17,7 +17,7 @@ acceptance application.
   headless display tools include their stderr, display/socket context, and a
   conditional sandbox-access explanation. Unexpected programming errors still
   propagate. Portal imports are deferred to `attach`; vncdotool's Twisted API
-  is imported only by the headless runner that keeps the idle input connection.
+  is imported only by the headless runner that owns the persistent input connection.
 - `framewisp/lib.py` owns process lifetime and invokes existing display tools.
   `run_session` coordinates startup, monitoring, and shutdown. Separate helpers
   prepare its environment and manage Sway, wayvnc, and optional recorder startup,
@@ -36,8 +36,10 @@ acceptance application.
   Widget state changes print to stdout for integration tests; no desktop service
   or third-party app is required.
 - Sway provides the headless Wayland display using the Pixman software renderer.
-- wayvnc creates virtual pointer and keyboard devices. vncdotool's `vncdo`
-  command sends input over a private Unix socket, connecting once per CLI call.
+- `framewisp/inputs.py` validates and serializes headless actions on one worker.
+  `framewisp/keys.py` defines supported keys and shortcut translation.
+- wayvnc creates virtual pointer and keyboard devices. The runner uses
+  vncdotool's threaded API over one private Unix socket connection.
 - Xwayland supplies the optional X11 server, owned by Sway. `framewisp/x11.py`
   uses xmodmap and xdotool for Unicode text in that server.
 - wtype supplies a temporary Wayland keyboard/keymap for non-ASCII text.
@@ -45,7 +47,7 @@ acceptance application.
 - wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
 
 There is no separate controller daemon or framebuffer cache.
-The runner accepts recording, status, and stop commands over a private Unix socket.
+The runner accepts input, recording, status, and stop commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
 
 ## Startup
@@ -90,8 +92,9 @@ before filing issues.
    clipboard offers arrive. Libwayland discards those offers, leaving gaps in its
    server object map that can make a later offer fail with an invalid object ID.
    Application clipboard and primary-selection transfers do not use these devices.
-   Open one idle connection through vncdotool's threaded API and wait up to ten
-   seconds for its handshake by calling `pause(0)`. Keep it connected for the
+   Open one connection through vncdotool's threaded API with a ten-second
+   handshake timeout and a 100 ms focus-settling pause. Then reduce the timeout
+   to one second per API call. Keep it connected for input throughout the
    session so the seat retains a keyboard and pointer between CLI commands.
    Without it, Qt dismisses context menus when the last input client disconnects.
 8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
@@ -105,7 +108,7 @@ before filing issues.
 
 Each child runs in its own process session with stdin disconnected and combined
 stdout/stderr directed to its log. The runner monitors all managed children.
-The idle VNC connection runs in the runner's process. Cleanup disconnects it and
+The persistent VNC connection runs in the runner's process. Cleanup disconnects it and
 stops its Twisted reactor thread before stopping wayvnc.
 
 ## X11 mode
@@ -137,9 +140,9 @@ hexadecimal ASCII keysyms for the rest. `sleep` commands add the requested inter
 only between characters. More than 128 distinct non-ASCII characters across the
 session returns an
 error before changing the keymap or sending input. A new session starts with an
-empty allocation. Commands remain sequential; concurrent typing or arbitrary custom X11 keymaps are unsupported.
+empty allocation. The input worker serializes concurrent typing requests; arbitrary custom X11 keymaps are unsupported.
 
-For VNC pointer commands, a new connection first moves one pixel beside the
+For VNC pointer commands, the worker first moves one pixel beside the
 requested point and waits 100 ms, then sends the requested motion and buttons.
 Xwayland drops the first pointer motion in the tested setup; without this step,
 an initial drag can disappear. The requested drag timing starts after its press.
@@ -155,7 +158,7 @@ display, development shell or external app installation.
 All CLI commands use `framewisp SESSION COMMAND ...`, with a required positional
 session directory before the subcommand. There is no default session.
 
-CLI calls read `session.json` to locate the display and VNC socket. The JSON has
+CLI calls read `session.json` to locate the display and control socket. The JSON has
 `runtime_directory`, `wayland_display`, `x11_display` (null for Wayland), and `processes` keys. The last is a map
 of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
 environment is saved.
@@ -168,17 +171,16 @@ invoking capture. The grim process still has its own ten-second deadline; the
 delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
 
-`move X Y` invokes `vncdo move X Y` without button commands. Movement is
+`move X Y` sends VNC pointer motion without button commands. Movement is
 immediate. Use `screenshot --delay` to wait for app-defined hover feedback.
 A GTK test verifies received coordinates, no button events, a visible tooltip,
 and its disappearance after moving away.
 
 `scroll X Y DIRECTION --steps N` moves the pointer to `(X, Y)` and sends `N`
 wheel-button press/release pairs on the same VNC connection. The VNC buttons are
-4 for up, 5 for down, 6 for left, and 7 for right. After the last release, the
-connection stays open for 100 ms. Without that pause, GTK sometimes discarded
-queued wheel events after wayvnc removed the pointer device, logging an invalid
-seat error. This is a measured workaround, not an input-delivery acknowledgement. `N` is a positive integer,
+4 for up, 5 for down, 6 for left, and 7 for right. The persistent pointer remains
+available to GTK while it consumes queued events, so no disconnect-settling pause
+is needed. `N` is a positive integer,
 defaulting to one. The widget under the pointer determines the amount scrolled;
 there is no pixel-distance guarantee or smooth scrolling. The CLI rejects invalid
 counts and directions before input. A two-pane GTK test checks received wheel
@@ -189,11 +191,11 @@ and sends one or two complete button press/release pairs. Left maps to VNC
 button 1 and right to button 3. Defaults are left and one. A double-click uses
 one connection with a 0.1-second pause between clicks; recognition depends on
 the target app's settings. Unsupported buttons and counts are rejected before
-reading the session. Plain `click` invokes `vncdo move X Y click 1`.
+reading the session. Plain `click` moves the pointer and sends one left click.
 
 Clicks and drags accept repeatable `--modifier ctrl|shift|alt`. The CLI
 normalizes case and rejects unknown or duplicate modifiers before reading the
-session. `send_input` prefixes the gesture with modifier keydowns and suffixes
+session. The worker prefixes the gesture with modifier keydowns and suffixes
 it with keyups in reverse order, all on the same connection. GTK tests verify
 modifier state during the gesture, release order, and a subsequent plain click.
 
@@ -207,7 +209,7 @@ pace; it has no random variation or easing.
 
 `type --interval SECONDS TEXT` accepts characters satisfying Python's
 `str.isprintable`, rejecting control and format characters before session access.
-For ASCII text it sends one `vncdo type CHARACTER` command per character, with
+For ASCII text it sends one VNC key press/release pair per character, with
 explicit pauses only between characters.
 The default interval is 0.08 seconds; zero disables pauses. Empty text sends
 no keys and adds no duration. The CLI rejects negative and nonfinite timing values.
@@ -235,20 +237,27 @@ modifiers. vncdotool lacks a name for ISO_Left_Tab, so this one keysym is encode
 as `chr(0xFE20)`; its single-character path sends the ordinal as the RFB keysym.
 There are no held keys across commands.
 
-All steps of a VNC input operation use one connection. Each operation presses
-and releases its buttons or keys within that connection. vncdotool's implicit
-command delay is disabled so only our explicit pauses control pacing. Each
-connection waits 100 ms before sending input: without that delay, Sway dropped
-the first key while focusing the newly created virtual keyboard in the tested
-environment. This is a measured workaround for this setup, not a general
-readiness guarantee.
+The runner queues at most 32 pending inputs and executes one action at a time,
+including Unicode helpers. Accepted sockets transfer to the worker; the main loop
+continues handling status, stop and recording commands. Validation checks the full
+action before queueing, including finite timing, printable text, supported names,
+and unsigned 16-bit VNC coordinates. Invalid actions never send partial input.
 
-The requested input duration is the drag duration or `(len(text) - 1) * interval`
-for nonempty text. VNC's client deadline is ten seconds plus that duration,
-rounded up to whole seconds. The subprocess deadline is fifteen seconds plus
-that duration. These allow paced input to exceed the base deadlines while
-retaining timeouts for stalled tools. Timing is approximate and includes process,
-connection, and scheduling overhead.
+The CLI waits for a single response. Its disconnect cancels pending or running
+input. Paced VNC waits check cancellation every 20 ms; helper subprocess waits
+check every 50 ms and terminate, then kill after 500 ms if necessary. Held VNC
+keys/buttons release in cleanup. Interrupted XTest helpers explicitly release
+their possible held keys; wtype's temporary keyboard disappears with its process.
+The worker finishes cleanup before starting another action. Stop sets the same
+cancellation event and joins the worker before stopping the app and recorder.
+Recorder finalization retains its existing shutdown time.
+
+A VNC API failure stops the session, disconnects the transport, and rejects queued
+input. Connection loss also stops the session. No action is retried automatically;
+an API return is not an application acknowledgement. One-second VNC call timeouts
+bound stalled API operations independently of intentional pacing. The connection
+settles for 100 ms once at startup. Xwayland pointer priming and XTest keyboard
+initialization retain their separate 100 ms waits.
 
 ## Shutdown and errors
 
@@ -266,8 +275,7 @@ exit during finalization raises an error naming the destination and log. A kille
 recorder may leave an incomplete file; no crash recovery is attempted.
 
 This guarantees cleanup of the managed direct children in the tested paths.
-Descendant containment, crash recovery, and concurrent command coordination are
-deferred.
+Descendant containment and crash recovery are deferred.
 
 ## Environment and verification
 
@@ -281,7 +289,7 @@ can install the same package onto PATH. No system service is required.
 The development shell additionally supplies FFmpeg for test decoding and the
 Python development tools. `checks.x86_64-linux.package` runs the integration
 tests against the built package with an empty environment and only the package
-and FFmpeg on PATH. Python dependencies are also declared
+FFmpeg, and the Qt QML regression runner on PATH. Python dependencies are also declared
 in `pyproject.toml` and `default.nix`. The demo uses a plain GTK window and GLib
 loop and runs without a D-Bus session.
 
@@ -342,10 +350,10 @@ control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
 and a `captions` boolean. Replies carry an `error` string or null and optional
 `data`. The runner checks the session directory against its own before acting,
-so copied metadata cannot control another session. It handles requests serially
-in its monitoring loop. It replies only after capture is ready or finalization has finished.
+so copied metadata cannot control another session. Its monitoring loop handles
+recording/status/stop requests; validated input sockets transfer to the worker. It replies only after capture is ready or finalization has finished.
 Metadata includes `control_protocol: 1`. The CLI rejects an absent or unknown
-version before connecting; a legacy recording-only runner would otherwise
+version before connecting. Input also requires `persistent_input: true`; a legacy recording-only runner would otherwise
 interpret new status or stop requests as recording-stop requests.
 Validation/startup errors are returned to the caller without stopping the app.
 Unexpected recorder exit or finalization failure still fails the session.
@@ -373,8 +381,10 @@ while already active, and a stop while inactive. Each start replaces `recorder.l
 
 ## Input logs and captions
 
-The CLI validates input arguments, then appends a start event to `inputs.jsonl`
-before dispatch and an end event afterward. Each JSONL event carries an ID,
+The CLI validates input arguments. For headless sessions, the worker appends a
+start event to `inputs.jsonl` when the action starts executing and an end event
+after cleanup, so queue time does not extend captions. Cancelled requests that
+never start do not produce captions. Attached sessions retain CLI-owned logging. Each JSONL event carries an ID,
 `event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
 `error`. Exceptions are logged and re-raised; the CLI formats expected operational
 failures, while unexpected exceptions retain their traceback. Normal

@@ -12,7 +12,7 @@ Framewisp's Python CLI manages the session and calls these tools:
 | --- | --- |
 | Sway / wlroots | Runs the headless Wayland display with Pixman software rendering. |
 | wayvnc | Provides virtual pointer and keyboard devices through a VNC server on a private Unix socket. |
-| vncdotool (`vncdo`) | Sends clicks, drags, scrolling, and keyboard input to wayvnc. |
+| vncdotool API | Sends clicks, drags, scrolling, and keyboard input to wayvnc. |
 | Xwayland | Runs X11 clients inside the private Sway session when `run --x11` is selected. |
 | xmodmap / xdotool | Keep X11 Unicode key mappings and send their key events. |
 | wtype | Types non-ASCII text through a Wayland virtual keyboard with a matching keymap. |
@@ -308,9 +308,13 @@ between them. Every click presses and releases the chosen button. The target
 app's settings and the control under the pointer determine how it responds.
 Plain `click X Y` still sends one left click.
 
-The runner keeps an idle input connection open for the session. This keeps the
+The runner sends input through one persistent connection for the session. It
+serializes concurrent commands, including Unicode typing. This keeps the
 keyboard and pointer available between commands, so Qt context menus remain open
-for a later screenshot or click.
+for a later screenshot or click. Disconnecting an input CLI cancels its queued
+or running action and releases held keys/buttons before the next action. Status
+and stop remain available during paced input. Connection failures stop the session
+without replaying input; restart the session before trying again.
 
 ## Pointer gestures with modifiers
 
@@ -537,7 +541,7 @@ it down when the session ends.
 
 The bundled GTK demo is the tested X11 target. GPU/game support, desktop services,
 and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
-launching has not been verified. X11 pointer commands prime a new virtual pointer
+launching has not been verified. X11 pointer commands prime the virtual pointer
 one pixel beside the target before moving to it; this adds 100 ms before the
 requested action to avoid losing its first motion.
 

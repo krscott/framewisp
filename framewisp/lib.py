@@ -1,7 +1,6 @@
 """Run one headless app and control it with existing command-line tools."""
 
 import json
-import math
 import os
 import shlex
 import signal
@@ -14,19 +13,20 @@ from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from string import ascii_lowercase, digits
 from threading import Event
 from types import FrameType
 from typing import BinaryIO, cast
 
 from framewisp.captions import capture_origin, recorder_output, render_captions
+from framewisp.connection import reply as reply
 from framewisp.errors import (
     SOCKET_ACCESS_HINT,
     SessionError,
     display_command,
     log_failure,
 )
-from framewisp.x11 import type_text as type_x11_text
+from framewisp.inputs import VNC, InputAction, InputWorker
+from framewisp.keys import key_commands as key_commands
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -35,51 +35,6 @@ seat seat0 fallback true
 input * xkb_layout us
 default_border none
 """
-
-KEYS = {
-    "return": "enter",
-    "tab": "tab",
-    "backspace": "bsp",
-    "escape": "esc",
-    "delete": "delete",
-    "left": "left",
-    "right": "right",
-    "up": "up",
-    "down": "down",
-    "space": "space",
-} | {character: character for character in ascii_lowercase + digits}
-MODIFIERS = {"ctrl", "shift", "alt"}
-CLICK_BUTTONS = {"left": 1, "right": 3}
-SCROLL_BUTTONS = {"up": 4, "down": 5, "left": 6, "right": 7}
-
-
-def key_commands(chord: str) -> list[str] | None:
-    """Translate a supported chord to VNC commands, or reject it before input."""
-    *modifiers, key = chord.lower().split("+")
-    if (
-        key not in KEYS
-        or any(modifier not in MODIFIERS for modifier in modifiers)
-        or len(set(modifiers)) != len(modifiers)
-    ):
-        return None
-    arguments: list[str] = []
-    for modifier in modifiers:
-        arguments.extend(["keydown", modifier])
-    symbol = KEYS[key]
-    if "shift" in modifiers:
-        # wayvnc adjusts modifiers to match the supplied keysym. Send the shifted
-        # symbol too, or it clears Shift (and other held modifiers) for this key.
-        symbol = symbol.upper() if key in ascii_lowercase else symbol
-        if key in digits:
-            symbol = ")!@#$%^&*("[int(key)]
-        if key == "tab":
-            # vncdotool has no ISO_Left_Tab name. It sends a single character's
-            # ordinal as the RFB keysym, so encode that keysym directly.
-            symbol = chr(0xFE20)
-    arguments.extend(["key", symbol])
-    for modifier in reversed(modifiers):
-        arguments.extend(["keyup", modifier])
-    return arguments
 
 
 @contextmanager
@@ -215,15 +170,32 @@ def wait_for_x11(
 
 
 @contextmanager
-def keep_input_devices(runtime: Path) -> Generator[None, None, None]:
-    """Keep the seat's keyboard and pointer present between CLI connections."""
+def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]:
+    """Own one input connection. Connection loss stops access without replay."""
     # Only the runner needs Twisted; loading it in every control CLI adds latency.
     from vncdotool import api
+    from vncdotool.client import VNCDoToolFactory
+
+    lost = Event()
+
+    class Factory(VNCDoToolFactory):  # type: ignore[misc]
+        def clientConnectionLost(self, connector: object, reason: object) -> None:
+            if not stop.is_set():
+                lost.set()
+            stop.set()
 
     try:
-        with api.connect(str(runtime / "vnc.sock"), timeout=10) as connection:
-            connection.pause(0)
-            yield
+        with api.connect(
+            str(runtime / "vnc.sock"), factory_class=Factory, timeout=10
+        ) as connection:
+            connection.pause(0.1)
+            # A stalled reactor call must not hold up cancellation indefinitely.
+            connection.timeout = 1
+            yield cast(VNC, connection)
+            if lost.is_set():
+                raise SessionError(
+                    "Persistent VNC connection lost. Session stopped without replaying input."
+                )
     finally:
         api.shutdown()
 
@@ -431,6 +403,7 @@ def session_command(
     destination: Path | None = None,
     *,
     captions: bool = True,
+    parameters: dict[str, object] | None = None,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
     if state.get("control_protocol") != 1:
@@ -444,7 +417,12 @@ def session_command(
         "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
+        "parameters": parameters,
     }
+    if parameters is not None and state.get("persistent_input") is not True:
+        raise SessionError(
+            "This runner does not support persistent input. Restart the session with this version of framewisp."
+        )
     control = Path(state["runtime_directory"]) / "control.sock"
     try:
         with socket.socket(socket.AF_UNIX) as connection:
@@ -472,24 +450,12 @@ def session_command(
     return 0
 
 
-def reply(
-    connection: socket.socket,
-    *,
-    error: str | None = None,
-    data: dict[str, object] | None = None,
-) -> None:
-    try:
-        connection.sendall((json.dumps({"error": error, "data": data}) + "\n").encode())
-    except (BrokenPipeError, ConnectionResetError):
-        # A caller can stop waiting while the runner is finalizing a recording.
-        pass
-
-
 def handle_session_command(
     listener: socket.socket,
     recordings: Recordings,
     write_state: Callable[[], None],
     status: Callable[[], dict[str, object]],
+    inputs: InputWorker,
 ) -> socket.socket | None:
     """Return a stop caller's connection for the runner to reply after cleanup."""
     try:
@@ -515,11 +481,29 @@ def handle_session_command(
             )
             return None
         action = command.get("action")
+        if not isinstance(action, str):
+            reply(connection, error="action must be a string.")
+            return None
         error = None
         data = None
         if action == "stop":
             stopping = True
             return connection
+        if action in {"move", "click", "drag", "scroll", "type", "key"}:
+            try:
+                input_action = InputAction.parse(action, command.get("parameters"))
+            except (ValueError, TypeError, OverflowError) as failure:
+                reply(connection, error=str(failure))
+                return None
+            if inputs.submit(connection, input_action):
+                # The worker now owns the socket until completion or cancellation.
+                stopping = True
+            else:
+                reply(
+                    connection,
+                    error="Input queue is full. Wait for pending actions to finish.",
+                )
+            return None
         if action == "status":
             data = status()
         elif action == "record-start":
@@ -623,7 +607,7 @@ def run_session(
             )
             if vnc is None:
                 return 0
-            stack.enter_context(keep_input_devices(runtime))
+            input_client = stack.enter_context(keep_input_devices(runtime, stop))
 
             backends = {"sway": sway, "wayvnc": vnc}
             recordings = Recordings(session, env, stop, size)
@@ -642,6 +626,8 @@ def run_session(
             listener.bind(str(runtime / "control.sock"))
             listener.listen()
             listener.settimeout(0.1)
+            inputs = InputWorker(session, input_client, stop, x11=x11)
+            stack.callback(inputs.close)
 
             def write_state() -> None:
                 assert recordings is not None
@@ -653,6 +639,7 @@ def run_session(
                     json.dumps(
                         {
                             "control_protocol": 1,
+                            "persistent_input": True,
                             "runtime_directory": directory,
                             "wayland_display": display,
                             "x11_display": x11_display,
@@ -701,7 +688,7 @@ def run_session(
                 if result is not None:
                     return result if result >= 0 else 128 - result
                 stop_connection = handle_session_command(
-                    listener, recordings, write_state, status
+                    listener, recordings, write_state, status, inputs
                 )
                 if stop_connection is not None:
                     stop.set()
@@ -741,142 +728,4 @@ def screenshot(session: Path, destination: Path) -> int:
         ["grim", "-t", "png", "-o", "HEADLESS-1", str(destination)],
         env=session_environment(session),
         timeout=10,
-    )
-
-
-def click_pointer(
-    session: Path,
-    x: int,
-    y: int,
-    *,
-    button: str,
-    count: int,
-    modifiers: tuple[str, ...] = (),
-) -> int:
-    arguments = ["move", str(x), str(y)]
-    for index in range(count):
-        if index:
-            arguments.extend(["pause", "0.1"])
-        arguments.extend(["click", str(CLICK_BUTTONS[button])])
-    return send_input(session, arguments, modifiers=modifiers)
-
-
-def drag_pointer(
-    session: Path,
-    x1: int,
-    y1: int,
-    x2: int,
-    y2: int,
-    *,
-    duration: float,
-    button: str = "left",
-    modifiers: tuple[str, ...] = (),
-) -> int:
-    button_number = str(CLICK_BUTTONS[button])
-    arguments = ["move", str(x1), str(y1), "mousedown", button_number]
-    steps = max(1, math.ceil(duration * 60))
-    for step in range(1, steps + 1):
-        if duration:
-            arguments.extend(["pause", str(duration / steps)])
-        x = round(x1 + (x2 - x1) * step / steps)
-        y = round(y1 + (y2 - y1) * step / steps)
-        arguments.extend(["move", str(x), str(y)])
-    arguments.extend(["mouseup", button_number])
-    return send_input(session, arguments, duration=duration, modifiers=modifiers)
-
-
-def scroll_pointer(session: Path, x: int, y: int, *, direction: str, steps: int) -> int:
-    # GTK resolves queued scroll events through their input device. Give it time
-    # to consume them before wayvnc removes the pointer on disconnect.
-    return send_input(
-        session,
-        ["move", str(x), str(y)]
-        + ["click", str(SCROLL_BUTTONS[direction])] * steps
-        + ["pause", "0.1"],
-    )
-
-
-def type_text(session: Path, text: str, *, interval: float) -> int:
-    if not text.isascii():
-        return type_unicode(session, text, interval=interval)
-    arguments: list[str] = []
-    for index, character in enumerate(text):
-        if index and interval:
-            arguments.extend(["pause", str(interval)])
-        arguments.extend(["type", character])
-    return send_input(session, arguments, duration=max(0, len(text) - 1) * interval)
-
-
-def type_unicode(session: Path, text: str, *, interval: float) -> int:
-    state = json.loads((session / "session.json").read_text())
-    if display := state.get("x11_display"):
-        env = session_environment(session) | {
-            "DISPLAY": display,
-            "XAUTHORITY": "/dev/null",
-        }
-        return type_x11_text(session, text, interval=interval, env=env)
-    # wtype uploads a keymap containing the requested characters; wayvnc's US
-    # keymap cannot represent arbitrary Unicode. Use keysyms so text never
-    # becomes a wtype option, and sleep only between characters.
-    pause_ms = math.ceil(interval * 1000)
-    arguments = ["wtype"]
-    for index, character in enumerate(text):
-        if index and pause_ms:
-            arguments.extend(["-s", str(pause_ms)])
-        arguments.extend(["-k", f"U{ord(character):04X}"])
-    duration = max(0, len(text) - 1) * pause_ms / 1000
-    # wtype also spends 2 ms on each key press and release.
-    return display_command(
-        session,
-        arguments,
-        env=session_environment(session),
-        timeout=15 + duration + len(text) * 0.004,
-    )
-
-
-def send_input(
-    session: Path,
-    arguments: list[str],
-    *,
-    duration: float = 0,
-    modifiers: tuple[str, ...] = (),
-) -> int:
-    env = session_environment(session)
-    socket = Path(env["XDG_RUNTIME_DIR"]) / "vnc.sock"
-    if json.loads((session / "session.json").read_text()).get(
-        "x11_display"
-    ) and arguments[:1] == ["move"]:
-        # Xwayland can discard a new pointer's first motion. Prime it one pixel
-        # beside the target, then move to the requested point before any button.
-        x = int(arguments[1])
-        arguments = [
-            "move",
-            str(x - 1 if x else 1),
-            arguments[2],
-            "pause",
-            "0.1",
-        ] + arguments
-    arguments = (
-        [part for modifier in modifiers for part in ("keydown", modifier)]
-        + arguments
-        + [part for modifier in reversed(modifiers) for part in ("keyup", modifier)]
-    )
-    # Sway needs time to focus wayvnc's newly created keyboard. Without this,
-    # the first character (or a single named key) is lost on each connection.
-    return display_command(
-        session,
-        [
-            "vncdo",
-            "--server",
-            str(socket),
-            "--timeout",
-            str(math.ceil(10 + duration)),
-            "--delay",
-            "0",
-            "--",
-            "pause",
-            "0.1",
-            *arguments,
-        ],
-        timeout=15 + duration,
     )

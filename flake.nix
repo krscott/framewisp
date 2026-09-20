@@ -67,7 +67,9 @@
           ${pkgs.diffutils}/bin/diff ${./framewisp/SKILL.md} agent-skill.md
           ${pkgs.coreutils}/bin/env -i \
             HOME="$HOME" \
-            PATH="${pkgs.framewisp}/bin:${pkgs.ffmpeg}/bin" \
+            PATH="${pkgs.framewisp}/bin:${pkgs.ffmpeg}/bin:${pkgs.qt6.qtdeclarative}/bin" \
+            QML_IMPORT_PATH="${pkgs.qt6.qtdeclarative}/lib/qt-6/qml" \
+            QT_PLUGIN_PATH="${pkgs.qt6.qtbase}/lib/qt-6/plugins" \
             ${
               (pkgs.python3.withPackages (ps: [
                 ps.pytest
@@ -102,6 +104,7 @@
               pkgs.xmodmap
               pkgs.ffmpeg
               pkgs.gst_all_1.gstreamer
+              pkgs.qt6.qtdeclarative # Qt menu regression probe
             ];
             venvDir = ".venv";
             postVenvCreation = ''
@@ -110,6 +113,8 @@
             shellHook = ''
               export GST_PLUGIN_SYSTEM_PATH_1_0=${pkgs.framewisp.capturePlugins}
               export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.captionFonts}
+              export QML_IMPORT_PATH=${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
+              export QT_PLUGIN_PATH=${pkgs.qt6.qtbase}/lib/qt-6/plugins
               runHook venvShellHook
               export PYTHONPATH="''${PYTHONPATH:-}:."
             '';
