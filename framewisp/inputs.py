@@ -8,16 +8,17 @@ import socket
 import time
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Thread
 from typing import Protocol, cast
 
+from framewisp.actions import InputAction
+from framewisp.batch import Batch
 from framewisp.captions import log_input
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
-from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS, key_commands
+from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
 from framewisp.x11 import type_text as type_x11_text
 
 
@@ -30,91 +31,27 @@ class VNC(Protocol):
     def disconnect(self) -> None: ...
 
 
-@dataclass(frozen=True)
-class InputAction:
-    action: str
-    parameters: dict[str, object]
-
-    @staticmethod
-    def parse(action: object, raw: object) -> "InputAction":
-        if not isinstance(raw, dict) or not isinstance(action, str):
-            raise ValueError("Input requires an action and parameters object.")
-        p = cast(dict[str, object], raw)
-        fields = {
-            "move": ("x", "y"),
-            "click": ("x", "y", "button", "count", "modifier"),
-            "drag": ("x1", "y1", "x2", "y2", "duration", "button", "modifier"),
-            "scroll": ("x", "y", "direction", "steps"),
-            "type": ("text", "interval"),
-            "key": ("chord",),
-        }
-        if action not in fields or any(name not in p for name in fields[action]):
-            raise ValueError("Unsupported or incomplete input action.")
-        p = {name: p[name] for name in fields[action]}
-        for name, value in p.items():
-            if name in {"x", "y", "x1", "y1", "x2", "y2", "count", "steps"}:
-                if type(value) is not int:
-                    raise ValueError(f"{name} must be an integer.")
-                if (
-                    name in {"x", "y", "x1", "y1", "x2", "y2"}
-                    and not 0 <= value <= 65535
-                ):
-                    raise ValueError("Coordinates must be between 0 and 65535.")
-            elif name in {"duration", "interval"}:
-                if (
-                    type(value) not in {int, float}
-                    or not isinstance(value, (int, float))
-                    or not math.isfinite(value)
-                    or value < 0
-                ):
-                    raise ValueError(f"{name} must be finite and nonnegative.")
-            elif name == "modifier":
-                if not isinstance(value, list):
-                    raise ValueError("modifier must be a list.")
-                values = cast(list[object], value)
-                if any(
-                    not isinstance(item, str) or item not in MODIFIERS
-                    for item in values
-                ) or len(set(cast(list[str], values))) != len(values):
-                    raise ValueError("Invalid or duplicate modifier.")
-            elif not isinstance(value, str):
-                raise ValueError(f"{name} must be a string.")
-        if "button" in p and p["button"] not in CLICK_BUTTONS:
-            raise ValueError("Unsupported button.")
-        if "count" in p and p["count"] not in (1, 2):
-            raise ValueError("Click count must be 1 or 2.")
-        if "steps" in p and cast(int, p["steps"]) < 1:
-            raise ValueError("Scroll steps must be positive.")
-        if "direction" in p and p["direction"] not in SCROLL_BUTTONS:
-            raise ValueError("Unsupported scroll direction.")
-        if action == "type" and not all(c.isprintable() for c in cast(str, p["text"])):
-            raise ValueError("type supports printable characters only.")
-        if action == "key" and key_commands(cast(str, p["chord"])) is None:
-            raise ValueError("Unsupported key combination.")
-        if action == "drag" and not math.isfinite(cast(float, p["duration"]) * 60):
-            raise ValueError("Drag duration is too large.")
-        if action == "type":
-            interval = cast(float, p["interval"])
-            length = len(cast(str, p["text"]))
-            if not math.isfinite(interval * 1000) or not math.isfinite(
-                15 + max(0, length - 1) * interval + length * 0.004
-            ):
-                raise ValueError("Typing interval or total duration is too large.")
-        return InputAction(action, p)
-
-
 class InputWorker:
-    def __init__(self, session: Path, client: VNC, stop: Event, *, x11: bool):
+    def __init__(
+        self,
+        session: Path,
+        client: VNC,
+        stop: Event,
+        *,
+        x11: bool,
+        capture: Callable[[Path, Callable[[], bool]], int],
+    ):
         self.session = session
         self.client = client
         self.stop = stop
         self.x11 = x11
+        self.capture = capture
         self.failure: str | None = None
-        self.queue: Queue[tuple[socket.socket, InputAction]] = Queue(maxsize=32)
+        self.queue: Queue[tuple[socket.socket, InputAction | Batch]] = Queue(maxsize=32)
         self.thread = Thread(target=self.run, name="headless-input")
         self.thread.start()
 
-    def submit(self, connection: socket.socket, action: InputAction) -> bool:
+    def submit(self, connection: socket.socket, action: InputAction | Batch) -> bool:
         try:
             self.queue.put_nowait((connection, action))
             return True
@@ -135,8 +72,15 @@ class InputWorker:
                 continue
             with connection:
                 error = None
+                data: dict[str, object] | None = (
+                    {} if isinstance(action, Batch) else None
+                )
                 try:
-                    self.perform(connection, action)
+                    if isinstance(action, Batch):
+                        assert data is not None
+                        self.perform_batch(connection, action, data)
+                    else:
+                        self.perform(connection, action)
                 except (InterruptedError, SessionError) as failure:
                     error = str(failure)
                 except Exception as failure:
@@ -147,28 +91,81 @@ class InputWorker:
                     traceback.print_exc()
                     error = f"Input failed; session stopped without retrying: {failure}"
                     self.failure = error
-                reply(connection, error=error)
+                if data is not None:
+                    data["status"] = "completed" if error is None else "failed"
+                    data["error"] = error
+                reply(connection, error=error, data=data)
+
+    def cancelled(self, connection: socket.socket) -> bool:
+        if self.stop.is_set():
+            return True
+        readable, _, _ = select.select([connection], [], [], 0)
+        # Each connection carries exactly one request. EOF or further data
+        # cancels it, including a client killed while waiting for its turn.
+        return bool(readable)
+
+    def wait(self, connection: socket.socket, seconds: float = 0) -> None:
+        deadline = time.monotonic() + seconds
+        while True:
+            if self.cancelled(connection):
+                raise InterruptedError(
+                    "Input cancelled; caller disconnected or session stopped."
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            self.stop.wait(min(remaining, 0.02))
+
+    def perform_batch(
+        self, connection: socket.socket, batch: Batch, data: dict[str, object]
+    ) -> None:
+        started = time.monotonic()
+        results: list[dict[str, object]] = []
+        artifacts: list[str] = []
+        data.update(
+            results=results,
+            artifacts=artifacts,
+            completed_actions=0,
+            failed_index=None,
+            failed_phase=None,
+            capture_seconds=None,
+        )
+        try:
+            for index, action in enumerate(batch.actions):
+                action_started = time.monotonic()
+                result: dict[str, object] = {
+                    "index": index,
+                    "action": action.action,
+                    "status": "completed",
+                    "error": None,
+                }
+                try:
+                    self.perform(connection, action)
+                except Exception as error:
+                    result.update(status="failed", error=str(error))
+                    data.update(failed_index=index, failed_phase="action")
+                    raise
+                finally:
+                    result["duration_seconds"] = time.monotonic() - action_started
+                    results.append(result)
+                data["completed_actions"] = index + 1
+            if batch.capture is not None:
+                capture_started = time.monotonic()
+                try:
+                    self.wait(connection, batch.capture.delay)
+                    self.capture(batch.capture.path, lambda: self.cancelled(connection))
+                    artifacts.append(str(batch.capture.path))
+                except Exception:
+                    data["failed_phase"] = "capture"
+                    raise
+                finally:
+                    data["capture_seconds"] = time.monotonic() - capture_started
+        finally:
+            data["duration_seconds"] = time.monotonic() - started
 
     def perform(self, connection: socket.socket, action: InputAction) -> None:
-        def cancelled() -> bool:
-            if self.stop.is_set():
-                return True
-            readable, _, _ = select.select([connection], [], [], 0)
-            # Each connection carries exactly one request. EOF or further data
-            # cancels it, including a client killed while waiting for its turn.
-            return bool(readable)
-
         def wait(seconds: float = 0) -> None:
-            deadline = time.monotonic() + seconds
-            while True:
-                if cancelled():
-                    raise InterruptedError(
-                        "Input cancelled; caller disconnected or session stopped."
-                    )
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return
-                self.stop.wait(min(remaining, 0.02))
+            self.wait(connection, seconds)
 
         keys: list[str] = []
         buttons: list[int] = []
@@ -255,7 +252,10 @@ class InputWorker:
                             key(character, False)
                     else:
                         type_unicode(
-                            self.session, text, interval=interval, cancelled=cancelled
+                            self.session,
+                            text,
+                            interval=interval,
+                            cancelled=lambda: self.cancelled(connection),
                         )
                 elif action.action == "key":
                     commands = key_commands(cast(str, p["chord"]))

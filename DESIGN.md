@@ -259,6 +259,55 @@ bound stalled API operations independently of intentional pacing. The connection
 settles for 100 ms once at startup. Xwayland pointer priming and XTest keyboard
 initialization retain their separate 100 ms waits.
 
+## Batched input
+
+`batch --file FILE` loads at most 1 MiB of JSON. `batch.py` parses an object with
+`actions` and optional `capture`. Each action is a flat object with an `action`
+name and the same named parameters as its individual CLI command. Batch defaults
+match CLI defaults; modifier arrays use lowercase names. Shared `InputAction`
+validation lives in `actions.py`. Reject unknown fields, invalid types, unsupported
+inputs, more than 256 actions, more than 16,384 total text characters or 10,000
+scroll steps, and more than 300 seconds of requested typing/drag/capture pacing.
+At least one action is required. There are no loops, lifecycle operations, or
+conditional checks. Capture accepts a path and optional finite nonnegative delay.
+The CLI resolves its path against its own working directory. The runner requires
+an absolute path and rejects existing destinations and reserved session paths.
+
+The CLI sends one control request with `action: "batch"` and the normalized
+object in `parameters`. Metadata advertises `batch_input: true`; older runners
+are rejected before sending. Control requests are limited to 1 MiB, including
+the envelope and trailing newline. The runner repeats all validation before
+queueing. Each batch occupies one of the worker's 32 pending slots. The worker
+runs each input using its existing logging, pacing, Unicode and cleanup paths.
+Other input jobs cannot interleave, including during the optional final capture.
+Status and stop remain on the main thread.
+
+Capture calls grim through the cancellable subprocess path and writes into a
+temporary directory beside the destination. A hard link publishes the completed
+PNG without overwriting a file created since validation. Cleanup removes the
+temporary files on success, failure or cancellation. A capture error fails the
+batch but leaves the session running. Captures do not create input captions.
+
+The response data contains `status` (completed/failed), `error`, `results`,
+`completed_actions`, `failed_index`, `failed_phase`, `duration_seconds`,
+`capture_seconds`, and `artifacts`. Each attempted input result has zero-based
+`index`, `action`, `status`, `error`, and `duration_seconds`. Overall timing starts
+when the worker takes the job, excluding queue time. Capture timing includes its
+delay. Artifacts list successfully published absolute PNG paths. A failed input
+sets its index and phase `action`; failed capture sets phase `capture` and leaves
+the index null. Remaining actions and capture are skipped after input failure.
+The CLI prints result data even on failure and exits nonzero. Pre-execution
+validation/session rejection reports an error without execution results.
+
+Cancellation checks run between actions, during paced waits, and while waiting
+for grim or Unicode helpers. Client disconnect or session stop cancels the
+remaining job and releases held keys/buttons before the next job. A queued job
+cancelled before execution sends no input and creates no input log events.
+A disconnected caller cannot receive results; logs and application inspection
+are needed to resolve uncertain completion. Nothing is replayed or rolled back.
+Transport failure retains the existing stop-session behavior. Capture reports an
+artifact, not an application acknowledgement or rendering barrier.
+
 ## Shutdown and errors
 
 Application exit ends the session and returns its exit code. SIGINT or SIGTERM
