@@ -746,6 +746,8 @@ def run_session(
                             "batch_input": True,
                             "runtime_directory": directory,
                             "wayland_display": display,
+                            "width": size[0],
+                            "height": size[1],
                             "x11_display": x11_display,
                             "processes": {
                                 name: process.pid for name, process in processes.items()
@@ -827,15 +829,66 @@ def session_environment(session: Path) -> dict[str, str]:
 
 
 def screenshot(
-    session: Path, destination: Path, *, cancelled: Callable[[], bool] | None = None
+    session: Path,
+    destination: Path,
+    *,
+    region: tuple[int, int, int, int] | None = None,
+    metadata: bool = False,
+    cancelled: Callable[[], bool] | None = None,
 ) -> int:
-    return display_command(
+    selector = ["-o", "HEADLESS-1"]
+    width = height = 0
+    x = y = 0
+    display_width = display_height = 0
+    if region is not None or metadata:
+        state = json.loads((session / "session.json").read_text())
+        display_width, display_height = state.get("width"), state.get("height")
+        if (
+            type(display_width) is not int
+            or type(display_height) is not int
+            or display_width <= 0
+            or display_height <= 0
+        ):
+            raise SessionError(
+                "Screenshot metadata requires display dimensions. "
+                "Restart the session with this version of framewisp."
+            )
+        x, y, width, height = region or (0, 0, display_width, display_height)
+        if x < 0 or y < 0 or width <= 0 or height <= 0:
+            raise SessionError(
+                "--region requires nonnegative X and Y and positive WIDTH and HEIGHT."
+            )
+        if x + width > display_width or y + height > display_height:
+            raise SessionError(
+                f"--region {x} {y} {width} {height} exceeds the "
+                f"{display_width}x{display_height} display."
+            )
+        if region is not None:
+            selector = ["-g", f"{x},{y} {width}x{height}"]
+    started = time.monotonic()
+    result = display_command(
         session,
-        ["grim", "-t", "png", "-o", "HEADLESS-1", str(destination)],
+        ["grim", "-t", "png", *selector, str(destination)],
         env=session_environment(session),
         timeout=10,
         cancelled=cancelled,
     )
+    if metadata and result == 0:
+        print(
+            json.dumps(
+                {
+                    "path": str(destination.resolve()),
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
+                    "display_width": display_width,
+                    "display_height": display_height,
+                    "capture_seconds": time.monotonic() - started,
+                }
+            )
+        )
+    return result
 
 
 def batch_screenshot(

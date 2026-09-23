@@ -16,7 +16,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | Command syntax | Behavior and defaults |
 | --- | --- |
 | `run [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
-| `screenshot [--delay SECONDS] PATH` | Save the current display as a PNG. Default delay: 0. |
+| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 2/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move immediately without pressing a button; useful for hover tooltips. |
@@ -36,7 +36,14 @@ desktop attachment, leaving the user's apps running; `framewisp --agent-skill`
 prints this guide. `framewisp --help` and `framewisp SESSION COMMAND --help`
 (also `-h`) show the installed version's help.
 
-Coordinates are integer pixels in the screenshot, with `(0, 0)` at the top left.
+Input coordinates are integer display pixels, with `(0, 0)` at the top left.
+Use full screenshots for discovery or when surrounding context matters. When
+the target region is known, use `screenshot --region 100 80 400 160 --json /tmp/crop.png`.
+The region must fit inside the display and have positive dimensions. JSON reports
+`path`, crop `x`, `y`, `width`, `height`, `display_width`, `display_height`, and
+`capture_seconds` (excluding delay and CLI startup). Add the crop origin to local
+image coordinates before sending input: local `(20, 30)` in this crop means
+`click 120 110`. Cropping does not resize pixels or change input coordinates.
 Inspect the screenshot to choose targets. Keyboard input goes to the focused
 control; click it first when needed. Commands release their keys and buttons
 before returning, so modifiers do not carry over to the next command.

@@ -446,3 +446,33 @@ def test_compositor_failure_includes_log_excerpt(tmp_path: Path) -> None:
     assert "sway.log" in result.stderr and "sandbox" in result.stderr
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "failed" / "session.json").exists()
+
+
+@pytest.mark.parametrize(
+    "state,expected",
+    [({"kind": "attached"}, "headless sessions only"), ({}, "Restart the session")],
+)
+@pytest.mark.parametrize("options", [["--json"], ["--region", "0", "0", "10", "10"]])
+def test_screenshot_options_reject_unsupported_sessions(
+    tmp_path: Path, state: dict[str, str], expected: str, options: list[str]
+) -> None:
+    (tmp_path / "session.json").write_text(json.dumps(state))
+    destination = tmp_path / "capture.png"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path),
+            "screenshot",
+            str(destination),
+            *options,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert expected in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not result.stdout and not destination.exists()

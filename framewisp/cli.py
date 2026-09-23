@@ -151,6 +151,18 @@ def main() -> None:
     )
     capture.add_argument("path", type=Path)
     capture.add_argument(
+        "--region",
+        type=int,
+        nargs=4,
+        metavar=("X", "Y", "WIDTH", "HEIGHT"),
+        help="capture a known region in display pixels (headless only); omit for full context",
+    )
+    capture.add_argument(
+        "--json",
+        action="store_true",
+        help="print crop origin, dimensions, display dimensions, path and capture time (headless only)",
+    )
+    capture.add_argument(
         "--delay",
         type=seconds,
         default=0.0,
@@ -361,12 +373,21 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             )
         )
     elif args.action == "screenshot":
+        if attached and (args.region is not None or args.json):
+            raise SessionError(
+                "screenshot --region and --json support headless sessions only."
+            )
         if args.delay:
             time.sleep(args.delay)
         result = (
             request_attached(session, "screenshot", {"path": str(args.path.resolve())})
             if attached
-            else screenshot(session, args.path)
+            else screenshot(
+                session,
+                args.path,
+                region=tuple(args.region) if args.region is not None else None,
+                metadata=args.json,
+            )
         )
     else:
         parameters = {

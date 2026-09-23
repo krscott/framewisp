@@ -159,7 +159,8 @@ All CLI commands use `framewisp SESSION COMMAND ...`, with a required positional
 session directory before the subcommand. There is no default session.
 
 CLI calls read `session.json` to locate the display and control socket. The JSON has
-`runtime_directory`, `wayland_display`, `x11_display` (null for Wayland), and `processes` keys. The last is a map
+`runtime_directory`, `wayland_display`, `x11_display` (null for Wayland),
+`width`, `height`, and `processes` keys. The last is a map
 of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
 environment is saved.
 
@@ -170,6 +171,17 @@ nonnegative number defaulting to zero, and sleeps for that duration before
 invoking capture. The grim process still has its own ten-second deadline; the
 delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
+
+Headless screenshots accept `--region X Y WIDTH HEIGHT` in display pixels.
+The origin must be nonnegative, dimensions positive, and the entire rectangle
+inside the session's display dimensions. Crops use grim `-g "X,Y WIDTHxHEIGHT"`
+without `-o`; full captures retain `-o HEADLESS-1`. Neither changes resolution.
+`--json` prints `path` (absolute), `x`, `y`, `width`, `height`, `display_width`,
+`display_height`, and `capture_seconds` after success. Timing covers the capture
+subprocess, excluding delay and CLI startup. Image-local coordinates map to
+display coordinates by adding `(x, y)`; input commands always use display pixels.
+Both options require headless sessions with dimensions in their metadata;
+older sessions must restart to use them. Plain screenshots remain compatible.
 
 `move X Y` sends VNC pointer motion without button commands. Movement is
 immediate. Use `screenshot --delay` to wait for app-defined hover feedback.
