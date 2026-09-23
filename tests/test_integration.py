@@ -2351,3 +2351,113 @@ def test_wait_cancellation_and_app_exit(
             os.kill(app, signal.SIGCONT)
     assert not (tmp_path / "never.png").exists()
     assert '"chord": "z"' not in (demo.directory / "inputs.jsonl").read_text()
+
+
+@pytest.fixture
+def frozen_demo(demo: Demo) -> Iterator[Demo]:
+    cli(
+        demo.directory,
+        "screenshot",
+        "--delay",
+        "0.5",
+        str(demo.directory / "ready.png"),
+    )
+    state = json.loads((demo.directory / "session.json").read_text())
+    app_pid = state["processes"]["app"]
+    os.kill(app_pid, signal.SIGSTOP)
+    try:
+        yield demo
+    finally:
+        os.kill(app_pid, signal.SIGCONT)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11", "odd"], indirect=True)
+def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
+    demo = frozen_demo
+    status = json.loads(cli(demo.directory, "status").stdout)
+    width, height = status["width"], status["height"]
+    full_path = tmp_path / "full.png"
+    full = json.loads(
+        cli(
+            demo.directory, "screenshot", "--delay", "0.5", "--json", str(full_path)
+        ).stdout
+    )
+    assert (full["x"], full["y"], full["width"], full["height"]) == (
+        0,
+        0,
+        width,
+        height,
+    )
+    for x, y, w, h in [
+        (0, 0, 1, 1),
+        (width - 1, height - 1, 1, 1),
+        (0, 0, width, height),
+        (40, 80, 400, 160),
+    ]:
+        crop_path = tmp_path / "crop.png"
+        metadata = json.loads(
+            cli(
+                demo.directory,
+                "screenshot",
+                str(crop_path),
+                "--region",
+                *map(str, (x, y, w, h)),
+                "--json",
+            ).stdout
+        )
+        assert metadata == {
+            "path": str(crop_path),
+            "x": x,
+            "y": y,
+            "width": w,
+            "height": h,
+            "display_width": width,
+            "display_height": height,
+            "capture_seconds": metadata["capture_seconds"],
+        }
+        assert metadata["capture_seconds"] > 0
+        with Image.open(full_path) as full_image, Image.open(crop_path) as crop:
+            assert crop.size == (w, h)
+            assert (
+                crop.convert("RGB").tobytes()
+                == full_image.crop((x, y, x + w, y + h)).convert("RGB").tobytes()
+            )
+    for region in [
+        (-1, 0, 1, 1),
+        (0, -1, 1, 1),
+        (0, 0, 0, 1),
+        (0, 0, 1, -1),
+        (width, 0, 1, 1),
+        (0, height, 1, 1),
+        (1, 0, width, height),
+        (0, 1, width, height),
+    ]:
+        rejected = tmp_path / "invalid.png"
+        result = subprocess.run(
+            [
+                "framewisp",
+                str(demo.directory),
+                "screenshot",
+                str(rejected),
+                "--region",
+                *map(str, region),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 1
+        assert "--region" in result.stderr
+        assert "Traceback" not in result.stderr
+        assert not result.stdout and not rejected.exists()
+    if width == 1280:
+        state = json.loads((demo.directory / "session.json").read_text())
+        os.kill(state["processes"]["app"], signal.SIGCONT)
+        # The crop-local entry target (80, 20) maps back to display (120, 100).
+        cli(demo.directory, "click", str(metadata["x"] + 80), str(metadata["y"] + 20))
+        cli(demo.directory, "type", "crop mapping")
+        wait_until(
+            lambda: "Text: crop mapping" in (demo.directory / "app.log").read_text()
+        )
