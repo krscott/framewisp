@@ -63,10 +63,10 @@ def main() -> None:
                         raise RuntimeError(log.read())
                     time.sleep(0.01)
                 time.sleep(1)
-                    app_pid = json.loads((session / "session.json").read_text())[
-                        "processes"
-                    ]["app"]
-                    assert isinstance(app_pid, int)
+                app_pid = json.loads((session / "session.json").read_text())[
+                    "processes"
+                ]["app"]
+                assert isinstance(app_pid, int)
                 os.kill(app_pid, signal.SIGSTOP)
                 time.sleep(0.1)
                 reference: bytes | None = None
