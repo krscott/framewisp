@@ -476,3 +476,16 @@ def test_screenshot_options_reject_unsupported_sessions(
     assert expected in result.stderr
     assert "Traceback" not in result.stderr
     assert not result.stdout and not destination.exists()
+
+
+def test_screenshot_json_rejects_png_stdout(tmp_path: Path) -> None:
+    (tmp_path / "session.json").write_text("{}")
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "screenshot", "--json", "-"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "requires a file path" in result.stderr
+    assert not result.stdout

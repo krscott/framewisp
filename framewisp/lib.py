@@ -836,6 +836,10 @@ def screenshot(
     metadata: bool = False,
     cancelled: Callable[[], bool] | None = None,
 ) -> int:
+    if metadata and str(destination) == "-":
+        raise SessionError(
+            "screenshot --json requires a file path; '-' writes PNG to stdout."
+        )
     selector = ["-o", "HEADLESS-1"]
     width = height = 0
     x = y = 0
