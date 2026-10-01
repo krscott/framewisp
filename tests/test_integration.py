@@ -2717,7 +2717,8 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
     name = "Activate dialog" if is_qt else "Apply text"
     socket_path = next(demo.runtime.glob("sway-ipc.*.sock"))
 
-    # Force an offset client area and a server-side title bar on both backends.
+    # Move away from the origin and request compositor borders. Native Wayland
+    # clients can negotiate their own decorations. Xwayland uses server title bars.
     def positioned() -> bool:
         result = subprocess.run(
             [
@@ -2754,7 +2755,10 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
     assert node["display_bounds_reason"] is None
     assert bounds["coordinate_space"] == "display"
     assert bounds["x"] > node["bounds"]["x"] + 100
-    assert bounds["y"] > node["bounds"]["y"] + 50
+    assert bounds["y"] >= node["bounds"]["y"] + 50
+    state = json.loads((demo.directory / "session.json").read_text())
+    if state["x11_display"] is not None:
+        assert bounds["y"] > node["bounds"]["y"] + 50
     cli(
         demo.directory,
         "click",

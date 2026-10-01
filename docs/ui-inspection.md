@@ -155,7 +155,8 @@ for geometry checks and race limitations.
 
 `test_inspect_display_bounds_activate_offset_controls` clicks reported centers
 for GTK 4 and Qt Quick on native Wayland and private Xwayland. It moves the GTK
-window and a Qt modal dialog away from the origin, adds server-side title bars,
-and verifies activation in each app's log. The Qt dialog shares a PID with its
+window and a Qt modal dialog away from the origin and verifies activation in
+each app's log. Xwayland cases also require a server-side title bar offset; native
+Wayland clients can negotiate their own decorations. The Qt dialog shares a PID with its
 main window. Unit tests cover duplicate titles, absent windows, movement,
 resizing, hidden windows, unsupported transforms, and bounded private IPC reads.

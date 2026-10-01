@@ -1,6 +1,7 @@
 import json
 import socket
 import struct
+import tempfile
 import time
 from collections.abc import Iterator
 from dataclasses import replace
@@ -123,26 +124,30 @@ def test_tree_includes_floating_client_origin(
 
 
 @pytest.fixture
-def ipc_socket(tmp_path: Path) -> Iterator[socket.socket]:
-    with socket.socket(socket.AF_UNIX) as listener:
-        listener.bind(str(tmp_path / "sway-ipc.1000.123.sock"))
-        listener.listen()
-        listener.settimeout(2)
-        yield listener
+def ipc_socket() -> Iterator[tuple[Path, socket.socket]]:
+    # Pytest's CI temp paths can exceed the Unix socket path limit.
+    with tempfile.TemporaryDirectory(prefix="fw-ipc-", dir="/tmp") as directory:
+        runtime = Path(directory)
+        with socket.socket(socket.AF_UNIX) as listener:
+            listener.bind(str(runtime / "sway-ipc.1000.123.sock"))
+            listener.listen()
+            listener.settimeout(2)
+            yield runtime, listener
 
 
 @pytest.mark.parametrize(
     "reply", ["fragmented", "oversized", "invalid", "disconnect", "stalled"]
 )
 def test_private_ipc_is_bounded_and_validated(
-    tmp_path: Path,
-    ipc_socket: socket.socket,
+    ipc_socket: tuple[Path, socket.socket],
     tree: dict[str, object],
     reply: str,
     window: Window,
 ) -> None:
+    runtime, listener = ipc_socket
+
     def serve() -> None:
-        with ipc_socket.accept()[0] as connection:
+        with listener.accept()[0] as connection:
             assert connection.recv(14) == b"i3-ipc" + struct.pack("=II", 0, 4)
             if reply == "stalled":
                 time.sleep(0.3)
@@ -160,7 +165,7 @@ def test_private_ipc_is_bounded_and_validated(
     server.start()
     started = time.monotonic()
     try:
-        windows, reason = read_windows(tmp_path, started + 1, None)
+        windows, reason = read_windows(runtime, started + 1, None)
         assert time.monotonic() - started < 0.6
         if reply == "fragmented":
             assert reason is None
