@@ -17,7 +17,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | --- | --- |
 | `run [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
-| `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 2/10 seconds. All limits must be positive. |
+| `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move immediately without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
@@ -109,8 +109,26 @@ empty result means no match in the exposed tree. `partial` reports traversal or
 text limits and failed objects; `timeout` reports an exhausted budget;
 `unsupported` means no app has registered yet; `unavailable` means the bus or
 registry could not be reached. Startup can temporarily appear unsupported.
-Do not treat incomplete results as proof of absence. Narrow filters or raise
-explicit limits when appropriate; use a screenshot when accessibility is missing.
+Do not treat incomplete results as proof of absence. Read `reasons`, `hints`,
+`longest_call_ms`, and `errors` before retrying:
+
+- `app-unresponsive`: a failed app call used at least 80% of the entire query
+  budget. Wait and retry, or take a screenshot. Raising limits may only prolong
+  the wait. This is a timing heuristic, not proof the app has hung.
+- `timeout` without `app-unresponsive`: raise `--timeout` up to 10 seconds.
+  Check `longest_call_ms`; an app that blocked late in traversal may also time out
+  without the unresponsive reason.
+- `max-depth` or `max-nodes`: raise the named flag up to 32 or 4096 respectively.
+  Filters do not prune the tree, so narrower filters cannot fix these limits.
+- `limit`: narrow role/name/text filters, or raise `--limit` up to 100.
+- `unavailable-object` or `stale-object`: retry once after the UI settles. Failed
+  calls in `errors` identify the bus name, object path, method, and duration.
+  Persistent failures need a screenshot; raising limits does not repair objects.
+- `text-limit` or `action-limit`: fixed caps of 1024 characters and 16 action
+  names per object. There is no flag to raise them. Use screenshots for omitted
+  visual content.
+
+Use a screenshot when accessibility is missing.
 Deep accessibility traversals can crash some Qt apps. Raising `--max-nodes` can
 increase that risk; keep the default 256-node budget unless more is needed.
 If the app exits, the runner and later commands report its exit code or signal
