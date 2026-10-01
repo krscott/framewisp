@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 from gi.repository import Gio, GLib
 
+from framewisp.display_bounds import Rect, Window
 from framewisp.errors import SessionError
 from framewisp.inspection import (
     ROOT,
@@ -340,3 +341,77 @@ def test_terminal_timeout_keeps_its_target_after_five_object_errors(
     assert "app-unresponsive" in cast(list[str], observation["reasons"])
     assert len(errors) == 5
     assert "/child_5 GetState" in errors[-1]
+
+
+@pytest.mark.parametrize("failure", ["pid", "geometry"])
+def test_optional_display_metadata_failure_keeps_observation_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    def init(self: Bus, address: str, timeout: float) -> None:
+        self.deadline = float("inf")
+        self.cancel = Gio.Cancellable()
+
+    def close(self: Bus) -> None:
+        pass
+
+    def call(
+        self: Bus,
+        ref: tuple[str, str],
+        interface: str,
+        method: str,
+        signature: str = "()",
+        arguments: tuple[object, ...] = (),
+    ) -> object:
+        if method == "GetChildAtIndex":
+            return (
+                ":1.2",
+                "/" + {ROOT[1]: "app", "/app": "window", "/window": "button"}[ref[1]],
+            )
+        if method == "GetState":
+            return [0, 0]
+        if method == "GetRoleName":
+            return {"/app": "application", "/window": "frame", "/button": "button"}[
+                ref[1]
+            ]
+        if method == "Get":
+            return (
+                (0 if ref[1] == "/button" else 1)
+                if arguments[-1] == "ChildCount"
+                else "Dialog"
+            )
+        if method == "GetInterfaces":
+            return ["org.a11y.atspi.Component"]
+        if method == "GetConnectionUnixProcessID":
+            if failure == "pid":
+                raise GLib.Error("PID unavailable")
+            return 123
+        if method == "GetExtents":
+            if ref[1] == "/window":
+                raise GLib.Error("Toplevel Component unavailable")
+            return (10, 20, 80, 23)
+        raise AssertionError(method)
+
+    def windows(*arguments: object) -> tuple[list[Window], None]:
+        return [
+            Window(
+                7,
+                123,
+                "Dialog",
+                Rect(500, 325, 600, 240),
+                True,
+                True,
+                Rect(0, 0, 1600, 900),
+            )
+        ], None
+
+    monkeypatch.setattr(Bus, "__init__", init)
+    monkeypatch.setattr(Bus, "call", call)
+    monkeypatch.setattr(Bus, "close", close)
+    monkeypatch.setattr("framewisp.inspection.read_windows", windows)
+    observation = inspect_bus("test", Query(role="button"), runtime=tmp_path)
+    assert observation["status"] == "ok", observation
+    assert observation["reasons"] == []
+    nodes = cast(list[dict[str, object]], observation["matches"])
+    assert nodes[0]["bounds"] is not None
+    assert nodes[0]["display_bounds"] is None
+    assert nodes[0]["display_bounds_reason"] == "window-metadata-unavailable"

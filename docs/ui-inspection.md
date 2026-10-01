@@ -13,7 +13,7 @@ wlroots 0.20.2 and Pixman at 1280x720, without recording.
 
 | Application/toolkit | Wayland | Private Xwayland | Observations and limits |
 | --- | --- | --- | --- |
-| Bundled GTK 4 demo | Tested | Tested | Entry/button discovery, changed entry/result text, checkbox state, slider value, action names, and window-relative bounds. |
+| Bundled GTK 4 demo | Tested | Tested | Entry/button discovery, changed entry/result text, checkbox state, slider value, action names, window-relative bounds, and display bounds. |
 | Qt Quick QML probe | Tested | Tested | Ordinary button name and state work. The separate `Popup.Window` menu item is absent, even while visible. |
 | KolourPaint 26.04.3, Qt Widgets Flatpak | Tested | Not tested for inspection | Menus expose names, states, actions, and bounds. The default 256-node budget is partial; `--max-nodes 1024 --max-depth 16 --timeout 5` traversed 379 objects. Painting content still needs images. |
 | GTK Flatpak | Not tested | Not tested | Native GTK coverage does not establish Flatpak coverage. |
@@ -142,3 +142,21 @@ Primary references: [AT-SPI Accessible protocol](https://github.com/GNOME/at-spi
 [Component coordinates](https://github.com/GNOME/at-spi2-core/blob/main/xml/Component.xml),
 [GTK accessibility](https://docs.gtk.org/gtk4/section-accessibility.html), and
 [Qt's explicit accessibility bus connection](https://github.com/qt/qtbase/blob/dev/src/gui/accessible/linux/dbusconnection.cpp).
+
+## Display bounds
+
+`inspect` retains `bounds` in window coordinates and adds `display_bounds` in
+input-command coordinates. The center of the latter is a pointer target without
+an image-based offset calculation. `display_bounds_reason` explains null results.
+The conversion uses the private compositor's client rectangle, PID, and exact
+window title. Ambiguous windows and window changes between the compositor
+snapshots produce no target. See [DESIGN.md](../DESIGN.md#structured-ui-inspection)
+for geometry checks and race limitations.
+
+`test_inspect_display_bounds_activate_offset_controls` clicks reported centers
+for GTK 4 and Qt Quick on native Wayland and private Xwayland. It moves the GTK
+window and a Qt modal dialog away from the origin and verifies activation in
+each app's log. Xwayland cases also require a server-side title bar offset; native
+Wayland clients can negotiate their own decorations. The Qt dialog shares a PID with its
+main window. Unit tests cover duplicate titles, absent windows, movement,
+resizing, hidden windows, unsupported transforms, and bounded private IPC reads.

@@ -63,6 +63,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
             "x11-qt-tree": "qt-tree",
+            "x11-qt-coordinates": "qt-coordinates",
             "x11-waits": "waits",
             "x11-large-waits": "large-waits",
         }[mode]
@@ -95,12 +96,16 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode in probes
         else ["framewisp-demo"]
     )
-    if mode in {"qt", "qt-tree"}:
+    if mode in {"qt", "qt-tree", "qt-coordinates"}:
         app = [
             "qml",
             str(
                 Path(__file__).with_name(
-                    "inspection_probe.qml" if mode == "qt-tree" else "menu_probe.qml"
+                    {
+                        "qt-tree": "inspection_probe.qml",
+                        "qt": "menu_probe.qml",
+                        "qt-coordinates": "coordinates_probe.qml",
+                    }[mode]
                 )
             ),
         ]
@@ -119,7 +124,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                     "QT_LOGGING_RULES": "qml.debug=true",
                     "QT_LOGGING_TO_CONSOLE": "1",
                 }
-                if mode in {"qt", "qt-tree"}
+                if mode in {"qt", "qt-tree", "qt-coordinates"}
                 else {}
             )
             | ({"WAYLAND_DEBUG": "client"} if mode == "clipboard" else {})
@@ -170,6 +175,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                 "clipboard",
                 "qt",
                 "qt-tree",
+                "qt-coordinates",
                 "waits",
                 "large-waits",
             }:
@@ -2695,4 +2701,82 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
     assert (
         inspect(demo, "--name", "Absent control", "--max-nodes", "1024")["status"]
         == "ok"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "demo", [None, "x11", "qt-coordinates", "x11-qt-coordinates"], indirect=True
+)
+def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
+    log = demo.directory / "app.log"
+    qt = "Coordinates probe ready"
+    wait_until(lambda: "Demo ready" in log.read_text() or qt in log.read_text())
+    is_qt = qt in log.read_text()
+    title = "Coordinates dialog" if is_qt else "Framewisp demo"
+    name = "Activate dialog" if is_qt else "Apply text"
+    socket_path = next(demo.runtime.glob("sway-ipc.*.sock"))
+
+    # Move away from the origin and request compositor borders. Native Wayland
+    # clients can negotiate their own decorations. Xwayland uses server title bars.
+    def positioned() -> bool:
+        command = (
+            f'[title="^{title}$"] floating enable, border normal, '
+            + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
+            + "move position 200 50"
+        ).encode()
+        # Direct IPC also works in the standalone package test's minimal PATH.
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(5)
+            connection.connect(str(socket_path))
+            connection.sendall(
+                b"i3-ipc" + struct.pack("=II", len(command), 0) + command
+            )
+
+            def receive(length: int) -> bytes:
+                data = bytearray()
+                while len(data) < length:
+                    chunk = connection.recv(length - len(data))
+                    assert chunk, "Sway closed the command connection"
+                    data.extend(chunk)
+                return bytes(data)
+
+            header = receive(14)
+            length, kind = struct.unpack("=II", header[6:])
+            assert header[:6] == b"i3-ipc" and kind == 0
+            assert length <= 1024 * 1024
+            return all(item["success"] for item in json.loads(receive(length)))
+
+    wait_until(positioned)
+    observation: dict[str, Any] = {}
+
+    def mapped() -> bool:
+        nonlocal observation
+        observation = inspect(
+            demo, "--role", "push button" if is_qt else "button", "--name", name
+        )
+        return (
+            observation["match_count"] == 1
+            and observation["matches"][0]["display_bounds"] is not None
+        )
+
+    wait_until(mapped)
+    assert observation["status"] == "ok", observation
+    node = observation["matches"][0]
+    bounds = node["display_bounds"]
+    assert node["display_bounds_reason"] is None
+    assert bounds["coordinate_space"] == "display"
+    assert bounds["x"] > node["bounds"]["x"] + 100
+    assert bounds["y"] >= node["bounds"]["y"] + 50
+    state = json.loads((demo.directory / "session.json").read_text())
+    if state["x11_display"] is not None:
+        assert bounds["y"] > node["bounds"]["y"] + 50
+    cli(
+        demo.directory,
+        "click",
+        str(bounds["x"] + bounds["width"] // 2),
+        str(bounds["y"] + bounds["height"] // 2),
+    )
+    wait_until(
+        lambda: ("Dialog activated" if is_qt else "Applied: ") in log.read_text()
     )

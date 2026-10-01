@@ -601,7 +601,8 @@ found. The private buses reject messages over 1 MiB.
 Schema version 1 returns `snapshot_id`, `status`, `matches`, `match_count`,
 `visited`, `applications`, `reasons`, `errors`, `hints`, `longest_call_ms`, and
 `elapsed_ms`. Each match has
-`id`, `role`, `name`, `text`, `states`, `actions`, `bounds`, `value`, and `depth`.
+`id`, `role`, `name`, `text`, `states`, `actions`, `bounds`, `display_bounds`,
+`display_bounds_reason`, `value`, and `depth`.
 Unavailable optional interfaces produce null text/value/bounds or empty actions.
 Errors while reading advertised interfaces make the whole observation partial;
 already read fields remain available. State names reproduce AT-SPI flags, not a
@@ -634,10 +635,34 @@ or reused across queries. Duplicate matches are returned separately; ordering is
 not a selection rule. Every query reads fresh state, but the reads are not atomic:
 the app can change between objects or fields, or after the response. Failed or
 defunct references are reported as partial, never converted into proof of absence.
-Bounds, when valid, use AT-SPI's window-relative coordinate system, in toolkit
-units. They are not screenshot coordinates, especially for popups and scaled
-windows. No automatic coordinate conversion or semantic input action is provided.
-Use screenshots to choose pointer targets when the window transform is unknown.
+`bounds`, when valid, uses AT-SPI's window-relative coordinate system in toolkit
+units. `display_bounds` uses the same rectangle shape with `coordinate_space:
+"display"`; its center can be passed directly to pointer commands. Failed
+conversion leaves `display_bounds` null and sets `display_bounds_reason`. This
+optional conversion does not make otherwise complete observations partial.
+
+`display_bounds.py` reads GET_TREE directly from the sole Sway IPC socket in the
+session's private runtime directory. It never consults the caller's SWAYSOCK.
+Each tree read shares the query deadline, takes at most 250 ms, polls cancellation,
+and caps replies at 1 MiB. The before/after tree reads and D-Bus traversal share
+the query timeout. Traversal carries the nearest accessible frame/dialog/window
+reference and its full title. D-Bus GetConnectionUnixProcessID identifies the
+accessible process. PID and exact window title must identify one Sway window;
+duplicate titles remain ambiguous. PID and toplevel geometry reads are cached
+only within the query.
+
+The client origin is Sway's absolute `rect` origin plus its relative
+`window_rect` origin, so server-side title bars and borders are excluded. A
+conversion requires a visible window on an unscaled, unrotated output at the
+origin. The accessible toplevel must start at window (0, 0), its size must match
+Sway's client size, and the control must fit inside that client area and the display. Missing
+windows, ambiguous mappings, unavailable metadata, geometry mismatches, or
+unsupported transforms produce reasons instead of guesses. The matching window
+must have the same ID, PID, title, visibility, client rectangle, and supported
+transform in both tree snapshots. A changed mapping produces `window-changed`.
+This detects changes between snapshots, not a move away and back between reads
+or changes after inspection. Use a screenshot when conversion is unavailable.
+No semantic input action is provided.
 
 The tested toolkit matrix, timings, reproducible benchmark, and decision about
 conditional waits are in [docs/ui-inspection.md](docs/ui-inspection.md).
