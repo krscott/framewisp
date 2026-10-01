@@ -2461,3 +2461,86 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
         wait_until(
             lambda: "Text: crop mapping" in (demo.directory / "app.log").read_text()
         )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "script,exit_code,reason,returncode",
+    [
+        (
+            "import os, resource, signal; "
+            "resource.setrlimit(resource.RLIMIT_CORE, (0, 0)); "
+            "os.kill(os.getpid(), signal.SIGSEGV)",
+            139,
+            "SIGSEGV (exit 139)",
+            -signal.SIGSEGV,
+        ),
+        ("raise SystemExit(23)", 23, "exit 23", 23),
+        ("pass", 0, "exit 0", 0),
+    ],
+)
+def test_app_exit_is_reported_after_cleanup(
+    tmp_path: Path, script: str, exit_code: int, reason: str, returncode: int
+) -> None:
+    session = tmp_path / "session with spaces"
+    started = time.time()
+    result = subprocess.run(
+        ["framewisp", str(session), "run", "--", sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == exit_code, result.stderr
+    expected = f"App exited: {reason}; see {session / 'app.log'}"
+    assert expected in result.stderr
+    assert not (session / "session.json").exists()
+    record = json.loads((session / "app-exit.json").read_text())
+    assert record["returncode"] == returncode
+    assert started <= record["time"] <= time.time()
+    for arguments in [("status",), ("stop",), ("key", "Return"), ("inspect", "--json")]:
+        later = subprocess.run(
+            ["framewisp", str(session), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert later.returncode == 1
+        assert expected in later.stderr
+        assert "attach" not in later.stderr
+        assert "Traceback" not in later.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_normal_stop_clears_previous_app_exit(demo: Demo) -> None:
+    cli(demo.directory, "stop")
+    demo.process.wait(timeout=10)
+    (demo.directory / "app-exit.json").write_text(
+        json.dumps({"returncode": -signal.SIGSEGV, "time": time.time()})
+    )
+    with subprocess.Popen(
+        ["framewisp", str(demo.directory), "run", "--", "framewisp-demo"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as runner:
+        try:
+            wait_until(lambda: (demo.directory / "session.json").exists())
+            assert not (demo.directory / "app-exit.json").exists()
+            cli(demo.directory, "status")
+            cli(demo.directory, "stop")
+            assert runner.wait(timeout=10) == 0
+        finally:
+            if runner.poll() is None:
+                runner.terminate()
+            runner.wait(timeout=10)
+    assert not (demo.directory / "app-exit.json").exists()
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "status"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "Session is disconnected" in result.stderr
+    assert "attach" in result.stderr

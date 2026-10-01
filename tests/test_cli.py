@@ -145,6 +145,8 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     [
         "session.json",
         ".session.json",
+        "app-exit.json",
+        ".app-exit.json",
         "sway.log",
         "wayvnc.log",
         "recorder.log",

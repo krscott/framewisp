@@ -24,6 +24,7 @@ from framewisp.connection import reply as reply
 from framewisp.errors import (
     SOCKET_ACCESS_HINT,
     SessionError,
+    app_exit_message,
     display_command,
     log_failure,
 )
@@ -350,6 +351,8 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
         for name in (
             "session.json",
             ".session.json",
+            "app-exit.json",
+            ".app-exit.json",
             "sway.log",
             "wayvnc.log",
             "recorder.log",
@@ -641,6 +644,7 @@ def run_session(
             f"{state} already exists. Use a different session directory."
         )
 
+    (session / "app-exit.json").unlink(missing_ok=True)
     (session / "inputs.jsonl").write_text("", encoding="utf-8")
     stop = Event()
     stop_connection: socket.socket | None = None
@@ -784,15 +788,23 @@ def run_session(
             write_state()
             print(f"Session ready: {session}", flush=True)
             while not stop.is_set():
+                result = app.poll()
+                if result is not None:
+                    temporary = session / ".app-exit.json"
+                    temporary.write_text(
+                        json.dumps({"returncode": result, "time": time.time()}) + "\n"
+                    )
+                    temporary.replace(session / "app-exit.json")
+                    print(
+                        app_exit_message(session, result), file=sys.stderr, flush=True
+                    )
+                    return result if result >= 0 else 128 - result
                 monitored = backends.copy()
                 if recordings.process is not None:
                     monitored["recorder"] = recordings.process
                 for name, process in monitored.items():
                     if process.poll() is not None:
                         raise log_failure(f"{name} exited", session / (name + ".log"))
-                result = app.poll()
-                if result is not None:
-                    return result if result >= 0 else 128 - result
                 stop_connection = handle_session_command(
                     listener, recordings, write_state, status, inputs
                 )

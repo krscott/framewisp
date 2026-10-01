@@ -400,6 +400,7 @@ def run_attachment(session: Path, terminal: int | None) -> int:
                         },
                     )
                     owns_state = True
+                    (session / "app-exit.json").unlink(missing_ok=True)
                     write_state(
                         directory / "desktop.json",
                         {"session": str(session), "attachment": attachment},

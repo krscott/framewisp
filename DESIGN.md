@@ -328,7 +328,13 @@ actions, `failed_phase: "validation"`, and the index that exceeds the limit.
 
 ## Shutdown and errors
 
-Application exit ends the session and returns its exit code. SIGINT or SIGTERM
+Application exit ends the session and returns its exit code (128 plus the signal
+number for signals). Before cleanup, the runner atomically writes `app-exit.json`
+via `.app-exit.json`, containing the subprocess `returncode` (negative for signals)
+and `time` (Unix seconds). It prints the exit code or signal name and the path to
+`app.log` on stderr. Later session commands report this record even during cleanup.
+A new headless run clears the record before startup; an attachment clears it when
+it publishes its state. Requested stops do not create an exit record. SIGINT or SIGTERM
 requests a clean stop and returns zero. A backend exit or startup timeout reports
 an error naming its log. Unexpected errors keep their traceback.
 
