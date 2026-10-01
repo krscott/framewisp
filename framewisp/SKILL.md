@@ -3,6 +3,13 @@
 Use framewisp to smoke-test GUI interactions, investigate visual bugs, or record
 a short demonstration using screenshots and mouse/keyboard input.
 
+Discover unknown pointer targets with a screenshot. Once targets are known,
+group inputs in one batch and verify an expected accessible result with a bounded
+check. Use `interval: 0` for ordinary smoke checks. Keep screenshots for appearance,
+layout, canvas content, and accessibility gaps; keep paced input for demonstrations
+and timing-sensitive behavior. Accessibility coverage and query cost vary by app;
+inspection is not always faster than a screenshot.
+
 Prefer `framewisp` on PATH. Otherwise replace `framewisp` in the examples with
 `nix run github:krscott/framewisp --`. No checkout or development shell is needed.
 The package includes `framewisp-demo`; other target apps must be installed separately.
@@ -59,8 +66,10 @@ or `key Tab` separately. X11 sessions support 128 distinct non-ASCII characters
 across text commands; start a fresh session if that limit is reached.
 
 Timing values are finite seconds, including fractions. Input/capture delays may
-be zero; inspection requires a positive timeout. Input completion does not mean animation completion;
-use `screenshot --delay 0.5 PATH` when the app needs time to respond.
+be zero; inspection requires a positive timeout. Input completion does not verify
+the app's response. Prefer a bounded `wait` for a known accessible result. Use
+`screenshot --delay 0.5 PATH` when intentionally allowing time for visual changes
+that a check cannot observe.
 
 ## Example workflow
 
@@ -72,21 +81,61 @@ may still be drawing its first frame:
 framewisp /tmp/framewisp-demo run -- framewisp-demo
 ```
 
-From another command session, capture and inspect the PNG, then interact. These
-coordinates target the bundled demo's text field:
+From another command session, create the batch file in a fresh working directory.
+These coordinates target the bundled demo's text field at the default display
+size. The first wait checks that the fresh demo's empty entry is accessible before
+sending input; the last checks its resulting label:
 
 ```sh
-framewisp /tmp/framewisp-demo screenshot /tmp/before.png
-framewisp /tmp/framewisp-demo click 120 100
-framewisp /tmp/framewisp-demo type 'Hello GUI!'
-framewisp /tmp/framewisp-demo key Return
-framewisp /tmp/framewisp-demo screenshot --delay 0.3 /tmp/after.png
+check_dir=$(mktemp -d /tmp/framewisp-check.XXXXXX)
+cd "$check_dir"
+cat > check.json <<'JSON'
+{
+  "actions": [
+    {"action": "wait", "timeout": 5, "condition": {"role": "text box", "field": "text", "equals": ""}},
+    {"action": "click", "x": 120, "y": 100},
+    {"action": "type", "text": "HelloGUI", "interval": 0},
+    {"action": "key", "chord": "Return"},
+    {"action": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
+  ],
+  "failure_capture": {"path": "check-failed.png"}
+}
+JSON
+framewisp /tmp/framewisp-demo batch --file check.json
 ```
 
-Inspect the result before choosing the next action. Use
-`framewisp /tmp/framewisp-demo status` to check the session and
-`framewisp /tmp/framewisp-demo stop` when finished. Ctrl+C or SIGTERM to the runner
-also stops it. `status` and `stop` require a connected headless session;
+Read the JSON: `status: "completed"` and `verified: true` mean the requested
+accessible conditions passed at their observation times. No success PNG is
+captured or needs image inspection. Input-only batches have `verified: null`;
+successful input alone does not verify app state or appearance.
+
+To exercise failure, repeat with a fresh demo session and working directory,
+changing only the last `equals` to `"Entered: Wrong"`. The batch exits 1 with
+`verified: false`, `status: "failed"`, `failed_phase: "check"`, and `failed_index: 4`.
+Read `error` and `results[4].observation` (including its `status`, matches, reasons,
+hints, and errors). Inspect the failure PNG at the absolute path in `artifacts`;
+if capture failed, read `failure_capture_error`. The fresh working directory
+keeps the optional capture filename unused. Do not blindly replay completed input.
+
+For an unfamiliar app, capture and inspect a screenshot before choosing pointer
+coordinates. Accessible bounds are window-relative toolkit units, so use them as
+display pixels only when the transform is known. A visual fallback is also useful
+when checks cannot expose the result; choose a delay for the app's visual timing:
+
+```sh
+framewisp /tmp/framewisp-demo screenshot --delay 0.3 "$check_dir/visual.png"
+```
+
+When finished, stop the session:
+
+```sh
+framewisp /tmp/framewisp-demo stop
+```
+
+The successful primary path uses three CLI invocations: run, batch, stop, with
+zero images inspected. The optional visual fallback adds one capture and image
+inspection. Use `status` if session health is uncertain. Ctrl+C or SIGTERM to the
+runner also stops it. `status` and `stop` require a connected headless session;
 `--detach` is for desktop attachments only.
 
 ## Accessible text and state
@@ -150,9 +199,10 @@ unavailable on attached desktops and does not supply semantic clicks.
 
 ## Batch known actions
 
-When targets are already known, use one batch for the inputs and final capture.
-Save this JSON to `check.json`, then run
-`framewisp /tmp/framewisp-demo batch --file check.json`:
+The primary example batches inputs and accessible checks. For a visual-only
+outcome, batch the known inputs and an optional final capture instead.
+Save this JSON to `visual-check.json`, then run
+`framewisp /tmp/framewisp-demo batch --file visual-check.json`:
 
 ```json
 {

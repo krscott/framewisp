@@ -92,35 +92,73 @@ exits. It needs no session or display and does not start an app.
 
 ## Try it
 
-After installation, in the first terminal:
+For known targets with an accessible outcome, batch the inputs and a bounded
+check. Use screenshots to discover unknown pointer coordinates and to check
+appearance, layout, canvas content, or controls missing from accessibility.
+Accessible bounds are window-relative toolkit units, not necessarily display
+pixels. Inspection cost and coverage vary by app.
+
+After installation, start a fresh demo session in the first terminal:
 
 ```sh
 framewisp /tmp/framewisp-demo run -- framewisp-demo
 ```
 
-Wait for `Session ready:`. Keep that process running. In a second terminal, run:
+Wait for `Session ready:` and keep that process running. The app may still be
+drawing. In a second terminal, create and run this batch:
 
 ```sh
-framewisp /tmp/framewisp-demo screenshot /tmp/before.png
+check_dir=$(mktemp -d /tmp/framewisp-check.XXXXXX)
+cd "$check_dir"
+cat > check.json <<'JSON'
+{
+  "actions": [
+    {"action": "wait", "timeout": 5, "condition": {"role": "text box", "field": "text", "equals": ""}},
+    {"action": "click", "x": 120, "y": 100},
+    {"action": "type", "text": "HelloGUI", "interval": 0},
+    {"action": "key", "chord": "Return"},
+    {"action": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
+  ],
+  "failure_capture": {"path": "check-failed.png"}
+}
+JSON
+framewisp /tmp/framewisp-demo batch --file check.json
 ```
 
-Open the PNG, or have the agent inspect it with its image-viewing tool. The demo
-has a text field near `(120, 100)` and an "Apply text" button near `(120, 170)`.
+The first wait checks that the fresh demo's empty entry is accessible before
+clicking its known coordinates. `interval: 0` removes deliberate typing pauses;
+use paced typing for demonstrations or timing-sensitive behavior. The final wait
+checks for `Entered: HelloGUI`. Read `status: "completed"` and `verified: true` in
+the JSON. This verifies the requested accessible conditions, not appearance or
+every app effect. Successful input without checks has `verified: null`.
+
+To try failure, repeat with a fresh demo session and working directory, changing
+only the last `equals` to `"Entered: Wrong"`. The batch exits 1 with
+`status: "failed"`, `verified: false`, `failed_phase: "check"`, and `failed_index: 4`.
+Read `error` and `results[4].observation` for the last accessible result and its
+diagnostics. Open the failure PNG listed in `artifacts`, or read
+`failure_capture_error` if capture failed. Earlier input remains in the app;
+inspect its state before deciding what to do next. The fresh working directory
+ensures the failure capture uses a new filename.
+
+No success screenshot needs inspection. For visual evidence or an accessibility
+gap, capture a PNG and open it, or have the agent use its image-viewing tool.
+Choose a delay when intentionally allowing time for rendering or an animation:
 
 ```sh
-framewisp /tmp/framewisp-demo click 120 100
-framewisp /tmp/framewisp-demo type 'Hello Wayland!'
-framewisp /tmp/framewisp-demo key BackSpace
-framewisp /tmp/framewisp-demo key Return
-framewisp /tmp/framewisp-demo click 120 170
-framewisp /tmp/framewisp-demo screenshot /tmp/after.png
+framewisp /tmp/framewisp-demo screenshot --delay 0.3 "$check_dir/visual.png"
 ```
 
-The final screenshot should show `Hello Wayland` in the field and
-`Applied: Hello Wayland` below the button. Stop the runner with Ctrl+C in the
-first terminal, or send SIGTERM to the `framewisp ... run` process. An agent can
-keep that foreground process running through its shell tool while it makes
-separate CLI calls.
+Stop the session when finished:
+
+```sh
+framewisp /tmp/framewisp-demo stop
+```
+
+The primary path uses three CLI invocations (run, batch, stop) and zero images
+inspected. The optional visual fallback adds one capture and image inspection.
+Ctrl+C in the first terminal or SIGTERM to the runner also stops it. An agent can
+keep the foreground runner alive through its shell tool while sending the batch.
 
 The installed package supplies the display and input tools. You can also use
 these commands inside `nix develop` when working on the source.
@@ -166,8 +204,9 @@ requires both to be even, because the recorder crops odd dimensions.
 `Session ready:` means the display and input sockets exist and the application
 process has started. The app may still be drawing its first frame. A screenshot
 captures the current display; it does not wait for the app to finish responding
-to input automatically. To allow time for an animation, choose a delay before
-capture:
+to input automatically. Prefer a [bounded check](docs/conditional-checks.md) for
+a known accessible result. For visual-only changes such as animations, choose
+a delay before capture:
 
 ```sh
 framewisp /tmp/framewisp-demo screenshot --delay 0.5 /tmp/after.png
@@ -320,7 +359,8 @@ without replaying input; restart the session before trying again.
 
 ## Batch known actions
 
-Save an ordered input sequence and optional final capture as JSON:
+The primary example above batches input and checks an accessible outcome.
+For a visual-only outcome, save known inputs and an optional final capture as JSON:
 
 ```json
 {
@@ -345,7 +385,8 @@ Relative capture paths use the CLI's working directory. Use a new filename in an
 existing directory. The PNG appears only after successful capture.
 
 The CLI prints structured results, timing, completed-action count, and artifact
-paths. On runtime failure it exits with status 1 and reports the zero-based
+paths. This input-and-capture example returns `verified: null`; inspect its PNG
+before claiming visual success. On runtime failure it exits with status 1 and reports the zero-based
 `failed_index` and `failed_phase`. Capture failure has a null failed index.
 Execution stops at that point; completed inputs cannot be rolled back, and even
 the failed action may have sent partial input. Never replay a failed batch without
