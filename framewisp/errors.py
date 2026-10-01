@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 
 class SessionError(RuntimeError):
@@ -53,9 +54,14 @@ def recorded_app_exit(session: Path) -> str | None:
         return None
     except (OSError, ValueError) as error:
         return f"Cannot read app exit record: {error}"
-    if not isinstance(record, dict) or type(record.get("returncode")) is not int:
+    returncode = (
+        cast(dict[str, object], record).get("returncode")
+        if isinstance(record, dict)
+        else None
+    )
+    if type(returncode) is not int:
         return f"Invalid app exit record: {session / 'app-exit.json'}"
-    return app_exit_message(session, record["returncode"])
+    return app_exit_message(session, returncode)
 
 
 def display_command(
