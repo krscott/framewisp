@@ -55,17 +55,50 @@ snapshot-ID selector.
 | `enabled` | Boolean: either sensitive or enabled AT-SPI flag. This accommodates the demonstrated GTK and Qt controls, but does not prove that input will succeed. |
 
 Role/name strings must be nonempty and at most 1024 characters. Expected text/name
-can be empty and is capped at 1024 characters. Check traversal uses inspection's
-default depth 8 and 256-node limits, with two matches sufficient to reject
-ambiguity. Each observation gets at most two seconds and the remaining deadline.
-Large or inaccessible trees may require screenshot-based verification.
+can be empty and is capped at 1024 characters. Every check accepts an optional
+`observation` object, separate from its `condition`:
+
+| Observation setting | Default | Allowed values |
+| --- | ---: | --- |
+| `max_nodes` | 256 | Integer, 1 to 4096 |
+| `max_depth` | 8 | Integer, 1 to 32 |
+| `timeout` | 2 seconds | Finite number, greater than 0 and at most 10 seconds |
+
+Unknown settings, booleans in numeric fields, and out-of-range values fail batch
+validation before any input. Omitted fields keep their defaults. The match limit
+stays fixed at two, sufficient to reject ambiguity. Each observation gets the
+smaller of `observation.timeout` and the remaining step deadline. The outer
+`timeout` covers all observations and polling pauses, even when the observation
+budget is larger. Observation budgets do not add to the batch's 300-second limit;
+the enclosing check deadlines already bound that work.
+
+For a larger/deeper accessible tree, use explicit limits on each needed step:
+
+```json
+{
+  "actions": [
+    {
+      "action": "assert", "timeout": 5,
+      "observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5},
+      "condition": {"role": "label", "name": "Result", "field": "text", "equals": "Done"}
+    }
+  ]
+}
+```
+
+Incomplete observations still cannot verify a condition. Failure messages name
+`observation.max_nodes` or `observation.max_depth` when those caps prevent a
+complete traversal. A longer check timeout alone does not fix those caps. Query
+timeouts identify both time budgets; stalled app calls recommend retrying or
+taking a screenshot. At hard traversal maxima, screenshots remain the fallback.
 
 ## States and transitions
 
 Ordinary `wait` and `assert` check state. A value that already matches is valid.
 To require a transition, insert a `baseline` check before the triggering input,
 then set the wait's `after` to that baseline's zero-based action index. Both
-steps must have the identical condition:
+steps must have the identical condition. Their observation settings and deadlines
+may differ; they change traversal budgets, not selector or equality semantics:
 
 ```json
 {
@@ -95,7 +128,9 @@ A baseline alone is not verification. Successful input-only or baseline-only
 batches have `verified: null`; failed batches have `verified: false`.
 
 Each check retains its `condition`, `observation` (last full inspection response),
-`observations` count, `verified`, and `duration_seconds`. Baselines and transition
+`observation_settings` (configured budgets), `observations` count, `verified`, and
+`duration_seconds`. The inspection response's `hints` describe standalone
+`inspect` flags; check failure messages describe the JSON overrides. Baselines and transition
 waits also include `baseline_snapshot_id`. Failure stops subsequent steps and
 preserves earlier results. It reports `failed_phase: "check"` and `failed_index`.
 CLI exit codes remain 0 for success, 1 for runtime failure, and 2 for invalid input.
@@ -112,6 +147,39 @@ in-flight D-Bus calls on client disconnect, session stop, or app exit; polling
 pauses are interruptible too. Checks create no input logs or captions.
 
 ## Measuring waiting
+
+`benchmark_check_traversal.py` compares default and explicit traversal budgets
+against one running large GTK or Qt app. It records baseline, wait, assert,
+and standalone inspection responses, complete CLI timings, and runner/app logs.
+Write its output outside the repository:
+
+```sh
+python docs/benchmark_check_traversal.py /tmp/check-traversal-gtk.json
+python docs/benchmark_check_traversal.py /tmp/check-traversal-gtk-x11.json --x11
+python docs/benchmark_check_traversal.py /tmp/check-traversal-qt.json --app qt
+python docs/benchmark_check_traversal.py /tmp/check-traversal-qt-x11.json --app qt --x11
+```
+
+On October 1, 2026, three samples per operation on the pinned NixOS stack
+traversed 315 objects in the GTK probe, with its result label at depth 14, and
+804 objects in the Qt probe. Defaults (256 nodes, depth 8, 2-second observations)
+failed every baseline, wait, and assertion. Explicit settings (1024 nodes,
+depth 16, 5-second observations) passed every check on the same apps. Every
+check had a 5-second total deadline. Default standalone inspection was partial;
+explicit inspection was complete. Nine successful Qt check observations took
+more than 2 seconds, exercising the larger observation budget.
+
+| App/backend | Default wait, failed | Explicit wait, passed | Explicit assert, passed |
+| --- | ---: | ---: | ---: |
+| GTK Wayland | 5.155 s | 0.789 s | 0.719 s |
+| GTK Xwayland | 5.160 s | 1.134 s | 1.167 s |
+| Qt Wayland | 5.152 s | 2.126 s | 2.156 s |
+| Qt Xwayland | 5.151 s | 2.116 s | 2.184 s |
+
+Values are median complete CLI times, excluding app/Nix startup. These are
+shared-host measurements; development checks overlapped some GTK samples.
+They demonstrate coverage with sufficient limits, not total-agent savings.
+Raw samples and logs are in the [PR benchmark comments](https://github.com/krscott/framewisp/pull/73#issuecomment-5932359865).
 
 `benchmark_checks.py` compares a fixed 500 ms delay followed by inspection,
 client-side inspection polling, and a batch containing a conditional wait. It

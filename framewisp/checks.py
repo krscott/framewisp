@@ -99,15 +99,53 @@ class Condition:
 
 
 @dataclass(frozen=True)
+class Observation:
+    max_nodes: int = 256
+    max_depth: int = 8
+    timeout: float = 2
+
+    @staticmethod
+    def parse(raw: object) -> "Observation":
+        if not isinstance(raw, dict):
+            raise ValueError("observation must be an object.")
+        data = cast(dict[str, object], raw)
+        if data.keys() - {"max_nodes", "max_depth", "timeout"}:
+            raise ValueError("Unknown observation parameter.")
+        defaults = Observation()
+        nodes = data.get("max_nodes", defaults.max_nodes)
+        depth = data.get("max_depth", defaults.max_depth)
+        for name, value, maximum in (
+            ("max_nodes", nodes, 4096),
+            ("max_depth", depth, 32),
+        ):
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(f"observation.{name} must be between 1 and {maximum}.")
+        timeout = data.get("timeout", defaults.timeout)
+        if type(timeout) not in (int, float) or not 0 < cast(float, timeout) <= 10:
+            raise ValueError(
+                "observation.timeout must be greater than 0 and at most 10 seconds."
+            )
+        return Observation(cast(int, nodes), cast(int, depth), cast(float, timeout))
+
+    def parameters(self) -> dict[str, object]:
+        return {
+            "max_nodes": self.max_nodes,
+            "max_depth": self.max_depth,
+            "timeout": self.timeout,
+        }
+
+
+@dataclass(frozen=True)
 class Check:
     action: str
     condition: Condition
     timeout: float
     after: int | None = None
+    observation: Observation = Observation()
 
     @staticmethod
     def parse(action: str, data: dict[str, object]) -> "Check":
-        if data.keys() - {"action", "condition", "timeout", "after"}:
+        if data.keys() - {"action", "condition", "timeout", "after", "observation"}:
             raise ValueError("Unknown check parameter.")
         timeout = data.get("timeout")
         if type(timeout) not in (int, float) or not 0 < cast(float, timeout) <= 10:
@@ -124,6 +162,7 @@ class Check:
             Condition.parse(data.get("condition")),
             cast(float, timeout),
             cast(int | None, after),
+            Observation.parse(data.get("observation", {})),
         )
 
     @property
@@ -131,6 +170,7 @@ class Check:
         result: dict[str, object] = {
             "condition": self.condition.parameters(),
             "timeout": self.timeout,
+            "observation": self.observation.parameters(),
         }
         if self.after is not None:
             result["after"] = self.after
@@ -154,35 +194,72 @@ def perform_check(
         observation=None,
         observations=0,
         verified=False,
+        observation_settings=check.observation.parameters(),
     )
+    reasons: set[str] = set()
+
+    def failure(message: str) -> SessionError:
+        hints: list[str] = []
+        for reason, field, maximum in (
+            ("max-nodes", "max_nodes", 4096),
+            ("max-depth", "max_depth", 32),
+        ):
+            if reason in reasons:
+                current = check.observation.parameters()[field]
+                if current == maximum:
+                    hints.append(
+                        f"observation.{field} reached its maximum ({maximum}); narrow the app tree or use a screenshot."
+                    )
+                else:
+                    hints.append(
+                        f"Raise observation.{field} (currently {current}, maximum {maximum}); a longer check timeout alone cannot fix this traversal cap."
+                    )
+        if "timeout" in reasons:
+            hints.append(
+                f"Observation time budget exhausted (observation.timeout={check.observation.timeout}, check timeout={check.timeout}); each query is capped by the remaining check deadline."
+            )
+            if "app-unresponsive" in reasons:
+                hints.append("An app call was unresponsive; retry or use a screenshot.")
+            elif check.observation.timeout == 10 and check.timeout == 10:
+                hints.append(
+                    "Both time budgets are at their maximum; retry or use a screenshot."
+                )
+            else:
+                hints.append(
+                    "Increase observation.timeout and the check timeout if needed (maximum 10 seconds each), or use a screenshot."
+                )
+        return SessionError(" ".join([message, *hints]))
+
     while True:
         wait(0)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise SessionError(
-                "Condition timed out before a complete matching observation."
-            )
+            raise failure("Condition timed out before a complete matching observation.")
         observation = inspect_session(
             session,
             Query(
                 role=check.condition.role,
                 name=check.condition.name,
                 limit=2,
-                timeout=min(2, remaining),
+                max_nodes=check.observation.max_nodes,
+                max_depth=check.observation.max_depth,
+                timeout=min(check.observation.timeout, remaining),
             ),
             cancelled=cancelled,
         )
         result["observation"] = observation
         result["observations"] = cast(int, result["observations"]) + 1
+        # A final short query must not hide structural caps from earlier polls.
+        if observation["status"] == "ok":
+            reasons.clear()
+        reasons.update(cast(list[str], observation["reasons"]))
         wait(0)
         matched = check.condition.evaluate(observation)
         if time.monotonic() > deadline:
-            raise SessionError(
-                "Condition timed out before a complete matching observation."
-            )
+            raise failure("Condition timed out before a complete matching observation.")
         if check.action == "baseline":
             if matched is not False:
-                raise SessionError(
+                raise failure(
                     "Transition baseline requires one complete, readable, nonmatching control."
                 )
             result["baseline_snapshot_id"] = observation["snapshot_id"]
@@ -191,7 +268,7 @@ def perform_check(
             result["verified"] = True
             return
         if check.action == "assert":
-            raise SessionError(
+            raise failure(
                 "Assertion failed: condition is false or observation is incomplete."
             )
         if observation["status"] == "unavailable":

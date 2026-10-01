@@ -64,6 +64,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-qt": "qt",
             "x11-qt-tree": "qt-tree",
             "x11-waits": "waits",
+            "x11-large-waits": "large-waits",
         }[mode]
     recording = (
         tmp_path / "session.mp4"
@@ -83,6 +84,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     probes = {
         "probe": "input_probe.py",
         "waits": "wait_probe.py",
+        "large-waits": "wait_probe.py",
         "clipboard": "input_probe.py",
         "scroll": "scroll_probe.py",
         "large": "input_probe.py",
@@ -102,6 +104,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                 )
             ),
         ]
+    if mode == "large-waits":
+        app.extend(["--nodes", "300", "--depth", "10"])
     command.extend(["--", *app])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
@@ -161,7 +165,14 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert b"WAYLAND_DISPLAY=host-display-do-not-use" not in app_env
             assert b"XAUTHORITY=/dev/null" in app_env
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
-            if mode not in {"probe", "clipboard", "qt", "qt-tree", "waits"}:
+            if mode not in {
+                "probe",
+                "clipboard",
+                "qt",
+                "qt-tree",
+                "waits",
+                "large-waits",
+            }:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
                 )
@@ -1199,8 +1210,9 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
     for direction in ["up", "left"]:
         cli(demo.directory, "scroll", "700", "250", direction, "--steps", "8")
     wait_until(lambda: position() == (0, 0))
+    # GTK can report zero during overshoot; move far enough back into the content.
     for direction in ["down", "right"]:
-        cli(demo.directory, "scroll", "700", "250", direction)
+        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "3")
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
     cli(demo.directory, "click", "120", "100")
     # Submitting a long result must not push the neighboring Reset offscreen.
@@ -1819,6 +1831,12 @@ def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> N
             "actions": [{"action": "key", "chord": "a"}],
             "capture": {"path": str(demo.directory / "missing" / "image.png")},
         },
+        {
+            "actions": [
+                {"action": "key", "chord": "a"},
+                check_step("assert", "Done") | {"observation": {"max_nodes": True}},
+            ]
+        },
     ]
     for parameters in invalid:
         with input_request(demo, "batch", parameters) as connection:
@@ -2263,6 +2281,89 @@ def test_checks_submit_delayed_and_replaced_widgets(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", ["large-waits", "x11-large-waits"], indirect=True)
+def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    default = inspect(demo, "--role", "label", "--name", "Result")
+    assert default["status"] == "partial", default
+    assert "max-depth" in default["reasons"], default
+    for action in ("baseline", "wait", "assert"):
+        failed = checked_batch(demo, tmp_path, [check_step(action, "Done", 0.5)])
+        assert failed["verified"] is False, failed
+        assert "observation.max_depth" in failed["error"], failed
+        assert "longer check timeout alone" in failed["error"], failed
+
+    depth_only = checked_batch(
+        demo,
+        tmp_path,
+        [check_step("assert", "Waiting") | {"observation": {"max_depth": 16}}],
+    )
+    assert depth_only["verified"] is False, depth_only
+    assert "observation.max_nodes" in depth_only["error"], depth_only
+    assert depth_only["results"][0]["observation"]["matches"][0]["text"] == "Waiting"
+
+    observation = {"max_nodes": 1024, "max_depth": 16, "timeout": 5}
+    actions: list[dict[str, object]] = [
+        check_step("baseline", "Done") | {"observation": observation},
+        {"action": "type", "text": "Done", "interval": 0},
+        {"action": "key", "chord": "Return"},
+        check_step("wait", "Done") | {"after": 0, "observation": observation},
+        check_step("assert", "Done") | {"observation": observation},
+    ]
+    passed = checked_batch(demo, tmp_path, actions)
+    assert passed["verified"] is True, passed
+    for index in (0, 3, 4):
+        result = passed["results"][index]
+        assert result["observation"]["status"] == "ok"
+        assert result["observation"]["visited"] > 256
+        assert result["observation_settings"] == observation
+    assert (
+        passed["results"][3]["baseline_snapshot_id"]
+        == passed["results"][0]["baseline_snapshot_id"]
+    )
+
+    cli(demo.directory, "key", "Ctrl+a")
+    cli(demo.directory, "type", "--interval", "0", "duplicate")
+    cli(demo.directory, "key", "Return")
+    wait_until(
+        lambda: "Finished: duplicate" in (demo.directory / "app.log").read_text()
+    )
+    duplicate = checked_batch(
+        demo, tmp_path, [check_step("wait", "duplicate") | {"observation": observation}]
+    )
+    assert duplicate["verified"] is False, duplicate
+    assert "ambiguous" in duplicate["error"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["qt-tree", "x11-qt-tree"], indirect=True)
+def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
+    wait_until(
+        lambda: "Inspection probe ready" in (demo.directory / "app.log").read_text()
+    )
+    condition = {
+        "name": "Control 0",
+        "field": "enabled",
+        "equals": True,
+    }
+    step: dict[str, object] = {
+        "action": "assert",
+        "timeout": 5,
+        "condition": condition,
+        "observation": {"max_nodes": 1024, "timeout": 5},
+    }
+    exhausted = checked_batch(
+        demo, tmp_path, [step | {"observation": {"max_nodes": 1024, "timeout": 0.1}}]
+    )
+    assert exhausted["verified"] is False, exhausted
+    assert exhausted["results"][0]["observation"]["status"] == "timeout"
+    assert "observation.timeout" in exhausted["error"]
+    complete = checked_batch(demo, tmp_path, [step])
+    assert complete["verified"] is True, complete
+    assert complete["results"][0]["observation"]["visited"] >= 800
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("demo", ["waits"], indirect=True)
 @pytest.mark.parametrize(
     "action,text,timeout",
@@ -2332,7 +2433,14 @@ def test_wait_cancellation_and_app_exit(
             "batch",
             {
                 "actions": [
-                    check_step("wait", "Never", 10),
+                    check_step("wait", "Never", 10)
+                    | {
+                        "observation": {
+                            "max_nodes": 1024,
+                            "max_depth": 16,
+                            "timeout": 10,
+                        }
+                    },
                     {"action": "key", "chord": "z"},
                 ],
                 "failure_capture": {"path": str(tmp_path / "never.png")},

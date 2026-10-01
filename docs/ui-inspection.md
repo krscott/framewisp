@@ -52,7 +52,9 @@ failure, SIGINT, SIGTERM, and recording tests also exercise the new bus lifetime
 
 The standalone timeout defaults to 5 seconds. Depth (8) and node count (256)
 remain conservative because deeper traversals have crashed some Qt apps. Batch
-checks still explicitly allocate at most 2 seconds per observation.
+checks default to 2 seconds per observation. Their optional `observation.timeout`
+can raise that budget to 10 seconds, within the overall check deadline; see
+[check traversal settings](conditional-checks.md#conditions-and-deadlines).
 
 `tests/inspection_probe.qml` exposes 800 buttons on Qt Quick. On September 30,
 2026, the pinned Nix environment on Xwayland traversed 804 objects in 2434 ms

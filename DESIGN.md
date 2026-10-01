@@ -654,6 +654,17 @@ Only a complete observation with exactly one readable match can verify state.
 A baseline must establish a nonmatching value before a transition wait can run.
 Replacement widgets are allowed under the same logical selector.
 
+Each step's optional `observation` object controls `max_nodes` (default 256,
+maximum 4096), `max_depth` (default 8, maximum 32), and per-query `timeout`
+(default 2 seconds, maximum 10). Counts must be positive integers; time must be
+finite and positive. The two-match ambiguity limit remains fixed. Each query
+receives the smaller of its configured time budget and the remaining monotonic
+step deadline. Only step deadlines count toward the shared batch budget.
+Baseline references compare conditions, allowing different observation budgets.
+Results include normalized `observation_settings`. Errors identify supported
+JSON overrides and retain traversal caps seen before a final short query times
+out; a subsequent complete observation clears those earlier cap diagnostics.
+
 `inspection.Bus` accepts a cancellation callback. A watcher checks it every 20 ms
 and cancels the Gio cancellable, interrupting connection setup and in-flight calls.
 The existing deadline timer independently bounds each observation. Both stop on

@@ -232,20 +232,30 @@ either AT-SPI sensitive or enabled. This rule covers the demonstrated GTK/Qt
 controls, not every toolkit. Missing or stale objects, unsupported apps, partial
 observations, and timeouts cannot satisfy a check. There is no absence assertion.
 Wait retries incomplete/missing observations within its deadline; assert does not.
-Queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
+By default, queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
+For larger/deeper trees, add
+`"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` to each
+needed `baseline`, `wait`, or `assert` step. Node/depth limits must be integers
+in 1..4096 and 1..32 respectively; observation timeout must be greater than 0
+and at most 10 seconds. Omitted fields keep their defaults. Each query gets the
+smaller of its observation timeout and the remaining step deadline. Increase
+both time budgets when needed. Structural cap errors name `observation.max_nodes`
+or `observation.max_depth`; a longer wait alone cannot fix those caps. Partial
+observations still fail. At hard maxima or for unresponsive apps, use screenshots.
 
 A state check may pass immediately on an existing value. To require a transition,
 put `{"action": "baseline", "timeout": 2, "condition": ...}` before the input,
 then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
 Use the identical condition in both. The baseline must read a unique nonmatching
-value, or the batch stops before input. The wait resolves the selector afresh,
+value. Observation settings may differ between baseline and wait. The baseline
+must be complete, or the batch stops before input. The wait resolves the selector afresh,
 allowing a replacement control. Snapshot IDs are diagnostic, not reusable handles.
 This proves observed nonmatching then matching state, not input causation.
 
 Read `verified` as well as `status`. True means all requested checks passed; null
 means no wait/assert verified app state. Failure stops the batch and sets verified
 to false. Each check returns its condition, last observation, observation count,
-and duration. `failed_phase: "check"` identifies failed checks. Optional
+configured `observation_settings`, and duration. `failed_phase: "check"` identifies failed checks. Optional
 `failure_capture` uses capture's path/delay schema, runs only on failure, and is
 skipped on cancellation. Its errors appear separately in `failure_capture_error`.
 Checks retain per-input results and do not create captions. Keep screenshots for
