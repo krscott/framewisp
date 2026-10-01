@@ -15,6 +15,7 @@ from typing import cast
 
 from gi.repository import Gio, GLib
 
+from framewisp.display_bounds import Rect, convert_bounds, read_windows
 from framewisp.errors import SessionError
 
 ACCESSIBLE = "org.a11y.atspi.Accessible"
@@ -201,13 +202,30 @@ def inspect_session(
     expected = f"unix:path={Path(state['runtime_directory']) / 'accessibility.sock'}"
     if state.get("accessibility_bus") != expected:
         raise SessionError("Invalid private accessibility bus in session metadata")
-    return inspect_bus(expected, query, cancelled=cancelled)
+    return inspect_bus(
+        expected, query, cancelled=cancelled, runtime=Path(state["runtime_directory"])
+    )
 
 
 def inspect_bus(
-    address: str, query: Query, *, cancelled: Callable[[], bool] | None = None
+    address: str,
+    query: Query,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    runtime: Path | None = None,
 ) -> dict[str, object]:
     started = time.monotonic()
+    deadline = started + query.timeout
+    before, mapping_error = (
+        read_windows(runtime, deadline, cancelled)
+        if runtime is not None
+        else ([], "private-compositor-unavailable")
+    )
+    # References and titles are inherited during traversal, including nested dialogs.
+    roots: dict[tuple[str, str], tuple[tuple[str, str], str]] = {}
+    pids: dict[str, int] = {}
+    geometries: dict[tuple[str, str], Rect] = {}
+    conversions: list[tuple[dict[str, object], Rect, Rect, int, str]] = []
     snapshot = uuid.uuid4().hex
     matches: list[dict[str, object]] = []
     reasons: set[str] = set()
@@ -224,9 +242,9 @@ def inspect_bus(
 
     try:
         bus = (
-            Bus(address, query.timeout)
+            Bus(address, max(0.001, deadline - time.monotonic()))
             if cancelled is None
-            else Bus(address, query.timeout, cancelled)
+            else Bus(address, max(0.001, deadline - time.monotonic()), cancelled)
         )
         applications = cast(int, bus.prop(ROOT, ACCESSIBLE, "ChildCount"))
         # Queue parent/index pairs instead of fetching an unbounded GetChildren reply.
@@ -264,7 +282,12 @@ def inspect_bus(
                     reasons.add("stale-object")
                     continue
                 role = clipped(cast(str, bus.call(ref, ACCESSIBLE, "GetRoleName")))
-                name = clipped(cast(str, bus.prop(ref, ACCESSIBLE, "Name")))
+                full_name = cast(str, bus.prop(ref, ACCESSIBLE, "Name"))
+                name = clipped(full_name)
+                if role.casefold() in {"frame", "dialog", "window"}:
+                    roots[ref] = (ref, full_name)
+                elif parent in roots:
+                    roots[ref] = roots[parent]
                 count = cast(int, bus.prop(ref, ACCESSIBLE, "ChildCount"))
                 if count > 0:
                     if depth >= query.max_depth:
@@ -291,6 +314,8 @@ def inspect_bus(
                     "states": states,
                     "actions": [],
                     "bounds": None,
+                    "display_bounds": None,
+                    "display_bounds_reason": "bounds-unavailable",
                     "value": None,
                     "depth": depth,
                 }
@@ -352,13 +377,56 @@ def inspect_bus(
                         ),
                     )
                     if x >= 0 and y >= 0 and width > 0 and height > 0:
-                        node["bounds"] = {
-                            "x": x,
-                            "y": y,
-                            "width": width,
-                            "height": height,
-                            "coordinate_space": "window",
-                        }
+                        bounds = Rect(x, y, width, height)
+                        node["bounds"] = bounds.as_bounds("window")
+                        node["display_bounds_reason"] = mapping_error
+                        if mapping_error is None:
+                            root = roots.get(ref)
+                            if root is None:
+                                node["display_bounds_reason"] = (
+                                    "accessible-window-not-found"
+                                )
+                            else:
+                                window_ref, title = root
+                                node["display_bounds_reason"] = (
+                                    "window-metadata-unavailable"
+                                )
+                                if ref[0] not in pids:
+                                    pids[ref[0]] = cast(
+                                        int,
+                                        bus.call(
+                                            (
+                                                "org.freedesktop.DBus",
+                                                "/org/freedesktop/DBus",
+                                            ),
+                                            "org.freedesktop.DBus",
+                                            "GetConnectionUnixProcessID",
+                                            "(s)",
+                                            (ref[0],),
+                                        ),
+                                    )
+                                if window_ref not in geometries:
+                                    geometries[window_ref] = Rect(
+                                        *cast(
+                                            tuple[int, int, int, int],
+                                            bus.call(
+                                                window_ref,
+                                                "org.a11y.atspi.Component",
+                                                "GetExtents",
+                                                "(u)",
+                                                (1,),
+                                            ),
+                                        )
+                                    )
+                                conversions.append(
+                                    (
+                                        node,
+                                        bounds,
+                                        geometries[window_ref],
+                                        pids[ref[0]],
+                                        title,
+                                    )
+                                )
             except GLib.Error as error:
                 message = f"{bus.error_context}{error}"[:TEXT_LIMIT]
                 if bus.cancel.is_cancelled() or time.monotonic() >= bus.deadline:
@@ -385,6 +453,15 @@ def inspect_bus(
     finally:
         if bus is not None:
             bus.close()
+    if runtime is not None and conversions:
+        after, mapping_error = read_windows(runtime, deadline, cancelled)
+        for node, bounds, toplevel, pid, title in conversions:
+            if mapping_error is not None:
+                node["display_bounds_reason"] = mapping_error
+            else:
+                node["display_bounds"], node["display_bounds_reason"] = convert_bounds(
+                    bounds, toplevel, pid, title, before, after
+                )
     if status == "timeout" and bus is not None and bus.app_unresponsive:
         reasons.add("app-unresponsive")
     if status == "ok" and reasons:

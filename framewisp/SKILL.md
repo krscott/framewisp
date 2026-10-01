@@ -117,10 +117,18 @@ hints, and errors). Inspect the failure PNG at the absolute path in `artifacts`;
 if capture failed, read `failure_capture_error`. The fresh working directory
 keeps the optional capture filename unused. Do not blindly replay completed input.
 
-For an unfamiliar app, capture and inspect a screenshot before choosing pointer
-coordinates. Accessible bounds are window-relative toolkit units, so use them as
-display pixels only when the transform is known. A visual fallback is also useful
-when checks cannot expose the result; choose a delay for the app's visual timing:
+For an unfamiliar app, use `inspect` to find a control. When `display_bounds` is
+present, its center can be passed directly to `click` or other pointer commands:
+`x + width // 2`, `y + height // 2`. These bounds include the window's display
+offset and exclude server-side borders and title bars. Query again after moving
+or resizing a window. Inspection is not atomic, and the app can change after it.
+
+If `display_bounds` is null, read `display_bounds_reason` and capture a screenshot
+to choose the pointer target. Reasons include missing or ambiguous windows,
+window changes during inspection, and unsupported geometry or display transforms.
+The original `bounds` field remains window-relative and cannot be used directly
+as display coordinates. A visual fallback is also useful when checks cannot
+expose the result; choose a delay for the app's visual timing:
 
 ```sh
 framewisp /tmp/framewisp-demo screenshot --delay 0.3 "$check_dir/visual.png"
