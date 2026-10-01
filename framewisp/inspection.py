@@ -360,13 +360,18 @@ def inspect_bus(
                             "coordinate_space": "window",
                         }
             except GLib.Error as error:
-                if len(errors) < 5:
-                    errors.append(f"{bus.error_context}{error}"[:TEXT_LIMIT])
+                message = f"{bus.error_context}{error}"[:TEXT_LIMIT]
                 if bus.cancel.is_cancelled() or time.monotonic() >= bus.deadline:
+                    # Preserve the terminal failure even after earlier object errors.
+                    if len(errors) == 5:
+                        errors.pop()
+                    errors.append(message)
                     status = "timeout"
                     reasons.add("timeout")
                     break
                 reasons.add("unavailable-object")
+                if len(errors) < 5:
+                    errors.append(message)
         if applications == 0:
             status = "unsupported"
             reasons.add("no-accessible-applications")
@@ -382,30 +387,6 @@ def inspect_bus(
             bus.close()
     if status == "timeout" and bus is not None and bus.app_unresponsive:
         reasons.add("app-unresponsive")
-    hints: list[str] = []
-    for reason, maximum in (("max-depth", 32), ("max-nodes", 4096), ("limit", 100)):
-        if reason in reasons:
-            hints.append(f"Raise --{reason} (maximum {maximum}).")
-    if "limit" in reasons:
-        hints.append("Narrow --role, --name, or --text to return fewer matches.")
-    if "app-unresponsive" in reasons:
-        hints.append(
-            "An app call consumed at least 80% of the query budget. Wait and retry, or take a screenshot; raising limits may not help."
-        )
-    elif "timeout" in reasons:
-        hints.append(
-            "Raise --timeout (maximum 10 seconds). See longest_call_ms for the slowest call; a timeout alone does not prove the app is responsive."
-        )
-    if "unavailable-object" in reasons or "stale-object" in reasons:
-        hints.append(
-            "The accessible tree changed or an object could not be read. Retry once after the UI settles; use a screenshot if it persists."
-        )
-    if "text-limit" in reasons:
-        hints.append(
-            "Accessible text is capped at 1024 characters; use a screenshot for omitted content."
-        )
-    if "action-limit" in reasons:
-        hints.append("Action names are capped at 16 per object.")
     if status == "ok" and reasons:
         status = "partial"
     return {
@@ -418,7 +399,50 @@ def inspect_bus(
         "applications": applications,
         "reasons": sorted(reasons),
         "errors": errors,
-        "hints": hints,
+        "hints": retry_hints(query, reasons),
         "longest_call_ms": round(bus.longest_call_ms, 3) if bus is not None else 0,
         "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
     }
+
+
+def retry_hints(query: Query, reasons: set[str]) -> list[str]:
+    hints: list[str] = []
+    for reason, current, maximum in (
+        ("max-depth", query.max_depth, 32),
+        ("max-nodes", query.max_nodes, 4096),
+        ("limit", query.limit, 100),
+    ):
+        if reason in reasons:
+            if current < maximum:
+                hints.append(f"Raise --{reason} (maximum {maximum}).")
+            else:
+                hints.append(
+                    f"--{reason} is already at its maximum ({maximum}); use a screenshot if the partial result is insufficient."
+                )
+    if "limit" in reasons:
+        hints.append("Narrow --role, --name, or --text to return fewer matches.")
+    if "app-unresponsive" in reasons:
+        hints.append(
+            "An app call consumed at least 80% of the query budget. Wait and retry, or take a screenshot; raising limits may not help."
+        )
+    elif "timeout" in reasons:
+        if query.timeout < 10:
+            hints.append("Raise --timeout (maximum 10 seconds).")
+        else:
+            hints.append(
+                "--timeout is already at its maximum (10 seconds); wait and retry, or take a screenshot."
+            )
+        hints.append(
+            "See longest_call_ms for the slowest call; a timeout alone does not prove the app is responsive."
+        )
+    if "unavailable-object" in reasons or "stale-object" in reasons:
+        hints.append(
+            "The accessible tree changed or an object could not be read. Retry once after the UI settles; use a screenshot if it persists."
+        )
+    if "text-limit" in reasons:
+        hints.append(
+            "Accessible text is capped at 1024 characters; use a screenshot for omitted content."
+        )
+    if "action-limit" in reasons:
+        hints.append("Action names are capped at 16 per object.")
+    return hints

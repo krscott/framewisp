@@ -12,7 +12,14 @@ import pytest
 from gi.repository import Gio, GLib
 
 from framewisp.errors import SessionError
-from framewisp.inspection import ROOT, Bus, Query, inspect_bus, inspect_session
+from framewisp.inspection import (
+    ROOT,
+    Bus,
+    Query,
+    inspect_bus,
+    inspect_session,
+    retry_hints,
+)
 
 
 @pytest.mark.parametrize(
@@ -271,3 +278,65 @@ def test_failed_call_timing_distinguishes_budget_from_app_stall(
     assert ref[0] in bus.error_context
     assert ref[1] in bus.error_context
     assert "GetState" in bus.error_context
+
+
+@pytest.mark.parametrize(
+    "reason,query,maximum",
+    [
+        ("max-depth", Query(max_depth=32), "32"),
+        ("max-nodes", Query(max_nodes=4096), "4096"),
+        ("limit", Query(limit=100), "100"),
+        ("timeout", Query(timeout=10), "10"),
+    ],
+)
+def test_limit_hints_at_hard_maxima(reason: str, query: Query, maximum: str) -> None:
+    hints = retry_hints(query, {reason})
+    assert not any("Raise" in hint for hint in hints)
+    assert any(
+        f"--{reason}" in hint and maximum in hint and "screenshot" in hint
+        for hint in hints
+    )
+    assert any(
+        f"Raise --{reason}" in hint and maximum in hint
+        for hint in retry_hints(Query(), {reason})
+    )
+
+
+def test_terminal_timeout_keeps_its_target_after_five_object_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def init(self: Bus, address: str, timeout: float) -> None:
+        self.deadline = float("inf")
+        self.cancel = Gio.Cancellable()
+
+    def call(
+        self: Bus,
+        ref: tuple[str, str],
+        interface: str,
+        method: str,
+        signature: str = "()",
+        arguments: tuple[object, ...] = (),
+    ) -> object:
+        if method == "Get":
+            return 6
+        if method == "GetChildAtIndex":
+            return (":1.2", f"/child_{arguments[0]}")
+        self.error_context = f"{ref[0]} {ref[1]} {method}: "
+        if ref[1] == "/child_5":
+            self.cancel.cancel()
+            self.app_unresponsive = True
+        raise GLib.Error("Cannot read object")
+
+    monkeypatch.setattr(Bus, "__init__", init)
+    monkeypatch.setattr(Bus, "call", call)
+
+    def close(self: Bus) -> None:
+        pass
+
+    monkeypatch.setattr(Bus, "close", close)
+    observation = inspect_bus("test", Query())
+    errors = cast(list[str], observation["errors"])
+    assert observation["status"] == "timeout"
+    assert "app-unresponsive" in cast(list[str], observation["reasons"])
+    assert len(errors) == 5
+    assert "/child_5 GetState" in errors[-1]
