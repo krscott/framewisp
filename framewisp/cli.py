@@ -87,8 +87,8 @@ def main() -> None:
     inspect.add_argument(
         "--timeout",
         type=seconds,
-        default=2.0,
-        help="query budget, >0 to 10 seconds (default: 2)",
+        default=5.0,
+        help="query budget, >0 to 10 seconds (default: 5)",
     )
 
     batch = commands.add_parser(

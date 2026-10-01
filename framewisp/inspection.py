@@ -38,7 +38,7 @@ class Query:
     max_depth: int = 8
     limit: int = 20
     max_nodes: int = 256
-    timeout: float = 2.0
+    timeout: float = 5.0
 
     def __post_init__(self) -> None:
         for name, value, maximum in (
@@ -60,9 +60,14 @@ class Query:
 
 
 class Bus:
+    longest_call_ms: float = 0
+    app_unresponsive: bool = False
+    error_context: str = ""
+
     def __init__(
         self, address: str, timeout: float, cancelled: Callable[[], bool] | None = None
     ):
+        self.timeout = timeout
         self.deadline = time.monotonic() + timeout
         self.cancel = Gio.Cancellable()
         self.timer = Timer(timeout, self.cancel.cancel)
@@ -119,18 +124,38 @@ class Bus:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             self.cancel.cancel()
-        result = self.connection.call_sync(
-            ref[0],
-            ref[1],
-            interface,
-            method,
-            GLib.Variant(signature, arguments),
-            None,
-            Gio.DBusCallFlags.NO_AUTO_START,
-            max(1, math.ceil(remaining * 1000)),
-            self.cancel,
-        )
-        return result.unpack()[0]
+        started = time.monotonic()
+        try:
+            result = self.connection.call_sync(
+                ref[0],
+                ref[1],
+                interface,
+                method,
+                GLib.Variant(signature, arguments),
+                None,
+                Gio.DBusCallFlags.NO_AUTO_START,
+                max(1, math.ceil(remaining * 1000)),
+                self.cancel,
+            )
+            return result.unpack()[0]
+        except GLib.Error:
+            duration = time.monotonic() - started
+            self.error_context = (
+                f"{ref[0]} {ref[1]} {interface}.{method} "
+                f"({duration * 1000:.3f} ms): "
+            )
+            # A failed app call consuming most of the whole query is evidence
+            # of an unresponsive app, not proof that the process has hung.
+            self.app_unresponsive = (
+                ref[0] not in (ROOT[0], "org.freedesktop.DBus")
+                and duration >= self.timeout * 0.8
+                and time.monotonic() >= self.deadline
+            )
+            raise
+        finally:
+            self.longest_call_ms = max(
+                self.longest_call_ms, (time.monotonic() - started) * 1000
+            )
 
     def prop(self, ref: tuple[str, str], interface: str, name: str) -> object:
         return self.call(
@@ -335,13 +360,13 @@ def inspect_bus(
                             "coordinate_space": "window",
                         }
             except GLib.Error as error:
+                if len(errors) < 5:
+                    errors.append(f"{bus.error_context}{error}"[:TEXT_LIMIT])
                 if bus.cancel.is_cancelled() or time.monotonic() >= bus.deadline:
                     status = "timeout"
                     reasons.add("timeout")
                     break
                 reasons.add("unavailable-object")
-                if len(errors) < 5:
-                    errors.append(str(error)[:TEXT_LIMIT])
         if applications == 0:
             status = "unsupported"
             reasons.add("no-accessible-applications")
@@ -350,10 +375,37 @@ def inspect_bus(
             "timeout" if time.monotonic() - started >= query.timeout else "unavailable"
         )
         reasons.add(status)
-        errors.append(str(error)[:TEXT_LIMIT])
+        context = bus.error_context if bus is not None else ""
+        errors.append(f"{context}{error}"[:TEXT_LIMIT])
     finally:
         if bus is not None:
             bus.close()
+    if status == "timeout" and bus is not None and bus.app_unresponsive:
+        reasons.add("app-unresponsive")
+    hints: list[str] = []
+    for reason, maximum in (("max-depth", 32), ("max-nodes", 4096), ("limit", 100)):
+        if reason in reasons:
+            hints.append(f"Raise --{reason} (maximum {maximum}).")
+    if "limit" in reasons:
+        hints.append("Narrow --role, --name, or --text to return fewer matches.")
+    if "app-unresponsive" in reasons:
+        hints.append(
+            "An app call consumed at least 80% of the query budget. Wait and retry, or take a screenshot; raising limits may not help."
+        )
+    elif "timeout" in reasons:
+        hints.append(
+            "Raise --timeout (maximum 10 seconds). See longest_call_ms for the slowest call; a timeout alone does not prove the app is responsive."
+        )
+    if "unavailable-object" in reasons or "stale-object" in reasons:
+        hints.append(
+            "The accessible tree changed or an object could not be read. Retry once after the UI settles; use a screenshot if it persists."
+        )
+    if "text-limit" in reasons:
+        hints.append(
+            "Accessible text is capped at 1024 characters; use a screenshot for omitted content."
+        )
+    if "action-limit" in reasons:
+        hints.append("Action names are capped at 16 per object.")
     if status == "ok" and reasons:
         status = "partial"
     return {
@@ -366,5 +418,7 @@ def inspect_bus(
         "applications": applications,
         "reasons": sorted(reasons),
         "errors": errors,
+        "hints": hints,
+        "longest_call_ms": round(bus.longest_call_ms, 3) if bus is not None else 0,
         "elapsed_ms": round((time.monotonic() - started) * 1000, 3),
     }

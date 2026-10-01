@@ -590,7 +590,7 @@ There is no persistent AT-SPI object cache or background observer.
 
 Traversal is breadth-first, starting with application objects at depth 1. It
 fetches individual child references rather than an unbounded tree. Defaults are
-8 levels, 20 returned matches, 256 visited nodes, and 2 seconds. Hard CLI maxima
+8 levels, 20 returned matches, 256 visited nodes, and 5 seconds. Hard CLI maxima
 are 32 levels, 100 matches, 4096 nodes, and 10 seconds. Role filtering compares
 case-insensitive exact toolkit role names; name/text filtering uses
 case-insensitive substrings. Filters combine with AND. Strings and text reads
@@ -599,7 +599,8 @@ that could affect the observation makes it partial, including when no match is
 found. The private buses reject messages over 1 MiB.
 
 Schema version 1 returns `snapshot_id`, `status`, `matches`, `match_count`,
-`visited`, `applications`, `reasons`, `errors`, and `elapsed_ms`. Each match has
+`visited`, `applications`, `reasons`, `errors`, `hints`, `longest_call_ms`, and
+`elapsed_ms`. Each match has
 `id`, `role`, `name`, `text`, `states`, `actions`, `bounds`, `value`, and `depth`.
 Unavailable optional interfaces produce null text/value/bounds or empty actions.
 Errors while reading advertised interfaces make the whole observation partial;
@@ -612,6 +613,18 @@ exposed tree. `unsupported` means no accessible application has registered yet;
 it can also occur while an app is starting. `partial` reports limits or vanished
 objects, `timeout` reports an exhausted budget, and `unavailable` reports failure
 to reach the bus/registry. Non-ok observations still print JSON and exit 1.
+`longest_call_ms` measures the slowest synchronous D-Bus method call, including
+failed calls but excluding connection setup. A failed call to an app that spends
+at least 80% of the entire query budget and reaches the deadline adds the
+`app-unresponsive` reason. This is evidence of a slow or blocked app, not proof
+of a hung process. Absence of this reason does not prove responsiveness: an app
+can block late in traversal. Cancellation before the deadline does not add it.
+Up to five bounded error strings include the failed call's bus name, object
+path, interface, method, and duration. `hints` names each limiting flag and its
+maximum; for an unresponsive app it recommends waiting or a screenshot instead
+of raising the timeout. Filters reduce matches and optional reads, but do not
+prune traversal, so they do not remove depth/node limits.
+
 Invalid command arguments exit 2. Toolkit omissions cannot be detected from a
 successful traversal, so `ok` does not certify that every visual widget exists
 in the accessibility tree.

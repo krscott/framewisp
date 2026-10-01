@@ -232,3 +232,42 @@ def test_inspection_cleanup_after_bus_disconnect(
         bus.call(ROOT, "org.a11y.atspi.Accessible", "GetState")
     bus.close()
     bus.close()
+
+
+@pytest.mark.parametrize(
+    "ref,elapsed,duration,unresponsive",
+    [
+        ((":1.2", "/app"), 0.0, 2.0, True),
+        ((":1.2", "/app"), 1.8, 0.2, False),
+        ((":1.2", "/app"), 0.0, 0.1, False),
+        (ROOT, 0.0, 2.0, False),
+    ],
+)
+def test_failed_call_timing_distinguishes_budget_from_app_stall(
+    monkeypatch: pytest.MonkeyPatch,
+    ref: tuple[str, str],
+    elapsed: float,
+    duration: float,
+    unresponsive: bool,
+) -> None:
+    now = 100.0 + elapsed
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+
+    class Connection:
+        def call_sync(self, *arguments: object) -> object:
+            nonlocal now
+            now += duration
+            raise GLib.Error("Call failed")
+
+    bus = Bus.__new__(Bus)
+    bus.timeout = 2.0
+    bus.deadline = 102.0
+    bus.cancel = Gio.Cancellable()
+    bus.connection = cast(Gio.DBusConnection, cast(object, Connection()))
+    with pytest.raises(GLib.Error):
+        bus.call(ref, "org.a11y.atspi.Accessible", "GetState")
+    assert bus.app_unresponsive is unresponsive
+    assert bus.longest_call_ms == pytest.approx(duration * 1000)
+    assert ref[0] in bus.error_context
+    assert ref[1] in bus.error_context
+    assert "GetState" in bus.error_context

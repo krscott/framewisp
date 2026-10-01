@@ -48,6 +48,27 @@ its buses, registry, children, and sockets while the other remains usable.
 An app without accessibility returns unsupported. A real private-bus disconnect test checks cleanup races. Existing app-exit, startup
 failure, SIGINT, SIGTERM, and recording tests also exercise the new bus lifetime.
 
+## Timeout diagnostics and Qt tree check
+
+The standalone timeout defaults to 5 seconds. Depth (8) and node count (256)
+remain conservative because deeper traversals have crashed some Qt apps. Batch
+checks still explicitly allocate at most 2 seconds per observation.
+
+`tests/inspection_probe.qml` exposes 800 buttons on Qt Quick. On September 30,
+2026, the pinned Nix environment on Xwayland traversed 804 objects in 2434 ms
+with `--name 'Absent control' --max-nodes 1024`. The longest call took 3.8 ms.
+This exceeds the old 2-second timeout. A 0.2-second query returned `timeout`
+without `app-unresponsive`; clicking the probe's button blocks its main loop for
+3 seconds, and a 0.5-second query reported `app-unresponsive`. Inspection
+succeeded again after the main loop resumed. This synthetic tree exercises
+hundreds of real Qt accessible objects; it does not reproduce every Qt Widgets
+item-view behavior from the issue.
+
+`hints` names limiting flags and their maxima. `longest_call_ms` includes failed
+calls; bounded `errors` identify the target and method. The unresponsive reason
+requires a failed app call consuming at least 80% of the whole budget and
+reaching its deadline. A late stall may therefore report only `timeout`.
+
 ## Measurements
 
 The reproducible script is [benchmark_inspection.py](benchmark_inspection.py).

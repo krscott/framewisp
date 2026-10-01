@@ -62,6 +62,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-record": True,
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
+            "x11-qt-tree": "qt-tree",
             "x11-waits": "waits",
         }[mode]
     recording = (
@@ -92,8 +93,15 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode in probes
         else ["framewisp-demo"]
     )
-    if mode == "qt":
-        app = ["qml", str(Path(__file__).with_name("menu_probe.qml"))]
+    if mode in {"qt", "qt-tree"}:
+        app = [
+            "qml",
+            str(
+                Path(__file__).with_name(
+                    "inspection_probe.qml" if mode == "qt-tree" else "menu_probe.qml"
+                )
+            ),
+        ]
     command.extend(["--", *app])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
@@ -107,7 +115,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                     "QT_LOGGING_RULES": "qml.debug=true",
                     "QT_LOGGING_TO_CONSOLE": "1",
                 }
-                if mode == "qt"
+                if mode in {"qt", "qt-tree"}
                 else {}
             )
             | ({"WAYLAND_DEBUG": "client"} if mode == "clipboard" else {})
@@ -153,7 +161,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert b"WAYLAND_DISPLAY=host-display-do-not-use" not in app_env
             assert b"XAUTHORITY=/dev/null" in app_env
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
-            if mode not in {"probe", "clipboard", "qt", "waits"}:
+            if mode not in {"probe", "clipboard", "qt", "qt-tree", "waits"}:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
                 )
@@ -1621,6 +1629,9 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
         bounded = inspect(demo, *args)
         assert bounded["status"] == "partial", bounded
         assert reason in bounded["reasons"]
+        assert any(
+            f"--{reason}" in hint and "maximum" in hint for hint in bounded["hints"]
+        )
     missing = inspect(demo, "--name", "No such widget")
     assert missing["status"] == "ok", missing
     assert missing["matches"] == []
@@ -1649,6 +1660,9 @@ def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
         started = time.monotonic()
         timed_out = inspect(demo, "--timeout", "0.2")
         assert timed_out["status"] == "timeout", timed_out
+        assert "app-unresponsive" in timed_out["reasons"], timed_out
+        assert timed_out["longest_call_ms"] >= 160
+        assert timed_out["errors"]
         assert time.monotonic() - started < 2
         assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
     finally:
@@ -2544,3 +2558,33 @@ def test_normal_stop_clears_previous_app_exit(demo: Demo) -> None:
     assert result.returncode == 1
     assert "Session is disconnected" in result.stderr
     assert "attach" in result.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["x11-qt-tree"], indirect=True)
+def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
+    log = demo.directory / "app.log"
+    wait_until(lambda: "Inspection probe ready" in log.read_text())
+    complete = inspect(demo, "--name", "Absent control", "--max-nodes", "1024")
+    assert complete["status"] == "ok", complete
+    assert complete["visited"] >= 800, complete
+    print(
+        f"Qt tree: visited={complete['visited']} elapsed_ms={complete['elapsed_ms']} longest_call_ms={complete['longest_call_ms']}"
+    )
+    exhausted = inspect(
+        demo, "--name", "Absent control", "--max-nodes", "1024", "--timeout", "0.2"
+    )
+    assert exhausted["status"] == "timeout", exhausted
+    assert "app-unresponsive" not in exhausted["reasons"], exhausted
+    assert any("--timeout" in hint and "10" in hint for hint in exhausted["hints"])
+    cli(demo.directory, "click", "40", "40")
+    wait_until(lambda: "Main loop blocked" in log.read_text())
+    blocked = inspect(demo, "--timeout", "0.5")
+    assert blocked["status"] == "timeout", blocked
+    assert "app-unresponsive" in blocked["reasons"], blocked
+    assert not any("Raise --timeout" in hint for hint in blocked["hints"])
+    wait_until(lambda: "Main loop resumed" in log.read_text())
+    assert (
+        inspect(demo, "--name", "Absent control", "--max-nodes", "1024")["status"]
+        == "ok"
+    )
