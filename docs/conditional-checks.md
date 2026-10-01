@@ -148,6 +148,39 @@ pauses are interruptible too. Checks create no input logs or captions.
 
 ## Measuring waiting
 
+`benchmark_check_traversal.py` compares default and explicit traversal budgets
+against one running large GTK or Qt app. It records baseline, wait, assert,
+and standalone inspection responses, complete CLI timings, and runner/app logs.
+Write its output outside the repository:
+
+```sh
+python docs/benchmark_check_traversal.py /tmp/check-traversal-gtk.json
+python docs/benchmark_check_traversal.py /tmp/check-traversal-gtk-x11.json --x11
+python docs/benchmark_check_traversal.py /tmp/check-traversal-qt.json --app qt
+python docs/benchmark_check_traversal.py /tmp/check-traversal-qt-x11.json --app qt --x11
+```
+
+On October 1, 2026, three samples per operation on the pinned NixOS stack
+traversed 315 objects in the GTK probe, with its result label at depth 14, and
+804 objects in the Qt probe. Defaults (256 nodes, depth 8, 2-second observations)
+failed every baseline, wait, and assertion. Explicit settings (1024 nodes,
+depth 16, 5-second observations) passed every check on the same apps. Every
+check had a 5-second total deadline. Default standalone inspection was partial;
+explicit inspection was complete. Nine successful Qt check observations took
+more than 2 seconds, exercising the larger observation budget.
+
+| App/backend | Default wait, failed | Explicit wait, passed | Explicit assert, passed |
+| --- | ---: | ---: | ---: |
+| GTK Wayland | 5.155 s | 0.789 s | 0.719 s |
+| GTK Xwayland | 5.160 s | 1.134 s | 1.167 s |
+| Qt Wayland | 5.152 s | 2.126 s | 2.156 s |
+| Qt Xwayland | 5.151 s | 2.116 s | 2.184 s |
+
+Values are median complete CLI times, excluding app/Nix startup. These are
+shared-host measurements; development checks overlapped some GTK samples.
+They demonstrate coverage with sufficient limits, not total-agent savings.
+Raw samples and logs are in the [PR benchmark comments](https://github.com/krscott/framewisp/pull/73#issuecomment-5932359865).
+
 `benchmark_checks.py` compares a fixed 500 ms delay followed by inspection,
 client-side inspection polling, and a batch containing a conditional wait. It
 uses `tests/wait_probe.py` with a configurable delayed response. Run it in the
