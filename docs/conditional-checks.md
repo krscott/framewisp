@@ -55,17 +55,50 @@ snapshot-ID selector.
 | `enabled` | Boolean: either sensitive or enabled AT-SPI flag. This accommodates the demonstrated GTK and Qt controls, but does not prove that input will succeed. |
 
 Role/name strings must be nonempty and at most 1024 characters. Expected text/name
-can be empty and is capped at 1024 characters. Check traversal uses inspection's
-default depth 8 and 256-node limits, with two matches sufficient to reject
-ambiguity. Each observation gets at most two seconds and the remaining deadline.
-Large or inaccessible trees may require screenshot-based verification.
+can be empty and is capped at 1024 characters. Every check accepts an optional
+`observation` object, separate from its `condition`:
+
+| Observation setting | Default | Allowed values |
+| --- | ---: | --- |
+| `max_nodes` | 256 | Integer, 1 to 4096 |
+| `max_depth` | 8 | Integer, 1 to 32 |
+| `timeout` | 2 seconds | Finite number, greater than 0 and at most 10 seconds |
+
+Unknown settings, booleans in numeric fields, and out-of-range values fail batch
+validation before any input. Omitted fields keep their defaults. The match limit
+stays fixed at two, sufficient to reject ambiguity. Each observation gets the
+smaller of `observation.timeout` and the remaining step deadline. The outer
+`timeout` covers all observations and polling pauses, even when the observation
+budget is larger. Observation budgets do not add to the batch's 300-second limit;
+the enclosing check deadlines already bound that work.
+
+For a larger/deeper accessible tree, use explicit limits on each needed step:
+
+```json
+{
+  "actions": [
+    {
+      "action": "assert", "timeout": 5,
+      "observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5},
+      "condition": {"role": "label", "name": "Result", "field": "text", "equals": "Done"}
+    }
+  ]
+}
+```
+
+Incomplete observations still cannot verify a condition. Failure messages name
+`observation.max_nodes` or `observation.max_depth` when those caps prevent a
+complete traversal. A longer check timeout alone does not fix those caps. Query
+timeouts identify both time budgets; stalled app calls recommend retrying or
+taking a screenshot. At hard traversal maxima, screenshots remain the fallback.
 
 ## States and transitions
 
 Ordinary `wait` and `assert` check state. A value that already matches is valid.
 To require a transition, insert a `baseline` check before the triggering input,
 then set the wait's `after` to that baseline's zero-based action index. Both
-steps must have the identical condition:
+steps must have the identical condition. Their observation settings and deadlines
+may differ; they change traversal budgets, not selector or equality semantics:
 
 ```json
 {
@@ -95,7 +128,9 @@ A baseline alone is not verification. Successful input-only or baseline-only
 batches have `verified: null`; failed batches have `verified: false`.
 
 Each check retains its `condition`, `observation` (last full inspection response),
-`observations` count, `verified`, and `duration_seconds`. Baselines and transition
+`observation_settings` (configured budgets), `observations` count, `verified`, and
+`duration_seconds`. The inspection response's `hints` describe standalone
+`inspect` flags; check failure messages describe the JSON overrides. Baselines and transition
 waits also include `baseline_snapshot_id`. Failure stops subsequent steps and
 preserves earlier results. It reports `failed_phase: "check"` and `failed_index`.
 CLI exit codes remain 0 for success, 1 for runtime failure, and 2 for invalid input.

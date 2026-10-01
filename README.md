@@ -358,7 +358,10 @@ steps, and at most 300 seconds of requested pacing and check deadlines. File and
 are limited to 1 MiB each. Supported actions are `move`, `click`, `drag`, `scroll`,
 `type`, `key`, `wait`, `assert`, and `baseline`; capture is separate. No attached desktops, loops, lifecycle
 commands. Checks support known accessible text, name, value, and checked/enabled
-state. See [conditional checks](docs/conditional-checks.md) for waits, assertions,
+state. Checks keep conservative traversal defaults. For larger trees, set
+`"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` on each
+`baseline`, `wait`, or `assert` step. The step's own `timeout` remains the total
+deadline; partial observations never verify state. See [conditional checks](docs/conditional-checks.md) for waits, assertions,
 transition baselines, and failure screenshots. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
 for the schema and error handling, and [batch measurements](docs/batch-latency.md)
 for complete CLI timings with app acknowledgements.

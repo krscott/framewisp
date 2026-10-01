@@ -96,6 +96,9 @@ def main() -> None:
         help="run ordered headless inputs and optional capture from JSON",
         description="Validate all inputs, execute without interleaving, and print JSON results. "
         "Stop at the first failure; completed actions cannot be rolled back. "
+        "baseline/wait/assert accept observation: {max_nodes: 1..4096 (default 256), "
+        "max_depth: 1..32 (default 8), timeout: >0..10 seconds (default 2)}. "
+        "The required check timeout (>0..10 seconds) caps all observations. "
         "Use interval 0 for unpaced typing. Capture is not an app acknowledgement.",
     )
     batch.add_argument(
