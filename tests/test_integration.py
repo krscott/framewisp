@@ -2720,20 +2720,30 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
     # Move away from the origin and request compositor borders. Native Wayland
     # clients can negotiate their own decorations. Xwayland uses server title bars.
     def positioned() -> bool:
-        result = subprocess.run(
-            [
-                "swaymsg",
-                "-s",
-                str(socket_path),
-                f'[title="^{title}$"] floating enable, border normal, '
-                + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
-                + "move position 200 50",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0
+        command = (
+            f'[title="^{title}$"] floating enable, border normal, '
+            + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
+            + "move position 200 50"
+        ).encode()
+        # Direct IPC also works in the standalone package test's minimal PATH.
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(5)
+            connection.connect(str(socket_path))
+            connection.sendall(b"i3-ipc" + struct.pack("=II", len(command), 0) + command)
+
+            def receive(length: int) -> bytes:
+                data = bytearray()
+                while len(data) < length:
+                    chunk = connection.recv(length - len(data))
+                    assert chunk, "Sway closed the command connection"
+                    data.extend(chunk)
+                return bytes(data)
+
+            header = receive(14)
+            length, kind = struct.unpack("=II", header[6:])
+            assert header[:6] == b"i3-ipc" and kind == 0
+            assert length <= 1024 * 1024
+            return all(item["success"] for item in json.loads(receive(length)))
 
     wait_until(positioned)
     observation: dict[str, Any] = {}
