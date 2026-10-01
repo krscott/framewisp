@@ -1,11 +1,13 @@
 """Actionable failures from session processes and their display connections."""
 
 import json
+import signal
 import subprocess
 import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 
 class SessionError(RuntimeError):
@@ -31,6 +33,35 @@ def log_failure(message: str, log: Path, *, display: bool = False) -> SessionErr
     if display:
         detail += f"\n{SOCKET_ACCESS_HINT}"
     return SessionError(detail)
+
+
+def app_exit_message(session: Path, returncode: int) -> str:
+    exit_code = returncode if returncode >= 0 else 128 - returncode
+    reason = f"exit {exit_code}"
+    if returncode < 0:
+        try:
+            name = signal.Signals(-returncode).name
+        except ValueError:
+            name = f"signal {-returncode}"
+        reason = f"{name} ({reason})"
+    return f"App exited: {reason}; see {session / 'app.log'}"
+
+
+def recorded_app_exit(session: Path) -> str | None:
+    try:
+        record = json.loads((session / "app-exit.json").read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        return f"Cannot read app exit record: {error}"
+    returncode = (
+        cast(dict[str, object], record).get("returncode")
+        if isinstance(record, dict)
+        else None
+    )
+    if type(returncode) is not int:
+        return f"Invalid app exit record: {session / 'app-exit.json'}"
+    return app_exit_message(session, returncode)
 
 
 def display_command(

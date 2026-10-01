@@ -9,7 +9,7 @@ from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import log_input
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
-from framewisp.errors import SessionError
+from framewisp.errors import SessionError, recorded_app_exit
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.lib import (
     key_commands,
@@ -309,6 +309,10 @@ def main() -> None:
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
     state_path = session / "session.json"
+    if args.action not in {"run", "attach"}:
+        exit_message = recorded_app_exit(session)
+        if exit_message is not None:
+            parser.exit(1, exit_message + "\n")
     if args.action not in {"run", "attach"} and not state_path.exists():
         parser.exit(
             1,

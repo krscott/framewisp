@@ -111,6 +111,10 @@ text limits and failed objects; `timeout` reports an exhausted budget;
 registry could not be reached. Startup can temporarily appear unsupported.
 Do not treat incomplete results as proof of absence. Narrow filters or raise
 explicit limits when appropriate; use a screenshot when accessibility is missing.
+Deep accessibility traversals can crash some Qt apps. Raising `--max-nodes` can
+increase that risk; keep the default 256-node budget unless more is needed.
+If the app exits, the runner and later commands report its exit code or signal
+and the path to `app.log`. Start a new `run` to retry.
 
 Check all matches. A button and its child label can share a name; add a role
 filter instead of choosing the first. IDs are scoped to that snapshot and cannot
