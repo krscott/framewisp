@@ -1210,8 +1210,9 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
     for direction in ["up", "left"]:
         cli(demo.directory, "scroll", "700", "250", direction, "--steps", "8")
     wait_until(lambda: position() == (0, 0))
+    # GTK can report zero during overshoot; move far enough back into the content.
     for direction in ["down", "right"]:
-        cli(demo.directory, "scroll", "700", "250", direction)
+        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "3")
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
     cli(demo.directory, "click", "120", "100")
     # Submitting a long result must not push the neighboring Reset offscreen.
