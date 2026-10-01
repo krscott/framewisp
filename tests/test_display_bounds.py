@@ -20,7 +20,9 @@ from framewisp.display_bounds import (
 
 @pytest.fixture
 def window() -> Window:
-    return Window(7, 123, "Dialog", Rect(500, 325, 600, 240), True, True)
+    return Window(
+        7, 123, "Dialog", Rect(500, 325, 600, 240), True, True, Rect(0, 0, 1600, 900)
+    )
 
 
 def test_title_bar_offset_and_multiple_windows(window: Window) -> None:
@@ -179,3 +181,27 @@ def test_no_host_compositor_fallback(
         [],
         "private-compositor-unavailable",
     )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [Rect(-300, 100, 600, 240), Rect(1590, 100, 600, 240), Rect(500, 890, 600, 240)],
+)
+def test_offscreen_control_is_not_a_pointer_target(
+    window: Window, content: Rect
+) -> None:
+    window = replace(window, content=content)
+    result, reason = convert_bounds(
+        Rect(10, 20, 80, 23), Rect(0, 0, 600, 240), 123, "Dialog", [window], [window]
+    )
+    assert result is None
+    assert reason == "bounds-outside-display"
+
+
+def test_visible_control_in_partly_offscreen_window(window: Window) -> None:
+    window = replace(window, content=Rect(-100, 100, 600, 240))
+    result, reason = convert_bounds(
+        Rect(390, 216, 80, 23), Rect(0, 0, 600, 240), 123, "Dialog", [window], [window]
+    )
+    assert reason is None
+    assert result is not None and result["x"] == 290

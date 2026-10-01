@@ -35,6 +35,7 @@ class Window:
     content: Rect
     visible: bool
     transform_supported: bool
+    output: Rect
 
 
 def rectangle(value: object) -> Rect:
@@ -50,9 +51,9 @@ def rectangle(value: object) -> Rect:
 
 def windows_from_tree(tree: object) -> list[Window]:
     windows: list[Window] = []
-    pending = [(tree, False)]
+    pending = [(tree, False, Rect(0, 0, 0, 0))]
     while pending:
-        item, supported = pending.pop()
+        item, supported, output = pending.pop()
         if not isinstance(item, dict):
             raise ValueError("Invalid Sway node")
         node = cast(dict[str, object], item)
@@ -81,13 +82,16 @@ def windows_from_tree(tree: object) -> list[Window]:
                     ),
                     node.get("visible") is True,
                     supported,
+                    output,
                 )
             )
         for key in ("nodes", "floating_nodes"):
             children = node.get(key, [])
             if not isinstance(children, list):
                 raise ValueError("Invalid Sway children")
-            pending.extend((child, supported) for child in cast(list[object], children))
+            pending.extend(
+                (child, supported, output) for child in cast(list[object], children)
+            )
     return windows
 
 
@@ -171,9 +175,14 @@ def convert_bounds(
         or bounds.y + bounds.height > content.height
     ):
         return None, "bounds-outside-window"
-    return (
-        Rect(
-            content.x + bounds.x, content.y + bounds.y, bounds.width, bounds.height
-        ).as_bounds("display"),
-        None,
+    display = Rect(
+        content.x + bounds.x, content.y + bounds.y, bounds.width, bounds.height
     )
+    if (
+        display.x < 0
+        or display.y < 0
+        or display.x + display.width > window.output.width
+        or display.y + display.height > window.output.height
+    ):
+        return None, "bounds-outside-display"
+    return display.as_bounds("display"), None

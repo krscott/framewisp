@@ -246,6 +246,8 @@ def inspect_bus(
             if cancelled is None
             else Bus(address, max(0.001, deadline - time.monotonic()), cancelled)
         )
+        # Stall classification uses the full query budget, including compositor reads.
+        bus.timeout = query.timeout
         applications = cast(int, bus.prop(ROOT, ACCESSIBLE, "ChildCount"))
         # Queue parent/index pairs instead of fetching an unbounded GetChildren reply.
         pending = deque(
@@ -391,33 +393,42 @@ def inspect_bus(
                                 node["display_bounds_reason"] = (
                                     "window-metadata-unavailable"
                                 )
-                                if ref[0] not in pids:
-                                    pids[ref[0]] = cast(
-                                        int,
-                                        bus.call(
-                                            (
-                                                "org.freedesktop.DBus",
-                                                "/org/freedesktop/DBus",
-                                            ),
-                                            "org.freedesktop.DBus",
-                                            "GetConnectionUnixProcessID",
-                                            "(s)",
-                                            (ref[0],),
-                                        ),
-                                    )
-                                if window_ref not in geometries:
-                                    geometries[window_ref] = Rect(
-                                        *cast(
-                                            tuple[int, int, int, int],
+                                try:
+                                    if ref[0] not in pids:
+                                        pids[ref[0]] = cast(
+                                            int,
                                             bus.call(
-                                                window_ref,
-                                                "org.a11y.atspi.Component",
-                                                "GetExtents",
-                                                "(u)",
-                                                (1,),
+                                                (
+                                                    "org.freedesktop.DBus",
+                                                    "/org/freedesktop/DBus",
+                                                ),
+                                                "org.freedesktop.DBus",
+                                                "GetConnectionUnixProcessID",
+                                                "(s)",
+                                                (ref[0],),
                                             ),
                                         )
-                                    )
+                                    if window_ref not in geometries:
+                                        geometries[window_ref] = Rect(
+                                            *cast(
+                                                tuple[int, int, int, int],
+                                                bus.call(
+                                                    window_ref,
+                                                    "org.a11y.atspi.Component",
+                                                    "GetExtents",
+                                                    "(u)",
+                                                    (1,),
+                                                ),
+                                            )
+                                        )
+                                except GLib.Error:
+                                    if (
+                                        bus.cancel.is_cancelled()
+                                        or time.monotonic() >= bus.deadline
+                                    ):
+                                        raise
+                                    # Conversion metadata is optional; readable control fields remain complete.
+                                    continue
                                 conversions.append(
                                     (
                                         node,

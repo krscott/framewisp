@@ -655,7 +655,7 @@ The client origin is Sway's absolute `rect` origin plus its relative
 `window_rect` origin, so server-side title bars and borders are excluded. A
 conversion requires a visible window on an unscaled, unrotated output at the
 origin. The accessible toplevel must start at window (0, 0), its size must match
-Sway's client size, and the control must fit inside that client area. Missing
+Sway's client size, and the control must fit inside that client area and the display. Missing
 windows, ambiguous mappings, unavailable metadata, geometry mismatches, or
 unsupported transforms produce reasons instead of guesses. The matching window
 must have the same ID, PID, title, visibility, client rectangle, and supported
