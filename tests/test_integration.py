@@ -2729,7 +2729,9 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(5)
             connection.connect(str(socket_path))
-            connection.sendall(b"i3-ipc" + struct.pack("=II", len(command), 0) + command)
+            connection.sendall(
+                b"i3-ipc" + struct.pack("=II", len(command), 0) + command
+            )
 
             def receive(length: int) -> bytes:
                 data = bytearray()
