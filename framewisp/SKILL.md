@@ -232,7 +232,7 @@ either AT-SPI sensitive or enabled. This rule covers the demonstrated GTK/Qt
 controls, not every toolkit. Missing or stale objects, unsupported apps, partial
 observations, and timeouts cannot satisfy a check. There is no absence assertion.
 Wait retries incomplete/missing observations within its deadline; assert does not.
-Queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
+By default, queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
 For larger/deeper trees, add
 `"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` to each
 needed `baseline`, `wait`, or `assert` step. Node/depth limits must be integers

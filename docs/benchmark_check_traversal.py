@@ -77,7 +77,6 @@ def main() -> None:
                 }
                 if args.app == "gtk"
                 else {
-                    "role": "button",
                     "name": "Control 0",
                     "field": "enabled",
                     "equals": True,
@@ -103,8 +102,11 @@ def main() -> None:
                             [
                                 "inspect",
                                 "--json",
-                                "--role",
-                                str(condition["role"]),
+                                *(
+                                    ["--role", str(condition["role"])]
+                                    if "role" in condition
+                                    else []
+                                ),
                                 "--name",
                                 str(condition["name"]),
                                 *(
@@ -143,6 +145,7 @@ def main() -> None:
                                 "request": request,
                                 "exit_code": response.returncode,
                                 "stderr": response.stderr,
+                                "arguments": arguments,
                                 "success": result["status"] in ("ok", "completed"),
                                 "response": result,
                             }

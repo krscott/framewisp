@@ -2341,7 +2341,6 @@ def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
         lambda: "Inspection probe ready" in (demo.directory / "app.log").read_text()
     )
     condition = {
-        "role": "button",
         "name": "Control 0",
         "field": "enabled",
         "equals": True,
