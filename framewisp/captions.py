@@ -179,7 +179,9 @@ def log_input(
         # Preserve the exception and traceback while recording why the command ended.
         detail = input_error(action, error, retain_input_content=retain_input_content)
         result.error = (
-            f"{type(error).__name__}: {detail}" if retain_input_content else detail
+            f"{type(error).__name__}: {detail}"
+            if retain_input_content or action not in {"type", "key"}
+            else detail
         )
         raise
     finally:

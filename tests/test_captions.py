@@ -58,6 +58,17 @@ def test_log_records_nonzero_and_exception_outcomes(tmp_path: Path) -> None:
     assert second[0]["id"] != first[0]["id"]
 
 
+def test_pointer_failure_keeps_exception_type(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        with log_input(tmp_path, "click", {"x": 1, "y": 2}):
+            raise ValueError("bad coordinates")
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert events[-1]["error"] == "ValueError: bad coordinates"
+
+
 @pytest.mark.parametrize("retain", [False, True])
 @pytest.mark.parametrize(
     "failure",
