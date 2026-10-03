@@ -56,6 +56,7 @@ def type_text(
             display=env["DISPLAY"],
             timeout=10,
             cancelled=cancelled,
+            input_content=True,
         )
         codes.update(added)
         path.write_text(json.dumps(codes))
@@ -75,6 +76,7 @@ def type_text(
             display=env["DISPLAY"],
             timeout=15 + max(0, len(text) - 1) * interval,
             cancelled=cancelled,
+            input_content=True,
         )
     except BaseException as error:
         # XTest keys outlive xdotool if it is interrupted between press/release.

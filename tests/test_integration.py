@@ -53,6 +53,10 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session with spaces"
     runner_log = tmp_path / "runner.log"
     mode = getattr(request, "param", None)
+    retain_input_content = isinstance(mode, str) and mode.endswith("-retain")
+    if retain_input_content:
+        assert isinstance(mode, str)
+        mode = mode.removesuffix("-retain") or None
     x11 = isinstance(mode, str) and mode.startswith("x11")
     if x11:
         assert isinstance(mode, str)
@@ -73,6 +77,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         else None
     )
     command = ["framewisp", str(directory), "run"]
+    if retain_input_content:
+        command.append("--retain-input-content")
     if x11:
         command.append("--x11")
     if recording is not None:
@@ -1094,8 +1100,11 @@ def video_patch(path: Path, second: float) -> bytes:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+@pytest.mark.parametrize("demo", [None, "x11", "-retain", "x11-retain"], indirect=True)
 def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
+    retain = json.loads((demo.directory / "session.json").read_text())[
+        "retain_input_content"
+    ]
     cli(demo.directory, "click", "120", "100")
     cli(demo.directory, "type", "Setup outside the clip")
     cli(demo.directory, "key", "Ctrl+a")
@@ -1122,6 +1131,9 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             json.loads(line)
             for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
         ]
+        typed_events = [event for event in events if event["action"] == "type"]
+        assert all(("text" in event["parameters"]) is retain for event in typed_events)
+        assert all(event["parameters"]["interval"] >= 0 for event in typed_events)
         assert all(
             event["returncode"] == 0 for event in events if event["event"] == "end"
         )
@@ -1465,6 +1477,17 @@ def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
     wait_until(
         lambda: any(event.get("text") == text[0] + "b" for event in input_events(demo))
     )
+    logged = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert all("text" not in event["parameters"] for event in logged)
+    assert all(
+        "chord" not in event["parameters"]
+        for event in logged
+        if event["action"] == "key"
+    )
+    assert any("cancelled" in (event["error"] or "") for event in logged)
     with input_request(
         demo,
         "drag",
@@ -1779,7 +1802,7 @@ def test_inspection_private_buses_and_unsupported_apps(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+@pytest.mark.parametrize("demo", [None, "x11", "-retain", "x11-retain"], indirect=True)
 def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
     cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "ready.png"))
@@ -1788,13 +1811,14 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
     actions = [
         {"action": "click", "x": 120, "y": 100},
         {"action": "type", "text": "HelloGUI é中", "interval": 0},
+        {"action": "key", "chord": "Shift+a"},
         {"action": "key", "chord": "Return"},
     ]
     plan.write_text(json.dumps({"actions": actions, "capture": {"path": str(capture)}}))
     result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
     assert result["status"] == "completed"
     assert result["verified"] is None
-    assert result["completed_actions"] == 3
+    assert result["completed_actions"] == 4
     assert result["failed_index"] is None
     assert result["failed_phase"] is None
     assert result["artifacts"] == [str(capture)]
@@ -1805,17 +1829,25 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
     with Image.open(capture) as image:
         assert image.size == (1280, 720)
     wait_until(
-        lambda: "Entered: HelloGUI é中\n" in (demo.directory / "app.log").read_text()
+        lambda: "Entered: HelloGUI é中A\n" in (demo.directory / "app.log").read_text()
     )
     logged = [
         json.loads(line)
         for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
-        (name, phase) for name in ("click", "type", "key") for phase in ("start", "end")
+        (name, phase)
+        for name in ("click", "type", "key", "key")
+        for phase in ("start", "end")
     ]
     assert all(event["returncode"] == 0 for event in logged if event["event"] == "end")
     assert all(a["time"] <= b["time"] for a, b in zip(logged, logged[1:]))
+    retain = json.loads((demo.directory / "session.json").read_text())[
+        "retain_input_content"
+    ]
+    assert ("text" in logged[2]["parameters"]) is retain
+    assert ("chord" in logged[4]["parameters"]) is retain
+    assert logged[6]["parameters"]["chord"] == "Return"
 
 
 @pytest.mark.integration
@@ -2069,7 +2101,7 @@ def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
         event["parameters"].get("chord")
         for event in logged
         if event["event"] == "start"
-    ] == [None, "c"]
+    ] == [None, None]
 
 
 @pytest.mark.integration

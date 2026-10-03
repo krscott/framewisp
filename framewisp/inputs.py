@@ -15,7 +15,7 @@ from typing import Protocol, cast
 
 from framewisp.actions import InputAction
 from framewisp.batch import Batch
-from framewisp.captions import log_input
+from framewisp.captions import input_error, log_input
 from framewisp.checks import Check, perform_check
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
@@ -46,12 +46,14 @@ class InputWorker:
         *,
         x11: bool,
         capture: Callable[[Path, Callable[[], bool]], int],
+        retain_input_content: bool = False,
     ):
         self.session = session
         self.client = client
         self.stop = stop
         self.x11 = x11
         self.capture = capture
+        self.retain_input_content = retain_input_content
         self.failure: str | None = None
         self.queue: Queue[tuple[socket.socket, InputAction | Batch]] = Queue(maxsize=32)
         self.thread = Thread(target=self.run, name="headless-input")
@@ -88,14 +90,25 @@ class InputWorker:
                     else:
                         self.perform(connection, action)
                 except (InterruptedError, SessionError) as failure:
-                    error = str(failure)
+                    error = input_error(
+                        "batch" if isinstance(action, Batch) else action.action,
+                        failure,
+                        retain_input_content=self.retain_input_content,
+                    )
                 except Exception as failure:
                     # An uncertain transport failure must never replay input or
                     # let another action use the proxy's possibly stale response.
                     self.stop.set()
                     self.client.disconnect()
-                    traceback.print_exc()
-                    error = f"Input failed; session stopped without retrying: {failure}"
+                    detail = input_error(
+                        "batch" if isinstance(action, Batch) else action.action,
+                        failure,
+                        retain_input_content=self.retain_input_content,
+                    )
+                    traceback.print_exception(
+                        RuntimeError(detail).with_traceback(failure.__traceback__)
+                    )
+                    error = f"Input failed; session stopped without retrying: {detail}"
                     self.failure = error
                 if data is not None:
                     data["status"] = "completed" if error is None else "failed"
@@ -179,11 +192,25 @@ class InputWorker:
                     else:
                         self.perform(connection, action)
                 except Exception as error:
-                    result.update(status="failed", error=str(error))
+                    detail = input_error(
+                        action.action,
+                        error,
+                        retain_input_content=self.retain_input_content,
+                    )
+                    result.update(status="failed", error=detail)
                     data.update(
                         failed_index=index,
                         failed_phase="check" if isinstance(action, Check) else "action",
                     )
+                    if (
+                        action.action in {"type", "key"}
+                        and not self.retain_input_content
+                    ):
+                        if isinstance(error, InterruptedError):
+                            raise InterruptedError(detail) from None
+                        if isinstance(error, SessionError):
+                            raise SessionError(detail) from None
+                        raise RuntimeError(detail) from None
                     raise
                 finally:
                     result["duration_seconds"] = time.monotonic() - action_started
@@ -251,7 +278,12 @@ class InputWorker:
 
         p = action.parameters
         wait()
-        with log_input(self.session, action.action, p) as logged:
+        with log_input(
+            self.session,
+            action.action,
+            p,
+            retain_input_content=self.retain_input_content,
+        ) as logged:
             try:
                 modifiers = cast(list[str], p.get("modifier", []))
                 for modifier in modifiers:
@@ -372,4 +404,5 @@ def type_unicode(
         env=env,
         timeout=15 + duration + len(text) * 0.004,
         cancelled=cancelled,
+        input_content=True,
     )

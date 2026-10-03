@@ -170,8 +170,8 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 
 | Command | Behavior |
 | --- | --- |
-| `run [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
-| `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
+| `run [--retain-input-content] [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
 | `record-start [--no-captions] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
@@ -508,14 +508,26 @@ The development shell includes FFmpeg for video inspection.
 
 Every accepted input command appends start and end records to `SESSION/inputs.jsonl`,
 even without a recording. Records include an action ID, monotonic timestamp in
-seconds, the command and its parameters, and its return code or exception. They
+seconds, the command and retained parameters, and its return code or exception type. They
 record what framewisp attempted and whether the input command completed, not
 whether the app responded as intended. A start without an end indicates an
 unfinished command. Reusing a session directory starts a fresh log.
 
-Recordings show input captions by default, including shortcuts, pointer gestures,
-and typed text. Captions stay visible during paced input and briefly after quick
-commands, until the next action. Long text is abbreviated in the video; the log
+Input logs and captions omit literal typed text by default, including Unicode and
+individual letter, digit, Space, and Shift-only literal key events. Captions say
+"Type text" or "Key" (with any Shift modifier). Ctrl/Alt shortcuts and named keys
+such as Return and arrows remain visible. These describe shortcuts, not text entry.
+Input failure details that could contain text or encoded keys are omitted; error
+types, cancellation, and exit codes remain available.
+
+To retain full input content for debugging or demonstrations, start the session
+with `run --retain-input-content` or `attach --retain-input-content`. This explicit
+opt-in applies to every individual input, batch action, and clip for that session.
+It cannot be changed by a batch file or `record-start`. Attached sessions log input
+but do not support recordings.
+
+Recordings show input captions by default, including shortcuts and pointer gestures. Captions stay visible during paced input and briefly after quick
+commands, until the next action. Opted-in text is abbreviated in the video; the log
 keeps the full text. Inputs between clips are excluded from the next clip.
 Captions appear only in recordings, never in app screenshots.
 
@@ -527,7 +539,7 @@ framewisp /tmp/framewisp-demo record-start --no-captions /tmp/plain.mp4
 framewisp /tmp/framewisp-demo run --record /tmp/plain.mp4 --no-captions -- framewisp-demo
 ```
 
-Input logging remains enabled. Captions are rendered into the video frames so
+Input logging remains enabled and follows the session retention policy. Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for caption rendering to finish.
 This adds encoding time when stopping a captioned clip. If rendering fails, the
@@ -541,8 +553,11 @@ arrives instead of retaining it for every frame.
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
 and monochrome emoji. The app keeps its own font configuration. Caption text uses
 fullwidth equivalents for braces and backslashes to prevent subtitle formatting;
-the input log preserves the original characters. Typed text is stored verbatim in
-the log and can appear in recordings, so review these artifacts before sharing.
+opted-in input logs preserve the original characters. Screenshots and recordings
+can still show secrets displayed by apps. Omitting input content does not redact
+screen content or provide a general app-log redaction guarantee. Shell history,
+batch files, application logs, and runtime input state are outside this policy.
+Review artifacts before sharing.
 
 ## Flatpak game
 

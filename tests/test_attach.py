@@ -166,7 +166,7 @@ if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     raise SystemExit(attach.attach_session(root / 'session'))
-raise SystemExit(attach.run_attachment(root / 'session', None))
+raise SystemExit(attach.run_attachment(root / 'session', None, retain_input_content=(root / 'retain').exists()))
 """
 
 
@@ -185,7 +185,11 @@ def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 @pytest.fixture
-def attach_process(tmp_path: Path) -> Iterator[subprocess.Popen[str]]:
+def attach_process(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[subprocess.Popen[str]]:
+    if getattr(request, "param", False):
+        (tmp_path / "retain").touch()
     process = subprocess.Popen(
         [sys.executable, "-c", _SERVER, str(tmp_path)],
         stdout=subprocess.PIPE,
@@ -199,6 +203,47 @@ def attach_process(tmp_path: Path) -> Iterator[subprocess.Popen[str]]:
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=5)
+
+
+@pytest.mark.parametrize("attach_process", [False, True], indirect=True)
+def test_attached_cli_input_retention(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    session = tmp_path / "session"
+    retain = json.loads((session / "session.json").read_text())["retain_input_content"]
+    for arguments in [
+        ("type", "--interval", "0", "café 日本語 😀"),
+        ("key", "Shift+a"),
+        ("key", "Ctrl+a"),
+    ]:
+        result = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert result.returncode == 0, result.stderr
+    raw = (session / "inputs.jsonl").read_text()
+    events = [json.loads(line) for line in raw.splitlines()]
+    assert ("café 日本語 😀" in raw) is retain
+    assert ("Shift+a" in raw) is retain
+    assert "Ctrl+a" in raw
+    assert all(event["returncode"] == 0 for event in events if event["event"] == "end")
+    (tmp_path / "fail").touch()
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session), "type", "secret"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    raw = (session / "inputs.jsonl").read_text()
+    assert ('"text": "secret"' in raw) is retain
+    assert attach_process.wait(timeout=5) == 1
 
 
 def test_pending_consent_reserves_session(

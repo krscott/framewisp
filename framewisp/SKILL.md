@@ -22,7 +22,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
+| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -36,7 +36,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
-| `attach` | User-only: share an existing Wayland desktop through its permission dialog. See the attachment instructions below. |
+| `attach [--retain-input-content]` | User-only: share an existing Wayland desktop through its permission dialog. See the attachment instructions below. |
 
 Standalone commands take no SESSION: `framewisp --detach` stops the active
 desktop attachment, leaving the user's apps running; `framewisp --agent-skill`
@@ -334,8 +334,16 @@ Recording works only in headless sessions, requires even display dimensions,
 and produces silent MP4 video. Only one clip may be active. Normal runner
 shutdown also finalizes it. Input captions are embedded by default;
 `--no-captions` disables them for that clip. Every input is still logged to
-`SESSION/inputs.jsonl`, including full typed text. Review logs and videos for
-sensitive content before sharing them. Caption rendering adds time to stopping.
+`SESSION/inputs.jsonl`. Logs and captions omit typed text (including Unicode) and
+literal key events by default. Letter/digit/Space keys with Shift alone are omitted;
+Ctrl/Alt shortcuts and named keys such as Return and arrows remain visible.
+Start `run` or user-owned `attach` with `--retain-input-content` only when full
+input retention is intended. That session-wide opt-in applies to individual inputs,
+batches, and every clip; `--no-captions` does not change logging policy.
+Input failure details can be omitted to avoid retaining text or encoded keys.
+Screenshots and recordings can still show secrets displayed by apps. This policy
+does not redact screens, app logs, shell history, batch files, or runtime input state.
+Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 

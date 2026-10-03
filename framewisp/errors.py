@@ -73,8 +73,10 @@ def display_command(
     display: str | None = None,
     input_text: str | None = None,
     cancelled: Callable[[], bool] | None = None,
+    input_content: bool = False,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
+    omit_content = input_content and state.get("retain_input_content") is not True
     context = (
         f"{command[0]} failed for session {session}, display {display or state['wayland_display']}, "
         f"runtime directory {state['runtime_directory']}"
@@ -115,11 +117,15 @@ def display_command(
     except InterruptedError:
         raise
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise SessionError(f"{context}: {error}\n{SOCKET_ACCESS_HINT}") from None
+        detail = type(error).__name__ if omit_content else str(error)
+        raise SessionError(f"{context}: {detail}\n{SOCKET_ACCESS_HINT}") from None
     if result.returncode:
-        raise SessionError(
-            f"{context} (exit {result.returncode}):\n{result.stderr.strip()}\n{SOCKET_ACCESS_HINT}"
+        diagnostic = (
+            "Input diagnostics omitted." if omit_content else result.stderr.strip()
         )
-    if result.stderr:
+        raise SessionError(
+            f"{context} (exit {result.returncode}):\n{diagnostic}\n{SOCKET_ACCESS_HINT}"
+        )
+    if result.stderr and not omit_content:
         print(result.stderr, end="", file=sys.stderr)
     return 0

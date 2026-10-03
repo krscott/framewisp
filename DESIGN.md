@@ -484,7 +484,27 @@ start event to `inputs.jsonl` when the action starts executing and an end event
 after cleanup, so queue time does not extend captions. Cancelled requests that
 never start do not produce captions. Attached sessions retain CLI-owned logging. Each JSONL event carries an ID,
 `event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
-`error`. Exceptions are logged and re-raised; the CLI formats expected operational
+`error`. Session metadata stores `retain_input_content`, default false. The
+`run/attach --retain-input-content` option sets it once for the session. The headless
+worker owns the policy for individual and batch actions; attached command clients
+read it from metadata. Recording captions use the retained parameters from the log,
+so all clips follow the same policy even with `--no-captions`. No command or batch
+parameter overrides it.
+
+By default, type parameters omit `text` while retaining `interval`. Literal key
+chords (letters, digits, Space, optionally Shift) omit the key and retain only
+modifiers. Ctrl/Alt shortcuts and named navigation/control keys retain their chord.
+Captions use "Type text" and "Key" for omitted content. Opt-in preserves full text
+and chords. Text/key failures omit backend messages that can include literal or
+encoded input, while preserving exception types, cancellation, and exit codes.
+Unicode subprocess diagnostics omit arguments and stderr by default. Tracebacks
+retain stack locations without content-bearing exception messages.
+
+Screenshots and recordings can still show secrets displayed by apps. This policy
+does not redact screen content or guarantee app-log redaction. Shell history, batch
+files, and runtime input state (including X11 key mappings) are outside its scope.
+
+Exceptions are logged and re-raised; the CLI formats expected operational
 failures, while unexpected exceptions retain their traceback. Normal
 nonzero returns are recorded as failures. Input logging is independent of
 recording. The runner truncates the log when creating a new session.

@@ -599,6 +599,7 @@ def run_session(
     captions: bool = True,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
+    retain_input_content: bool = False,
 ) -> int:
     session = session.resolve()
     if recording is not None:
@@ -697,6 +698,7 @@ def run_session(
                 input_client,
                 stop,
                 x11=x11,
+                retain_input_content=retain_input_content,
                 capture=lambda path, cancelled: batch_screenshot(
                     session, path, cancelled
                 ),
@@ -714,6 +716,7 @@ def run_session(
                         {
                             "control_protocol": 1,
                             "persistent_input": True,
+                            "retain_input_content": retain_input_content,
                             "inspection_protocol": 1,
                             "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
                             "batch_input": True,
