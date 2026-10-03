@@ -18,6 +18,7 @@
   wf-recorder,
   wtype,
   bash,
+  git,
   xwayland,
   xdotool,
   xmodmap,
@@ -76,6 +77,7 @@ buildPythonPackage {
           wf-recorder
           wtype
           bash
+          git
           dbus
           xwayland
           xdotool
@@ -103,6 +105,7 @@ buildPythonPackage {
     pygobject-stubs
     pillow
     dbus
+    git
   ];
 
   preCheck = ''

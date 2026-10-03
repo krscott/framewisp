@@ -99,6 +99,7 @@
               pkgs.wf-recorder
               pkgs.wtype
               pkgs.bash
+              pkgs.git
               pkgs.dbus
               pkgs.xwayland
               pkgs.xdotool

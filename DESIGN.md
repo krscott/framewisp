@@ -161,7 +161,29 @@ display, development shell or external app installation.
 ## Interaction
 
 All CLI commands use `framewisp SESSION COMMAND ...`, with a required positional
-session directory before the subcommand. There is no default session.
+session name or explicit path before the subcommand. There is no implicit session.
+`framewisp/sessions.py` resolves the original string argument before either
+headless or attached dispatch. A slash marks an explicit path, which uses
+`Path.resolve()` as before. Empty names, NUL, and bare `.`/`..` are rejected;
+bare names must fit in 255 filesystem bytes.
+
+For a bare name, run `git -C <canonical cwd> rev-parse --show-toplevel` with a
+five-second timeout, ignoring inherited `GIT_DIR`, `GIT_WORK_TREE`, and
+`GIT_COMMON_DIR` overrides. Canonicalize the resulting worktree root; if not in a
+worktree, use canonical cwd. Hash its filesystem bytes with SHA-256, take the
+first 24 hexadecimal characters, and resolve `/tmp/framewisp-project-<hash>/NAME`.
+The hash is stable across processes and separates worktrees, while canonical
+paths make symlink aliases agree. Git is a packaged runtime and test dependency;
+if unavailable, report an actionable error rather than silently choosing a
+different project. Explicit paths do not require Git. No local or legacy
+directory fallback occurs for names. The existing short runtime socket paths
+remain independent of the session directory.
+
+Agents sharing a project must choose distinct names. Startup diagnostics print
+the resolved directory, which can be used explicitly from another project.
+Desktop attachment remains user-started, and `--detach` is session-independent.
+The resolver does not change session ownership checks, shutdown, recovery, or
+sandbox socket permissions.
 
 CLI calls read `session.json` to locate the display and control socket. The JSON has
 `runtime_directory`, `wayland_display`, `x11_display` (null for Wayland),

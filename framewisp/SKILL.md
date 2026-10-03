@@ -18,8 +18,22 @@ Requires running outside of agent sandbox.
 
 ## Command reference
 
-Use `framewisp SESSION COMMAND ...`, where SESSION is a directory such as
-`/tmp/framewisp-demo`. In the syntax below, brackets mark optional arguments;
+Use `framewisp SESSION COMMAND ...`, where SESSION is normally a bare name such
+as `demo` or `browser`. Names resolve to `/tmp/framewisp-project-<hash>/NAME`.
+The hash is the first 24 hexadecimal characters of SHA-256 of the canonical Git
+worktree root, or the canonical current directory outside Git. Subdirectories of
+one worktree agree; separate worktrees differ. Symlinked project paths agree.
+Git is required for names and included in the Nix package.
+
+Explicit paths such as `/tmp/framewisp-demo`, `./browser`, and `sessions/browser`
+retain their behavior. Bare names never fall back to a legacy directory. Empty
+names and `.`/`..` are invalid; names must fit in 255 bytes. Agents in the same
+project must choose distinct names. Keep launch and control commands in the same
+project (the same working directory outside Git). `Session ready:` and `Attached:`
+print the resolved directory; use that explicit path from another project.
+Project scoping does not change sandbox socket permissions.
+
+In the syntax below, brackets mark optional arguments;
 uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
@@ -75,22 +89,24 @@ that a check cannot observe.
 
 ## Example workflow
 
-Start an isolated demo in a terminal or background tool session. Use a fresh
-session directory, wait for `Session ready:`, and keep the runner alive. The app
-may still be drawing its first frame:
+Start an isolated demo in a terminal or background tool session. Use a distinct
+session name and a fresh working directory, wait for `Session ready:`, and keep
+the runner alive. The app may still be drawing its first frame:
 
 ```sh
-framewisp /tmp/framewisp-demo run -- framewisp-demo
+check_dir=$(mktemp -d /tmp/framewisp-check.XXXXXX)
+cd "$check_dir"
+framewisp demo run -- framewisp-demo
 ```
 
-From another command session, create the batch file in a fresh working directory.
+From another command session, change to the working directory chosen above and
+create the batch file there.
 These coordinates target the bundled demo's text field at the default display
 size. The first wait checks that the fresh demo's empty entry is accessible before
 sending input; the last checks its resulting label:
 
 ```sh
-check_dir=$(mktemp -d /tmp/framewisp-check.XXXXXX)
-cd "$check_dir"
+check_dir=$(pwd)
 cat > check.json <<'JSON'
 {
   "actions": [
@@ -103,7 +119,7 @@ cat > check.json <<'JSON'
   "failure_capture": {"path": "check-failed.png"}
 }
 JSON
-framewisp /tmp/framewisp-demo batch --file check.json
+framewisp demo batch --file check.json
 ```
 
 Read the JSON: `status: "completed"` and `verified: true` mean the requested
@@ -133,13 +149,13 @@ as display coordinates. A visual fallback is also useful when checks cannot
 expose the result; choose a delay for the app's visual timing:
 
 ```sh
-framewisp /tmp/framewisp-demo screenshot --delay 0.3 "$check_dir/visual.png"
+framewisp demo screenshot --delay 0.3 "$check_dir/visual.png"
 ```
 
 When finished, stop the session:
 
 ```sh
-framewisp /tmp/framewisp-demo stop
+framewisp demo stop
 ```
 
 The successful primary path uses three CLI invocations: run, batch, stop, with
@@ -154,9 +170,9 @@ For supported headless apps, use a bounded query to discover controls or read
 state without interpreting an image:
 
 ```sh
-framewisp /tmp/framewisp-demo inspect --json --role button --name 'Apply text'
-framewisp /tmp/framewisp-demo inspect --json --role 'text box'
-framewisp /tmp/framewisp-demo inspect --json --role label --text 'Applied:'
+framewisp demo inspect --json --role button --name 'Apply text'
+framewisp demo inspect --json --role 'text box'
+framewisp demo inspect --json --role label --text 'Applied:'
 ```
 
 Role is a case-insensitive exact toolkit name. Name/text are case-insensitive
@@ -212,7 +228,7 @@ unavailable on attached desktops and does not supply semantic clicks.
 The primary example batches inputs and accessible checks. For a visual-only
 outcome, batch the known inputs and an optional final capture instead.
 Save this JSON to `visual-check.json`, then run
-`framewisp /tmp/framewisp-demo batch --file visual-check.json`:
+`framewisp demo batch --file visual-check.json`:
 
 ```json
 {
@@ -327,9 +343,9 @@ To record just a demonstration, start recording after setup, perform the inputs,
 then stop recording. Use a new output filename:
 
 ```sh
-framewisp /tmp/framewisp-demo record-start /tmp/demo.mp4
+framewisp demo record-start /tmp/demo.mp4
 # Perform the interactions to demonstrate.
-framewisp /tmp/framewisp-demo record-stop
+framewisp demo record-stop
 ```
 
 Recording works only in headless sessions, requires even display dimensions,
