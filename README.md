@@ -702,8 +702,9 @@ exit. It returns the application's exit code when the app exits on its own.
 It does not contain arbitrary descendants or recover from SIGKILL. If a stale
 `session.json` remains after a crash, use a fresh session directory.
 
-GTK currently logs a warning about the missing session bus. The demo works
-without it. No private D-Bus service is started.
+Headless sessions start private D-Bus session and accessibility buses plus an
+AT-SPI registry. These buses do not activate host desktop services. Apps that
+need additional D-Bus services may still require their own setup.
 
 Expected startup failures include a bounded tail of the component log. Failed
 headless display commands identify the session, display/socket directory, and
@@ -735,8 +736,8 @@ Run `nix flake check` to test the installed package in an empty environment,
 including real input, screenshots, and recording. This checks that it works
 without the development shell.
 
-See [DESIGN.md](DESIGN.md) for the implementation and [FOLLOWUPS.md](FOLLOWUPS.md)
-for deferred work.
+See [DESIGN.md](DESIGN.md) for the implementation and
+[GitHub issues](https://github.com/krscott/framewisp/issues) for deferred work.
 
 ## License
 
