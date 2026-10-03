@@ -16,8 +16,6 @@ from typing import Any
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.sessions import resolve_session
-
 
 @dataclass(frozen=True)
 class Demo:
@@ -2957,15 +2955,12 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
 
 
 @pytest.mark.integration
-def test_named_session_launch_control_and_cleanup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_named_session_launch_control_and_cleanup(tmp_path: Path) -> None:
     project = tmp_path / "project"
     nested = project / "nested"
     nested.mkdir(parents=True)
     subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
-    monkeypatch.chdir(project)
-    session = resolve_session("browser")
+    session: Path | None = None
     runner_log = tmp_path / "named-runner.log"
     with runner_log.open("w") as output:
         process = subprocess.Popen(
@@ -2978,9 +2973,18 @@ def test_named_session_launch_control_and_cleanup(
 
         def ready() -> bool:
             assert process.poll() is None, runner_log.read_text()
-            return f"Session ready: {session}" in runner_log.read_text()
+            return "Session ready: " in runner_log.read_text()
 
         wait_until(ready)
+        session = Path(
+            next(
+                line.removeprefix("Session ready: ")
+                for line in runner_log.read_text().splitlines()
+                if line.startswith("Session ready: ")
+            )
+        )
+        assert session.is_absolute()
+        assert session.name == "browser"
         state = json.loads((session / "session.json").read_text())
         runtime = Path(state["runtime_directory"])
 
@@ -3021,5 +3025,6 @@ def test_named_session_launch_control_and_cleanup(
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=20)
-        shutil.rmtree(session)
-        session.parent.rmdir()
+        if session is not None:
+            shutil.rmtree(session)
+            session.parent.rmdir()
