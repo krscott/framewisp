@@ -14,6 +14,8 @@ Prefer `framewisp` on PATH. Otherwise replace `framewisp` in the examples with
 `nix run github:krscott/framewisp --`. No checkout or development shell is needed.
 The package includes `framewisp-demo`; other target apps must be installed separately.
 
+Requires running outside of agent sandbox.
+
 ## Command reference
 
 Use `framewisp SESSION COMMAND ...`, where SESSION is a directory such as
@@ -355,8 +357,9 @@ Screenshots cover the selected monitor. Recording attached sessions is unsupport
 
 ## Problems
 
-Inspect the session's `app.log`, `sway.log`, and `wayvnc.log` for headless launch
-failures, or `recorder.log` and `captions.log` for recording failures.
+Inspect the session's `dbus.log`, `accessibility.log`, `app.log`, `sway.log`, and
+`wayvnc.log` for headless launch failures, or `recorder.log` and `captions.log`
+for recording failures.
 The runner and every screenshot/input/control invocation need access to the
 private display sockets. Launching outside a sandbox does not grant later
 sandboxed commands access. If the environment denies socket access, use its
