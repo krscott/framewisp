@@ -2780,3 +2780,65 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
     wait_until(
         lambda: ("Dialog activated" if is_qt else "Applied: ") in log.read_text()
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("ending", ["stop", "exit", "SIGINT", "SIGTERM"])
+def test_session_owns_detached_descendants(
+    demo: Demo, tmp_path: Path, ending: str
+) -> None:
+    # The demo fixture is an independent session which must survive this stop.
+    directory = tmp_path / "owned-session"
+    tree = tmp_path / "owned-tree"
+    log = tmp_path / "owned-runner.log"
+    with log.open("w") as output:
+        runner = subprocess.Popen(
+            [
+                "framewisp",
+                str(directory),
+                "run",
+                "--",
+                sys.executable,
+                str(Path(__file__).with_name("descendants_probe.py")),
+                str(tree),
+            ],
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+
+        def ready() -> bool:
+            assert runner.poll() is None, log.read_text()
+            return "Session ready:" in log.read_text() and all(
+                (tree / name).exists() for name in ("app", "helper", "detached")
+            )
+
+        wait_until(ready)
+        state = json.loads((directory / "session.json").read_text())
+        pids = [
+            int((tree / name).read_text()) for name in ("app", "helper", "detached")
+        ]
+        assert state["processes"]["app"] == pids[0]
+        started = time.monotonic()
+        if ending == "stop":
+            cli(directory, "stop")
+        elif ending == "exit":
+            (tree / "exit").touch()
+        else:
+            runner.send_signal(getattr(signal, ending))
+        assert runner.wait(timeout=15) == (
+            23 if ending == "exit" else 0
+        ), log.read_text()
+        assert time.monotonic() - started < 15
+        assert all(not Path(f"/proc/{pid}").exists() for pid in pids)
+        assert all(
+            not Path(f"/proc/{pid}").exists() for pid in state["processes"].values()
+        )
+        assert not Path(state["runtime_directory"]).exists()
+        assert not (directory / "session.json").exists()
+        assert demo.process.poll() is None
+        cli(demo.directory, "status")
+    finally:
+        if runner.poll() is None:
+            runner.terminate()
+        runner.wait(timeout=20)

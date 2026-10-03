@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 from types import FrameType
-from typing import BinaryIO, cast
+from typing import cast
 
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
@@ -30,6 +30,7 @@ from framewisp.errors import (
 )
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
+from framewisp.processes import OwnedProcess, managed_process
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -40,43 +41,11 @@ default_border none
 """
 
 
-@contextmanager
-def managed_process(
-    command: list[str],
-    *,
-    log: Path,
-    env: dict[str, str],
-    output: BinaryIO | None = None,
-) -> Generator[subprocess.Popen[bytes], None, None]:
-    with ExitStack() as stack:
-        destination = (
-            output if output is not None else stack.enter_context(log.open("wb"))
-        )
-        process = subprocess.Popen(
-            command,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=destination,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    try:
-        yield process
-    finally:
-        if process.poll() is None:
-            process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-
-
 def wait_for_socket(
     runtime: Path,
     pattern: str,
     *,
-    process: subprocess.Popen[bytes],
+    process: OwnedProcess,
     log: Path,
     stop: Event,
 ) -> Path | None:
@@ -129,7 +98,7 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
 
 def start_inspection_buses(
     stack: ExitStack, runtime: Path, session: Path, env: dict[str, str], stop: Event
-) -> dict[str, subprocess.Popen[bytes]] | None:
+) -> dict[str, OwnedProcess] | None:
     """Own both buses and the registry; never activate host desktop services."""
     config = runtime / "bus.conf"
     config.write_text(
@@ -138,7 +107,7 @@ def start_inspection_buses(
         '<allow receive_sender="*"/><allow own="*"/></policy>'
         '<limit name="max_message_size">1048576</limit></busconfig>'
     )
-    processes: dict[str, subprocess.Popen[bytes]] = {}
+    processes: dict[str, OwnedProcess] = {}
     for name, variable in (
         ("dbus", "DBUS_SESSION_BUS_ADDRESS"),
         ("accessibility", "AT_SPI_BUS_ADDRESS"),
@@ -187,7 +156,7 @@ def start_sway(
     stop: Event,
     size: tuple[int, int],
     x11: bool = False,
-) -> Generator[tuple[subprocess.Popen[bytes], str] | None, None, None]:
+) -> Generator[tuple[OwnedProcess, str] | None, None, None]:
     """Yield the process and display name, or None if startup is interrupted."""
     config = runtime / "sway.conf"
     contents = SWAY_CONFIG.format(width=size[0], height=size[1])
@@ -213,7 +182,7 @@ def start_sway(
 
 
 def wait_for_x11(
-    runtime: Path, *, process: subprocess.Popen[bytes], log: Path, stop: Event
+    runtime: Path, *, process: OwnedProcess, log: Path, stop: Event
 ) -> str | None:
     deadline = time.monotonic() + 10
     path = runtime / "x11-display"
@@ -262,7 +231,7 @@ def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]
 @contextmanager
 def start_wayvnc(
     runtime: Path, *, log: Path, env: dict[str, str], stop: Event
-) -> Generator[subprocess.Popen[bytes] | None, None, None]:
+) -> Generator[OwnedProcess | None, None, None]:
     """Yield the ready process, or None if startup is interrupted."""
     command = [
         "wayvnc",
@@ -283,7 +252,7 @@ def start_wayvnc(
 @contextmanager
 def start_recording(
     destination: Path, *, log: Path, env: dict[str, str], stop: Event, captions: bool
-) -> Generator[subprocess.Popen[bytes] | None, None, None]:
+) -> Generator[OwnedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
     command = [
         "wf-recorder",
@@ -412,7 +381,7 @@ class Recordings:
     env: dict[str, str]
     stop_requested: Event
     size: tuple[int, int]
-    process: subprocess.Popen[bytes] | None = None
+    process: OwnedProcess | None = None
     resources: ExitStack = field(default_factory=ExitStack)
     destination: Path | None = None
     last_summary: dict[str, object] | None = None

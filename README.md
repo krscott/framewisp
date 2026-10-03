@@ -699,7 +699,17 @@ and managed process IDs. Normal shutdown removes the runtime sockets and
 
 The runner stops its managed processes on Ctrl+C, SIGTERM, or application
 exit. It returns the application's exit code when the app exits on its own.
-It does not contain arbitrary descendants or recover from SIGKILL. If a stale
+Each managed process has a private Linux subreaper supervisor that also stops
+forked helpers and detached descendants. Cleanup allows five seconds for SIGTERM
+and two more for SIGKILL per tree, and reports failures with process IDs and logs.
+Other sessions and unrelated processes remain outside these trees.
+
+Headless runs require Linux 5.3+, readable procfs (including task `children`), and
+permission for `prctl`, `pidfd_open`, and `pidfd_send_signal`. Startup checks these
+before launching apps and fails if ownership is unavailable. Neither root nor a
+systemd user service is required. This owns forked processes; it does not restrict
+access to your files or own work launched by an existing external service.
+Recovery from runner SIGKILL remains a separate follow-up. If a stale
 `session.json` remains after a crash, use a fresh session directory.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
