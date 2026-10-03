@@ -26,18 +26,33 @@ def wait_for(path: Path) -> None:
         time.sleep(0.02)
 
 
-@pytest.mark.parametrize("stage", ["journal", "mkdir", "runtime", "children"])
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "partial-journal",
+        "journal",
+        "mkdir",
+        "runtime",
+        "children",
+        "shutdown-runtime",
+        "shutdown-metadata",
+    ],
+)
 def test_killed_startup_recovers(tmp_path: Path, stage: str) -> None:
     session = tmp_path / "session"
     session.mkdir()
     ready = tmp_path / "ready"
     script = """
-import os, sys, time
+import os, shutil, sys, time
 from pathlib import Path
 from framewisp.ownership import session_lease, headless_runtime, write_journal, runtime_path
 from framewisp.processes import managed_process
 session, ready, stage, probe = map(Path, sys.argv[1:])
 with session_lease(session) as lease:
+    if str(stage) == 'partial-journal':
+        (session / '.headless-owner.tmp').write_text('{')
+        ready.touch()
+        time.sleep(60)
     if str(stage) in {'journal', 'mkdir'}:
         write_journal(session, None)
         if str(stage) == 'mkdir':
@@ -45,6 +60,13 @@ with session_lease(session) as lease:
         ready.touch()
         time.sleep(60)
     with headless_runtime(session) as runtime:
+        if str(stage) in {'shutdown-runtime', 'shutdown-metadata'}:
+            (session / 'session.json').write_text('{}')
+            shutil.rmtree(runtime)
+            if str(stage) == 'shutdown-metadata':
+                (session / 'session.json').unlink()
+            ready.touch()
+            time.sleep(60)
         if str(stage) == 'runtime':
             ready.touch()
             time.sleep(60)
@@ -115,7 +137,6 @@ def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
         assert (runtime / "important").read_text() == "live resource"
         # Neither runtime paths nor process IDs in session.json authorize recovery.
         (session / "session.json").write_text("not even valid JSON")
-    (session / "session.json").unlink()
     assert recover_session(session) == 0
     assert (copied / "session.json").exists()
 

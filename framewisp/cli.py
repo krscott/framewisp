@@ -17,6 +17,7 @@ from framewisp.lib import (
     screenshot,
     session_command,
 )
+from framewisp.ownership import recover_session
 
 
 def seconds(value: str) -> float:
@@ -363,8 +364,6 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
 
         result = attach_session(session, retain_input_content=args.retain_input_content)
     elif args.action == "recover":
-        from framewisp.ownership import recover_session
-
         result = recover_session(session)
     elif args.action == "run":
         command: list[str] = args.command

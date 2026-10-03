@@ -402,8 +402,9 @@ The lock file persists across runs and must not be unlinked or replaced. Session
 directories must be private; malicious same-user filesystem mutation is outside
 the protocol. Old sessions without journals require manual inspection. Recovery
 cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
-records and runtime remain for manual investigation. Attached sessions retain
-their separate locking and emergency-detach workflow.
+records and runtime remain for manual investigation. Attached sessions acquire this same session lease before writing metadata and
+refuse abandoned headless journals. They retain their separate desktop reservation
+and emergency-detach workflow.
 
 ## Environment and verification
 

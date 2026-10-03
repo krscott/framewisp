@@ -42,7 +42,7 @@ def session_lease(session: Path) -> Generator[int, None, None]:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SessionError(
-                "Headless owner or descendant cleanup is still live. Wait for cleanup and retry."
+                "Session owner or descendant cleanup is still live. Wait for cleanup and retry."
             ) from None
         if identity(session / LOCK) != [info.st_dev, info.st_ino]:
             raise SessionError("Headless lock changed while acquiring ownership.")
@@ -55,10 +55,17 @@ def session_lease(session: Path) -> Generator[int, None, None]:
 
 def read_journal(session: Path) -> dict[str, object]:
     path = session / JOURNAL
-    if path.is_symlink():
-        raise SessionError(f"Refusing symlink ownership journal: {path}")
     try:
-        value: object = json.loads(path.read_text())
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor) as source:
+            info = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+            ):
+                raise ValueError("journal must be an owned regular file with one link")
+            value: object = json.load(source)
         if not isinstance(value, dict):
             raise ValueError("journal must be an object")
         journal = cast(dict[str, object], value)
@@ -116,18 +123,25 @@ def remove_runtime(session: Path) -> None:
             shutil.rmtree(runtime)
 
 
-@contextmanager
-def headless_runtime(session: Path) -> Generator[Path, None, None]:
+def refuse_abandoned_ownership(session: Path) -> None:
     runtime = runtime_path(session)
     if (
         (session / JOURNAL).exists()
         or (session / JOURNAL).is_symlink()
+        or (session / ".headless-owner.tmp").exists()
+        or (session / ".headless-owner.tmp").is_symlink()
         or runtime.exists()
         or runtime.is_symlink()
     ):
         raise SessionError(
             "Abandoned headless ownership remains. Run framewisp SESSION recover first."
         )
+
+
+@contextmanager
+def headless_runtime(session: Path) -> Generator[Path, None, None]:
+    runtime = runtime_path(session)
+    refuse_abandoned_ownership(session)
     write_journal(session, None)
     runtime.mkdir(mode=0o700)
     write_journal(session, runtime)
@@ -135,6 +149,10 @@ def headless_runtime(session: Path) -> Generator[Path, None, None]:
         yield runtime
     finally:
         remove_runtime(session)
+        # Keep proof of ownership until metadata is gone, including if shutdown
+        # is interrupted after removing the runtime.
+        for name in ("session.json", ".session.json"):
+            (session / name).unlink(missing_ok=True)
         (session / JOURNAL).unlink()
 
 
@@ -149,6 +167,8 @@ def recover_session(session: Path) -> int:
                 or runtime_path(session).is_symlink()
                 or (session / "session.json").exists()
                 or (session / "session.json").is_symlink()
+                or (session / ".session.json").exists()
+                or (session / ".session.json").is_symlink()
             ):
                 raise SessionError(
                     "No verified headless ownership journal. Resources remain; recovery cannot safely clean an older or foreign session."

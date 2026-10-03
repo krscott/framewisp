@@ -30,7 +30,11 @@ from framewisp.errors import (
 )
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
-from framewisp.ownership import JOURNAL, headless_runtime, runtime_path, session_lease
+from framewisp.ownership import (
+    headless_runtime,
+    refuse_abandoned_ownership,
+    session_lease,
+)
 from framewisp.processes import OwnedProcess, managed_process
 
 SWAY_CONFIG = """\
@@ -613,16 +617,7 @@ def run_session(
             raise SessionError(error)
     session.mkdir(mode=0o700, parents=True, exist_ok=True)
     with session_lease(session) as lease:
-        if (
-            (session / JOURNAL).exists()
-            or (session / JOURNAL).is_symlink()
-            or (session / ".headless-owner.tmp").exists()
-            or runtime_path(session).exists()
-            or runtime_path(session).is_symlink()
-        ):
-            raise SessionError(
-                "Abandoned headless ownership remains. Run framewisp SESSION recover first."
-            )
+        refuse_abandoned_ownership(session)
         return _run_session(
             session,
             command,

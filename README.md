@@ -746,7 +746,8 @@ processes manually; their PIDs are diagnostic, not safe signal targets. Resource
 and ownership metadata remain so recovery cannot claim success. Recovery also
 refuses unverifiable journals, replaced runtimes, and stale sessions created by
 older versions without an ownership journal. It does not recover desktop
-attachments; use `framewisp --detach` for those.
+attachments; use `framewisp --detach` for those. Attachment shares the session
+metadata lock and refuses directories with abandoned headless ownership.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
 AT-SPI registry. These buses do not activate host desktop services. Apps that
