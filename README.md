@@ -581,6 +581,10 @@ Review artifacts before sharing.
 
 ## Flatpak game
 
+The [real-app compatibility runs](docs/ui-inspection.md#real-app-compatibility-runs)
+cover a GTK 3 Writer Flatpak and Blender on private Wayland and Xwayland, with
+versions, launch commands, input outcomes, accessibility limits, and opt-in tests.
+
 With the `org.gnome.SwellFoop` Flatpak installed, run:
 
 ```sh

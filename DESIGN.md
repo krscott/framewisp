@@ -769,6 +769,11 @@ No semantic input action is provided.
 
 The tested toolkit matrix, timings, reproducible benchmark, and decision about
 conditional waits are in [docs/ui-inspection.md](docs/ui-inspection.md).
+`tests/test_real_apps.py` adds opt-in host coverage for installed Writer GTK 3
+and Blender Flatpaks on private Wayland and Xwayland. It verifies edited Writer
+paragraph text through AT-SPI and Blender geometry through its GUI console,
+records screenshots and backend evidence, and checks normal-stop cleanup.
+These app/version-specific tests do not run in the standalone package check.
 
 
 ## Conditional checks
