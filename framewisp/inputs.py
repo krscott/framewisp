@@ -209,7 +209,9 @@ class InputWorker:
                         if isinstance(error, InterruptedError):
                             raise InterruptedError(detail) from None
                         if isinstance(error, SessionError):
-                            raise SessionError(detail) from None
+                            raise SessionError(
+                                detail, returncode=error.returncode
+                            ) from None
                         raise RuntimeError(detail) from None
                     raise
                 finally:

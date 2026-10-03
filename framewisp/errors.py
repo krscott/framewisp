@@ -13,6 +13,10 @@ from typing import cast
 class SessionError(RuntimeError):
     """An expected operational failure that the CLI can report without a traceback."""
 
+    def __init__(self, message: str, *, returncode: int | None = None):
+        super().__init__(message)
+        self.returncode = returncode
+
 
 SOCKET_ACCESS_HINT = (
     "The runner and control commands both need access to the private display sockets. "
@@ -124,7 +128,8 @@ def display_command(
             "Input diagnostics omitted." if omit_content else result.stderr.strip()
         )
         raise SessionError(
-            f"{context} (exit {result.returncode}):\n{diagnostic}\n{SOCKET_ACCESS_HINT}"
+            f"{context} (exit {result.returncode}):\n{diagnostic}\n{SOCKET_ACCESS_HINT}",
+            returncode=result.returncode,
         )
     if result.stderr and not omit_content:
         print(result.stderr, end="", file=sys.stderr)

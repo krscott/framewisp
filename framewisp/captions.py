@@ -52,8 +52,6 @@ def input_error(
         return "Input cancelled; caller disconnected or session stopped."
     details = "input details omitted"
     returncode = getattr(error, "returncode", None)
-    if returncode is None and (match := re.search(r"\(exit (-?\d+)\)", str(error))):
-        returncode = int(match[1])
     if isinstance(returncode, int):
         details += f"; exit {returncode}"
     return f"{type(error).__name__}: {details}"
@@ -177,6 +175,9 @@ def log_input(
         yield result
     except BaseException as error:
         # Preserve the exception and traceback while recording why the command ended.
+        returncode = getattr(error, "returncode", None)
+        if isinstance(returncode, int):
+            result.returncode = returncode
         detail = input_error(action, error, retain_input_content=retain_input_content)
         result.error = (
             f"{type(error).__name__}: {detail}"

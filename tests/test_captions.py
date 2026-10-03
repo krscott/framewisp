@@ -14,11 +14,13 @@ from framewisp.captions import (
     captions_for_clip,
     capture_origin,
     filter_recorder_output,
+    input_error,
     log_input,
     recorder_output,
     retained_parameters,
     subtitle_script,
 )
+from framewisp.errors import SessionError
 
 
 def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
@@ -69,6 +71,18 @@ def test_pointer_failure_keeps_exception_type(tmp_path: Path) -> None:
     assert events[-1]["error"] == "ValueError: bad coordinates"
 
 
+def test_input_error_keeps_structured_exit_code_only() -> None:
+    text = "secret (exit 123456)"
+    for error in [RuntimeError(text), SessionError(text)]:
+        assert "123456" not in input_error("type", error, retain_input_content=False)
+    assert (
+        input_error(
+            "type", SessionError(text, returncode=7), retain_input_content=False
+        )
+        == "SessionError: input details omitted; exit 7"
+    )
+
+
 @pytest.mark.parametrize("retain", [False, True])
 @pytest.mark.parametrize(
     "failure",
@@ -113,6 +127,7 @@ def test_content_retention_and_captions(
     assert ("(failed)" in captions[0].text) is (failure is not None)
     if isinstance(failure, subprocess.CalledProcessError):
         assert "7" in events[-1]["error"]
+        assert events[-1]["returncode"] == 7
 
 
 @pytest.mark.parametrize(
