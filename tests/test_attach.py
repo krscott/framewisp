@@ -262,7 +262,7 @@ def test_pending_consent_reserves_session(
         check=False,
     )
     assert duplicate.returncode == 1
-    assert "already exists" in duplicate.stderr
+    assert "still live" in duplicate.stderr
     assert metadata.read_text() == original
     assert attach_process.poll() is None
     assert detach_desktop() == 0
@@ -534,9 +534,6 @@ def test_invalid_session_metadata_fails_clearly(
 def test_attachment_refuses_headless_ownership(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from framewisp.attach import run_attachment
-    from framewisp.ownership import recover_session, session_lease, write_journal
-
     session = tmp_path / "session"
     session.mkdir()
     with session_lease(session):
