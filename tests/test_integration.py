@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import struct
@@ -2951,3 +2952,79 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
         finally:
             unrelated.terminate()
             unrelated.wait(timeout=5)
+
+
+@pytest.mark.integration
+def test_named_session_launch_control_and_cleanup(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    nested = project / "nested"
+    nested.mkdir(parents=True)
+    subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
+    session: Path | None = None
+    runner_log = tmp_path / "named-runner.log"
+    with runner_log.open("w") as output:
+        process = subprocess.Popen(
+            ["framewisp", "browser", "run", "--", "framewisp-demo"],
+            cwd=nested,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+
+        def ready() -> bool:
+            assert process.poll() is None, runner_log.read_text()
+            return "Session ready: " in runner_log.read_text()
+
+        wait_until(ready)
+        session = Path(
+            next(
+                line.removeprefix("Session ready: ")
+                for line in runner_log.read_text().splitlines()
+                if line.startswith("Session ready: ")
+            )
+        )
+        assert session.is_absolute()
+        assert session.name == "browser"
+        state = json.loads((session / "session.json").read_text())
+        runtime = Path(state["runtime_directory"])
+
+        def named(*arguments: str) -> subprocess.CompletedProcess[str]:
+            result = subprocess.run(
+                ["framewisp", "browser", *arguments],
+                cwd=project,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            assert result.returncode == 0, result.stderr
+            return result
+
+        named("status")
+        named("move", "120", "100")
+        capture = tmp_path / "named.png"
+        named("screenshot", str(capture))
+        with Image.open(capture) as image:
+            assert image.size == (1280, 720)
+        duplicate = subprocess.run(
+            ["framewisp", "browser", "run", "--", "framewisp-demo"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert duplicate.returncode == 1
+        assert process.poll() is None
+        assert "Session owner or descendant cleanup is still live" in duplicate.stderr
+        named("stop")
+        assert process.wait(timeout=20) == 0
+        assert not (session / "session.json").exists()
+        assert not runtime.exists()
+        for pid in state["processes"].values():
+            assert not Path(f"/proc/{pid}").exists()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=20)
+        if session is not None:
+            shutil.rmtree(session)
+            session.parent.rmdir()

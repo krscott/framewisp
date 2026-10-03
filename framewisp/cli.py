@@ -18,6 +18,7 @@ from framewisp.lib import (
     session_command,
 )
 from framewisp.ownership import recover_session
+from framewisp.sessions import resolve_session
 
 
 def seconds(value: str) -> float:
@@ -52,7 +53,10 @@ def main() -> None:
         help="stop the active desktop attachment, regardless of session",
     )
     parser.add_argument(
-        "session", nargs="?", type=Path, metavar="SESSION", help="session directory"
+        "session",
+        nargs="?",
+        metavar="SESSION",
+        help="project-scoped session name (e.g. browser), or explicit path (e.g. ./browser or /tmp/browser)",
     )
     commands = parser.add_subparsers(dest="action")
 
@@ -277,7 +281,10 @@ def main() -> None:
         parser.error(
             "SESSION and COMMAND are required (or use --detach or --agent-skill)"
         )
-    session = args.session.resolve()
+    try:
+        session = resolve_session(args.session)
+    except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+        parser.error(f"Cannot resolve session: {error}")
     if args.action == "inspect":
         from framewisp.inspection import Query
 
