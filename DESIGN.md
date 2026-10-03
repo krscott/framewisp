@@ -61,14 +61,18 @@ environment against the source file. The skill covers the public Nix URL fallbac
 all commands and options, GUI workflows, user-started attachment, and permission
 before filing issues.
 
-1. Create or reuse the requested session directory. Refuse an existing
-   `session.json`; concurrent runs and stale-session recovery are unsupported.
+1. Create or reuse the requested session directory. Acquire a nonblocking exclusive
+   flock on the persistent `.headless.lock` (regular, single-link, private file,
+   opened with O_NOFOLLOW). Refuse an existing `session.json` or ownership journal;
+   ask the caller to recover abandoned ownership first.
    Refuse existing recording destinations and paths reserved for session logs or
    metadata before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
-3. Create a temporary runtime directory. It holds the compositor configuration
-   and sockets (including `control.sock`) and is removed when the runner exits normally. Its short path
-   avoids Unix socket path limits even when the session log directory is long.
+3. Atomically write `.headless-owner.json` with the session device/inode and a
+   null runtime identity, create `/tmp/framewisp-UID-DEVICEHEX-INODEHEX` with mode
+   0700, then atomically update the journal with its device/inode. The short path
+   avoids Unix socket path limits. It holds compositor configuration and sockets
+   (including `control.sock`) and is removed after successful cleanup.
 4. Copy the environment, remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
@@ -372,8 +376,34 @@ or protect against an app deliberately killing its supervisor.
 The runtime directory and `session.json` are removed; logs remain. The recorder
 handles SIGTERM by flushing its encoder and MP4 trailer while Sway is still alive.
 A nonzero recorder exit during finalization names its destination and log. A killed
-recorder may leave an incomplete file. Recovery after runner SIGKILL remains a
-separate follow-up, though socket EOF requests cleanup when its supervisor survives.
+recorder may leave an incomplete file. Socket EOF requests cleanup when its supervisor survives.
+
+`recover` acquires the same session lease without reading `session.json`. Each
+supervisor inherits the lease descriptor, while its application does not. The
+runner closes the descriptor without LOCK_UN; recovery remains excluded until all
+supervisors exit. Before launching children, each supervisor writes an
+`owner-PID.json` record in the private runtime. Only successful descendant cleanup
+removes that record. Failure retains diagnostic information. A killed supervisor
+leaves its record and recovery refuses to remove the runtime.
+
+Recovery verifies the journal's session identity and the fixed runtime's inode,
+owner, permissions, and directory type. It never signals stored PIDs and never
+uses metadata as a runtime path. A null runtime identity permits only rmdir of an
+empty directory, covering interruption between mkdir and journal update. Missing
+runtimes are safe to finish recovering. Without a committed journal, recovery
+only clears a partial temporary journal if no runtime or session metadata exists.
+Copied journals, symlink ownership files, and replaced runtimes fail verification.
+Once ownership is verified and no supervisor records remain, recovery removes the
+runtime, `session.json`, its temporary file, and the ownership journal. Logs,
+app-exit diagnostics, inputs, and recordings remain. It reports success as JSON
+or a nonzero error identifying resources that remain. Running again replaces logs.
+
+The lock file persists across runs and must not be unlinked or replaced. Session
+directories must be private; malicious same-user filesystem mutation is outside
+the protocol. Old sessions without journals require manual inspection. Recovery
+cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
+records and runtime remain for manual investigation. Attached sessions retain
+their separate locking and emergency-detach workflow.
 
 ## Environment and verification
 

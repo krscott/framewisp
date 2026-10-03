@@ -30,6 +30,7 @@ from framewisp.errors import (
 )
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
+from framewisp.ownership import JOURNAL, headless_runtime, runtime_path, session_lease
 from framewisp.processes import OwnedProcess, managed_process
 
 SWAY_CONFIG = """\
@@ -318,6 +319,9 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
     reserved = {
         (session / name).resolve()
         for name in (
+            ".headless.lock",
+            ".headless-owner.json",
+            ".headless-owner.tmp",
             "session.json",
             ".session.json",
             "app-exit.json",
@@ -608,10 +612,44 @@ def run_session(
         if error is not None:
             raise SessionError(error)
     session.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with session_lease(session) as lease:
+        if (
+            (session / JOURNAL).exists()
+            or (session / JOURNAL).is_symlink()
+            or (session / ".headless-owner.tmp").exists()
+            or runtime_path(session).exists()
+            or runtime_path(session).is_symlink()
+        ):
+            raise SessionError(
+                "Abandoned headless ownership remains. Run framewisp SESSION recover first."
+            )
+        return _run_session(
+            session,
+            command,
+            lease=lease,
+            recording=recording,
+            captions=captions,
+            size=size,
+            x11=x11,
+            retain_input_content=retain_input_content,
+        )
+
+
+def _run_session(
+    session: Path,
+    command: list[str],
+    *,
+    lease: int,
+    recording: Path | None,
+    captions: bool,
+    size: tuple[int, int],
+    x11: bool,
+    retain_input_content: bool,
+) -> int:
     state = session / "session.json"
     if state.exists():
         raise SessionError(
-            f"{state} already exists. Use a different session directory."
+            f"{state} already exists. Run framewisp SESSION recover after the owner exits."
         )
 
     (session / "app-exit.json").unlink(missing_ok=True)
@@ -630,11 +668,13 @@ def run_session(
     try:
         # Short paths also fit Wayland and VNC's Unix socket path limits.
         with (
-            tempfile.TemporaryDirectory(prefix="framewisp-") as directory,
+            headless_runtime(session) as runtime,
             ExitStack() as stack,
         ):
-            runtime = Path(directory)
+            directory = str(runtime)
             env = session_environment_for_run(runtime)
+            env["FRAMEWISP_OWNER_FD"] = str(lease)
+            env["FRAMEWISP_OWNER_RUNTIME"] = directory
             buses = start_inspection_buses(stack, runtime, session, env, stop)
             if buses is None:
                 return 0
@@ -788,7 +828,8 @@ def run_session(
         shutdown_error = str(error)
         raise
     finally:
-        state.unlink(missing_ok=True)
+        if not (session / ".headless-owner.json").exists():
+            state.unlink(missing_ok=True)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
         if stop_connection is not None:

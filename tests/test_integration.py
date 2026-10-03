@@ -2874,3 +2874,80 @@ def test_session_owns_detached_descendants(
         if runner.poll() is None:
             runner.terminate()
         runner.wait(timeout=20)
+
+
+@pytest.mark.integration
+def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -> None:
+    # Keep a second process alive to catch unsafe signalling from stale JSON.
+    with subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+    ) as unrelated:
+        try:
+            for action in (["recover"], ["run", "--", sys.executable, "-c", "pass"]):
+                before = (demo.directory / "inputs.jsonl").read_bytes()
+                rejected = subprocess.run(
+                    ["framewisp", str(demo.directory), *action],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                assert rejected.returncode != 0
+                assert "still live" in rejected.stderr
+                assert (demo.directory / "inputs.jsonl").read_bytes() == before
+            demo.process.kill()
+            demo.process.wait(timeout=5)
+            state_path = demo.directory / "session.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "runtime_directory": str(tmp_path),
+                        "processes": {"app": unrelated.pid},
+                    }
+                )
+            )
+            (tmp_path / "unrelated-file").write_text("preserve")
+            deadline = time.monotonic() + 15
+            while True:
+                result = subprocess.run(
+                    ["framewisp", str(demo.directory), "recover"],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if result.returncode == 0:
+                    break
+                assert "still live" in result.stderr, result.stderr
+                assert time.monotonic() < deadline
+                time.sleep(0.05)
+            assert json.loads(result.stdout)["status"] == "recovered"
+            assert not demo.runtime.exists()
+            assert not state_path.exists()
+            assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
+            assert (demo.directory / "app.log").exists()
+            assert unrelated.poll() is None
+            assert (tmp_path / "unrelated-file").read_text() == "preserve"
+            with (tmp_path / "restart.log").open("w") as output:
+                with subprocess.Popen(
+                    [
+                        "framewisp",
+                        str(demo.directory),
+                        "run",
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(60)",
+                    ],
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                ) as restarted:
+                    try:
+                        wait_until(lambda: state_path.exists())
+                        cli(demo.directory, "stop")
+                        assert restarted.wait(timeout=20) == 0
+                    finally:
+                        if restarted.poll() is None:
+                            restarted.terminate()
+                            restarted.wait(timeout=20)
+        finally:
+            unrelated.terminate()
+            unrelated.wait(timeout=5)

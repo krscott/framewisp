@@ -178,6 +178,7 @@ The session directory is required; the former `--session DIRECTORY` spelling is 
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
 | `stop` | Stop the headless session and wait for cleanup and recording finalization. |
+| `recover` | Recover an abandoned headless session after its owner and supervisors exit, preserving logs. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Headless sessions support crops and JSON origin, dimensions, display size, path, and capture time. Default delay: 0. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move the pointer immediately without pressing any button. |
@@ -724,8 +725,28 @@ permission for `prctl`, `pidfd_open`, and `pidfd_send_signal`. Startup checks th
 before launching apps and fails if ownership is unavailable. Neither root nor a
 systemd user service is required. This owns forked processes; it does not restrict
 access to your files or own work launched by an existing external service.
-Recovery from runner SIGKILL remains a separate follow-up. If a stale
-`session.json` remains after a crash, use a fresh session directory.
+After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`,
+then reuse the directory with `framewisp SESSION run -- APP`. Supervisors start
+cleanup on runner loss. Recovery refuses while the runner or any supervisor
+holds the kernel ownership lock; wait a few seconds and retry. It removes the
+owned runtime and stale session metadata, preserves logs and recordings, and
+prints JSON with `status: "recovered"`. Copy those diagnostics before the next
+run replaces its logs. An interrupted recording may be incomplete.
+
+Recovery never signals PIDs from metadata or follows its runtime path. Ownership
+is bound to the session directory's device and inode, so copied metadata cannot
+recover the original run. Keep `.headless.lock` in place, including between runs;
+deleting or replacing ownership files while processes are live breaks the lock
+protocol. Use a private session directory. Same-user programs that deliberately
+replace files or remove ownership records are outside this protocol's protection.
+
+If a supervisor dies or cannot finish cleanup, recovery fails and lists the
+remaining supervisor records in the runtime directory. Inspect those records and
+processes manually; their PIDs are diagnostic, not safe signal targets. Resources
+and ownership metadata remain so recovery cannot claim success. Recovery also
+refuses unverifiable journals, replaced runtimes, and stale sessions created by
+older versions without an ownership journal. It does not recover desktop
+attachments; use `framewisp --detach` for those.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
 AT-SPI registry. These buses do not activate host desktop services. Apps that

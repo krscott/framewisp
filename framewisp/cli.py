@@ -58,6 +58,9 @@ def main() -> None:
     commands.add_parser(
         "status", help="report live headless app and recording state as JSON"
     )
+    commands.add_parser(
+        "recover", help="recover an abandoned headless session, preserving logs"
+    )
     commands.add_parser("stop", help="stop a headless session and wait for cleanup")
 
     inspect = commands.add_parser(
@@ -318,18 +321,19 @@ def main() -> None:
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
     state_path = session / "session.json"
-    if args.action not in {"run", "attach"}:
+    if args.action not in {"run", "attach", "recover"}:
         exit_message = recorded_app_exit(session)
         if exit_message is not None:
             parser.exit(1, exit_message + "\n")
-    if args.action not in {"run", "attach"} and not state_path.exists():
+    if args.action not in {"run", "attach", "recover"} and not state_path.exists():
         parser.exit(
             1,
             "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
         )
     try:
         attached = (
-            state_path.exists()
+            args.action != "recover"
+            and state_path.exists()
             and json.loads(state_path.read_text()).get("kind") == "attached"
         )
     except (OSError, ValueError, AttributeError) as error:
@@ -358,6 +362,10 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
         from framewisp.attach import attach_session
 
         result = attach_session(session, retain_input_content=args.retain_input_content)
+    elif args.action == "recover":
+        from framewisp.ownership import recover_session
+
+        result = recover_session(session)
     elif args.action == "run":
         command: list[str] = args.command
         if command[:1] == ["--"]:
