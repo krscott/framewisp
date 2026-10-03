@@ -11,6 +11,7 @@ import unicodedata
 import uuid
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -78,7 +79,7 @@ def recorder_output(log: Path) -> Generator[BinaryIO, None, None]:
             sink.close()
             try:
                 task.result(timeout=1)
-            except TimeoutError:
+            except FutureTimeout:
                 stopped.set()
                 task.result()
                 if not failed:
