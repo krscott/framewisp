@@ -4,7 +4,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Generator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -165,9 +167,15 @@ def test_symlink_ownership_files_refused(tmp_path: Path, name: str) -> None:
     assert target.read_text() == "preserve"
 
 
-def test_runtime_replacement_refused(tmp_path: Path) -> None:
+@pytest.fixture
+def runtime_backup() -> Generator[Path, None, None]:
+    with TemporaryDirectory(prefix="framewisp-test-", dir="/tmp") as directory:
+        yield Path(directory) / "saved"
+
+
+def test_runtime_replacement_refused(tmp_path: Path, runtime_backup: Path) -> None:
     runtime = runtime_path(tmp_path)
-    original = tmp_path / "saved"
+    original = runtime_backup
     with pytest.raises(SessionError, match="Runtime identity changed"):
         with session_lease(tmp_path), headless_runtime(tmp_path) as runtime:
             runtime.rename(original)
