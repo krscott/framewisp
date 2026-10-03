@@ -170,7 +170,11 @@ bare names must fit in 255 filesystem bytes.
 For a bare name, run `git -C <canonical cwd> rev-parse --show-toplevel` with a
 five-second timeout, ignoring inherited `GIT_DIR`, `GIT_WORK_TREE`, and
 `GIT_COMMON_DIR` overrides. Canonicalize the resulting worktree root; if not in a
-worktree, use canonical cwd. Hash its filesystem bytes with SHA-256, take the
+worktree, use canonical cwd. Run Git with the C locale, capture bytes, and decode
+the root with `os.fsdecode` to preserve non-UTF-8 filesystem names. Only Git's
+"not a git repository" error permits the cwd fallback; other failures report an
+actionable error instead of silently changing project scope.
+Hash its filesystem bytes with SHA-256, take the
 first 24 hexadecimal characters, and resolve `/tmp/framewisp-project-<hash>/NAME`.
 The hash is stable across processes and separates worktrees, while canonical
 paths make symlink aliases agree. Git is a packaged runtime and test dependency;

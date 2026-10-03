@@ -114,6 +114,31 @@ def test_git_overrides_do_not_select_another_project(
     assert resolve_session("browser") == expected
 
 
+def test_git_errors_do_not_change_project_scope(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child = repository / "child"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    (repository / ".git" / "config").write_text("[unterminated")
+    with pytest.raises(ValueError, match="Fix Git configuration"):
+        resolve_session("browser")
+
+
+@pytest.mark.parametrize("name", [b"project-\xff", b"root\rname", b"root\nname"])
+def test_git_root_preserves_filesystem_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: bytes
+) -> None:
+    directory = tmp_path / os.fsdecode(name)
+    directory.mkdir()
+    git(directory, "init")
+    monkeypatch.chdir(directory)
+    digest = hashlib.sha256(os.fsencode(directory.resolve())).hexdigest()[:24]
+    assert resolve_session("browser") == (
+        Path("/tmp") / f"framewisp-project-{digest}" / "browser"
+    )
+
+
 @pytest.mark.parametrize(
     "argument", ["./browser", "sessions/browser", "browser/", "./", "../"]
 )
@@ -159,7 +184,7 @@ def test_cli_resolves_named_control_without_legacy_fallback(
     try:
         for argument in ["browser", str(session)]:
             result = subprocess.run(
-                ["framewisp", argument, "status"],
+                [sys.executable, "-m", "framewisp", argument, "status"],
                 cwd=tmp_path,
                 capture_output=True,
                 text=True,
@@ -173,7 +198,7 @@ def test_cli_resolves_named_control_without_legacy_fallback(
             ) in result.stderr
         (session / "session.json").unlink()
         result = subprocess.run(
-            ["framewisp", "browser", "status"],
+            [sys.executable, "-m", "framewisp", "browser", "status"],
             cwd=tmp_path,
             capture_output=True,
             text=True,

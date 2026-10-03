@@ -14,12 +14,12 @@ def project_directory() -> Path:
         for key, value in os.environ.items()
         if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"}
     }
+    env["LC_ALL"] = "C"
     try:
         result = subprocess.run(
             ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
             env=env,
             capture_output=True,
-            text=True,
             check=False,
             timeout=5,
         )
@@ -28,8 +28,14 @@ def project_directory() -> Path:
             "Git is required to resolve session names. Install git or use an explicit session path."
         ) from None
     if result.returncode == 0:
-        return Path(result.stdout.removesuffix("\n")).resolve()
-    return directory
+        return Path(os.fsdecode(result.stdout.removesuffix(b"\n"))).resolve()
+    if result.stderr.startswith(b"fatal: not a git repository"):
+        return directory
+    raise ValueError(
+        "Cannot determine project directory: "
+        + os.fsdecode(result.stderr).strip()
+        + ". Fix Git configuration or use an explicit session path."
+    )
 
 
 def resolve_session(argument: str) -> Path:
