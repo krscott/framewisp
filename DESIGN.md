@@ -338,17 +338,42 @@ it publishes its state. Requested stops do not create an exit record. SIGINT or 
 requests a clean stop and returns zero. A backend exit or startup timeout reports
 an error naming its log. Unexpected errors keep their traceback.
 
-ExitStack stops managed children in reverse order: app, optional recorder,
-wayvnc, Sway. It sends
-SIGTERM, waits up to five seconds per process, then uses SIGKILL if needed and
-reaps the process. The runtime directory and `session.json` are removed. Logs
-remain in the session directory. The recorder handles SIGTERM by flushing its
-encoder and writing the MP4 trailer while Sway is still alive. A nonzero recorder
-exit during finalization raises an error naming the destination and log. A killed
-recorder may leave an incomplete file; no crash recovery is attempted.
+ExitStack stops owned process trees in reverse order: app, optional recorder,
+wayvnc, Sway, registry, and private buses. Each `managed_process` starts a private
+single-threaded Python supervisor with `PR_SET_CHILD_SUBREAPER` enabled before
+launching its command. It reports the real app PID and return code over a private,
+non-inherited socket. It resets inherited SIGCHLD dispositions so child exit
+statuses remain waitable. Detached and double-forked descendants reparent to this
+supervisor when their parents exit. App exit also initiates tree cleanup.
 
-This guarantees cleanup of the managed direct children in the tested paths.
-Descendant containment and crash recovery are deferred.
+Cleanup enumerates only the supervisor's immediate children through
+`/proc/self/task/PID/children`, signals them through pidfds, and reaps them. It
+repeats as grandchildren become adopted children, including descendants that
+create their own sessions or subreapers. No concurrent thread or signal handler
+reaps children, so listed PIDs cannot be reused before pidfd acquisition. SIGTERM
+has a five-second grace period, followed by up to two seconds of repeated SIGKILL
+and reaping. The runner allows eight seconds for the supervisor response. Errors
+name the log and supervisor/app PIDs; deadline failures list remaining children.
+Denied signals do not skip cleanup of the remaining children. The recorder log
+reader uses cancellable pipe reads and allows one second for EOF, so a surviving
+pipe writer cannot block shutdown indefinitely. Cleanup errors make `stop` fail rather than report success. Uninterruptible kernel
+I/O or denied signals can prevent cleanup; the time limit bounds waiting, not the
+kernel's ability to terminate a process.
+
+Headless ownership requires Linux 5.3 or newer, readable procfs with the task
+children file, and permission to use `prctl`, `pidfd_open`, and `pidfd_send_signal`.
+The supervisor checks these before launching anything and fails closed if they
+are unavailable. It uses the standard library and needs neither root, cgroup
+delegation, nor a systemd user service. The Nix package and development shell use
+the same implementation. Ownership covers forked descendants, not work requested
+from an existing external service. It does not restrict app access to user files
+or protect against an app deliberately killing its supervisor.
+
+The runtime directory and `session.json` are removed; logs remain. The recorder
+handles SIGTERM by flushing its encoder and MP4 trailer while Sway is still alive.
+A nonzero recorder exit during finalization names its destination and log. A killed
+recorder may leave an incomplete file. Recovery after runner SIGKILL remains a
+separate follow-up, though socket EOF requests cleanup when its supervisor survives.
 
 ## Environment and verification
 

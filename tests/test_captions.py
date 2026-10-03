@@ -1,4 +1,6 @@
 import json
+import os
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from framewisp.captions import (
     capture_origin,
     filter_recorder_output,
     log_input,
+    recorder_output,
     subtitle_script,
 )
 
@@ -90,3 +93,24 @@ def test_caption_text_cannot_inject_ass_formatting() -> None:
     assert r"\pos" not in script
     assert r"\N" not in script
     assert "｛＼pos(0,0)｝＼N日本語" in script
+
+
+@pytest.mark.parametrize("failure", [None, "cleanup failed: PID 123"])
+def test_recorder_output_does_not_wait_forever_for_inherited_writer(
+    tmp_path: Path, failure: str | None
+) -> None:
+    duplicate: int | None = None
+    started = time.monotonic()
+    try:
+        with pytest.raises(RuntimeError, match=failure or "inherited log pipe"):
+            with recorder_output(tmp_path / "recorder.log") as sink:
+                duplicate = os.dup(sink.fileno())
+                sink.write(b"partial diagnostic")
+                sink.flush()
+                if failure is not None:
+                    raise RuntimeError(failure)
+        assert time.monotonic() - started < 2
+        assert (tmp_path / "recorder.log").read_bytes() == b"partial diagnostic"
+    finally:
+        if duplicate is not None:
+            os.close(duplicate)
