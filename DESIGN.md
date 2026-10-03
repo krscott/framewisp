@@ -342,7 +342,8 @@ ExitStack stops owned process trees in reverse order: app, optional recorder,
 wayvnc, Sway, registry, and private buses. Each `managed_process` starts a private
 single-threaded Python supervisor with `PR_SET_CHILD_SUBREAPER` enabled before
 launching its command. It reports the real app PID and return code over a private,
-non-inherited socket. Detached and double-forked descendants reparent to this
+non-inherited socket. It resets inherited SIGCHLD dispositions so child exit
+statuses remain waitable. Detached and double-forked descendants reparent to this
 supervisor when their parents exit. App exit also initiates tree cleanup.
 
 Cleanup enumerates only the supervisor's immediate children through
@@ -353,7 +354,9 @@ reaps children, so listed PIDs cannot be reused before pidfd acquisition. SIGTER
 has a five-second grace period, followed by up to two seconds of repeated SIGKILL
 and reaping. The runner allows eight seconds for the supervisor response. Errors
 name the log and supervisor/app PIDs; deadline failures list remaining children.
-Cleanup errors make `stop` fail rather than report success. Uninterruptible kernel
+Denied signals do not skip cleanup of the remaining children. The recorder log
+reader uses cancellable pipe reads and allows one second for EOF, so a surviving
+pipe writer cannot block shutdown indefinitely. Cleanup errors make `stop` fail rather than report success. Uninterruptible kernel
 I/O or denied signals can prevent cleanup; the time limit bounds waiting, not the
 kernel's ability to terminate a process.
 

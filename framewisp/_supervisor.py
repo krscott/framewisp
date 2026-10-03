@@ -41,7 +41,8 @@ def enable_ownership() -> None:
 
 def reap(app: subprocess.Popen[bytes]) -> list[int]:
     reaped: list[int] = []
-    while True:
+    # Return to the supervisor loop even if a busy app keeps producing zombies.
+    for _ in range(256):
         try:
             pid, status = os.waitpid(-1, os.WNOHANG)
         except ChildProcessError:
@@ -51,37 +52,50 @@ def reap(app: subprocess.Popen[bytes]) -> list[int]:
         reaped.append(pid)
         if pid == app.pid:
             app.returncode = os.waitstatus_to_exitcode(status)
+    return reaped
 
 
 def cleanup(app: subprocess.Popen[bytes]) -> None:
     deadline = time.monotonic() + TERM_SECONDS + KILL_SECONDS
     kill_at = deadline - KILL_SECONDS
     terminated: set[int] = set()
+    failures: dict[int, str] = {}
     while owned := children():
         now = time.monotonic()
         if now >= deadline:
             raise RuntimeError(
                 f"Cleanup exceeded {TERM_SECONDS + KILL_SECONDS:g}s; "
-                f"supervisor PID {os.getpid()}, surviving child PIDs {owned}. "
+                f"supervisor PID {os.getpid()}, app PID {app.pid}, "
+                f"surviving child PIDs {owned}, signal failures {failures}. "
                 "Inspect these processes for blocked kernel I/O or denied signals."
             )
         for pid in owned:
+            if time.monotonic() >= deadline:
+                break
             if now >= kill_at or pid not in terminated:
-                descriptor = os.pidfd_open(pid)
                 try:
+                    descriptor = os.pidfd_open(pid)
                     try:
-                        signal.pidfd_send_signal(
-                            descriptor,
-                            signal.SIGKILL if now >= kill_at else signal.SIGTERM,
-                        )
-                    except ProcessLookupError:
-                        pass
-                finally:
-                    os.close(descriptor)
-                terminated.add(pid)
+                        try:
+                            signal.pidfd_send_signal(
+                                descriptor,
+                                signal.SIGKILL if now >= kill_at else signal.SIGTERM,
+                            )
+                        except ProcessLookupError:
+                            pass
+                    finally:
+                        os.close(descriptor)
+                    terminated.add(pid)
+                    failures.pop(pid, None)
+                except OSError as error:
+                    # One denied signal must not prevent killing other children.
+                    failures[pid] = str(error)
         # Killing parents reparents helpers here, including double-forked daemons
         # and descendants that are themselves subreapers. Re-scan until empty.
-        terminated.difference_update(reap(app))
+        reaped = reap(app)
+        terminated.difference_update(reaped)
+        for pid in reaped:
+            failures.pop(pid, None)
         time.sleep(0.01)
 
 
@@ -119,13 +133,19 @@ def supervise(connection: socket.socket, command: list[str]) -> None:
                 cleanup(app)
                 send({"returncode": app.returncode})
             except (OSError, RuntimeError) as error:
-                send({"error": str(error)})
+                send(
+                    {
+                        "error": f"Cleanup failed: supervisor PID {os.getpid()}, "
+                        f"app PID {app.pid}: {error}. Check procfs access and signal permissions."
+                    }
+                )
         send({"done": True})
 
 
 if __name__ == "__main__":
     # A terminal signal must not bypass cleanup. The runner sends stop over the
     # private socket; its SIGKILL closes that socket too.
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     signal.signal(signal.SIGINT, lambda signum, frame: None)
     signal.signal(signal.SIGTERM, lambda signum, frame: None)
     with socket.socket(fileno=int(sys.argv[1])) as control:

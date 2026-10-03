@@ -53,7 +53,10 @@ class OwnedProcess:
     def poll(self) -> int | None:
         self.receive()
         if self.errors:
-            raise SessionError(f"{'; '.join(self.errors)}; log: {self.log}")
+            raise SessionError(
+                f"{'; '.join(self.errors)}; supervisor PID {self.supervisor.pid}, "
+                f"app PID {self.pid}, log: {self.log}"
+            )
         return self.returncode
 
     def close(self) -> None:
@@ -73,7 +76,10 @@ class OwnedProcess:
                 self.receive(min(remaining, 0.1))
             self.supervisor.wait(timeout=max(0.01, deadline - time.monotonic()))
             if self.errors:
-                raise SessionError(f"{'; '.join(self.errors)}; log: {self.log}")
+                raise SessionError(
+                    f"{'; '.join(self.errors)}; supervisor PID {self.supervisor.pid}, "
+                    f"app PID {self.pid}, log: {self.log}"
+                )
         finally:
             self.connection.close()
 
