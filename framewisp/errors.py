@@ -13,9 +13,17 @@ from typing import cast
 class SessionError(RuntimeError):
     """An expected operational failure that the CLI can report without a traceback."""
 
-    def __init__(self, message: str, *, returncode: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int | None = None,
+        input_message: str | None = None,
+    ):
         super().__init__(message)
         self.returncode = returncode
+        # Only supply diagnostics constructed without literal or encoded input.
+        self.input_message = input_message
 
 
 SOCKET_ACCESS_HINT = (
@@ -122,14 +130,21 @@ def display_command(
         raise
     except (OSError, subprocess.TimeoutExpired) as error:
         detail = type(error).__name__ if omit_content else str(error)
-        raise SessionError(f"{context}: {detail}\n{SOCKET_ACCESS_HINT}") from None
+        message = f"{context}: {detail}\n{SOCKET_ACCESS_HINT}"
+        raise SessionError(
+            message, input_message=message if omit_content else None
+        ) from None
     if result.returncode:
         diagnostic = (
             "Input diagnostics omitted." if omit_content else result.stderr.strip()
         )
+        message = (
+            f"{context} (exit {result.returncode}):\n{diagnostic}\n{SOCKET_ACCESS_HINT}"
+        )
         raise SessionError(
-            f"{context} (exit {result.returncode}):\n{diagnostic}\n{SOCKET_ACCESS_HINT}",
+            message,
             returncode=result.returncode,
+            input_message=message if omit_content else None,
         )
     if result.stderr and not omit_content:
         print(result.stderr, end="", file=sys.stderr)

@@ -81,6 +81,14 @@ def test_input_error_keeps_structured_exit_code_only() -> None:
         )
         == "SessionError: input details omitted; exit 7"
     )
+    assert (
+        input_error(
+            "type",
+            SessionError(text, input_message="Display connection failed"),
+            retain_input_content=False,
+        )
+        == "SessionError: Display connection failed"
+    )
 
 
 @pytest.mark.parametrize("retain", [False, True])

@@ -37,7 +37,7 @@ def type_text(
         char for char in dict.fromkeys(text) if not char.isascii() and char not in codes
     ]
     if len(codes) + len(characters) > MAX_UNICODE_CHARACTERS:
-        raise SessionError(UNICODE_CAPACITY_ERROR)
+        raise SessionError(UNICODE_CAPACITY_ERROR, input_message=UNICODE_CAPACITY_ERROR)
     # Upper US keycodes, excluding the modifier aliases. Numeric xdotool codes
     # avoid its temporary Unicode remappings, which lose queued characters.
     available = [

@@ -18,6 +18,8 @@ from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Literal, TypedDict, cast
 
+from framewisp.errors import SessionError
+
 
 def retained_parameters(
     action: str, parameters: dict[str, object], *, retain_input_content: bool
@@ -50,6 +52,8 @@ def input_error(
         return str(error)
     if isinstance(error, InterruptedError):
         return "Input cancelled; caller disconnected or session stopped."
+    if isinstance(error, SessionError) and error.input_message is not None:
+        return f"{type(error).__name__}: {error.input_message}"
     details = "input details omitted"
     returncode = getattr(error, "returncode", None)
     if isinstance(returncode, int):
