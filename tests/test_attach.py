@@ -15,9 +15,11 @@ from threading import Event
 
 import pytest
 
-from framewisp.attach import KEYCODES, AttachedInput
+from framewisp.attach import KEYCODES, AttachedInput, run_attachment
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
+from framewisp.errors import SessionError
+from framewisp.ownership import recover_session, session_lease, write_journal
 from framewisp.portal import DesktopPortal
 
 
@@ -260,7 +262,7 @@ def test_pending_consent_reserves_session(
         check=False,
     )
     assert duplicate.returncode == 1
-    assert "already exists" in duplicate.stderr
+    assert "still live" in duplicate.stderr
     assert metadata.read_text() == original
     assert attach_process.poll() is None
     assert detach_desktop() == 0
@@ -527,3 +529,29 @@ def test_invalid_session_metadata_fails_clearly(
     (tmp_path / "session.json").write_text(state)
     assert request_attached(tmp_path, "key", {"chord": "a"}) == 1
     assert "Cannot use attached session" in capsys.readouterr().err
+
+
+def test_attachment_refuses_headless_ownership(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    session = tmp_path / "session"
+    session.mkdir()
+    with session_lease(session):
+        assert run_attachment(session, None) == 1
+        assert "still live" in capsys.readouterr().err
+    write_journal(session, None)
+    assert run_attachment(session, None) == 1
+    assert "recover first" in capsys.readouterr().err
+    assert not (session / "session.json").exists()
+    recover_session(session)
+
+
+def test_recovery_refuses_live_attachment(
+    attach_process: subprocess.Popen[str], tmp_path: Path
+) -> None:
+    state = tmp_path / "session" / "session.json"
+    before = state.read_bytes()
+    with pytest.raises(SessionError, match="still live"):
+        recover_session(tmp_path / "session")
+    assert state.read_bytes() == before
+    assert attach_process.poll() is None

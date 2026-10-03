@@ -97,18 +97,22 @@ def managed_process(
         destination = (
             output if output is not None else stack.enter_context(log.open("wb"))
         )
+        supervisor_env = env.copy()
+        lease = int(supervisor_env.pop("FRAMEWISP_OWNER_FD", "-1"))
+        runtime = supervisor_env.pop("FRAMEWISP_OWNER_RUNTIME", "")
         supervisor = subprocess.Popen(
             [
                 sys.executable,
                 str(Path(__file__).with_name("_supervisor.py")),
                 str(child.fileno()),
+                runtime,
                 *command,
             ],
-            env=env,
+            env=supervisor_env,
             stdin=subprocess.DEVNULL,
             stdout=destination,
             stderr=subprocess.STDOUT,
-            pass_fds=(child.fileno(),),
+            pass_fds=(child.fileno(),) + ((lease,) if lease >= 0 else ()),
             start_new_session=True,
         )
         child.close()

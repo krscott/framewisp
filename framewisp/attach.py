@@ -27,6 +27,7 @@ from gi.repository import GLib, Gst
 
 from framewisp.captions import input_error
 from framewisp.desktop import reserve_desktop, write_state
+from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
 
 
@@ -283,6 +284,23 @@ def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
 
 def run_attachment(
     session: Path, terminal: int | None, *, retain_input_content: bool = False
+) -> int:
+    """Reserve session metadata after the CLI completes interactive consent."""
+    session = session.resolve()
+    try:
+        session.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with session_lease(session):
+            refuse_abandoned_ownership(session)
+            return _run_attachment(
+                session, terminal, retain_input_content=retain_input_content
+            )
+    except (OSError, RuntimeError) as failure:
+        print(f"Could not attach: {failure}", file=sys.stderr)
+        return 1
+
+
+def _run_attachment(
+    session: Path, terminal: int | None, *, retain_input_content: bool
 ) -> int:
     """Own all desktop access. The CLI must complete interactive consent first."""
     stop, ready = Event(), Event()

@@ -99,21 +99,30 @@ def cleanup(app: subprocess.Popen[bytes]) -> None:
         time.sleep(0.01)
 
 
-def supervise(connection: socket.socket, command: list[str]) -> None:
+def supervise(
+    connection: socket.socket, command: list[str], runtime: Path | None = None
+) -> None:
     def send(value: dict[str, object]) -> None:
         try:
             connection.sendall(json.dumps(value).encode() + b"\n")
         except (BrokenPipeError, ConnectionResetError):
             pass  # Runner loss still requires descendant cleanup.
 
+    record = runtime / f"owner-{os.getpid()}.json" if runtime else None
     app: subprocess.Popen[bytes] | None = None
     try:
         enable_ownership()
+        if record is not None:
+            record.write_text(
+                json.dumps({"supervisor": os.getpid(), "command": command})
+            )
         # Only the supervisor receives runner stop requests. The app retains
         # default signal handlers and never inherits the control socket.
         app = subprocess.Popen(
             command, stdin=subprocess.DEVNULL, start_new_session=True
         )
+        if record is not None:
+            record.write_text(json.dumps({"supervisor": os.getpid(), "app": app.pid}))
         send({"pid": app.pid})
         while True:
             reap(app)
@@ -131,14 +140,20 @@ def supervise(connection: socket.socket, command: list[str]) -> None:
         if app is not None:
             try:
                 cleanup(app)
+                if record is not None:
+                    record.unlink(missing_ok=True)
                 send({"returncode": app.returncode})
             except (OSError, RuntimeError) as error:
+                if record is not None:
+                    record.write_text(json.dumps({"error": str(error)}))
                 send(
                     {
                         "error": f"Cleanup failed: supervisor PID {os.getpid()}, "
                         f"app PID {app.pid}: {error}. Check procfs access and signal permissions."
                     }
                 )
+        elif record is not None:
+            record.unlink(missing_ok=True)
         send({"done": True})
 
 
@@ -149,4 +164,4 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, lambda signum, frame: None)
     signal.signal(signal.SIGTERM, lambda signum, frame: None)
     with socket.socket(fileno=int(sys.argv[1])) as control:
-        supervise(control, sys.argv[2:])
+        supervise(control, sys.argv[3:], Path(sys.argv[2]) if sys.argv[2] else None)

@@ -143,6 +143,9 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "name",
     [
+        ".headless.lock",
+        ".headless-owner.json",
+        ".headless-owner.tmp",
         "session.json",
         ".session.json",
         "app-exit.json",
