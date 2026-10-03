@@ -179,3 +179,13 @@ def test_runtime_replacement_refused(tmp_path: Path) -> None:
     shutil.rmtree(runtime)
     original.rename(runtime)
     recover_session(tmp_path)
+
+
+def test_writable_session_refused_before_creating_lock(tmp_path: Path) -> None:
+    tmp_path.chmod(0o777)
+    try:
+        with pytest.raises(SessionError, match="Unsafe session directory"):
+            recover_session(tmp_path)
+        assert not (tmp_path / LOCK).exists()
+    finally:
+        tmp_path.chmod(0o700)

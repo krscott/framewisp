@@ -737,7 +737,8 @@ Recovery never signals PIDs from metadata or follows its runtime path. Ownership
 is bound to the session directory's device and inode, so copied metadata cannot
 recover the original run. Keep `.headless.lock` in place, including between runs;
 deleting or replacing ownership files while processes are live breaks the lock
-protocol. Use a private session directory. Same-user programs that deliberately
+protocol. Use a private session directory. Startup and recovery reject session
+directories owned by another user or writable by the group or others. Same-user programs that deliberately
 replace files or remove ownership records are outside this protocol's protection.
 
 If a supervisor dies or cannot finish cleanup, recovery fails and lists the

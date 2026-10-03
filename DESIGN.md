@@ -61,7 +61,8 @@ environment against the source file. The skill covers the public Nix URL fallbac
 all commands and options, GUI workflows, user-started attachment, and permission
 before filing issues.
 
-1. Create or reuse the requested session directory. Acquire a nonblocking exclusive
+1. Create or reuse the requested session directory. Reject directories not owned
+   by the caller or writable by group/others. Acquire a nonblocking exclusive
    flock on the persistent `.headless.lock` (regular, single-link, private file,
    opened with O_NOFOLLOW). Refuse an existing `session.json` or ownership journal;
    ask the caller to recover abandoned ownership first.

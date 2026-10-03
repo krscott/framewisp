@@ -28,6 +28,15 @@ def runtime_path(session: Path) -> Path:
 
 @contextmanager
 def session_lease(session: Path) -> Generator[int, None, None]:
+    directory = session.lstat()
+    if (
+        not stat.S_ISDIR(directory.st_mode)
+        or directory.st_uid != os.getuid()
+        or directory.st_mode & 0o022
+    ):
+        raise SessionError(
+            f"Unsafe session directory: {session}. Use a directory you own without group or other write permission (chmod 700)."
+        )
     descriptor = os.open(session / LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         info = os.fstat(descriptor)
