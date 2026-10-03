@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import time
 from io import BytesIO
 from pathlib import Path
@@ -8,13 +9,18 @@ import pytest
 
 from framewisp.captions import (
     Caption,
+    InputEvent,
+    caption_text,
     captions_for_clip,
     capture_origin,
     filter_recorder_output,
+    input_error,
     log_input,
     recorder_output,
+    retained_parameters,
     subtitle_script,
 )
+from framewisp.errors import SessionError
 
 
 def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
@@ -49,9 +55,122 @@ def test_log_records_nonzero_and_exception_outcomes(tmp_path: Path) -> None:
     assert first[0]["id"] == first[1]["id"]
     assert first[1]["time"] >= first[0]["time"]
     assert first[1]["returncode"] == 1
-    assert second[1]["error"] == "RuntimeError: input failed"
-    assert second[0]["parameters"]["text"] == "café 日本語 😀"
+    assert second[1]["error"] == "RuntimeError: input details omitted"
+    assert "text" not in second[0]["parameters"]
     assert second[0]["id"] != first[0]["id"]
+
+
+def test_pointer_failure_keeps_exception_type(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        with log_input(tmp_path, "click", {"x": 1, "y": 2}):
+            raise ValueError("bad coordinates")
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "inputs.jsonl").read_text().splitlines()
+    ]
+    assert events[-1]["error"] == "ValueError: bad coordinates"
+
+
+def test_input_error_keeps_structured_exit_code_only() -> None:
+    text = "secret (exit 123456)"
+    for error in [RuntimeError(text), SessionError(text)]:
+        assert "123456" not in input_error("type", error, retain_input_content=False)
+    assert (
+        input_error(
+            "type", SessionError(text, returncode=7), retain_input_content=False
+        )
+        == "SessionError: input details omitted; exit 7"
+    )
+    assert (
+        input_error(
+            "type",
+            SessionError(text, input_message="Display connection failed"),
+            retain_input_content=False,
+        )
+        == "SessionError: Display connection failed"
+    )
+
+
+@pytest.mark.parametrize("retain", [False, True])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        RuntimeError("café 日本語 😀"),
+        InterruptedError("café 日本語 😀"),
+        subprocess.CalledProcessError(7, ["wtype", "café 日本語 😀"]),
+    ],
+)
+def test_content_retention_and_captions(
+    tmp_path: Path, retain: bool, failure: BaseException | None
+) -> None:
+    text = "café 日本語 😀"
+
+    def perform() -> None:
+        with log_input(
+            tmp_path,
+            "type",
+            {"text": text, "interval": 0.1},
+            retain_input_content=retain,
+        ) as result:
+            if failure is not None:
+                raise failure
+            result.returncode = 0
+
+    if failure is None:
+        perform()
+    else:
+        with pytest.raises(type(failure)):
+            perform()
+    raw = (tmp_path / "inputs.jsonl").read_text()
+    events = [json.loads(line) for line in raw.splitlines()]
+    assert (text in raw) is retain
+    assert all(event["parameters"]["interval"] == 0.1 for event in events)
+    captions = captions_for_clip(
+        tmp_path / "inputs.jsonl",
+        origin=events[0]["time"] - 0.1,
+        stopped=events[-1]["time"] + 1,
+    )
+    assert (text in captions[0].text) is retain
+    assert ("(failed)" in captions[0].text) is (failure is not None)
+    if isinstance(failure, subprocess.CalledProcessError):
+        assert "7" in events[-1]["error"]
+        assert events[-1]["returncode"] == 7
+
+
+@pytest.mark.parametrize(
+    "chord,visible",
+    [
+        ("a", False),
+        ("Shift+a", False),
+        ("7", False),
+        ("Shift+7", False),
+        ("Space", False),
+        ("Shift+Space", False),
+        ("Ctrl+a", True),
+        ("Alt+7", True),
+        ("Return", True),
+        ("Shift+Left", True),
+    ],
+)
+@pytest.mark.parametrize("retain", [False, True])
+def test_literal_key_retention(chord: str, visible: bool, retain: bool) -> None:
+    p = retained_parameters("key", {"chord": chord}, retain_input_content=retain)
+    assert ("chord" in p) is (visible or retain)
+    event: InputEvent = {
+        "id": "test",
+        "event": "start",
+        "time": 1,
+        "action": "key",
+        "parameters": p,
+        "returncode": 0,
+        "error": None,
+    }
+    assert caption_text(event) == (
+        chord
+        if visible or retain
+        else ("Shift+Key" if chord.startswith("Shift") else "Key")
+    )
 
 
 def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(

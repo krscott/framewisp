@@ -18,6 +18,48 @@ from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Literal, TypedDict, cast
 
+from framewisp.errors import SessionError
+
+
+def retained_parameters(
+    action: str, parameters: dict[str, object], *, retain_input_content: bool
+) -> dict[str, object]:
+    """Keep shortcuts and action metadata without retaining literal keystrokes."""
+    p = parameters.copy()
+    if retain_input_content:
+        return p
+    if action == "type":
+        p.pop("text", None)
+    elif action == "key":
+        chord = cast(str, p.pop("chord"))
+        *modifiers, key = chord.lower().split("+")
+        # Ctrl/Alt chords describe shortcuts. Shift alone can still type text.
+        if {"ctrl", "alt"}.intersection(modifiers) or key not in {
+            *"abcdefghijklmnopqrstuvwxyz0123456789",
+            "space",
+        }:
+            p["chord"] = chord
+        else:
+            p["modifier"] = modifiers
+    return p
+
+
+def input_error(
+    action: str, error: BaseException, *, retain_input_content: bool
+) -> str:
+    """Backend errors can include text, keysyms, or serialized subprocess arguments."""
+    if retain_input_content or action not in {"type", "key"}:
+        return str(error)
+    if isinstance(error, InterruptedError):
+        return "Input cancelled; caller disconnected or session stopped."
+    if isinstance(error, SessionError) and error.input_message is not None:
+        return f"{type(error).__name__}: {error.input_message}"
+    details = "input details omitted"
+    returncode = getattr(error, "returncode", None)
+    if isinstance(returncode, int):
+        details += f"; exit {returncode}"
+    return f"{type(error).__name__}: {details}"
+
 
 def filter_recorder_output(source: Iterable[bytes], destination: BinaryIO) -> None:
     """Keep diagnostics and the first frame's clock, discarding protocol chatter."""
@@ -107,11 +149,18 @@ class InputResult:
 
 @contextmanager
 def log_input(
-    session: Path, action: str, parameters: dict[str, object]
+    session: Path,
+    action: str,
+    parameters: dict[str, object],
+    *,
+    retain_input_content: bool = False,
 ) -> Generator[InputResult, None, None]:
     """Record command start/end, including failures; these are not app acknowledgements."""
     identifier = uuid.uuid4().hex
     result = InputResult()
+    parameters = retained_parameters(
+        action, parameters, retain_input_content=retain_input_content
+    )
 
     def append(event: Literal["start", "end"]) -> None:
         entry = {
@@ -130,7 +179,15 @@ def log_input(
         yield result
     except BaseException as error:
         # Preserve the exception and traceback while recording why the command ended.
-        result.error = f"{type(error).__name__}: {error}"
+        returncode = getattr(error, "returncode", None)
+        if isinstance(returncode, int):
+            result.returncode = returncode
+        detail = input_error(action, error, retain_input_content=retain_input_content)
+        result.error = (
+            f"{type(error).__name__}: {detail}"
+            if retain_input_content or action not in {"type", "key"}
+            else detail
+        )
         raise
     finally:
         append("end")
@@ -156,9 +213,9 @@ def caption_text(event: InputEvent) -> str:
     modifiers = cast(list[str], p.get("modifier", []))
     prefix = "".join(f"{str(modifier).title()}+" for modifier in modifiers)
     if action == "type":
-        text = f"Type: {p['text']}"
+        text = f"Type: {p['text']}" if "text" in p else "Type text"
     elif action == "key":
-        text = str(p["chord"])
+        text = str(p["chord"]) if "chord" in p else f"{prefix}Key"
     elif action == "drag":
         text = f"{prefix}{p['button']} drag ({p['x1']}, {p['y1']}) to ({p['x2']}, {p['y2']})"
     elif action == "click":
@@ -238,7 +295,7 @@ Format: Layer, Start, End, Style, Text
 """
     for caption in captions:
         # ASS interprets braces and backslashes as formatting. Use visible fullwidth
-        # equivalents in captions; the separate input log retains the original text.
+        # equivalents in captions; opted-in input logs retain the original text.
         text = caption.text.translate(str.maketrans("\\{}", "＼｛｝"))
         script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{text}\n"
     return script

@@ -13,6 +13,18 @@ from typing import cast
 class SessionError(RuntimeError):
     """An expected operational failure that the CLI can report without a traceback."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int | None = None,
+        input_message: str | None = None,
+    ):
+        super().__init__(message)
+        self.returncode = returncode
+        # Only supply diagnostics constructed without literal or encoded input.
+        self.input_message = input_message
+
 
 SOCKET_ACCESS_HINT = (
     "The runner and control commands both need access to the private display sockets. "
@@ -73,8 +85,10 @@ def display_command(
     display: str | None = None,
     input_text: str | None = None,
     cancelled: Callable[[], bool] | None = None,
+    input_content: bool = False,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
+    omit_content = input_content and state.get("retain_input_content") is not True
     context = (
         f"{command[0]} failed for session {session}, display {display or state['wayland_display']}, "
         f"runtime directory {state['runtime_directory']}"
@@ -115,11 +129,23 @@ def display_command(
     except InterruptedError:
         raise
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise SessionError(f"{context}: {error}\n{SOCKET_ACCESS_HINT}") from None
-    if result.returncode:
+        detail = type(error).__name__ if omit_content else str(error)
+        message = f"{context}: {detail}\n{SOCKET_ACCESS_HINT}"
         raise SessionError(
-            f"{context} (exit {result.returncode}):\n{result.stderr.strip()}\n{SOCKET_ACCESS_HINT}"
+            message, input_message=message if omit_content else None
+        ) from None
+    if result.returncode:
+        diagnostic = (
+            "Input diagnostics omitted." if omit_content else result.stderr.strip()
         )
-    if result.stderr:
+        message = (
+            f"{context} (exit {result.returncode}):\n{diagnostic}\n{SOCKET_ACCESS_HINT}"
+        )
+        raise SessionError(
+            message,
+            returncode=result.returncode,
+            input_message=message if omit_content else None,
+        )
+    if result.stderr and not omit_content:
         print(result.stderr, end="", file=sys.stderr)
     return 0

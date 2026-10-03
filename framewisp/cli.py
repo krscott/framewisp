@@ -108,13 +108,19 @@ def main() -> None:
         help="JSON file with actions and optional capture",
     )
 
-    commands.add_parser(
+    attach = commands.add_parser(
         "attach", help="share an existing desktop through its permission dialog"
     )
 
     run = commands.add_parser(
         "run", help="run an app until it exits or you interrupt it"
     )
+    for session_parser in (run, attach):
+        session_parser.add_argument(
+            "--retain-input-content",
+            action="store_true",
+            help="retain typed text and literal keys in input logs and captions for this entire session (default: omit); screen content is never redacted",
+        )
     run.add_argument(
         "--x11", action="store_true", help="run the app on a private Xwayland display"
     )
@@ -351,7 +357,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
         # Desktop portal imports are only needed by the foreground attach owner.
         from framewisp.attach import attach_session
 
-        result = attach_session(session)
+        result = attach_session(session, retain_input_content=args.retain_input_content)
     elif args.action == "run":
         command: list[str] = args.command
         if command[:1] == ["--"]:
@@ -363,6 +369,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             captions=not args.no_captions,
             size=(args.width, args.height),
             x11=args.x11,
+            retain_input_content=args.retain_input_content,
         )
     elif args.action in {"record-start", "record-stop", "status", "stop"}:
         if attached and args.action in {"status", "stop"}:
@@ -403,7 +410,13 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             if key not in {"session", "action"}
         }
         if attached:
-            with log_input(session, args.action, parameters) as action:
+            state = json.loads((session / "session.json").read_text())
+            with log_input(
+                session,
+                args.action,
+                parameters,
+                retain_input_content=state.get("retain_input_content") is True,
+            ) as action:
                 result = request_attached(session, args.action, parameters)
                 action.returncode = result
         else:

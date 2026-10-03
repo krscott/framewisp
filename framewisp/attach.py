@@ -25,6 +25,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from framewisp.captions import input_error
 from framewisp.desktop import reserve_desktop, write_state
 from framewisp.portal import DesktopPortal, dispatch_events
 
@@ -236,7 +237,7 @@ def foreground_terminal(descriptor: int) -> bool:
         return False
 
 
-def attach_session(session: Path) -> int:
+def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
     if (
         not sys.stdin.isatty()
         or not sys.stdout.isatty()
@@ -275,10 +276,14 @@ def attach_session(session: Path) -> int:
             file=sys.stderr,
         )
         return 1
-    return run_attachment(session, sys.stdin.fileno())
+    return run_attachment(
+        session, sys.stdin.fileno(), retain_input_content=retain_input_content
+    )
 
 
-def run_attachment(session: Path, terminal: int | None) -> int:
+def run_attachment(
+    session: Path, terminal: int | None, *, retain_input_content: bool = False
+) -> int:
     """Own all desktop access. The CLI must complete interactive consent first."""
     stop, ready = Event(), Event()
     lock = Lock()
@@ -302,6 +307,7 @@ def run_attachment(session: Path, terminal: int | None) -> int:
         assert portal is not None and inputs is not None
         with connection:
             status, error = 0, None
+            action: str = ""
             try:
                 connection.settimeout(2)
                 with connection.makefile("r") as source:
@@ -313,7 +319,7 @@ def run_attachment(session: Path, terminal: int | None) -> int:
                     raise ValueError(
                         "Attached session is disconnected. Ask the user to attach again."
                     )
-                action: str = request["action"]
+                action = request["action"]
                 parameters: InputParameters = request["parameters"]
                 if not ready.is_set():
                     raise ValueError("Attach is waiting for desktop permission.")
@@ -337,13 +343,19 @@ def run_attachment(session: Path, terminal: int | None) -> int:
                 finally:
                     lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
-                status, error = 1, str(failure)
+                status, error = 1, input_error(
+                    action, failure, retain_input_content=retain_input_content
+                )
             except BaseException as failure:
-                status, error = 1, str(failure)
+                status, error = 1, input_error(
+                    action, failure, retain_input_content=retain_input_content
+                )
                 failures.append(failure)
                 stop.set()
                 portal.close()
-                traceback.print_exc()
+                traceback.print_exception(
+                    RuntimeError(error).with_traceback(failure.__traceback__)
+                )
             try:
                 connection.sendall(
                     (json.dumps({"status": status, "error": error}) + "\n").encode()
@@ -394,6 +406,7 @@ def run_attachment(session: Path, terminal: int | None) -> int:
                         state,
                         {
                             "kind": "attached",
+                            "retain_input_content": retain_input_content,
                             "attachment": attachment,
                             "runtime_directory": str(directory),
                             "processes": {"attach": os.getpid()},
