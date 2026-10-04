@@ -183,12 +183,16 @@ def test_no_host_diagnostic(
     assert not indicator.stop.is_set()
 
 
+@pytest.mark.parametrize("delay_registration", [False, True])
 def test_watcher_registration_and_restart(
-    buses: tuple[Gio.DBusConnection, Gio.DBusConnection], indicator: SharingIndicator
+    buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
+    indicator: SharingIndicator,
+    delay_registration: bool,
 ) -> None:
     owner, host = buses
     registrations: list[str] = []
     host_available = False
+    pending: list[Gio.DBusMethodInvocation] = []
     info = Gio.DBusNodeInfo.new_for_xml(
         """<node><interface name="org.kde.StatusNotifierWatcher">
       <method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
@@ -207,7 +211,10 @@ def test_watcher_registration_and_restart(
         invocation: Gio.DBusMethodInvocation,
     ) -> None:
         registrations.append(sender + parameters.unpack()[0])
-        invocation.return_value(None)
+        if delay_registration:
+            pending.append(invocation)
+        else:
+            invocation.return_value(None)
 
     def property(
         bus: Gio.DBusConnection, sender: str, path: str, interface: str, name: str
@@ -235,6 +242,37 @@ def test_watcher_registration_and_restart(
                     lambda: indicator.proxy is not None and indicator.available is False
                 )
                 assert not registrations
+                host_available = True
+                host.emit_signal(
+                    None,
+                    "/StatusNotifierWatcher",
+                    WATCHER,
+                    "StatusNotifierHostRegistered",
+                    None,
+                )
+            if delay_registration:
+                until(lambda: len(pending) == 1)
+                assert indicator.registering and not indicator.registered
+                host_available = False
+                host.emit_signal(
+                    None,
+                    "/StatusNotifierWatcher",
+                    WATCHER,
+                    "StatusNotifierHostRegistered",
+                    None,
+                )
+
+                def host_is_absent() -> bool:
+                    assert indicator.proxy is not None
+                    value = indicator.proxy.get_cached_property(
+                        "IsStatusNotifierHostRegistered"
+                    )
+                    return value is not None and not value.unpack()
+
+                until(host_is_absent)
+                pending.pop().return_value(None)
+                until(lambda: indicator.registered)
+                assert indicator.available is False
                 host_available = True
                 host.emit_signal(
                     None,

@@ -65,6 +65,7 @@ class SharingIndicator:
         self.proxy: Gio.DBusProxy | None = None
         self.closed = False
         self.registered = False
+        self.registering = False
         self.generation = 0
         self.available: bool | None = None
         pixmaps = icon_pixmaps()
@@ -180,6 +181,7 @@ class SharingIndicator:
         self.generation += 1
         self.proxy = None
         self.registered = False
+        self.registering = False
         if not self.closed:
             self.report(False)
 
@@ -194,15 +196,19 @@ class SharingIndicator:
         if self.registered:
             self.report(True)
             return
-        self.registered = True
+        if self.registering:
+            return
+        self.registering = True
         generation = self.generation
 
         def completed(source: object, result: Gio.AsyncResult, data: object) -> None:
             if self.closed or generation != self.generation:
                 return
+            self.registering = False
             try:
                 proxy.call_finish(result)
-                self.report(True)
+                self.registered = True
+                self.check_host()
             except GLib.Error:
                 self.registered = False
                 self.report(False)
