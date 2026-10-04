@@ -61,7 +61,10 @@ def conflicting_home(tmp_path: Path) -> Path:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("x11", [False, True], ids=["wayland", "x11"])
-def test_fresh_real_app(tmp_path: Path, conflicting_home: Path, x11: bool) -> None:
+@pytest.mark.parametrize("demo", [False, True], ids=["native-gtk", "bundled-demo"])
+def test_fresh_real_app(
+    tmp_path: Path, conflicting_home: Path, x11: bool, demo: bool
+) -> None:
     app = os.environ.get("FRAMEWISP_TEST_GTK_APP")
     assert app and Path(app).is_file(), "Run inside nix develop for GTK's demo app"
     host = conflicting_home
@@ -96,6 +99,8 @@ def test_fresh_real_app(tmp_path: Path, conflicting_home: Path, x11: bool) -> No
         command.extend(
             ["--", sys.executable, str(Path(__file__).with_name("profile_probe.py"))]
         )
+        if demo:
+            command.append("--demo")
         env = os.environ | {
             "HOME": str(host),
             "XDG_CONFIG_HOME": str(config),
@@ -109,7 +114,10 @@ def test_fresh_real_app(tmp_path: Path, conflicting_home: Path, x11: bool) -> No
             "LC_ALL": "C",
             "LANGUAGE": "de",
             "FONTCONFIG_FILE": "/dev/null",
+            "FONTCONFIG_SYSROOT": str(host / "nonexistent-sysroot"),
+            "FC_LANG": "ja",
             "FRAMEWISP_TEST_REPORT": str(report),
+            "FRAMEWISP_TEST_DEMO_FONTS": "" if number == 0 else "/dev/null",
         }
         log = tmp_path / f"runner-{number}.log"
         with log.open("w") as output:
@@ -125,7 +133,13 @@ def test_fresh_real_app(tmp_path: Path, conflicting_home: Path, x11: bool) -> No
                     + "\n"
                     + "\n".join(path.read_text() for path in directory.glob("*.log"))
                 )
-                return report.exists() and "Session ready:" in log.read_text()
+                return (
+                    report.exists()
+                    and "Session ready:" in log.read_text()
+                    and (
+                        not demo or "Demo ready" in (directory / "app.log").read_text()
+                    )
+                )
 
             wait_until(ready)
             state = json.loads((directory / "session.json").read_text())
@@ -143,6 +157,9 @@ def test_fresh_real_app(tmp_path: Path, conflicting_home: Path, x11: bool) -> No
             assert homes[-1].is_relative_to(Path(state["runtime_directory"]))
             assert state["app_profile"] == "fresh"
             time.sleep(1)
+            if demo:
+                # Move focus off the entry so cursor blinking cannot change pixels.
+                cli(directory, "key", "Tab")
             # Move the cursor away from app widgets to avoid hover state.
             cli(directory, "move", "1279", "719")
             capture = tmp_path / f"capture-{number}.png"

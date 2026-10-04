@@ -571,9 +571,9 @@ caption alignment. Framewisp filters the remaining Wayland protocol trace as it
 arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
-and monochrome emoji. Apps inherit font configuration unless you select a fresh
-profile (below). Caption text uses
-fullwidth equivalents for braces and backslashes to prevent subtitle formatting;
+and monochrome emoji. Apps inherit font configuration unless you select a
+[fresh profile](#fresh-app-profiles). Caption text uses fullwidth equivalents
+for braces and backslashes to prevent subtitle formatting;
 opted-in input logs preserve the original characters. Screenshots and recordings
 can still show secrets displayed by apps. Omitting input content does not redact
 screen content or provide a general app-log redaction guarantee. Shell history,
@@ -644,7 +644,8 @@ including an explicit dconf backend override and private service activation.
 It checks fresh preferences,
 font/theme/DPI settings, identical screenshots across conflicting host scale
 settings, private preference writes, unchanged host config, and cleanup. The
-bundled framewisp demo keeps its existing fixed font settings.
+bundled framewisp demo keeps DejaVu Sans 11 and selects the profile's Fontconfig
+file during fresh runs, even when its installed wrapper sets caption fonts.
 
 ## Flatpak game
 

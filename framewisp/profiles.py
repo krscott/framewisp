@@ -24,6 +24,8 @@ def fresh_environment(runtime: Path, env: dict[str, str]) -> dict[str, str]:
         not in {
             "LANGUAGE",
             "FONTCONFIG_PATH",
+            "FONTCONFIG_SYSROOT",
+            "FC_LANG",
             "GSETTINGS_SCHEMA_DIR",
             "DCONF_PROFILE",
             "XENVIRONMENT",
@@ -43,6 +45,7 @@ def fresh_environment(runtime: Path, env: dict[str, str]) -> dict[str, str]:
         LC_ALL="C.UTF-8",
         FONTCONFIG_FILE=fonts,
         FRAMEWISP_FONTCONFIG_FILE=fonts,
+        FRAMEWISP_APP_PROFILE="fresh",
         GSETTINGS_BACKEND="keyfile",
         GTK_THEME="Adwaita",
         GDK_BACKEND="wayland",
