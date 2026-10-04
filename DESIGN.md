@@ -622,6 +622,30 @@ process death also closes that connection. No access-owning child processes exis
 SIGINT, SIGTERM, SIGHUP, and SIGTSTP request shutdown. Loss of terminal foreground
 ownership or the portal's Closed signal also stops access.
 
+`tray.py` exports org.kde.StatusNotifierItem at /StatusNotifierItem and a static
+com.canonical.dbusmenu at /Menu on the owner's private portal bus connection,
+after portal approval and input setup. It supplies a 32x32 ARGB monitor icon,
+active-sharing title and tooltip, and one enabled "Stop sharing" menu item.
+The menu sets the same stop Event used by signals and portal revocation. Pending
+input cancels through the existing worker cleanup; no app process is stopped.
+Shutdown unregisters the objects before closing the portal connection. Forced
+owner death closes the connection and removes both sharing access and the item.
+There is no tray helper process or new runtime dependency. Gio is already packaged
+in the installed Nix wrapper and development environment.
+
+The indicator watches org.kde.StatusNotifierWatcher and registers its object path
+only when IsStatusNotifierHostRegistered is true. Watcher appearance, disappearance,
+and property/signal changes update the diagnostic; watcher restarts register the
+item again. Proxy setup and registration use asynchronous calls so an unresponsive
+tray watcher cannot block input cancellation or terminal checks. Registration
+errors and missing hosts report the terminal/shortcut stop methods without ending
+sharing. Successful registration reports no promise of visible placement.
+KDE Plasma, COSMIC's status area, and GNOME with an enabled compatible
+StatusNotifierItem/AppIndicator extension are the supported host configurations.
+The host owns placement, overflow, auto-hide, and visibility. The independent
+emergency detach command remains necessary for suspended or unresponsive owners.
+Desktop verification status and required setup live in docs/desktop-sharing-tray.md.
+
 An exclusive flock on $XDG_RUNTIME_DIR/framewisp/desktop.lock limits desktop access
 to one owner per user runtime directory, including while permission is pending.
 The directory must be private and owned by the user. The lock inode is never

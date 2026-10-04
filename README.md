@@ -334,14 +334,27 @@ your live pointer and keyboard focus. Keyboard input goes to the focused app,
 even if that app is on another monitor. Screenshots include everything visible
 on the shared monitor.
 
+Once sharing becomes active, framewisp registers a tray icon with the label
+"framewisp desktop sharing is active" and a "Stop sharing" menu item. Open its
+menu to end access. Supported tray hosts are KDE Plasma, COSMIC's status area,
+and GNOME with an enabled StatusNotifierItem/AppIndicator extension (for example,
+AppIndicator and KStatusNotifierItem Support). Framewisp uses its existing Gio
+runtime dependency; no root access or extra indicator library is required.
+The desktop controls icon placement, overflow, panel auto-hide, and visibility.
+Registration does not guarantee a visible icon. If no compatible host is available,
+the terminal reports that the indicator is unavailable and gives the shortcut
+and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a tray
+icon: its menu requires a responsive owner. The indicator disappears when the
+attachment ends or its owner exits; a new attachment registers a new item.
+See [tray verification](docs/desktop-sharing-tray.md) for setup and verification status.
+
 Ctrl+Alt+Escape runs `framewisp --detach`. Ctrl+C, loss of the controlling terminal,
 pressing Ctrl+Z, or portal revocation also ends access. Detaching from tmux
 or screen can leave that terminal and the attach process running. Use `--detach`
 before disconnecting from a terminal multiplexer. If the attach
 process crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive attach process
-after half a second. It uses Linux 6.5 or newer to identify the socket owner safely. No separate stop-sharing control was visible
-on the tested COSMIC desktop; use the configured shortcut or Ctrl+C.
+after half a second. It uses Linux 6.5 or newer to identify the socket owner safely.
 Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
 open in its current state. Reconnecting requires running `attach` and approving
 the dialog again. Test your binding before handing control to an agent.

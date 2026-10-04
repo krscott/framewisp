@@ -29,6 +29,7 @@ from framewisp.captions import input_error
 from framewisp.desktop import reserve_desktop, write_state
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
+from framewisp.tray import UNAVAILABLE, SharingIndicator
 
 
 class InputParameters(TypedDict, total=False):
@@ -309,6 +310,7 @@ def _run_attachment(
     failures: list[BaseException] = []
     portal: DesktopPortal | None = None
     inputs: AttachedInput | None = None
+    indicator: SharingIndicator | None = None
     attachment = uuid.uuid4().hex
     state = session / "session.json"
     owns_state = False
@@ -446,6 +448,12 @@ def _run_attachment(
                     try:
                         portal.open()
                         inputs.wait()
+                        indicator = SharingIndicator(portal.bus, stop)
+                        try:
+                            indicator.start()
+                        except GLib.Error:
+                            indicator.close()
+                            print(UNAVAILABLE, file=sys.stderr, flush=True)
                         ready.set()
                         print(
                             f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
@@ -461,6 +469,8 @@ def _run_attachment(
                             dispatch_events()
                     finally:
                         stop.set()
+                        if indicator is not None:
+                            indicator.close()
                         portal.close()
                         server.join(timeout=0.2)
                         deadline = time.monotonic() + 0.2

@@ -140,6 +140,9 @@ import sys
 import time
 from pathlib import Path
 import framewisp.attach as attach
+from gi.repository import Gio
+test_bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
+test_bus.up()
 root = Path(sys.argv[1])
 class Portal:
     def __init__(self, stop):
@@ -147,6 +150,7 @@ class Portal:
         self.size = (800, 600)
         self.node = 1
         self.closed = False
+        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     def open(self):
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
@@ -160,10 +164,10 @@ class Portal:
     def close(self):
         if not self.closed:
             self.closed = True
+            self.bus.close_sync(None)
             time.sleep(.1)
             (root / 'closed').touch()
 attach.DesktopPortal = Portal
-attach.dispatch_events = lambda: None
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)

@@ -382,6 +382,17 @@ Other processes with access to the attachment's state and control socket can
 issue commands. Portal approval grants desktop access to the attachment; it
 does not authenticate a particular agent.
 
+When sharing is active, the user can open the framewisp tray icon's menu and
+choose "Stop sharing". Its label is "framewisp desktop sharing is active".
+KDE Plasma and COSMIC's status area support the tray protocol; GNOME needs an
+enabled StatusNotifierItem/AppIndicator extension. The desktop controls placement,
+overflow, panel auto-hide, and visibility, so registration does not guarantee a
+visible icon. If no compatible host is available, the attachment terminal reports
+that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
+The indicator ends with the attachment owner; reconnecting needs fresh portal
+approval and creates a new item. Keep emergency shortcuts configured. The tray
+menu needs a responsive owner, while emergency detach can stop a suspended owner.
+
 The stop command is `framewisp --detach`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also
 works during a Shift gesture. Attachment shares the real pointer and keyboard;
