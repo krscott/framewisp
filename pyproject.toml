@@ -59,6 +59,7 @@ show_error_context = true
 [tool.pytest.ini_options]
 markers = [
     "integration: black-box integration tests that require installed executables",
+    "real_apps: opt-in compatibility checks requiring installed Flatpaks",
 ]
 
 [[tool.mypy.overrides]]
