@@ -32,7 +32,7 @@ def buses(
 ) -> Iterator[tuple[Gio.DBusConnection, Gio.DBusConnection]]:
     config = tmp_path / "bus.conf"
     config.write_text(
-        '<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen>'
+        "<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen>"
         '<auth>EXTERNAL</auth><policy context="default">'
         '<allow send_destination="*"/><allow receive_sender="*"/>'
         '<allow own="*"/></policy></busconfig>'
