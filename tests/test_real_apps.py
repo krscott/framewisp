@@ -204,12 +204,21 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
         yield app
     finally:
         pids.update(descendants(process.pid))
-        if process.poll() is None:
-            if app is not None:
-                app.cli("stop")
-            else:
+        try:
+            if process.poll() is None:
+                if app is not None:
+                    app.cli("stop")
+                else:
+                    process.terminate()
+        finally:
+            if process.poll() is None:
                 process.terminate()
-        process.wait(timeout=30)
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+                raise
         if app is not None:
             assert not app.runtime.exists()
             assert not (session / "session.json").exists()
