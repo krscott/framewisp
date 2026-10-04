@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from threading import Event, Thread
 
 import pytest
@@ -27,9 +28,17 @@ from framewisp.tray import (
 @pytest.fixture
 def buses(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> Iterator[tuple[Gio.DBusConnection, Gio.DBusConnection]]:
+    config = tmp_path / "bus.conf"
+    config.write_text(
+        '<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen>'
+        '<auth>EXTERNAL</auth><policy context="default">'
+        '<allow send_destination="*"/><allow receive_sender="*"/>'
+        '<allow own="*"/></policy></busconfig>'
+    )
     daemon = subprocess.Popen(
-        ["dbus-daemon", "--session", "--nofork", "--print-address"],
+        ["dbus-daemon", f"--config-file={config}", "--nofork", "--print-address"],
         stdout=subprocess.PIPE,
         text=True,
     )
