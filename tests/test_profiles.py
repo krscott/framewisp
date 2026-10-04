@@ -87,7 +87,6 @@ def test_fresh_real_app(
             "FONTCONFIG_SYSROOT": str(host / "nonexistent-sysroot"),
             "FC_LANG": "ja",
             "FRAMEWISP_TEST_REPORT": str(report),
-            "FRAMEWISP_TEST_DEMO_FONTS": "" if number == 0 else "/dev/null",
         }
         log = tmp_path / f"runner-{number}.log"
         with log.open("w") as output:

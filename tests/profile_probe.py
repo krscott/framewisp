@@ -62,13 +62,7 @@ service_pid = bus.call_sync(
 ).unpack()[0]
 app_command = [os.environ["FRAMEWISP_TEST_GTK_APP"]]
 if "--demo" in sys.argv:
-    # Emulate the installed demo wrapper overriding the caption font variable.
-    app_command = [
-        sys.executable,
-        "-c",
-        "import os; from framewisp.demo import main; "
-        "os.environ['FRAMEWISP_FONTCONFIG_FILE']=os.environ['FRAMEWISP_TEST_DEMO_FONTS'] or os.environ['FRAMEWISP_PROFILE_FONTCONFIG_FILE']; main()",
-    ]
+    app_command = ["framewisp-demo"]
 app = subprocess.Popen(app_command, env=service_env)
 names = bus.call_sync(
     "org.freedesktop.DBus",
