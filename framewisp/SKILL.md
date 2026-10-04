@@ -38,7 +38,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an isolated app and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
+| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -89,9 +89,14 @@ that a check cannot observe.
 
 ## Example workflow
 
-Start an isolated demo in a terminal or background tool session. Use a distinct
-session name and a fresh working directory, wait for `Session ready:`, and keep
-the runner alive. The app may still be drawing its first frame:
+Apps started with `run` run as the invoking user, with the file and account access
+allowed by the surrounding environment. The private display does not restrict
+that access.
+
+Start a demo on a private display in a terminal or background tool session.
+Use a distinct session name and a fresh working directory, wait for
+`Session ready:`, and keep the runner alive. The app may still be drawing its
+first frame:
 
 ```sh
 check_dir=$(mktemp -d /tmp/framewisp-check.XXXXXX)
@@ -372,6 +377,10 @@ own foreground terminal and follow its instructions. Never start attachment
 yourself or allocate a terminal to bypass its user confirmation. The user must
 configure stop shortcuts, type `ATTACH`, approve the desktop dialog, and keep
 the terminal open. Wait for `Attached:` before sending commands.
+
+Other processes with access to the attachment's state and control socket can
+issue commands. Portal approval grants desktop access to the attachment; it
+does not authenticate a particular agent.
 
 The stop command is `framewisp --detach`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also
