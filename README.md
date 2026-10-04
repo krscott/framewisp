@@ -642,7 +642,7 @@ apply to native apps that honor the profile environment, not arbitrary Flatpaks.
 `tests/test_profiles.py` runs GTK's shipped demo application on Wayland and X11,
 including an explicit dconf backend override and private service activation.
 It checks fresh preferences,
-font/theme/DPI settings, identical screenshots across conflicting host scale
+font/theme/DPI settings, matching content pixels across conflicting host scale
 settings, private preference writes, unchanged host config, and cleanup. The
 bundled framewisp demo keeps DejaVu Sans 11 and selects the profile's Fontconfig
 file during fresh runs, even when its installed wrapper sets caption fonts.
