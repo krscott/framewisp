@@ -571,13 +571,81 @@ caption alignment. Framewisp filters the remaining Wayland protocol trace as it
 arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
-and monochrome emoji. The app keeps its own font configuration. Caption text uses
-fullwidth equivalents for braces and backslashes to prevent subtitle formatting;
+and monochrome emoji. Apps inherit font configuration unless you select a
+[fresh profile](#fresh-app-profiles). Caption text uses fullwidth equivalents
+for braces and backslashes to prevent subtitle formatting;
 opted-in input logs preserve the original characters. Screenshots and recordings
 can still show secrets displayed by apps. Omitting input content does not redact
 screen content or provide a general app-log redaction guarantee. Shell history,
 batch files, application logs, and runtime input state are outside this policy.
 Review artifacts before sharing.
+
+## Fresh app profiles
+
+Opt in when you want repeatable initial app preferences:
+
+```sh
+framewisp browser run --profile fresh -- your-app
+framewisp browser run --profile fresh --x11 -- your-x11-app
+```
+
+Each run creates private HOME, XDG config/cache/data/state directories and TMPDIR
+under its owned runtime directory. It starts with empty app preferences.
+`XDG_CONFIG_DIRS` points at the private config directory too. Normal runs still
+inherit the caller's app settings.
+
+The profile sets `LANG` and `LC_ALL` to `C.UTF-8`, removes inherited locale
+overrides, and uses a separate bundled Fontconfig configuration with DejaVu and
+Noto fonts. It loads no host Fontconfig rules or system font directories. GTK 3/4
+use Adwaita, DejaVu Sans 11, a light theme, 96 DPI and scale 1, with animations
+and overlay scrollbars disabled. Qt uses Fusion,
+96 DPI, scale 1 and software Qt Quick rendering. Inherited GTK/GDK/Qt settings
+are cleared except Qt plugin lookup paths needed to load installed binaries.
+GTK settings use the keyfile backend inside the profile instead of the user's
+dconf database. The display uses scale 1 and the existing US keyboard layout.
+Input methods and non-US shortcuts are outside this profile's supported scope.
+
+The existing private session and accessibility buses remain in use. Neither
+loads the desktop's default service activation directories. If an app requires
+activation, supply a directory containing only its required `.service` files:
+
+```sh
+framewisp app run --profile fresh --dbus-service-dir ./app-services -- your-app
+```
+
+Repeat `--dbus-service-dir` for additional directories. Only the private app bus
+loads these directories; the accessibility bus stays unchanged. Activated
+services receive the final app environment, including the discovered display.
+Use direct `Exec` entries for these services. User systemd activation and desktop
+portals are not configured. Every service in a supplied directory can activate,
+so avoid supplying a whole desktop service directory. Framewisp owns activated
+services through the existing bus process supervisor and stops them on cleanup.
+
+Successful shutdown deletes all profile directories after stopping the app and
+services. There is no profile reuse or persistence option. Copy wanted app data
+to an explicit path before stopping. Screenshots, recordings and session logs
+retain their normal lifecycle. After a failed cleanup, use `recover` as usual;
+it preserves logs and removes the abandoned runtime and profile.
+
+This is a preferences profile, not a security sandbox. The app can still access
+the host filesystem, network and system bus. Existing session/artifact path
+protections apply; save artifacts outside the disposable runtime. The profile
+preserves PATH, working directory, XDG data search directories, library/plugin
+paths and app-specific environment variables. App versions, installed schemas,
+icons, toolkit overrides, rendering differences, time-dependent content and
+remote data remain outside its control. Explicit app arguments or an `env`
+wrapper can override the defaults. Apps with hard-coded settings paths, separate
+daemons, or their own font engines need app-specific configuration. Flatpak can
+remap HOME, XDG directories and fonts inside its sandbox, so these guarantees
+apply to native apps that honor the profile environment, not arbitrary Flatpaks.
+
+`tests/test_profiles.py` runs GTK's shipped demo application on Wayland and X11,
+including an explicit dconf backend override and private service activation.
+It checks fresh preferences,
+font/theme/DPI settings, matching content pixels across conflicting host scale
+settings, private preference writes, unchanged host config, and cleanup. The
+bundled framewisp demo keeps DejaVu Sans 11 and selects the profile's Fontconfig
+file during fresh runs, even when its installed wrapper sets caption fonts.
 
 ## Flatpak game
 

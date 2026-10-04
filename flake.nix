@@ -70,6 +70,10 @@
             PATH="${pkgs.framewisp}/bin:${pkgs.ffmpeg}/bin:${pkgs.qt6.qtdeclarative}/bin:${pkgs.git}/bin" \
             QML_IMPORT_PATH="${pkgs.qt6.qtdeclarative}/lib/qt-6/qml" \
             QT_PLUGIN_PATH="${pkgs.qt6.qtbase}/lib/qt-6/plugins" \
+            FRAMEWISP_TEST_GTK_APP="${pkgs.gtk4.dev}/bin/gtk4-demo" \
+            FRAMEWISP_TEST_DCONF_MODULES="${pkgs.dconf.lib}/lib/gio/modules" \
+            FRAMEWISP_TEST_DCONF_SERVICE="${pkgs.dconf}/share/dbus-1/services/ca.desrt.dconf.service" \
+            FRAMEWISP_TEST_GTK_SCHEMAS="${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas" \
             ${
               (pkgs.python3.withPackages (ps: [
                 ps.pytest
@@ -77,7 +81,7 @@
                 ps.pygobject3
               ]))
             }/bin/python \
-            -m pytest -c ${./pyproject.toml} ${./tests}/test_integration.py --basetemp "$TMPDIR/tests"
+            -m pytest -c ${./pyproject.toml} ${./tests}/test_profiles.py ${./tests}/test_integration.py --basetemp "$TMPDIR/tests"
           touch "$out"
         '';
 
@@ -115,6 +119,11 @@
             shellHook = ''
               export GST_PLUGIN_SYSTEM_PATH_1_0=${pkgs.framewisp.capturePlugins}
               export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.captionFonts}
+              export FRAMEWISP_PROFILE_FONTCONFIG_FILE=${pkgs.framewisp.profileFonts}
+              export FRAMEWISP_TEST_GTK_APP=${pkgs.gtk4.dev}/bin/gtk4-demo
+              export FRAMEWISP_TEST_DCONF_MODULES=${pkgs.dconf.lib}/lib/gio/modules
+              export FRAMEWISP_TEST_DCONF_SERVICE=${pkgs.dconf}/share/dbus-1/services/ca.desrt.dconf.service
+              export FRAMEWISP_TEST_GTK_SCHEMAS=${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas
               export FRAMEWISP_ATSPI_REGISTRY=${pkgs.framewisp.atspiRegistry}
               export QML_IMPORT_PATH=${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
               export QT_PLUGIN_PATH=${pkgs.qt6.qtbase}/lib/qt-6/plugins

@@ -78,6 +78,14 @@ before filing issues.
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
    and `GSK_RENDERER=cairo`.
+   With `--profile fresh`, `profiles.fresh_environment` creates disposable
+   HOME/config/cache/data/state/tmp directories under this runtime and clears
+   inherited toolkit and locale settings. It writes GTK 3/4 settings.ini with
+   Adwaita, DejaVu Sans 11, light theme and 96 DPI, selects GSettings keyfile
+   storage, Qt Fusion/software rendering at 96 DPI, and C.UTF-8. A separate
+   Nix Fontconfig file excludes host rules and impure font directories. These
+   directories share runtime ownership, shutdown and recovery; no profile data
+   survives successful cleanup. See README for compatibility limits.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at the requested width and height (default 1280x720) and
    60 Hz, a fallback seat, US keyboard layout,
@@ -670,8 +678,8 @@ Ctrl+Alt+Shift+Escape to the same detach command.
 
 `inspect --json` is a read-only AT-SPI prototype for headless sessions. Every
 runner starts two private `dbus-daemon --nofork` processes and an
-`at-spi2-registryd` before the display/app. Bus configuration has no service
-activation directories. The runner replaces inherited session/accessibility bus
+`at-spi2-registryd` before the display/app. Default bus configuration has no
+service activation directories. The runner replaces inherited session/accessibility bus
 addresses and sets `AT_SPI_BUS_ADDRESS`, `GTK_A11Y=atspi`, and
 `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1` for its children. It monitors all three
 processes and closes them after the application/display during ordinary cleanup.
@@ -684,6 +692,14 @@ The CLI requires that address to equal the runtime directory's accessibility
 socket. It never uses the caller's desktop bus, autolaunches a bus, or inspects
 attached sessions. Gio, already a dependency, connects directly to this address
 and calls read-only AT-SPI methods. No additional Python package is needed.
+
+For fresh profiles, repeated `--dbus-service-dir` paths become XML-escaped
+`servicedir` entries in a separate app-bus config. The accessibility config
+still has no service directories. After discovering the Wayland or X11 display,
+the runner calls `dbus-update-activation-environment --all` against the private
+app bus with the final app environment. It does not request systemd activation.
+The bus supervisor owns services and reaps them before runtime deletion.
+Metadata records `app_profile` as `"fresh"` or null.
 
 The CLI owns each query connection independently of the input/control socket.
 A Gio cancellable with a deadline timer bounds connection setup and requests;

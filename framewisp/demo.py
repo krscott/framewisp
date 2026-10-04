@@ -14,7 +14,12 @@ from gi.repository import GLib, Gtk, Pango  # isort: skip
 
 def main() -> None:
     # Keep the documented input targets stable across desktop font settings.
-    if fonts := os.environ.get("FRAMEWISP_FONTCONFIG_FILE"):
+    font_key = (
+        "FRAMEWISP_PROFILE_FONTCONFIG_FILE"
+        if os.environ.get("FRAMEWISP_APP_PROFILE") == "fresh"
+        else "FRAMEWISP_FONTCONFIG_FILE"
+    )
+    if fonts := os.environ.get(font_key):
         os.environ["FONTCONFIG_FILE"] = fonts
     Gtk.init()
     settings = Gtk.Settings.get_default()
