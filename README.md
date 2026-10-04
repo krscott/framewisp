@@ -92,6 +92,10 @@ exits. It needs no session or display and does not start an app.
 
 ## Try it
 
+Apps started with `run` use a private display and run as the invoking user,
+with the file and account access allowed by the surrounding environment.
+The private display does not restrict that access.
+
 For known targets with an accessible outcome, batch the inputs and a bounded
 check. Use screenshots to discover unknown pointer coordinates and to check
 appearance, layout, canvas content, or controls missing from accessibility.
@@ -311,6 +315,10 @@ Keep that terminal open. Do not background or suspend the command. Agents must a
 the user to run it, never allocate a terminal to bypass the startup check. The
 terminal check prevents accidental agent startup; it is not a security boundary
 against programs running under the same user account.
+
+Other processes with access to the attachment's state and control socket can
+issue commands. Portal approval grants desktop access to the attachment; it
+does not authenticate a particular agent.
 
 Wait for `Attached:`. An agent running under the same user account can now use
 another terminal:
