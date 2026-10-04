@@ -16,6 +16,7 @@ from pathlib import Path
 from threading import Event
 from types import FrameType
 from typing import cast
+from xml.sax.saxutils import escape
 
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
@@ -36,10 +37,12 @@ from framewisp.ownership import (
     session_lease,
 )
 from framewisp.processes import OwnedProcess, managed_process
+from framewisp.profiles import fresh_environment
 
 SWAY_CONFIG = """\
 xwayland disable
 output HEADLESS-1 mode {width}x{height}@60Hz
+output HEADLESS-1 scale 1
 seat seat0 fallback true
 input * xkb_layout us
 default_border none
@@ -102,7 +105,12 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
 
 
 def start_inspection_buses(
-    stack: ExitStack, runtime: Path, session: Path, env: dict[str, str], stop: Event
+    stack: ExitStack,
+    runtime: Path,
+    session: Path,
+    env: dict[str, str],
+    stop: Event,
+    service_directories: tuple[Path, ...] = (),
 ) -> dict[str, OwnedProcess] | None:
     """Own both buses and the registry; never activate host desktop services."""
     config = runtime / "bus.conf"
@@ -117,6 +125,16 @@ def start_inspection_buses(
         ("dbus", "DBUS_SESSION_BUS_ADDRESS"),
         ("accessibility", "AT_SPI_BUS_ADDRESS"),
     ):
+        bus_config = config
+        if name == "dbus" and service_directories:
+            bus_config = runtime / "app-bus.conf"
+            services = "".join(
+                f"<servicedir>{escape(str(path))}</servicedir>"
+                for path in service_directories
+            )
+            bus_config.write_text(
+                config.read_text().replace("</busconfig>", services + "</busconfig>")
+            )
         address = f"unix:path={runtime / (name + '.sock')}"
         log = session / (name + ".log")
         process = stack.enter_context(
@@ -124,7 +142,7 @@ def start_inspection_buses(
                 [
                     "dbus-daemon",
                     "--nofork",
-                    f"--config-file={config}",
+                    f"--config-file={bus_config}",
                     f"--address={address}",
                 ],
                 log=log,
@@ -608,7 +626,15 @@ def run_session(
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
     retain_input_content: bool = False,
+    fresh_profile: bool = False,
+    service_directories: tuple[Path, ...] = (),
 ) -> int:
+    if service_directories and not fresh_profile:
+        raise SessionError("D-Bus service directories require --profile fresh.")
+    service_directories = tuple(path.resolve() for path in service_directories)
+    for path in service_directories:
+        if not path.is_dir():
+            raise SessionError(f"D-Bus service directory does not exist: {path}")
     session = session.resolve()
     if recording is not None:
         recording = recording.resolve()
@@ -627,6 +653,8 @@ def run_session(
             size=size,
             x11=x11,
             retain_input_content=retain_input_content,
+            fresh_profile=fresh_profile,
+            service_directories=service_directories,
         )
 
 
@@ -640,6 +668,8 @@ def _run_session(
     size: tuple[int, int],
     x11: bool,
     retain_input_content: bool,
+    fresh_profile: bool,
+    service_directories: tuple[Path, ...],
 ) -> int:
     state = session / "session.json"
     if state.exists():
@@ -668,9 +698,13 @@ def _run_session(
         ):
             directory = str(runtime)
             env = session_environment_for_run(runtime)
+            if fresh_profile:
+                env = fresh_environment(runtime, env)
             env["FRAMEWISP_OWNER_FD"] = str(lease)
             env["FRAMEWISP_OWNER_RUNTIME"] = directory
-            buses = start_inspection_buses(stack, runtime, session, env, stop)
+            buses = start_inspection_buses(
+                stack, runtime, session, env, stop, service_directories
+            )
             if buses is None:
                 return 0
             compositor = stack.enter_context(
@@ -703,6 +737,23 @@ def _run_session(
                     QT_QPA_PLATFORM="xcb",
                     SDL_VIDEODRIVER="x11",
                 )
+
+            if service_directories:
+                # The bus starts before the compositor discovers its display.
+                # Activated apps need the same final environment as the target.
+                activation = subprocess.run(
+                    ["dbus-update-activation-environment", "--all"],
+                    env=app_env,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                if activation.returncode:
+                    raise SessionError(
+                        "Could not configure private D-Bus service environment: "
+                        + activation.stderr.strip()
+                    )
 
             vnc = stack.enter_context(
                 start_wayvnc(runtime, log=session / "wayvnc.log", env=env, stop=stop)
@@ -756,6 +807,7 @@ def _run_session(
                             "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
                             "batch_input": True,
                             "runtime_directory": directory,
+                            "app_profile": "fresh" if fresh_profile else None,
                             "wayland_display": display,
                             "width": size[0],
                             "height": size[1],

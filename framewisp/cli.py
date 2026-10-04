@@ -133,6 +133,19 @@ def main() -> None:
         "--x11", action="store_true", help="run the app on a private Xwayland display"
     )
     run.add_argument(
+        "--profile",
+        choices=["fresh"],
+        help="use disposable app directories and fixed toolkit settings (see README limitations)",
+    )
+    run.add_argument(
+        "--dbus-service-dir",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="allow app-bus activation from this directory only; repeat as needed (requires --profile fresh)",
+    )
+    run.add_argument(
         "--record", type=Path, metavar="FILE", help="record the session to MP4"
     )
     run.add_argument(
@@ -324,6 +337,8 @@ def main() -> None:
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
     if args.action == "run":
+        if args.dbus_service_dir and args.profile != "fresh":
+            parser.error("--dbus-service-dir requires --profile fresh")
         if not args.command or args.command == ["--"]:
             parser.error("run requires an application command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
@@ -384,6 +399,8 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             size=(args.width, args.height),
             x11=args.x11,
             retain_input_content=args.retain_input_content,
+            fresh_profile=args.profile == "fresh",
+            service_directories=tuple(args.dbus_service_dir),
         )
     elif args.action in {"record-start", "record-stop", "status", "stop"}:
         if attached and args.action in {"status", "stop"}:

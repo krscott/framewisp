@@ -40,6 +40,16 @@ let
       noto-fonts-monochrome-emoji
     ];
   };
+  profileFonts = makeFontsConf {
+    fontDirectories = [
+      dejavu_fonts
+      noto-fonts
+      noto-fonts-cjk-sans
+      noto-fonts-monochrome-emoji
+    ];
+    impureFontDirectories = [ ];
+    includes = [ ];
+  };
   capturePlugins = lib.makeSearchPath "lib/gstreamer-1.0" [
     (lib.getLib gst_all_1.gstreamer)
     pipewire
@@ -67,6 +77,7 @@ buildPythonPackage {
     makeWrapperArgs+=(
       "''${gappsWrapperArgs[@]}"
       --set FRAMEWISP_FONTCONFIG_FILE "${captionFonts}"
+      --set FRAMEWISP_PROFILE_FONTCONFIG_FILE "${profileFonts}"
       --set FRAMEWISP_ATSPI_REGISTRY "${at-spi2-core}/libexec/at-spi2-registryd"
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${capturePlugins}"
       --prefix PATH : "$out/bin:${
@@ -91,7 +102,7 @@ buildPythonPackage {
   '';
 
   passthru = {
-    inherit captionFonts capturePlugins;
+    inherit captionFonts profileFonts capturePlugins;
     atspiRegistry = "${at-spi2-core}/libexec/at-spi2-registryd";
   };
 
