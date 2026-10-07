@@ -2796,7 +2796,7 @@ def test_inspect_display_bounds_activate_offset_controls(
 
     def mapped() -> bool:
         nonlocal observation
-        if is_qt and state["x11_display"] is None:
+        if is_qt:
             pending = [sway_request(4)]
             windows: list[dict[str, Any]] = []
             while pending:
@@ -2813,9 +2813,15 @@ def test_inspect_display_bounds_activate_offset_controls(
             if len(windows) != 1:
                 return False
             window = windows[0]
+            titlebar = window["deco_rect"]["height"]
+            outer = window["rect"].copy()
+            # A floating_con reports its title bar separately from rect.
+            if window["type"] == "floating_con":
+                outer["y"] -= titlebar
+                outer["height"] += titlebar
             if (
-                window["rect"] != {"x": 200, "y": 50, "width": 480, "height": 240}
-                or window["window_rect"]["y"] <= 0
+                outer != {"x": 200, "y": 50, "width": 480, "height": 240}
+                or titlebar <= 0
             ):
                 return False
         observation = inspect(
@@ -2826,9 +2832,14 @@ def test_inspect_display_bounds_activate_offset_controls(
             and observation["matches"][0]["display_bounds"] is not None
         )
 
-    wait_until(mapped)
-    print(f"Positioned control: {observation}")
-    cli(demo.directory, "screenshot", str(tmp_path / "positioned.png"))
+    try:
+        wait_until(mapped)
+    finally:
+        (tmp_path / "positioned-tree.json").write_text(
+            json.dumps(sway_request(4), indent=2)
+        )
+        print(f"Positioned control: {observation}")
+        cli(demo.directory, "screenshot", str(tmp_path / "positioned.png"))
     assert observation["status"] == "ok", observation
     node = observation["matches"][0]
     bounds = node["display_bounds"]
