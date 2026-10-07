@@ -49,6 +49,18 @@ def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return result
 
 
+def wait_for_demo_frame(demo: Demo, screenshot: Path) -> None:
+    def painted() -> bool:
+        cli(demo.directory, "screenshot", str(screenshot))
+        with Image.open(screenshot) as image:
+            assert image.format == "PNG"
+            assert image.size == (1280, 720)
+            # The status label has text once GTK has painted the initial frame.
+            return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
+
+    wait_until(painted)
+
+
 @pytest.fixture
 def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     directory = tmp_path / "session with spaces"
@@ -210,15 +222,7 @@ def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
 
-    def app_is_visible() -> bool:
-        cli(demo.directory, "screenshot", str(before))
-        with Image.open(before) as image:
-            assert image.format == "PNG"
-            assert image.size == (1280, 720)
-            # The label contains text once the app has painted, unlike the empty output.
-            return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
-
-    wait_until(app_is_visible)
+    wait_for_demo_frame(demo, before)
     with Image.open(before) as image:
         original_entry = image.crop((50, 85, 400, 115))
         original_label = image.crop((40, 210, 440, 240))
@@ -1106,6 +1110,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
     retain = json.loads((demo.directory / "session.json").read_text())[
         "retain_input_content"
     ]
+    wait_for_demo_frame(demo, tmp_path / "before.png")
     cli(demo.directory, "click", "120", "100")
     cli(demo.directory, "type", "Setup outside the clip")
     cli(demo.directory, "key", "Ctrl+a")
@@ -2741,7 +2746,9 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
 @pytest.mark.parametrize(
     "demo", [None, "x11", "qt-coordinates", "x11-qt-coordinates"], indirect=True
 )
-def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
+def test_inspect_display_bounds_activate_offset_controls(
+    demo: Demo, tmp_path: Path
+) -> None:
     log = demo.directory / "app.log"
     qt = "Coordinates probe ready"
     wait_until(lambda: "Demo ready" in log.read_text() or qt in log.read_text())
@@ -2756,7 +2763,7 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
         command = (
             f'[title="^{title}$"] floating enable, border normal, '
             + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
-            + "move position 200 50"
+            + "move position 200 50, focus"
         ).encode()
         # Direct IPC also works in the standalone package test's minimal PATH.
         with socket.socket(socket.AF_UNIX) as connection:
@@ -2794,6 +2801,8 @@ def test_inspect_display_bounds_activate_offset_controls(demo: Demo) -> None:
         )
 
     wait_until(mapped)
+    print(f"Positioned control: {observation}")
+    cli(demo.directory, "screenshot", str(tmp_path / "positioned.png"))
     assert observation["status"] == "ok", observation
     node = observation["matches"][0]
     bounds = node["display_bounds"]

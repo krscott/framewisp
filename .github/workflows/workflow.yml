@@ -37,7 +37,15 @@ jobs:
       run: nix develop --command bash -c 'framewisp --help'
 
     - name: Test CLI and library
-      run: nix develop --command python -m pytest
+      run: nix develop --command python -m pytest --basetemp "$RUNNER_TEMP/framewisp-tests"
+
+    - name: Preserve failed test artifacts
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: failed-test-artifacts
+        path: ${{ runner.temp }}/framewisp-tests
+        retention-days: 7
 
     - name: Test and Build
       run: nix build -L
