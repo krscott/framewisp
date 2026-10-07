@@ -2756,21 +2756,17 @@ def test_inspect_display_bounds_activate_offset_controls(
     title = "Coordinates dialog" if is_qt else "Framewisp demo"
     name = "Activate dialog" if is_qt else "Apply text"
     socket_path = next(demo.runtime.glob("sway-ipc.*.sock"))
+    state = json.loads((demo.directory / "session.json").read_text())
 
     # Move away from the origin and request compositor borders. Native Wayland
     # clients can negotiate their own decorations. Xwayland uses server title bars.
-    def positioned() -> bool:
-        command = (
-            f'[title="^{title}$"] floating enable, border normal, '
-            + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
-            + "move position 200 50, focus"
-        ).encode()
+    def sway_request(kind: int, payload: bytes = b"") -> Any:
         # Direct IPC also works in the standalone package test's minimal PATH.
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(5)
             connection.connect(str(socket_path))
             connection.sendall(
-                b"i3-ipc" + struct.pack("=II", len(command), 0) + command
+                b"i3-ipc" + struct.pack("=II", len(payload), kind) + payload
             )
 
             def receive(length: int) -> bytes:
@@ -2782,16 +2778,46 @@ def test_inspect_display_bounds_activate_offset_controls(
                 return bytes(data)
 
             header = receive(14)
-            length, kind = struct.unpack("=II", header[6:])
-            assert header[:6] == b"i3-ipc" and kind == 0
+            length, reply_kind = struct.unpack("=II", header[6:])
+            assert header[:6] == b"i3-ipc" and reply_kind == kind
             assert length <= 1024 * 1024
-            return all(item["success"] for item in json.loads(receive(length)))
+            return json.loads(receive(length))
+
+    def positioned() -> bool:
+        command = (
+            f'[title="^{title}$"] floating enable, border normal, '
+            + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
+            + "move position 200 50"
+        ).encode()
+        return all(item["success"] for item in sway_request(0, command))
 
     wait_until(positioned)
     observation: dict[str, Any] = {}
 
     def mapped() -> bool:
         nonlocal observation
+        if is_qt and state["x11_display"] is None:
+            pending = [sway_request(4)]
+            windows: list[dict[str, Any]] = []
+            while pending:
+                window = pending.pop()
+                if (
+                    window.get("name") == title
+                    and window.get("pid") == state["processes"]["app"]
+                ):
+                    windows.append(window)
+                pending.extend(window.get("nodes", []))
+                pending.extend(window.get("floating_nodes", []))
+            # A command reply precedes the client's resize acknowledgement.
+            # Wait for the requested size and server title bar to be committed.
+            if len(windows) != 1:
+                return False
+            window = windows[0]
+            if (
+                window["rect"] != {"x": 200, "y": 50, "width": 480, "height": 240}
+                or window["window_rect"]["y"] <= 0
+            ):
+                return False
         observation = inspect(
             demo, "--role", "push button" if is_qt else "button", "--name", name
         )
@@ -2810,7 +2836,6 @@ def test_inspect_display_bounds_activate_offset_controls(
     assert bounds["coordinate_space"] == "display"
     assert bounds["x"] > node["bounds"]["x"] + 100
     assert bounds["y"] >= node["bounds"]["y"] + 50
-    state = json.loads((demo.directory / "session.json").read_text())
     if state["x11_display"] is not None:
         assert bounds["y"] > node["bounds"]["y"] + 50
     cli(
