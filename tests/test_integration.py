@@ -2823,6 +2823,9 @@ def test_inspect_display_bounds_activate_offset_controls(
                 outer != {"x": 200, "y": 50, "width": 480, "height": 240}
                 or titlebar <= 0
             ):
+                # A late tiled configure can overwrite the floating resize.
+                # Reapply the geometry until the client commits the requested size.
+                positioned()
                 return False
         observation = inspect(
             demo, "--role", "push button" if is_qt else "button", "--name", name
