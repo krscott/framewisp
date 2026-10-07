@@ -52,6 +52,14 @@ nix run github:krscott/framewisp -- \
 Repeat the same `nix run ... --` prefix for input and screenshot commands.
 The first invocation builds or downloads the package and its dependencies.
 
+The packaged `framewisp` and `framewisp-demo` commands use Python's isolated
+mode. They ignore inherited `PYTHONPATH`, `PYTHONHOME`, and user site-packages
+when loading their own modules, so a development shell's PyGObject cannot
+replace the packaged version. Apps launched by `run` still inherit the caller's
+Python environment, including `PYTHONPATH` and `PYTHONHOME`. The package's
+toolkit wrapper adds its own typelib paths ahead of the caller's `GI_TYPELIB_PATH`.
+Editable installs and `python -m framewisp` use the active Python environment.
+
 To put `framewisp` and `framewisp-demo` on PATH, add the flake to your NixOS or
 Home Manager configuration's inputs:
 

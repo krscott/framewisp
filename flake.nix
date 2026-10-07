@@ -74,6 +74,7 @@
             FRAMEWISP_TEST_DCONF_MODULES="${pkgs.dconf.lib}/lib/gio/modules" \
             FRAMEWISP_TEST_DCONF_SERVICE="${pkgs.dconf}/share/dbus-1/services/ca.desrt.dconf.service" \
             FRAMEWISP_TEST_GTK_SCHEMAS="${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas" \
+            FRAMEWISP_TEST_ISOLATED_PYTHON=1 \
             ${
               (pkgs.python3.withPackages (ps: [
                 ps.pytest
@@ -81,7 +82,7 @@
                 ps.pygobject3
               ]))
             }/bin/python \
-            -m pytest -c ${./pyproject.toml} ${./tests}/test_profiles.py ${./tests}/test_integration.py --basetemp "$TMPDIR/tests"
+            -m pytest -c ${./pyproject.toml} ${./tests}/test_profiles.py ${./tests}/test_integration.py ${./tests}/test_python_environment.py --basetemp "$TMPDIR/tests"
           touch "$out"
         '';
 

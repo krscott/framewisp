@@ -52,6 +52,17 @@ The foreground `run` command is the lifetime owner.
 
 ## Startup
 
+The Nix package adds `-I` to the `framewisp` and `framewisp-demo` entry-point
+shebangs before Python fixup writes the dependency paths into each script.
+Python ignores inherited import settings and user site-packages, then the
+script adds the packaged dependency paths. The environment variables remain
+available to target apps, including fresh-profile runs and activated services.
+The internal process supervisor and X11 display probe also use `-I`; both need
+only the standard library. Editable installs use the development interpreter
+without this entry-point isolation. The standalone package check tests foreign
+`gi` and `sitecustomize` modules, invalid `PYTHONHOME`, Wayland/X11 demo startup,
+and unset, empty, and populated app `PYTHONPATH` values.
+
 `framewisp --agent-skill` reads the UTF-8 body from `framewisp/SKILL.md`, writes it
 unchanged to stdout, and exits successfully before importing GUI/session tools.
 Setuptools includes that file in package data. The flag takes no session or other

@@ -103,6 +103,7 @@ def managed_process(
         supervisor = subprocess.Popen(
             [
                 sys.executable,
+                "-I",
                 str(Path(__file__).with_name("_supervisor.py")),
                 str(child.fileno()),
                 runtime,
