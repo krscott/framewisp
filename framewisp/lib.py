@@ -189,6 +189,7 @@ def start_sway(
         probe = shlex.join(
             [
                 sys.executable,
+                "-I",
                 "-c",
                 "import os; from pathlib import Path; "
                 f"Path({str(runtime / 'x11-display')!r}).write_text(os.environ['DISPLAY'])",

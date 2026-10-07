@@ -73,6 +73,11 @@ buildPythonPackage {
   ];
 
   dontWrapGApps = true;
+  # Nix adds the dependency paths to these scripts during fixup. Isolated mode
+  # ignores the caller's Python settings without removing them from the app env.
+  postInstall = ''
+    sed -i '1s/$/ -I/' "$out/bin/framewisp" "$out/bin/framewisp-demo"
+  '';
   preFixup = ''
     makeWrapperArgs+=(
       "''${gappsWrapperArgs[@]}"
