@@ -39,11 +39,14 @@ def test_packaged_demo_ignores_caller_python_settings(
 ) -> None:
     session = tmp_path / "session"
     runner_log = tmp_path / "runner.log"
+    framewisp = shutil.which("framewisp")
+    assert framewisp is not None
     env = os.environ | {
+        "PATH": str(tmp_path / "no demo on caller PATH"),
         "PYTHONPATH": str(foreign_python),
         "PYTHONHOME": str(tmp_path / "missing Python home"),
     }
-    command = ["framewisp", str(session), "run"]
+    command = [framewisp, str(session), "run"]
     if x11:
         command.append("--x11")
     command.extend(["--", "framewisp-demo"])
@@ -65,7 +68,7 @@ def test_packaged_demo_ignores_caller_python_settings(
             time.sleep(0.05)
         assert backend in (session / "app.log").read_text()
         result = subprocess.run(
-            ["framewisp", str(session), "stop"],
+            [framewisp, str(session), "stop"],
             env=env,
             capture_output=True,
             text=True,
@@ -151,7 +154,8 @@ def test_target_app_preserves_wrapper_variables(
     command.extend(
         [
             "--",
-            sys.executable,
+            # The running binary avoids the test interpreter's Nix wrapper.
+            str(Path("/proc/self/exe").resolve()),
             "-S",
             "-c",
             f"import json, os; print(json.dumps({{k: os.environ.get(k) for k in {(*keys, 'FRAMEWISP_CALLER_ENV_FD')!r}}}))",
@@ -201,7 +205,16 @@ def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
         "for entry in entries if entry for k, v in [entry.split(b'=', 1)]}))"
     )
     result = subprocess.run(
-        [framewisp, str(session), "run", "--", sys.executable, "-I", "-c", script],
+        [
+            framewisp,
+            str(session),
+            "run",
+            "--",
+            str(Path("/proc/self/exe").resolve()),
+            "-I",
+            "-c",
+            script,
+        ],
         env={},
         capture_output=True,
         text=True,

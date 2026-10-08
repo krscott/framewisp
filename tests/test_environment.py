@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from framewisp.environment import caller_environment
-from framewisp.lib import session_environment_for_run
+from framewisp.lib import app_command, session_environment_for_run
 
 
 def test_unwrapped_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,3 +91,25 @@ def test_session_environment_keeps_source_separate(tmp_path: Path) -> None:
     assert "AT_SPI_BUS_ADDRESS" not in env
     assert source["DISPLAY"] == ":123"
     assert "XDG_RUNTIME_DIR" not in source
+
+
+def test_bundled_demo_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    caller = tmp_path / "caller"
+    runtime = tmp_path / "runtime"
+    for directory in (caller, runtime):
+        directory.mkdir()
+        demo = directory / "framewisp-demo"
+        demo.touch()
+        demo.chmod(0o755)
+    monkeypatch.setenv("PATH", str(runtime))
+    command = ["framewisp-demo", "argument"]
+    env = {"PATH": str(caller)}
+    assert app_command(command, env) == command
+    assert env == {"PATH": str(caller)}
+    assert app_command(command, {"PATH": ""}) == [
+        str(runtime / "framewisp-demo"),
+        "argument",
+    ]
+    assert app_command(["python"], {"PATH": ""}) == ["python"]
+    absolute = [str(caller / "framewisp-demo")]
+    assert app_command(absolute, {"PATH": ""}) == absolute

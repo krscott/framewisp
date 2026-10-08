@@ -108,6 +108,17 @@ def session_environment_for_run(
     return env
 
 
+def app_command(command: list[str], env: dict[str, str]) -> list[str]:
+    """Make the bundled demo available to nix run without changing the app PATH."""
+    if (
+        command[0] == "framewisp-demo"
+        and shutil.which("framewisp-demo", path=env.get("PATH", os.defpath)) is None
+    ):
+        if demo := shutil.which("framewisp-demo"):
+            return [demo, *command[1:]]
+    return command
+
+
 def start_inspection_buses(
     stack: ExitStack,
     runtime: Path,
@@ -790,6 +801,7 @@ def _run_session(
                         return 0
                     raise SessionError(error)
 
+            command = app_command(command, app_env)
             app = stack.enter_context(
                 managed_process(command, log=session / "app.log", env=app_env)
             )

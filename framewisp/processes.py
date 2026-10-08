@@ -4,7 +4,6 @@ import json
 import select
 import socket
 import subprocess
-import sys
 import time
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
@@ -102,7 +101,7 @@ def managed_process(
         runtime = supervisor_env.pop("FRAMEWISP_OWNER_RUNTIME", "")
         supervisor = subprocess.Popen(
             [
-                sys.executable,
+                str(Path("/proc/self/exe").resolve()),
                 "-I",
                 str(Path(__file__).with_name("_supervisor.py")),
                 str(child.fileno()),

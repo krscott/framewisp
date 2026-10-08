@@ -76,6 +76,10 @@ This boundary covers every wrapper variable without tracking which variables
 Nix adds, prefixes, or defaults, and preserves unset and empty values. Reading
 the initial exec environment also excludes Python's startup locale coercion.
 Editable installs use the current environment directly.
+The bare `framewisp-demo` command falls back to the runtime's bundled executable
+when it is absent from the caller's PATH. This supports `nix run` without
+modifying the target environment. Caller-provided demos take precedence;
+other commands and explicit executable paths receive no fallback.
 
 The two private D-Bus daemons also start with the app environment, so activated
 services cannot inherit wrapper defaults for variables absent in the caller.
@@ -86,6 +90,8 @@ to the app and its services; the runtime supplies the bundled profile font file
 explicitly. The process supervisor also reads its original exec environment
 and passes it explicitly to each managed child, so its Python startup cannot
 add locale variables to the child's environment.
+The supervisor runs with the current interpreter binary from `/proc/self/exe`,
+bypassing any command wrapper named by `sys.executable`.
 Launcher tests cover arbitrary future wrapper variables, Unicode, non-UTF-8
 bytes, multiline values, large environments, and descriptor cleanup. Installed
 package tests check exact unset/empty/populated wrapper-variable values and

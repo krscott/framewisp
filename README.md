@@ -62,6 +62,9 @@ affect its own tools only. A command such as `run -- python -m myapp` resolves
 `python` through the caller's PATH, including an activated virtual environment.
 The private display, accessibility settings, and optional fresh profile still
 override the corresponding app settings.
+If `framewisp-demo` is absent from the caller's PATH, `run` resolves that bundled
+demo through framewisp's runtime PATH. This keeps the `nix run` example working
+without adding framewisp's dependencies to an external app's PATH.
 Editable installs and `python -m framewisp` use the active Python environment.
 
 To put `framewisp` and `framewisp-demo` on PATH, add the flake to your NixOS or

@@ -25,7 +25,8 @@ def test_supervisor_preserves_exec_environment(
         "print(json.dumps({os.fsdecode(k): os.fsdecode(v) "
         "for entry in entries if entry for k, v in [entry.split(b'=', 1)]}))"
     )
-    with managed_process([sys.executable, "-I", "-c", script], log=log, env=env) as app:
+    python = str(Path("/proc/self/exe").resolve())
+    with managed_process([python, "-I", "-c", script], log=log, env=env) as app:
         deadline = time.monotonic() + 5
         while app.poll() is None:
             assert time.monotonic() < deadline
