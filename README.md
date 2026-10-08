@@ -56,8 +56,12 @@ The packaged `framewisp` and `framewisp-demo` commands use Python's isolated
 mode. They ignore inherited `PYTHONPATH`, `PYTHONHOME`, and user site-packages
 when loading their own modules, so a development shell's PyGObject cannot
 replace the packaged version. Apps launched by `run` still inherit the caller's
-Python environment, including `PYTHONPATH` and `PYTHONHOME`. The package's
-toolkit wrapper adds its own typelib paths ahead of the caller's `GI_TYPELIB_PATH`.
+environment, including `PATH`, `PYTHONPATH`, `PYTHONHOME`, `GI_TYPELIB_PATH`,
+`XDG_DATA_DIRS`, and plugin lookup paths. Framewisp's packaged dependencies
+affect its own tools only. A command such as `run -- python -m myapp` resolves
+`python` through the caller's PATH, including an activated virtual environment.
+The private display, accessibility settings, and optional fresh profile still
+override the corresponding app settings.
 Editable installs and `python -m framewisp` use the active Python environment.
 
 To put `framewisp` and `framewisp-demo` on PATH, add the flake to your NixOS or
@@ -629,7 +633,8 @@ Noto fonts. It loads no host Fontconfig rules or system font directories. GTK 3/
 use Adwaita, DejaVu Sans 11, a light theme, 96 DPI and scale 1, with animations
 and overlay scrollbars disabled. Qt uses Fusion,
 96 DPI, scale 1 and software Qt Quick rendering. Inherited GTK/GDK/Qt settings
-are cleared except Qt plugin lookup paths needed to load installed binaries.
+are cleared except Qt plugin lookup paths and GdkPixbuf loader settings needed
+to load installed binaries.
 GTK settings use the keyfile backend inside the profile instead of the user's
 dconf database. The display uses scale 1 and the existing US keyboard layout.
 Input methods and non-US shortcuts are outside this profile's supported scope.

@@ -153,6 +153,26 @@ def test_fresh_real_app(
             display_key = "DISPLAY" if x11 else "WAYLAND_DISPLAY"
             display_value = state["x11_display"] if x11 else state["wayland_display"]
             assert f"{display_key}={display_value}".encode() in service_env
+            # Activated services must retain the caller's dependency lookup paths.
+            for key in (
+                "PATH",
+                "GI_TYPELIB_PATH",
+                "XDG_DATA_DIRS",
+                "GST_PLUGIN_SYSTEM_PATH_1_0",
+                "GIO_EXTRA_MODULES",
+                "GDK_PIXBUF_MODULE_FILE",
+                "GDK_PIXBUF_MODULEDIR",
+                "PYTHONNOUSERSITE",
+            ):
+                observed_values = [
+                    item
+                    for item in service_env
+                    if item.startswith((key + "=").encode())
+                ]
+                expected_values = (
+                    [os.fsencode(f"{key}={env[key]}")] if key in env else []
+                )
+                assert observed_values == expected_values, key
             # Neither bus includes default desktop activation directories.
             runtime = Path(state["runtime_directory"])
             assert "servicedir" not in (runtime / "bus.conf").read_text()

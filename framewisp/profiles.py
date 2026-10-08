@@ -5,9 +5,11 @@ from pathlib import Path
 from framewisp.errors import SessionError
 
 
-def fresh_environment(runtime: Path, env: dict[str, str]) -> dict[str, str]:
+def fresh_environment(
+    runtime: Path, env: dict[str, str], *, fonts: str | None = None
+) -> dict[str, str]:
     """Create settings under the owned runtime, before starting any children."""
-    fonts = env.get("FRAMEWISP_PROFILE_FONTCONFIG_FILE")
+    fonts = fonts or env.get("FRAMEWISP_PROFILE_FONTCONFIG_FILE")
     if not fonts or not Path(fonts).is_file():
         raise SessionError(
             "--profile fresh requires FRAMEWISP_PROFILE_FONTCONFIG_FILE. "
@@ -19,7 +21,10 @@ def fresh_environment(runtime: Path, env: dict[str, str]) -> dict[str, str]:
     result = {
         key: value
         for key, value in env.items()
-        if not key.startswith(("LC_", "QT_", "GTK_", "GDK_", "XKB_"))
+        if (
+            not key.startswith(("LC_", "QT_", "GTK_", "GDK_", "XKB_"))
+            or key.startswith("GDK_PIXBUF_")
+        )
         and key
         not in {
             "LANGUAGE",

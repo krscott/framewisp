@@ -13,6 +13,23 @@ def test_missing_profile_fonts(tmp_path: Path) -> None:
         fresh_environment(tmp_path, {})
 
 
+def test_profile_preserves_pixbuf_runtime_paths(tmp_path: Path) -> None:
+    fonts = tmp_path / "fonts.conf"
+    fonts.touch()
+    env = fresh_environment(
+        tmp_path,
+        {
+            "GDK_PIXBUF_MODULE_FILE": "/caller/loaders.cache",
+            "GDK_PIXBUF_MODULEDIR": "/caller/loaders",
+            "GDK_SCALE": "3",
+        },
+        fonts=str(fonts),
+    )
+    assert env["GDK_PIXBUF_MODULE_FILE"] == "/caller/loaders.cache"
+    assert env["GDK_PIXBUF_MODULEDIR"] == "/caller/loaders"
+    assert env["GDK_SCALE"] == "1"
+
+
 def test_service_directories_require_profile(tmp_path: Path) -> None:
     result = subprocess.run(
         [

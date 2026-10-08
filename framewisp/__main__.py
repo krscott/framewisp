@@ -4,9 +4,11 @@ import sys
 from pathlib import Path
 
 from framewisp.desktop import detach_desktop
+from framewisp.environment import initialize_environment
 
 
 def main() -> None:
+    initialize_environment()
     if sys.argv[1:] == ["--agent-skill"]:
         sys.stdout.write(
             Path(__file__).with_name("SKILL.md").read_text(encoding="utf-8")
