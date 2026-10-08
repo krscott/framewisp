@@ -1,5 +1,6 @@
 {
   buildPythonPackage,
+  python,
   lib,
   pytestCheckHook,
   setuptools,
@@ -104,6 +105,20 @@ buildPythonPackage {
         ]
       }"
     )
+  '';
+
+  # Install outside Python fixup: this entry point must see the environment
+  # before any generated wrapper changes it, including Python's own PATH prefix.
+  postFixup = ''
+    mv "$out/bin/framewisp" "$out/bin/.framewisp-runtime"
+    cat > "$out/bin/framewisp" <<EOF
+    #!${python.interpreter} -I
+    import runpy
+    import sys
+    sys.argv = ["${placeholder "out"}/${python.sitePackages}/framewisp/_launch.py", "${placeholder "out"}/bin/.framewisp-runtime", *sys.argv[1:]]
+    runpy.run_path(sys.argv[0], run_name="__main__")
+    EOF
+    chmod +x "$out/bin/framewisp"
   '';
 
   passthru = {

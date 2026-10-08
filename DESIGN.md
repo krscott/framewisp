@@ -63,6 +63,40 @@ without this entry-point isolation. The standalone package check tests foreign
 `gi` and `sitecustomize` modules, invalid `PYTHONHOME`, Wayland/X11 demo startup,
 and unset, empty, and populated app `PYTHONPATH` values.
 
+The installed `framewisp` command first runs a standard-library-only launcher
+with isolated Python, before entering any generated Nix wrapper. `_launch.py`
+captures the complete caller exec environment from `/proc/self/environ` in an
+anonymous `memfd`, then executes the wrapped runtime. Only the descriptor number travels in
+`FRAMEWISP_CALLER_ENV_FD`; environment contents never enter a temporary file or
+an extra exec argument/environment string. `__main__.main` consumes and closes
+the descriptor through `environment.initialize_environment` before dispatch.
+The runtime keeps Nix's environment for its imports and tools. Target apps use
+the captured caller environment, with the private session settings applied.
+This boundary covers every wrapper variable without tracking which variables
+Nix adds, prefixes, or defaults, and preserves unset and empty values. Reading
+the initial exec environment also excludes Python's startup locale coercion.
+Editable installs use the current environment directly.
+The bare `framewisp-demo` command falls back to the runtime's bundled executable
+when it is absent from the caller's PATH. This supports `nix run` without
+modifying the target environment. Caller-provided demos take precedence;
+other commands and explicit executable paths receive no fallback.
+
+The two private D-Bus daemons also start with the app environment, so activated
+services cannot inherit wrapper defaults for variables absent in the caller.
+The runtime resolves the daemon and activation-update executables through its
+own PATH before running them with the app environment. The registry, compositor,
+VNC server, and capture tools keep the runtime environment. Fresh profiles apply
+to the app and its services; the runtime supplies the bundled profile font file
+explicitly. The process supervisor also reads its original exec environment
+and passes it explicitly to each managed child, so its Python startup cannot
+add locale variables to the child's environment.
+The supervisor runs with the current interpreter binary from `/proc/self/exe`,
+bypassing any command wrapper named by `sys.executable`.
+Launcher tests cover arbitrary future wrapper variables, Unicode, non-UTF-8
+bytes, multiline values, large environments, and descriptor cleanup. Installed
+package tests check exact unset/empty/populated wrapper-variable values and
+launch a module through a caller-created venv using the bare `python` command.
+
 `framewisp --agent-skill` reads the UTF-8 body from `framewisp/SKILL.md`, writes it
 unchanged to stdout, and exits successfully before importing GUI/session tools.
 Setuptools includes that file in package data. The flag takes no session or other
@@ -85,7 +119,7 @@ before filing issues.
    0700, then atomically update the journal with its device/inode. The short path
    avoids Unix socket path limits. It holds compositor configuration and sockets
    (including `control.sock`) and is removed after successful cleanup.
-4. Copy the environment, remove inherited display and session-bus addresses,
+4. Prepare separate runtime and caller app environments. Remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
    and `GSK_RENDERER=cairo`.

@@ -3,6 +3,7 @@
 import json
 import os
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -22,6 +23,7 @@ from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import capture_origin, recorder_output, render_captions
 from framewisp.connection import reply as reply
+from framewisp.environment import caller_environment
 from framewisp.errors import (
     SOCKET_ACCESS_HINT,
     SessionError,
@@ -78,8 +80,10 @@ def wait_for_socket(
     return None
 
 
-def session_environment_for_run(runtime: Path) -> dict[str, str]:
-    env = os.environ.copy()
+def session_environment_for_run(
+    runtime: Path, source: dict[str, str]
+) -> dict[str, str]:
+    env = source.copy()
     for key in (
         "DISPLAY",
         "XAUTHORITY",
@@ -104,11 +108,26 @@ def session_environment_for_run(runtime: Path) -> dict[str, str]:
     return env
 
 
+def app_command(command: list[str], env: dict[str, str]) -> list[str]:
+    """Make the bundled demo available to nix run without changing the app PATH."""
+    if (
+        command[0] == "framewisp-demo"
+        and shutil.which(
+            "framewisp-demo", path=env.get("PATH", os.defpath) or os.curdir
+        )
+        is None
+    ):
+        if demo := shutil.which("framewisp-demo"):
+            return [demo, *command[1:]]
+    return command
+
+
 def start_inspection_buses(
     stack: ExitStack,
     runtime: Path,
     session: Path,
     env: dict[str, str],
+    app_env: dict[str, str],
     stop: Event,
     service_directories: tuple[Path, ...] = (),
 ) -> dict[str, OwnedProcess] | None:
@@ -140,13 +159,13 @@ def start_inspection_buses(
         process = stack.enter_context(
             managed_process(
                 [
-                    "dbus-daemon",
+                    shutil.which("dbus-daemon") or "dbus-daemon",
                     "--nofork",
                     f"--config-file={bus_config}",
                     f"--address={address}",
                 ],
                 log=log,
-                env=env,
+                env=app_env,
             )
         )
         processes[name] = process
@@ -158,7 +177,9 @@ def start_inspection_buses(
         ):
             return None
         env[variable] = address
+        app_env[variable] = address
     env.update(GTK_A11Y="atspi", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1")
+    app_env.update(GTK_A11Y="atspi", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1")
     registry = os.environ.get("FRAMEWISP_ATSPI_REGISTRY", "at-spi2-registryd")
     processes["registry"] = stack.enter_context(
         managed_process([registry], log=session / "registry.log", env=env)
@@ -698,13 +719,19 @@ def _run_session(
             ExitStack() as stack,
         ):
             directory = str(runtime)
-            env = session_environment_for_run(runtime)
+            env = session_environment_for_run(runtime, dict(os.environ))
+            app_env = session_environment_for_run(runtime, caller_environment())
             if fresh_profile:
-                env = fresh_environment(runtime, env)
-            env["FRAMEWISP_OWNER_FD"] = str(lease)
-            env["FRAMEWISP_OWNER_RUNTIME"] = directory
+                app_env = fresh_environment(
+                    runtime,
+                    app_env,
+                    fonts=os.environ.get("FRAMEWISP_PROFILE_FONTCONFIG_FILE"),
+                )
+            for process_env in (env, app_env):
+                process_env["FRAMEWISP_OWNER_FD"] = str(lease)
+                process_env["FRAMEWISP_OWNER_RUNTIME"] = directory
             buses = start_inspection_buses(
-                stack, runtime, session, env, stop, service_directories
+                stack, runtime, session, env, app_env, stop, service_directories
             )
             if buses is None:
                 return 0
@@ -722,8 +749,8 @@ def _run_session(
                 return 0
             sway, display = compositor
             env["WAYLAND_DISPLAY"] = display
+            app_env["WAYLAND_DISPLAY"] = display
             x11_display = None
-            app_env = env.copy()
             if x11:
                 x11_display = wait_for_x11(
                     runtime, process=sway, log=session / "sway.log", stop=stop
@@ -743,7 +770,11 @@ def _run_session(
                 # The bus starts before the compositor discovers its display.
                 # Activated apps need the same final environment as the target.
                 activation = subprocess.run(
-                    ["dbus-update-activation-environment", "--all"],
+                    [
+                        shutil.which("dbus-update-activation-environment")
+                        or "dbus-update-activation-environment",
+                        "--all",
+                    ],
                     env=app_env,
                     capture_output=True,
                     text=True,
@@ -773,6 +804,7 @@ def _run_session(
                         return 0
                     raise SessionError(error)
 
+            command = app_command(command, app_env)
             app = stack.enter_context(
                 managed_process(command, log=session / "app.log", env=app_env)
             )
