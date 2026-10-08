@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import socket
@@ -11,6 +12,26 @@ import pytest
 from framewisp import _supervisor
 from framewisp.errors import SessionError
 from framewisp.processes import managed_process
+
+
+@pytest.mark.parametrize("env", [{}, {"LANG": "C", "CALLER_ONLY": ""}])
+def test_supervisor_preserves_exec_environment(
+    tmp_path: Path, env: dict[str, str]
+) -> None:
+    log = tmp_path / "app.log"
+    script = (
+        "import json, os; from pathlib import Path; "
+        "entries = Path('/proc/self/environ').read_bytes().split(b'\\0'); "
+        "print(json.dumps({os.fsdecode(k): os.fsdecode(v) "
+        "for entry in entries if entry for k, v in [entry.split(b'=', 1)]}))"
+    )
+    with managed_process([sys.executable, "-I", "-c", script], log=log, env=env) as app:
+        deadline = time.monotonic() + 5
+        while app.poll() is None:
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        assert app.returncode == 0, log.read_text()
+    assert json.loads(log.read_text()) == env
 
 
 def wait_for_tree(root: Path) -> list[int]:

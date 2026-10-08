@@ -188,3 +188,28 @@ def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (session / "app.log").read_text().strip() == str(venv)
+
+
+def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
+    framewisp = shutil.which("framewisp")
+    assert framewisp is not None
+    session = tmp_path / "session"
+    script = (
+        "import json, os; from pathlib import Path; "
+        "entries = Path('/proc/self/environ').read_bytes().split(b'\\0'); "
+        "print(json.dumps({os.fsdecode(k): os.fsdecode(v) "
+        "for entry in entries if entry for k, v in [entry.split(b'=', 1)]}))"
+    )
+    result = subprocess.run(
+        [framewisp, str(session), "run", "--", sys.executable, "-I", "-c", script],
+        env={},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads((session / "app.log").read_text())
+    for key in ("PATH", "LC_CTYPE", "LANG", "GI_TYPELIB_PATH", "XDG_DATA_DIRS"):
+        assert key not in observed
+    assert not any(key.startswith("FRAMEWISP_") for key in observed)
+    assert observed["GDK_BACKEND"] == "wayland"

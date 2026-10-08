@@ -713,7 +713,6 @@ def _run_session(
                     app_env,
                     fonts=os.environ.get("FRAMEWISP_PROFILE_FONTCONFIG_FILE"),
                 )
-                env["FRAMEWISP_FONTCONFIG_FILE"] = app_env["FRAMEWISP_FONTCONFIG_FILE"]
             for process_env in (env, app_env):
                 process_env["FRAMEWISP_OWNER_FD"] = str(lease)
                 process_env["FRAMEWISP_OWNER_RUNTIME"] = directory

@@ -83,7 +83,9 @@ The runtime resolves the daemon and activation-update executables through its
 own PATH before running them with the app environment. The registry, compositor,
 VNC server, and capture tools keep the runtime environment. Fresh profiles apply
 to the app and its services; the runtime supplies the bundled profile font file
-explicitly, and caption rendering uses that same font file.
+explicitly. The process supervisor also reads its original exec environment
+and passes it explicitly to each managed child, so its Python startup cannot
+add locale variables to the child's environment.
 Launcher tests cover arbitrary future wrapper variables, Unicode, non-UTF-8
 bytes, multiline values, large environments, and descriptor cleanup. Installed
 package tests check exact unset/empty/populated wrapper-variable values and

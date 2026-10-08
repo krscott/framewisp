@@ -118,8 +118,14 @@ def supervise(
             )
         # Only the supervisor receives runner stop requests. The app retains
         # default signal handlers and never inherits the control socket.
+        # Use the exec environment, before Python's own startup changes it.
+        app_env: dict[str, str] = {}
+        for entry in Path("/proc/self/environ").read_bytes().split(b"\0"):
+            if entry:
+                key, value = entry.split(b"=", 1)
+                app_env[os.fsdecode(key)] = os.fsdecode(value)
         app = subprocess.Popen(
-            command, stdin=subprocess.DEVNULL, start_new_session=True
+            command, env=app_env, stdin=subprocess.DEVNULL, start_new_session=True
         )
         if record is not None:
             record.write_text(json.dumps({"supervisor": os.getpid(), "app": app.pid}))
