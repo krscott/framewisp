@@ -93,6 +93,14 @@ def test_session_environment_keeps_source_separate(tmp_path: Path) -> None:
     assert "XDG_RUNTIME_DIR" not in source
 
 
+@pytest.mark.parametrize("value", [None, "0", "1", ""])
+def test_session_accessibility_default(tmp_path: Path, value: str | None) -> None:
+    source = {} if value is None else {"ACCESSIBILITY_ENABLED": value}
+    env = session_environment_for_run(tmp_path, source)
+    assert env["ACCESSIBILITY_ENABLED"] == ("1" if value is None else value)
+    assert source == ({} if value is None else {"ACCESSIBILITY_ENABLED": value})
+
+
 def test_bundled_demo_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     caller = tmp_path / "caller"
     runtime = tmp_path / "runtime"
