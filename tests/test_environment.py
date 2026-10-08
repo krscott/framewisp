@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +22,7 @@ def test_unwrapped_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("minimal", [False, True])
 def test_launcher_captures_all_variables(tmp_path: Path, minimal: bool) -> None:
     source = Path(__file__).parents[1]
+    python = str(Path("/proc/self/exe").resolve())
     probe = tmp_path / "wrapper.py"
     probe.write_text(
         "import json, os, sys\n"
@@ -57,10 +57,10 @@ def test_launcher_captures_all_variables(tmp_path: Path, minimal: bool) -> None:
         env = {"PATH": "/caller/bin"}
     result = subprocess.run(
         [
-            sys.executable,
+            python,
             "-I",
             str(source / "framewisp" / "_launch.py"),
-            sys.executable,
+            python,
             "-I",
             str(probe),
         ],
@@ -113,3 +113,5 @@ def test_bundled_demo_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert app_command(["python"], {"PATH": ""}) == ["python"]
     absolute = [str(caller / "framewisp-demo")]
     assert app_command(absolute, {"PATH": ""}) == absolute
+    monkeypatch.chdir(caller)
+    assert app_command(command, {"PATH": ""}) == command

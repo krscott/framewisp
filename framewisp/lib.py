@@ -112,7 +112,10 @@ def app_command(command: list[str], env: dict[str, str]) -> list[str]:
     """Make the bundled demo available to nix run without changing the app PATH."""
     if (
         command[0] == "framewisp-demo"
-        and shutil.which("framewisp-demo", path=env.get("PATH", os.defpath)) is None
+        and shutil.which(
+            "framewisp-demo", path=env.get("PATH", os.defpath) or os.curdir
+        )
+        is None
     ):
         if demo := shutil.which("framewisp-demo"):
             return [demo, *command[1:]]
