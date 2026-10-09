@@ -513,6 +513,11 @@ def session_command(
             "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
             "with this version of framewisp."
         )
+    if console and state.get("console_recording") is not True:
+        raise SessionError(
+            "This runner does not support console recordings. Restart the session "
+            "with this version of framewisp."
+        )
     request = {
         "action": action,
         "session": str(session),
@@ -870,6 +875,7 @@ def _run_session(
                     json.dumps(
                         {
                             "control_protocol": 1,
+                            "console_recording": True,
                             "persistent_input": True,
                             "retain_input_content": retain_input_content,
                             "inspection_protocol": 1,

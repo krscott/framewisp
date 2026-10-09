@@ -566,7 +566,7 @@ any active recorder before stopping the display.
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
-and a `captions` boolean. Replies carry an `error` string or null and optional
+and `captions` and `console` booleans. Replies carry an `error` string or null and optional
 `data`. The runner checks the session directory against its own before acting,
 so copied metadata cannot control another session. Its monitoring loop handles
 recording/status/stop requests; validated input sockets transfer to the worker. It replies only after capture is ready or finalization has finished.
@@ -654,7 +654,8 @@ file replaces the raw recording; on failure, the raw MP4 remains and the command
 fails with the `captions.log` path. The final video preserves GUI dimensions, 30 fps,
 full-range color, and no audio. `record-stop` waits for rendering, as does normal
 session cleanup. With `--no-captions`, rendering and timestamp extraction are
-skipped unless a console panel is requested, but input logging remains enabled. Caption formatting cannot affect
+skipped unless a console panel is requested, but input logging remains enabled.
+Caption formatting cannot affect
 app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session paths.
 
 ## Console output in recordings
@@ -673,6 +674,8 @@ into a 640-pixel console panel on the right. `run --console` without `--record` 
 invalid. The control request adds a validated boolean `console`, default false.
 Console capture uses the same first-frame monotonic origin as input captions,
 including with `--no-captions`. A lock protects sidecar snapshots during rendering.
+Session metadata advertises `console_recording: true`. A console request requires
+this capability before connecting, so an older runner cannot silently ignore it.
 The app-output worker is checked during monitoring, joined after app cleanup and
 before final recording rendering, and bounded on shutdown if a pipe writer remains.
 

@@ -135,12 +135,14 @@ buildPythonPackage {
     pytestCheckHook
     pygobject-stubs
     pillow
+    ffmpeg
     dbus
     git
   ];
 
   preCheck = ''
     export FRAMEWISP_ATSPI_REGISTRY="${at-spi2-core}/libexec/at-spi2-registryd"
+    export FRAMEWISP_FONTCONFIG_FILE="${captionFonts}"
   '';
 
   # Skip integration tests during build (they require the installed executable)

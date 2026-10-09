@@ -141,11 +141,16 @@ class ConsoleText:
             elif char == "\r":
                 self.replacing = True
             elif char == "\n":
+                if not self.current:
+                    self.timestamp = timestamp
                 self.newline()
             elif char == "\b":
                 self.current = self.current[:-1]
             elif char == "\t":
-                self.feed(" " * (8 - len(self.current) % 8), timestamp)
+                width = (
+                    0 if self.replacing else sum(cell_width(c) for c in self.current)
+                )
+                self.feed(" " * (8 - width % 8), timestamp)
             elif not unicodedata.category(char).startswith("C"):
                 if self.replacing:
                     self.current = ""
