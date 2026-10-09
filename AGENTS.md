@@ -1,87 +1,66 @@
-# Agent Guide for framewisp
+# Agent guide for framewisp
 
 framewisp is a tool that gives agents their own display to control GUI apps.
 
 It is early dev and has no users yet. Improving software quality is more
 important than maintaining backwards compatibility.
 
-## Quick Reference
+Code from the original py-start template may be removed as the project evolves.
 
-| Action | Command |
-|--------|---------|
-| Type check | `python -m pyright` |
-| Type check | `python -m mypy .` |
-| Run tests | `python -m pytest` |
+## Development environment
 
-## Environment & Dependencies
+Use `nix develop` to enter the development shell. Its hooks create `.venv` if
+missing, activate it, and install the project with development dependencies on
+creation. Agents can run this themselves; no user restart is needed.
 
-### Template
+For noninteractive commands, use `nix develop -c <command>`, for example:
 
-Code from the original template "py start" may be removed.
+```sh
+nix develop -c python -m pytest
+```
 
-### Adding Dependencies
+Run Python tools such as pytest, mypy, and pyright with `python -m <tool>` so
+they use the active environment and can find its installed packages.
 
-Don't use `pip install <package>` directly. Instead:
-1. Add to `pyproject.toml` (`dependencies` or `optional-dependencies.dev`)
-2. Add corresponding Nix package to `default.nix`
-3. Run `pip install -e '.[dev]'`
+## Dependencies
 
-### Nix Environment
+Declare dependencies before installing them:
 
-**missing .venv**
-  - If .venv is not present, but nix exists on the system, do not create the
-    virtual environment yourself. Ask the user to restart the agent from
-    within a new `nix develop` environment.
+1. Add runtime dependencies to `pyproject.toml` under `dependencies`, or
+   development dependencies under `project.optional-dependencies.dev`.
+2. Add corresponding Nix runtime packages to `default.nix`. Add development
+   tools needed by the Nix environment to `flake.nix` and test dependencies
+   needed during package checks to `default.nix` under `nativeCheckInputs`.
+3. Run `python -m pip install -e '.[dev]'` in the development shell to refresh
+   the installation.
 
-**Tools can't find packages installed in venv:**
-  - Running tools directly (e.g., `pytest`, `mypy`, `pyright`) uses Nix environment versions, which can't see venv packages
-  - **Solution: Always use `python -m <tool>`** - this uses the venv's python and sees all venv packages
-  - This is especially important after adding new dependencies
-  - Examples: `python -m pytest`, `python -m mypy .`, `python -m pyright`
+For libraries without type hints, add available stub packages to development
+dependencies. If stubs are unavailable, use a mypy override scoped to the
+affected module in `pyproject.toml`.
 
-**mypy and type stubs:**
-  - For packages without built-in type hints, add stub packages to dev dependencies
-  - Example: `tqdm` requires `types-tqdm` in `[project.optional-dependencies.dev]`
-  - If stub packages aren't available, add mypy override in `pyproject.toml`:
-    ```toml
-    [[tool.mypy.overrides]]
-    module = "package_name"
-    ignore_missing_imports = true
-    ```
+## Validation
 
-## Build, Test, and Lint
+| Check | Command |
+|-------|---------|
+| Pyright | `python -m pyright` |
+| Mypy | `python -m mypy .` |
+| Tests | `python -m pytest` |
 
-### Type Checking
+Both type checkers must pass. Keep any necessary type-checking exceptions narrow
+and explain why they are needed.
 
-Both mypy and pyright must pass. However, for non-trival pyright issues, it may
-be better to set the error to be ignored in the config.
+Use pytest fixtures for setup and teardown. Minimize mocks.
 
-### Testing
-* Use pytest fixtures for setup/teardown
-* Minimize use of mocks
+## Code style
 
-## Code Style
+- Use Python 3.10+ type hints, such as `list[str | None]`.
+- Keep imports at the top of the file unless a local import is necessary.
+- Prefer returning values over raising exceptions. Make failures actionable.
+- Use `pathlib.Path` instead of `os.path`.
+- Prefer composition over inheritance and keep data easy to inspect, test,
+  and serialize.
 
-### Type Hints
-Use modern Python 3.10+ type hints (e.g. `list[str | None]`):
+## Design documentation
 
-### Imports
-Imports go at the top of the file. Don't include within functions unless absolutely necessary.
-
-### Error Handling
-* Prefer returning values over throwing exceptions.
-* Prefer general exception classes over specific
-
-### File System
-Use `pathlib.Path` instead of `os.path`.
-
-### Data-Oriented Design
-* Follow data-oriented design principles to keep code simple and maintainable.
-* Prefer composition over inheritance
-* Make data easy to inspect, test, and serialize
-
-## Documentation
-
-### DESIGN.md
-This file serves as a blueprint for the application's design.
-An AI agent should be able to read `DESIGN.md` and reproduce the application.
+Keep `DESIGN.md` current with application requirements and architecture. It
+should contain enough detail for an agent to reproduce the application.
