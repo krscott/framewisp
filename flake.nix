@@ -89,7 +89,7 @@
                     ps.pygobject3
                   ]))
                 }/bin/python \
-                -m pytest -c ${./pyproject.toml} ${./tests}/test_profiles.py ${./tests}/test_integration.py ${./tests}/test_python_environment.py --basetemp "$TMPDIR/tests"
+                -m pytest -c ${./pyproject.toml} ${./tests}/test_profiles.py ${./tests}/test_integration.py ${./tests}/test_python_environment.py --durations=25 --basetemp "$TMPDIR/tests"
               touch "$out"
             '';
 

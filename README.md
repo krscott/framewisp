@@ -912,6 +912,11 @@ Run `nix flake check` to test the installed package in an empty environment,
 including real input, screenshots, and recording. This checks that it works
 without the development shell.
 
+CI runs the full library suite during `nix build` and the full installed-package
+GUI suite during `nix flake check`. The development-shell pytest pass checks
+basic input and screenshots on Wayland and X11, plus X11 connection diagnostics.
+The GUI passes report the 25 slowest test phases with `--durations=25`.
+
 See [DESIGN.md](DESIGN.md) for the implementation and
 [GitHub issues](https://github.com/krscott/framewisp/issues) for deferred work.
 

@@ -36,8 +36,12 @@ jobs:
     - name: Check Develop Shell
       run: nix develop --command bash -c 'framewisp --help'
 
-    - name: Test CLI and library
-      run: nix develop --command python -m pytest --basetemp "$RUNNER_TEMP/framewisp-tests"
+    - name: Test development shell GUI and X11 diagnostics
+      run: |
+        nix develop --command python -m pytest \
+          tests/test_integration.py::test_agent_can_see_type_and_click \
+          tests/test_x11.py \
+          --durations=25 --basetemp "$RUNNER_TEMP/framewisp-tests"
 
     - name: Preserve failed test artifacts
       if: failure()
