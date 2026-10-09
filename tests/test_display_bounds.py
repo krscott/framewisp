@@ -220,7 +220,7 @@ def test_embedded_dialog_uses_enclosing_window(window: Window) -> None:
         "Preferences",
         [window],
         [window],
-        ancestors=((Rect(0, 0, 600, 240), "Dialog"),),
+        ancestor_titles=("Dialog",),
     )
     assert reason is None
     assert result is not None and result["x"] == 510
@@ -252,7 +252,7 @@ def test_dialog_fallback_preserves_mapping_guards(window: Window, case: str) -> 
         "Preferences",
         before,
         after,
-        ancestors=((Rect(0, 0, 600, 240), "Dialog"),),
+        ancestor_titles=("Missing" if case == "geometry" else "Dialog",),
     )
     assert result is None
     assert reason == expected
@@ -280,3 +280,18 @@ def test_untitled_accessible_requires_unique_pid_window(
         assert reason == (
             "ambiguous-window" if case == "duplicate" else "window-changed"
         )
+
+
+def test_embedded_dialog_title_cannot_select_another_window(window: Window) -> None:
+    other = replace(window, id=8, title="Preferences", content=Rect(10, 10, 600, 240))
+    result, reason = convert_bounds(
+        Rect(10, 20, 80, 23),
+        Rect(0, 0, 600, 240),
+        123,
+        "Preferences",
+        [window, other],
+        [window, other],
+        ancestor_titles=("Dialog",),
+    )
+    assert result is None
+    assert reason == "ambiguous-window"

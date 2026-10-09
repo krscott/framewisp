@@ -15,7 +15,7 @@ from typing import cast
 
 from gi.repository import Gio, GLib
 
-from framewisp.display_bounds import Rect, convert_bounds, read_windows
+from framewisp.display_bounds import Rect, convert_bounds, match_window, read_windows
 from framewisp.errors import SessionError
 
 ACCESSIBLE = "org.a11y.atspi.Accessible"
@@ -251,9 +251,7 @@ def inspect_bus(
     parents: dict[tuple[str, str], tuple[str, str]] = {}
     pids: dict[str, int] = {}
     geometries: dict[tuple[str, str], Rect | None] = {}
-    conversions: list[
-        tuple[dict[str, object], Rect, tuple[tuple[Rect, str], ...], int]
-    ] = []
+    conversions: list[tuple[dict[str, object], Rect, Rect, tuple[str, ...], int]] = []
     snapshot = uuid.uuid4().hex
     matches: list[dict[str, object]] = []
     reasons: set[str] = set()
@@ -454,14 +452,16 @@ def inspect_bus(
                                             "bounds-outside-parent"
                                         )
                                         continue
-                                    windows: list[tuple[Rect, str]] = []
-                                    for window_ref, title in root:
-                                        rect = component_bounds(
-                                            bus, window_ref, geometries
-                                        )
-                                        if rect is None:
-                                            break
-                                        windows.append((rect, title))
+                                    titles = tuple(title for _, title in root)
+                                    selected = match_window(
+                                        pids[ref[0]], titles, before
+                                    )
+                                    if isinstance(selected, str):
+                                        node["display_bounds_reason"] = selected
+                                        continue
+                                    toplevel = component_bounds(
+                                        bus, root[selected.index][0], geometries
+                                    )
                                 except GLib.Error:
                                     if (
                                         bus.cancel.is_cancelled()
@@ -470,9 +470,9 @@ def inspect_bus(
                                         raise
                                     # Conversion metadata is optional; readable control fields remain complete.
                                     continue
-                                if windows:
+                                if toplevel is not None:
                                     conversions.append(
-                                        (node, bounds, tuple(windows), pids[ref[0]])
+                                        (node, bounds, toplevel, titles, pids[ref[0]])
                                     )
             except GLib.Error as error:
                 message = f"{bus.error_context}{error}"[:TEXT_LIMIT]
@@ -502,18 +502,18 @@ def inspect_bus(
             bus.close()
     if runtime is not None and conversions:
         after, mapping_error = read_windows(runtime, deadline, cancelled)
-        for node, bounds, window_geometries, pid in conversions:
+        for node, bounds, toplevel, titles, pid in conversions:
             if mapping_error is not None:
                 node["display_bounds_reason"] = mapping_error
             else:
                 node["display_bounds"], node["display_bounds_reason"] = convert_bounds(
                     bounds,
-                    window_geometries[0][0],
+                    toplevel,
                     pid,
-                    window_geometries[0][1],
+                    titles[0],
                     before,
                     after,
-                    ancestors=window_geometries[1:],
+                    ancestor_titles=titles[1:],
                 )
     if status == "timeout" and bus is not None and bus.app_unresponsive:
         reasons.add("app-unresponsive")

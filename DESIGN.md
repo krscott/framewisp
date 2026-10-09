@@ -852,8 +852,12 @@ duplicate titles remain ambiguous. An empty accessible title can match only if
 the PID has exactly one Sway window, since GTK may supply a compositor title
 for an untitled window. If a dialog has no compositor match, conversion tries
 its enclosing accessible windows. Ambiguity or a failed geometry check on a
-matching window never triggers fallback. PID and component geometry reads are
-cached only within the query.
+matching window never triggers fallback. Enclosing window identities must agree
+with the selected compositor window; conflicting matches produce
+`ambiguous-window`, even if their sizes agree. Window selection uses titles
+before fetching geometry, so an unused enclosing window's Component interface
+cannot suppress a valid nearer match. PID and component geometry reads are cached
+only within the query.
 
 For matched controls, conversion reads the component bounds of their traversed
 ancestors up to the nearest accessible window, including ancestors excluded by

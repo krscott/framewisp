@@ -419,7 +419,14 @@ def test_optional_display_metadata_failure_keeps_observation_complete(
 
 @pytest.mark.parametrize(
     "case",
-    ["valid", "outside-parent", "outside-ancestor", "no-component", "unavailable"],
+    [
+        "valid",
+        "outside-parent",
+        "outside-ancestor",
+        "no-component",
+        "unavailable",
+        "unused-window",
+    ],
 )
 def test_filtered_control_checks_embedded_dialog_ancestors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
@@ -482,6 +489,8 @@ def test_filtered_control_checks_embedded_dialog_ancestors(
             calls.append(path)
             if case == "unavailable" and path == "/panel":
                 raise GLib.Error("Ancestor bounds unavailable")
+            if case == "unused-window" and path == "/window":
+                raise GLib.Error("Unused window geometry must not be read")
             return rectangles[path]
         raise AssertionError(method)
 
@@ -493,7 +502,7 @@ def test_filtered_control_checks_embedded_dialog_ancestors(
             Window(
                 7,
                 123,
-                "python",
+                "Preferences" if case == "unused-window" else "python",
                 Rect(500, 325, 600, 240),
                 True,
                 True,
