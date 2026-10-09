@@ -560,6 +560,46 @@ The recorder writes diagnostics to `recorder.log`, replaced for each clip.
 Keep the runner alive until shutdown completes so it can finalize the MP4.
 The development shell includes FFmpeg for video inspection.
 
+## Share media in GitHub comments
+
+[GitHub CLI 2.99.0](https://github.com/cli/cli/releases/tag/v2.99.0) and newer
+can upload PNG screenshots and MP4 recordings directly to issue and PR comments.
+Check `gh pr comment --help` for `--attach`. Install or update `gh` separately;
+Framewisp does not include it.
+
+After reviewing the screenshot and waiting for `record-stop` to finish, post both
+files with a comment body saved in `/tmp/review.md`:
+
+```sh
+gh pr comment 123 --repo OWNER/REPO --body-file /tmp/review.md \
+  --attach '/tmp/after.png#The app after the verified interaction' \
+  --attach /tmp/demo.mp4
+```
+
+Replace `123` and `OWNER/REPO` with the destination PR and repository. Use
+`gh issue comment` with the issue number for an issue. Each `--attach` uploads
+one file; unreferenced files are appended to the comment. The `#` suffix supplies
+image alt text. Videos render as inline players and do not accept alt text.
+To place an image within the body, write `![Result](/tmp/after.png)` in
+`/tmp/review.md` and attach the same path; `gh` replaces it with the uploaded URL.
+For a video, use `![](/tmp/demo.mp4)` alone in its paragraph.
+
+Uploads require repository write access and supported authentication, such as
+an OAuth token or a classic or fine-grained personal access token. CLI attachments
+support GitHub.com and GitHub Enterprise Cloud. If `--attach` is unavailable or
+access is insufficient, upload through the browser's comment editor. A separate
+media branch adds binary files to Git history and requires keeping the referenced
+commit available; direct attachments avoid that maintenance.
+
+[GitHub's attachment limits](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files)
+are 10 MB per image, 10 MB per video on free plans, and up to 100 MB per video on
+paid plans with the required access. Framewisp's H.264 MP4 matches GitHub's
+recommended codec. Uploaded files in public repositories are publicly accessible;
+private/internal attachments require repository access. Review screen content
+before publishing, even when input logs omit typed text.
+See [GitHub's CLI attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+for Markdown placement and supported commands.
+
 ## Input logs and recording captions
 
 Every accepted input command appends start and end records to `SESSION/inputs.jsonl`,

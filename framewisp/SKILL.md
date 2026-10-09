@@ -370,6 +370,32 @@ Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 
+## Share evidence on GitHub
+
+Review screenshots and finished recordings before publishing. Follow the user's
+repository and posting permissions; an upload publishes the file immediately.
+Wait for `record-stop` or normal session shutdown to finish before using an MP4.
+
+Use GitHub CLI 2.99.0 or newer with `--attach` (check `gh pr comment --help`).
+Save the comment text in `/tmp/review.md`, following any required attribution,
+then replace the PR number and repository in this example:
+
+```sh
+gh pr comment 123 --repo OWNER/REPO --body-file /tmp/review.md \
+  --attach '/tmp/after.png#The verified result' --attach /tmp/demo.mp4
+```
+
+Use `gh issue comment` for issues. Repeat `--attach` for each file; images and
+inline video players are appended unless the body references the same local path.
+Image alt text follows `#`; videos have no alt text. Uploads require write access
+and supported authentication, such as OAuth or a classic/fine-grained PAT, on
+GitHub.com or GitHub Enterprise Cloud. If the flag, host, or access is unsupported,
+ask the user to upload in the browser's comment editor.
+Keep each PNG under 10 MB and MP4 under 10 MB for free plans (paid plans allow
+up to 100 MB with the required access). Public-repository attachments are public.
+Prefer direct attachments to a media branch that must be retained for its links.
+See [GitHub's CLI attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
+
 ## Desktop attachment
 
 For an existing desktop, ask the user to run `framewisp SESSION attach` in their

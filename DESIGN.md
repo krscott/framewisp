@@ -46,6 +46,10 @@ acceptance application.
 - grim captures the headless output directly to PNG.
 - wf-recorder captures the display to H.264 MP4 when `run --record FILE` is used.
 
+The README and bundled agent skill describe publishing finished PNG/MP4 evidence
+with GitHub CLI's `--attach` flag, its access and size limits, and the browser
+fallback. Media publication stays outside Framewisp's CLI and runtime dependencies.
+
 There is no separate controller daemon or framebuffer cache.
 The runner accepts input, recording, status, and stop commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
