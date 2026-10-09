@@ -2,6 +2,7 @@
 
 # pyright: reportMissingModuleSource=false
 
+import argparse
 import json
 import time
 from functools import partial
@@ -27,6 +28,9 @@ def modifier_state(state: Gdk.ModifierType) -> dict[str, bool]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--keys-only", action="store_true")
+    args = parser.parse_args()
     Gtk.init()
     loop = GLib.MainLoop()
     window = Gtk.Window(title="Input probe")
@@ -66,6 +70,8 @@ def main() -> None:
     content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     area = Gtk.DrawingArea()
     area.set_size_request(640, 400)
+    if args.keys_only:
+        area.set_focusable(True)
     area.set_has_tooltip(True)
 
     def on_tooltip(
@@ -115,9 +121,12 @@ def main() -> None:
     entry = Gtk.Entry()
     entry.set_size_request(640, 48)
     entry.connect("changed", lambda *_: log("text", text=entry.get_text()))
-    content.append(entry)
+    if not args.keys_only:
+        content.append(entry)
     window.set_child(content)
     window.present()
+    if args.keys_only:
+        area.grab_focus()
     loop.run()  # type: ignore[no-untyped-call]
 
 

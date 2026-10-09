@@ -323,17 +323,26 @@ up to whole milliseconds. The subprocess timeout is fifteen seconds plus those
 intervals and wtype's 4 ms per-character key press/release time. No clipboard or
 input-method composition is involved.
 
-`key CHORD` accepts one letter, digit, or named key, prefixed by zero or more
-`Ctrl+`, `Shift+`, or `Alt+` modifiers. Names are case-insensitive, and letter case
-does not imply Shift. Named keys are Space, Return, Tab, BackSpace, Escape,
-Delete, Left, Right, Up, and Down. `key_commands` validates the complete
-combination before input, rejecting unknown keys, empty components, and repeated
-modifiers. It maps names to vncdotool's vocabulary (`enter`, `bsp`, `esc`, etc.),
-then emits `keydown` for each modifier, `key` for the final key, and `keyup` for
+`key CHORD` accepts one letter, digit, ASCII punctuation symbol, or named key,
+prefixed by zero or more `Ctrl+`, `Shift+`, or `Alt+` modifiers.
+Names are case-insensitive, and letter case does not imply Shift.
+Named keys are Space, Return, Tab, BackSpace, Escape,
+Delete, Left, Right, Up, Down, Home, End, Page_Up, Page_Down, and F1 through F12.
+Punctuation accepts each literal and its X keysym name (listed in the CLI help).
+`parse_chord` validates and normalizes names to VNC symbols for both headless
+and attached input and for log redaction. A final literal plus uses `+` alone
+or a doubled separator such as `Ctrl++`; `Ctrl+` remains invalid.
+Validation rejects unknown keys, empty components, and repeated modifiers before
+input. Names map to vncdotool's vocabulary (`enter`, `bsp`, `esc`, etc.).
+`key_commands` emits `keydown` for each modifier, `key` for the final key, and `keyup` for
 each modifier in reverse order. With Shift held, letters and digits use the
-shifted US-layout symbol, and Tab uses ISO_Left_Tab. wayvnc otherwise adjusts
-modifier state to produce the unshifted symbol, removing the intended shortcut
-modifiers. vncdotool lacks a name for ISO_Left_Tab, so this one keysym is encoded
+shifted US-layout symbol, as does unshifted punctuation, and Tab uses ISO_Left_Tab.
+Punctuation names map to literal characters, bypassing vncdotool's misleading
+`slash` alias (which means backslash). Both backends add an explicit Shift modifier
+for shifted punctuation; attachment sends the corresponding US evdev keycode.
+Function/navigation keys also have explicit attachment keycodes. wayvnc otherwise
+adjusts modifier state to produce the unshifted symbol, removing the intended
+shortcut modifiers. vncdotool lacks a name for ISO_Left_Tab, so this keysym is encoded
 as `chr(0xFE20)`; its single-character path sends the ordinal as the RFB keysym.
 There are no held keys across commands.
 
@@ -607,7 +616,7 @@ so all clips follow the same policy even with `--no-captions`. No command or bat
 parameter overrides it.
 
 By default, type parameters omit `text` while retaining `interval`. Literal key
-chords (letters, digits, Space, optionally Shift) omit the key and retain only
+chords (letters, digits, punctuation, Space, optionally Shift) omit the key and retain only
 modifiers. Ctrl/Alt shortcuts and named navigation/control keys retain their chord.
 Captions use "Type text" and "Key" for omitted content. Opt-in preserves full text
 and chords. Text/key failures omit backend messages that can include literal or

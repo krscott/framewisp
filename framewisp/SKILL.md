@@ -75,7 +75,17 @@ For `click` and `drag`, MOD is `ctrl`, `shift`, or `alt`, case-insensitive.
 Repeat `--modifier` for combinations, for example `--modifier ctrl --modifier shift`;
 each modifier may appear once. For `key`, join modifiers and a key with `+`.
 Supported keys are `a` through `z`, `0` through `9`, `Space`, `Return`, `Tab`,
-`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, and `Down`.
+`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`,
+`Page_Up`, `Page_Down`, and `F1` through `F12`. ASCII punctuation accepts literals
+or X keysym names: `comma`, `period`, `slash`, `minus`, `equal`, `semicolon`,
+`apostrophe`, `bracketleft`, `bracketright`, `backslash`, `grave`, `exclam`,
+`quotedbl`, `numbersign`, `dollar`, `percent`, `ampersand`, `parenleft`,
+`parenright`, `asterisk`, `plus`, `colon`, `less`, `greater`, `question`, `at`,
+`asciicircum`, `underscore`, `braceleft`, `bar`, `braceright`, `asciitilde`.
+For Preferences, use `key Ctrl+comma` or `key 'Ctrl+,'`. Use `Ctrl+plus` or
+`'Ctrl++'` for Ctrl with `+`; `Ctrl+` is incomplete. Quote shell metacharacters.
+Shift selects US-layout shifted punctuation, so `Ctrl+Shift+comma` and
+`Ctrl+less` both send Ctrl+`<`. Shifted punctuation implies Shift.
 Names are case-insensitive; `A` does not imply Shift. Use `Shift+a` for that chord.
 `type` rejects newlines, tabs, and other nonprintable characters; send `key Return`
 or `key Tab` separately. X11 sessions support 128 distinct non-ASCII characters
@@ -358,7 +368,7 @@ and produces silent MP4 video. Only one clip may be active. Normal runner
 shutdown also finalizes it. Input captions are embedded by default;
 `--no-captions` disables them for that clip. Every input is still logged to
 `SESSION/inputs.jsonl`. Logs and captions omit typed text (including Unicode) and
-literal key events by default. Letter/digit/Space keys with Shift alone are omitted;
+literal key events by default. Letter/digit/punctuation/Space keys with Shift alone are omitted;
 Ctrl/Alt shortcuts and named keys such as Return and arrows remain visible.
 Start `run` or user-owned `attach` with `--retain-input-content` only when full
 input retention is intended. That session-wide opt-in applies to individual inputs,

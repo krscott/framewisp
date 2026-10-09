@@ -27,6 +27,7 @@ from gi.repository import GLib, Gst
 
 from framewisp.captions import input_error
 from framewisp.desktop import reserve_desktop, write_state
+from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
 from framewisp.tray import UNAVAILABLE, SharingIndicator
@@ -53,10 +54,10 @@ class InputParameters(TypedDict, total=False):
 
 # Linux evdev keycodes for the tested desktop's US layout.
 KEYCODES = {
-    "escape": 1,
-    "backspace": 14,
+    "esc": 1,
+    "bsp": 14,
     "tab": 15,
-    "return": 28,
+    "enter": 28,
     "ctrl": 29,
     "shift": 42,
     "alt": 56,
@@ -66,7 +67,25 @@ KEYCODES = {
     "right": 106,
     "down": 108,
     "delete": 111,
+    "home": 102,
+    "end": 107,
+    "pgup": 104,
+    "pgdn": 109,
+    "-": 12,
+    "=": 13,
+    "[": 26,
+    "]": 27,
+    ";": 39,
+    "'": 40,
+    "`": 41,
+    "\\": 43,
+    ",": 51,
+    ".": 52,
+    "/": 53,
+    "f11": 87,
+    "f12": 88,
 }
+KEYCODES.update({f"f{number}": 58 + number for number in range(1, 11)})
 for first, row in [
     (2, "1234567890"),
     (16, "qwertyuiop"),
@@ -180,7 +199,16 @@ class AttachedInput:
                     self.portal.input("NotifyKeyboardKeysym", "iu", symbol, 1)
                     self.portal.input("NotifyKeyboardKeysym", "iu", symbol, 0)
             elif action == "key":
-                *modifiers, key = p["chord"].lower().split("+")
+                parsed = parse_chord(p["chord"])
+                if parsed is None:
+                    raise ValueError("Unsupported key combination.")
+                modifiers, key = parsed
+                # Shifted punctuation names/literals imply Shift on a US layout.
+                unshifted = {shifted: base for base, shifted in SHIFTED_KEYS.items()}
+                if key in unshifted:
+                    key = unshifted[key]
+                    if "shift" not in modifiers:
+                        modifiers.append("shift")
                 for modifier in modifiers:
                     self.key(KEYCODES[modifier], True)
                 self.key(KEYCODES[key], True)

@@ -43,6 +43,52 @@ def input_without_bus(stop: Event) -> AttachedInput:
     return AttachedInput(portal, stop)
 
 
+@pytest.mark.parametrize(
+    "chord,code,modifiers",
+    [
+        ("Ctrl+comma", 51, (29,)),
+        ("Ctrl+,", 51, (29,)),
+        ("Ctrl+slash", 53, (29,)),
+        ("Ctrl+backslash", 43, (29,)),
+        ("Ctrl+Shift+comma", 51, (29, 42)),
+        ("Ctrl+less", 51, (29, 42)),
+        ("Ctrl++", 13, (29, 42)),
+        ("Shift+plus", 13, (42,)),
+        ("Home", 102, ()),
+        ("End", 107, ()),
+        ("Page_Up", 104, ()),
+        ("Page_Down", 109, ()),
+        ("Shift+Tab", 15, (42,)),
+    ]
+    + [(f"F{number}", 58 + number, ()) for number in range(1, 11)]
+    + [("F11", 87, ()), ("F12", 88, ())],
+)
+def test_attached_key_codes_and_release(
+    portal_calls: list[tuple[str, tuple[object, ...]]],
+    chord: str,
+    code: int,
+    modifiers: tuple[int, ...],
+) -> None:
+    inputs = input_without_bus(Event())
+    inputs.perform("key", {"chord": chord})
+    expected = [
+        *((modifier, 1) for modifier in modifiers),
+        (code, 1),
+        (code, 0),
+        *((modifier, 0) for modifier in reversed(modifiers)),
+    ]
+    assert portal_calls == [("NotifyKeyboardKeycode", values) for values in expected]
+    assert not inputs.keys
+
+
+def test_invalid_attached_chord_sends_no_keys(
+    portal_calls: list[tuple[str, tuple[object, ...]]],
+) -> None:
+    with pytest.raises(ValueError, match="Unsupported key combination"):
+        input_without_bus(Event()).perform("key", {"chord": "Ctrl+unknown"})
+    assert portal_calls == []
+
+
 def test_stop_releases_drag_and_modifiers(
     portal_calls: list[tuple[str, tuple[object, ...]]],
     monkeypatch: pytest.MonkeyPatch,
