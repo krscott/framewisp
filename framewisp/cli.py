@@ -168,6 +168,11 @@ def main() -> None:
     record_start.add_argument("path", type=Path, metavar="FILE")
     for recording_parser in (run, record_start):
         recording_parser.add_argument(
+            "--console",
+            action="store_true",
+            help="append timestamped app stdout/stderr beside the recorded GUI",
+        )
+        recording_parser.add_argument(
             "--no-captions",
             action="store_true",
             help="record without input captions (input logging stays enabled)",
@@ -337,6 +342,10 @@ def main() -> None:
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
     if args.action == "run":
+        if args.console and args.record is None:
+            parser.error(
+                "--console requires --record; use record-start --console for later clips"
+            )
         if args.dbus_service_dir and args.profile != "fresh":
             parser.error("--dbus-service-dir requires --profile fresh")
         if not args.command or args.command == ["--"]:
@@ -396,6 +405,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             command,
             recording=args.record,
             captions=not args.no_captions,
+            console=args.console,
             size=(args.width, args.height),
             x11=args.x11,
             retain_input_content=args.retain_input_content,
@@ -415,6 +425,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 args.action,
                 args.path if args.action == "record-start" else None,
                 captions=not getattr(args, "no_captions", False),
+                console=getattr(args, "console", False),
             )
         )
     elif args.action == "screenshot":

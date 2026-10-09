@@ -21,6 +21,28 @@ def test_cli_help() -> None:
     assert "--agent-skill" in result.stdout
 
 
+def test_console_requires_recording(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "run",
+            "--console",
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "--console requires --record" in result.stderr
+    assert not (tmp_path / "session").exists()
+
+
 def test_agent_skill_without_runtime_dependencies(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     script = (
@@ -154,6 +176,7 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
         "wayvnc.log",
         "recorder.log",
         "app.log",
+        "console.jsonl",
         "inputs.jsonl",
         "captions.log",
         "dbus.log",

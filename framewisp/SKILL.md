@@ -38,7 +38,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
+| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--no-captions] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console` requires `--record`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -48,7 +48,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
-| `record-start [--no-captions] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
+| `record-start [--console] [--no-captions] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
@@ -369,6 +369,20 @@ does not redact screens, app logs, shell history, batch files, or runtime input 
 Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
+
+Use `run --record FILE --console` or `record-start --console FILE` to append a
+640-pixel-wide scrolling panel of the launched app's combined stdout/stderr.
+The GUI and screenshots keep their original dimensions. Panel lines show seconds
+relative to the clip; negative timestamps identify earlier output kept for context.
+ANSI formatting is stripped and carriage returns replace progress lines. No
+terminal emulation or app buffering changes occur. Times describe when Framewisp
+receives output, so buffered output can appear late. Output from separately
+activated services is not captured. Every headless session keeps original bytes
+in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
+uses replacement characters in the panel. Console text follows the app-log policy,
+so the input-content policy does not redact it. `--no-captions` still permits the
+console panel. Rendering waits until clip finalization; a failure preserves the
+raw GUI video and reports `captions.log`.
 
 ## Share evidence on GitHub
 

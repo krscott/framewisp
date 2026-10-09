@@ -21,8 +21,9 @@ from xml.sax.saxutils import escape
 
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import capture_origin, recorder_output, render_captions
+from framewisp.captions import capture_origin, recorder_output, render_recording
 from framewisp.connection import reply as reply
+from framewisp.console import ConsoleCapture, app_output
 from framewisp.environment import caller_environment
 from framewisp.errors import (
     SOCKET_ACCESS_HINT,
@@ -297,7 +298,14 @@ def start_wayvnc(
 
 @contextmanager
 def start_recording(
-    destination: Path, *, log: Path, env: dict[str, str], stop: Event, captions: bool
+    destination: Path,
+    *,
+    log: Path,
+    env: dict[str, str],
+    stop: Event,
+    captions: bool,
+    console: ConsoleCapture | None = None,
+    size: tuple[int, int] = (1280, 720),
 ) -> Generator[OwnedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
     command = [
@@ -318,7 +326,8 @@ def start_recording(
         "-f",
         str(destination),
     ]
-    recorder_env = env | {"WAYLAND_DEBUG": "client"} if captions else env
+    timed = captions or console is not None
+    recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     with (
         recorder_output(log) as output,
         managed_process(command, log=log, env=recorder_env, output=output) as process,
@@ -330,7 +339,7 @@ def start_recording(
                 raise log_failure("Recorder exited during startup", log)
             # wf-recorder opens and writes the MP4 header after receiving a frame.
             if destination.exists() and destination.stat().st_size > 0:
-                if not captions:
+                if not timed:
                     break
                 try:
                     origin = capture_origin(log)
@@ -350,13 +359,16 @@ def start_recording(
             stopped = time.monotonic()
     if process.returncode != 0:
         raise log_failure(f"Recorder failed to finalize {destination}", log)
-    if captions:
-        render_captions(
+    if timed:
+        render_recording(
             destination,
             input_log=log.parent / "inputs.jsonl",
             origin=origin,
             stopped=stopped,
             log=log.parent / "captions.log",
+            captions=captions,
+            console=console,
+            size=size,
         )
 
 
@@ -375,6 +387,7 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
             "wayvnc.log",
             "recorder.log",
             "app.log",
+            "console.jsonl",
             "inputs.jsonl",
             "captions.log",
             "dbus.log",
@@ -430,12 +443,15 @@ class Recordings:
     env: dict[str, str]
     stop_requested: Event
     size: tuple[int, int]
+    console_capture: ConsoleCapture
     process: OwnedProcess | None = None
     resources: ExitStack = field(default_factory=ExitStack)
     destination: Path | None = None
     last_summary: dict[str, object] | None = None
 
-    def start(self, destination: Path, *, captions: bool = True) -> str | None:
+    def start(
+        self, destination: Path, *, captions: bool = True, console: bool = False
+    ) -> str | None:
         if self.process is not None:
             return "A recording is already active. Use record-stop first."
         if any(dimension % 2 for dimension in self.size):
@@ -451,6 +467,8 @@ class Recordings:
                     env=self.env,
                     stop=self.stop_requested,
                     captions=captions,
+                    console=self.console_capture if console else None,
+                    size=self.size,
                 )
             )
         except (RuntimeError, OSError) as error:
@@ -485,6 +503,7 @@ def session_command(
     destination: Path | None = None,
     *,
     captions: bool = True,
+    console: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
@@ -499,6 +518,7 @@ def session_command(
         "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
+        "console": console,
         "parameters": parameters,
     }
     if parameters is not None and state.get("persistent_input") is not True:
@@ -620,12 +640,17 @@ def handle_session_command(
         elif action == "record-start":
             destination = command.get("destination")
             captions = command.get("captions", True)
+            console = command.get("console", False)
             if not isinstance(destination, str):
                 error = "record-start requires a destination"
             elif not isinstance(captions, bool):
                 error = "captions must be true or false"
+            elif not isinstance(console, bool):
+                error = "console must be true or false"
             else:
-                error = recordings.start(Path(destination), captions=captions)
+                error = recordings.start(
+                    Path(destination), captions=captions, console=console
+                )
         elif action == "record-stop":
             error = recordings.finish()
             if error is None:
@@ -646,6 +671,7 @@ def run_session(
     *,
     recording: Path | None = None,
     captions: bool = True,
+    console: bool = False,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
     retain_input_content: bool = False,
@@ -673,6 +699,7 @@ def run_session(
             lease=lease,
             recording=recording,
             captions=captions,
+            console=console,
             size=size,
             x11=x11,
             retain_input_content=retain_input_content,
@@ -688,6 +715,7 @@ def _run_session(
     lease: int,
     recording: Path | None,
     captions: bool,
+    console: bool,
     size: tuple[int, int],
     x11: bool,
     retain_input_content: bool,
@@ -796,18 +824,25 @@ def _run_session(
             input_client = stack.enter_context(keep_input_devices(runtime, stop))
 
             backends = buses | {"sway": sway, "wayvnc": vnc}
-            recordings = Recordings(session, env, stop, size)
+            console_capture = ConsoleCapture(session)
+            output = stack.enter_context(app_output(console_capture))
+            recordings = Recordings(session, env, stop, size, console_capture)
             stack.callback(recordings.close)
             if recording is not None:
-                error = recordings.start(recording, captions=captions)
+                error = recordings.start(recording, captions=captions, console=console)
                 if error is not None:
                     if stop.is_set():
                         return 0
                     raise SessionError(error)
 
             command = app_command(command, app_env)
+            # Drain final app bytes before rendering the last recording.
+            stack.callback(console_capture.wait)
+            stack.callback(output.close)
             app = stack.enter_context(
-                managed_process(command, log=session / "app.log", env=app_env)
+                managed_process(
+                    command, log=session / "app.log", env=app_env, output=output
+                )
             )
             listener = stack.enter_context(socket.socket(socket.AF_UNIX))
             listener.bind(str(runtime / "control.sock"))
@@ -881,6 +916,7 @@ def _run_session(
             write_state()
             print(f"Session ready: {session}", flush=True)
             while not stop.is_set():
+                console_capture.check()
                 result = app.poll()
                 if result is not None:
                     temporary = session / ".app-exit.json"

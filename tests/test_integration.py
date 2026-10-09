@@ -16,6 +16,9 @@ from typing import Any
 import pytest
 from PIL import Image, ImageChops
 
+from framewisp.captions import render_recording
+from framewisp.console import ConsoleCapture
+
 
 @dataclass(frozen=True)
 class Demo:
@@ -77,6 +80,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11": None,
             "x11-probe": "probe",
             "x11-record": True,
+            "x11-console": "console",
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
             "x11-qt-tree": "qt-tree",
@@ -86,7 +90,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         }[mode]
     recording = (
         tmp_path / "session.mp4"
-        if mode is True or mode in {"large", "uncaptioned"}
+        if mode is True or mode in {"large", "uncaptioned", "console"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -96,6 +100,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.append("--x11")
     if recording is not None:
         command.extend(["--record", str(recording)])
+        if mode == "console":
+            command.append("--console")
         if mode == "uncaptioned":
             command.append("--no-captions")
     if mode in {"large", "odd"}:
@@ -1102,6 +1108,196 @@ def video_patch(path: Path, second: float) -> bytes:
         check=True,
         timeout=20,
     ).stdout
+
+
+def console_panel(path: Path, second: float) -> bytes:
+    return subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(second),
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "crop=640:720:1280:0",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+
+
+@pytest.mark.integration
+def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
+    video = tmp_path / "video with [punctuation]:,.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=green:s=320x240:r=30:d=2",
+            "-c:v",
+            "libx264",
+            str(video),
+        ],
+        check=True,
+        timeout=20,
+    )
+    (tmp_path / "console.jsonl").write_text(
+        json.dumps(
+            {"time": 10.7, "text": "\x1b[31mLiteral {\\pos(0,0)}\\N\x1b[0m\n日本語\n"}
+        )
+        + "\n"
+    )
+    render_recording(
+        video,
+        input_log=tmp_path / "unused",
+        origin=10,
+        stopped=12,
+        log=tmp_path / "captions.log",
+        captions=False,
+        console=ConsoleCapture(tmp_path),
+        size=(320, 240),
+    )
+
+    def frame(second: float) -> Image.Image:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-ss",
+                str(second),
+                "-i",
+                str(video),
+                "-frames:v",
+                "1",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+            timeout=20,
+        )
+        return Image.frombytes("RGB", (960, 240), result.stdout)
+
+    early, late = frame(0.3), frame(1.3)
+    # Output only changes the added panel. Literal ASS syntax cannot move it onto the GUI.
+    assert (
+        ImageChops.difference(
+            early.crop((0, 0, 304, 240)), late.crop((0, 0, 304, 240))
+        ).getbbox()
+        is None
+    )
+    assert (
+        ImageChops.difference(
+            early.crop((320, 48, 960, 240)), late.crop((320, 48, 960, 240))
+        ).getbbox()
+        is not None
+    )
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration:stream=width,height,r_frame_rate",
+            "-of",
+            "json",
+            str(video),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    data = json.loads(probe.stdout)
+    assert float(data["format"]["duration"]) == pytest.approx(2, abs=1 / 30)
+    assert data["streams"][0]["r_frame_rate"] == "30/1"
+
+
+@pytest.mark.integration
+def test_console_render_failure_preserves_raw_video(tmp_path: Path) -> None:
+    video = tmp_path / "invalid.mp4"
+    video.write_bytes(b"raw file contents")
+    (tmp_path / "console.jsonl").write_text("")
+    with pytest.raises(RuntimeError, match="raw video remains"):
+        render_recording(
+            video,
+            input_log=tmp_path / "unused",
+            origin=10,
+            stopped=12,
+            log=tmp_path / "captions.log",
+            captions=False,
+            console=ConsoleCapture(tmp_path),
+        )
+    assert video.read_bytes() == b"raw file contents"
+    assert (tmp_path / "captions.log").stat().st_size > 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["console", "x11-console"], indirect=True)
+def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> None:
+    screenshot = tmp_path / "gui.png"
+    wait_for_demo_frame(demo, screenshot)
+    assert demo.recording is not None
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert (summary["width"], summary["height"]) == (1920, 720)
+    assert len(recording_frames(demo.recording, size=(1920, 720))) > 1
+    assert (demo.directory / "console.jsonl").stat().st_size > 0
+    for captions in [False, True]:
+        clip = tmp_path / f"console-{captions}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            "--console",
+            *([] if captions else ["--no-captions"]),
+            str(clip),
+        )
+        time.sleep(0.4)
+        cli(demo.directory, "type", "console output")
+        cli(demo.directory, "key", "Return")
+        wait_until(
+            lambda: "Entered: console output"
+            in (demo.directory / "app.log").read_text()
+        )
+        time.sleep(0.5)
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        assert (summary["width"], summary["height"]) == (1920, 720)
+        early = console_panel(clip, 0.1)
+        late = console_panel(clip, summary["duration_seconds"] - 0.2)
+        assert len(early) == len(late) == 640 * 720 * 3
+        assert sum(abs(a - b) for a, b in zip(early, late, strict=True)) > 100000
+        cli(demo.directory, "screenshot", str(screenshot))
+        with Image.open(screenshot) as image:
+            assert image.size == (1280, 720)
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "key", "BackSpace")
+    plain = tmp_path / "plain.mp4"
+    cli(demo.directory, "record-start", "--no-captions", str(plain))
+    time.sleep(0.2)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert (summary["width"], summary["height"]) == (1280, 720)
+    cli(demo.directory, "record-start", "--console", str(tmp_path / "shutdown.mp4"))
+    stopped = json.loads(cli(demo.directory, "stop").stdout)
+    assert stopped["recording"]["width"] == 1920
+    assert demo.process.wait(timeout=20) == 0
 
 
 @pytest.mark.integration
