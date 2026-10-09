@@ -922,13 +922,32 @@ Framewisp is licensed under the GNU General Public License, version 3 only
 
 ## Inspect accessible controls
 
-Headless GTK and Qt apps can expose text and state without a screenshot:
+Headless GTK, Qt, and Chromium apps can expose text and state without a screenshot:
 
 ```sh
 framewisp demo inspect --json --role button --name 'Apply text'
 framewisp demo inspect --json --role 'text box'
 framewisp demo inspect --json --role label --text 'Applied:'
 ```
+
+Private `run` sessions default `ACCESSIBILITY_ENABLED` to `1` so Chromium can
+connect to the private AT-SPI bus on headless hosts. Caller-provided values are
+preserved, including `ACCESSIBILITY_ENABLED=0` to disable this bridge. Set it
+before invoking framewisp, or pass `env ACCESSIBILITY_ENABLED=0` before the app
+command. This also applies to `--profile fresh` sessions.
+
+Keep Chromium's `--force-renderer-accessibility` flag when launching it:
+
+```sh
+framewisp browser run -- chromium \
+  --ozone-platform=wayland --force-renderer-accessibility \
+  --user-data-dir="$(mktemp -d /tmp/framewisp-chromium.XXXXXX)" \
+  --no-first-run --no-default-browser-check http://127.0.0.1:3000
+framewisp browser inspect --json --role button --max-depth 24 --max-nodes 1024
+```
+
+Serve your test page on that address first. The environment variable alone has
+not been verified without `--force-renderer-accessibility`.
 
 This is a read-only prototype. It returns roles, names, text, state flags,
 action names, numeric values, and window-relative bounds where the app exposes

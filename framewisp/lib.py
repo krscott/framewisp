@@ -105,6 +105,7 @@ def session_environment_for_run(
         GDK_BACKEND="wayland",
         GSK_RENDERER="cairo",
     )
+    env.setdefault("ACCESSIBILITY_ENABLED", "1")
     return env
 
 

@@ -756,6 +756,14 @@ Their sockets live in the private runtime directory, and their logs are reserved
 session files. This separates sessions from each other and the user's desktop;
 it is not a security boundary against other processes with the same UID.
 
+`session_environment_for_run` also defaults `ACCESSIBILITY_ENABLED` to `1`
+with `setdefault`, enabling Chromium's AT-SPI bridge on headless hosts while
+preserving caller values such as `0`. Both runtime and app environments receive
+this default, and fresh profiles preserve it. An `env ACCESSIBILITY_ENABLED=0`
+prefix on the target command can override it for that app. Chromium launch
+guidance retains `--force-renderer-accessibility`; the variable alone has not
+been verified without that flag.
+
 Metadata carries `inspection_protocol: 1` and the private accessibility address.
 The CLI requires that address to equal the runtime directory's accessibility
 socket. It never uses the caller's desktop bus, autolaunches a bus, or inspects

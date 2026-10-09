@@ -170,6 +170,38 @@ def test_target_app_preserves_wrapper_variables(
     assert observed == dict.fromkeys(keys, value)
 
 
+@pytest.mark.parametrize("value", [None, "0", ""])
+@pytest.mark.parametrize("fresh", [False, True])
+def test_target_app_accessibility_default(
+    tmp_path: Path, value: str | None, fresh: bool
+) -> None:
+    env = os.environ.copy()
+    if value is None:
+        env.pop("ACCESSIBILITY_ENABLED", None)
+    else:
+        env["ACCESSIBILITY_ENABLED"] = value
+    session = tmp_path / "session"
+    command = ["framewisp", str(session), "run"]
+    if fresh:
+        command.extend(["--profile", "fresh"])
+    command.extend(
+        [
+            "--",
+            str(Path("/proc/self/exe").resolve()),
+            "-I",
+            "-c",
+            "import os; print(repr(os.environ.get('ACCESSIBILITY_ENABLED')))",
+        ]
+    )
+    result = subprocess.run(
+        command, env=env, capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (session / "app.log").read_text().strip() == repr(
+        "1" if value is None else value
+    )
+
+
 def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
