@@ -17,6 +17,14 @@ class Rect:
     width: int
     height: int
 
+    def contains(self, other: "Rect") -> bool:
+        return (
+            self.x <= other.x
+            and self.y <= other.y
+            and other.x + other.width <= self.x + self.width
+            and other.y + other.height <= self.y + self.height
+        )
+
     def as_bounds(self, coordinate_space: str) -> dict[str, int | str]:
         return {
             "x": self.x,
@@ -140,19 +148,33 @@ def convert_bounds(
     title: str,
     before: list[Window],
     after: list[Window],
+    *,
+    ancestors: tuple[tuple[Rect, str], ...] = (),
 ) -> tuple[dict[str, int | str] | None, str | None]:
-    def candidates(windows: list[Window]) -> list[Window]:
+    def candidates(windows: list[Window], title: str) -> list[Window]:
         matches = [window for window in windows if window.pid == pid]
-        matches = [window for window in matches if window.title == title]
+        # Untitled accessibles can have a compositor title supplied by GTK.
+        # A missing title is usable only when the process has one window.
+        if title:
+            matches = [window for window in matches if window.title == title]
         return matches
 
-    matches = candidates(before)
+    roots = ((toplevel, title), *ancestors)
+
+    def select(windows: list[Window]) -> tuple[Rect, str, list[Window]]:
+        for rect, name in roots:
+            matches = candidates(windows, name)
+            if matches:
+                return rect, name, matches
+        return toplevel, title, []
+
+    toplevel, title, matches = select(before)
     if not matches:
         return None, "window-not-found"
     if len(matches) != 1:
         return None, "ambiguous-window"
     window = matches[0]
-    if candidates(after) != matches:
+    if select(after) != (toplevel, title, matches):
         return None, "window-changed"
     if not window.visible:
         return None, "window-not-visible"
