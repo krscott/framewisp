@@ -43,7 +43,7 @@ class Query:
 
     def __post_init__(self) -> None:
         for name, value, maximum in (
-            ("max-depth", self.max_depth, 32),
+            ("max-depth", self.max_depth, 64),
             ("limit", self.limit, 100),
             ("max-nodes", self.max_nodes, 4096),
         ):
@@ -496,7 +496,7 @@ def inspect_bus(
 def retry_hints(query: Query, reasons: set[str]) -> list[str]:
     hints: list[str] = []
     for reason, current, maximum in (
-        ("max-depth", query.max_depth, 32),
+        ("max-depth", query.max_depth, 64),
         ("max-nodes", query.max_nodes, 4096),
         ("limit", query.limit, 100),
     ):

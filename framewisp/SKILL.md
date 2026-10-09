@@ -40,7 +40,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | --- | --- |
 | `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
-| `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
+| `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move X Y` | Move immediately without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
@@ -198,7 +198,7 @@ Do not treat incomplete results as proof of absence. Read `reasons`, `hints`,
 - `timeout` without `app-unresponsive`: raise `--timeout` up to 10 seconds.
   Check `longest_call_ms`; an app that blocked late in traversal may also time out
   without the unresponsive reason.
-- `max-depth` or `max-nodes`: raise the named flag up to 32 or 4096 respectively.
+- `max-depth` or `max-nodes`: raise the named flag up to 64 or 4096 respectively.
   Filters do not prune the tree, so narrower filters cannot fix these limits.
 - `limit`: narrow role/name/text filters, or raise `--limit` up to 100.
 - `unavailable-object` or `stale-object`: retry once after the UI settles. Failed
@@ -317,7 +317,7 @@ By default, queries use depth 8, 256 nodes, two matches, and at most two seconds
 For larger/deeper trees, add
 `"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` to each
 needed `baseline`, `wait`, or `assert` step. Node/depth limits must be integers
-in 1..4096 and 1..32 respectively; observation timeout must be greater than 0
+in 1..4096 and 1..64 respectively; observation timeout must be greater than 0
 and at most 10 seconds. Omitted fields keep their defaults. Each query gets the
 smaller of its observation timeout and the remaining step deadline. Increase
 both time budgets when needed. Structural cap errors name `observation.max_nodes`

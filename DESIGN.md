@@ -791,7 +791,7 @@ There is no persistent AT-SPI object cache or background observer.
 Traversal is breadth-first, starting with application objects at depth 1. It
 fetches individual child references rather than an unbounded tree. Defaults are
 8 levels, 20 returned matches, 256 visited nodes, and 5 seconds. Hard CLI maxima
-are 32 levels, 100 matches, 4096 nodes, and 10 seconds. Role filtering compares
+are 64 levels, 100 matches, 4096 nodes, and 10 seconds. Role filtering compares
 case-insensitive exact toolkit role names; name/text filtering uses
 case-insensitive substrings. Filters combine with AND. Strings and text reads
 are capped at 1024 characters, and actions at 16 per match. Truncation anywhere
@@ -885,7 +885,7 @@ A baseline must establish a nonmatching value before a transition wait can run.
 Replacement widgets are allowed under the same logical selector.
 
 Each step's optional `observation` object controls `max_nodes` (default 256,
-maximum 4096), `max_depth` (default 8, maximum 32), and per-query `timeout`
+maximum 4096), `max_depth` (default 8, maximum 64), and per-query `timeout`
 (default 2 seconds, maximum 10). Counts must be positive integers; time must be
 finite and positive. The two-match ambiguity limit remains fixed. Each query
 receives the smaller of its configured time budget and the remaining monotonic

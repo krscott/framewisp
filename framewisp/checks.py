@@ -116,7 +116,7 @@ class Observation:
         depth = data.get("max_depth", defaults.max_depth)
         for name, value, maximum in (
             ("max_nodes", nodes, 4096),
-            ("max_depth", depth, 32),
+            ("max_depth", depth, 64),
         ):
             if type(value) is not int or not 1 <= value <= maximum:
                 raise ValueError(f"observation.{name} must be between 1 and {maximum}.")
@@ -202,7 +202,7 @@ def perform_check(
         hints: list[str] = []
         for reason, field, maximum in (
             ("max-nodes", "max_nodes", 4096),
-            ("max-depth", "max_depth", 32),
+            ("max-depth", "max_depth", 64),
         ):
             if reason in reasons:
                 current = check.observation.parameters()[field]
