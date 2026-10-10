@@ -510,11 +510,24 @@ framewisp paint key Ctrl+s
 ```
 
 Accepted keys are `a` through `z`, `0` through `9`, `Space`, `Return`, `Tab`,
-`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, and `Down`. Prefix a key
+`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`,
+`Page_Up`, `Page_Down`, and `F1` through `F12`. Prefix a key
 with any combination of `Ctrl+`, `Shift+`, and `Alt+`, each at most once.
 Names are case-insensitive: `Ctrl+A` and `ctrl+a` mean the same shortcut.
 Letter case does not add Shift; use `Shift+a` to send a capital A, or `type`
 to enter literal text.
+
+ASCII punctuation accepts literals and X keysym names: `comma`, `period`, `slash`,
+`minus`, `equal`, `semicolon`, `apostrophe`, `bracketleft`, `bracketright`,
+`backslash`, `grave`, `exclam`, `quotedbl`, `numbersign`, `dollar`, `percent`,
+`ampersand`, `parenleft`, `parenright`, `asterisk`, `plus`, `colon`, `less`,
+`greater`, `question`, `at`, `asciicircum`, `underscore`, `braceleft`, `bar`,
+`braceright`, and `asciitilde`. For example, `key Ctrl+comma` and `key 'Ctrl+,'`
+send the same Preferences shortcut. Use `key Ctrl+plus` or `key 'Ctrl++'` for
+Ctrl with `+`; `Ctrl+` alone is incomplete. Quote literal shell metacharacters.
+Shift selects the US-layout shifted symbol: `Ctrl+Shift+comma` sends Ctrl+`<`.
+Shifted punctuation names and literals imply Shift, so `Ctrl+less` also sends
+Ctrl+`<`. Desktop attachment uses its documented US-layout keycodes.
 
 Each command presses the modifiers, presses and releases the key, then releases
 the modifiers in reverse order on the same connection. Modifiers do not remain
@@ -610,7 +623,7 @@ whether the app responded as intended. A start without an end indicates an
 unfinished command. Reusing a session directory starts a fresh log.
 
 Input logs and captions omit literal typed text by default, including Unicode and
-individual letter, digit, Space, and Shift-only literal key events. Captions say
+individual letter, digit, punctuation, Space, and Shift-only literal key events. Captions say
 "Type text" or "Key" (with any Shift modifier). Ctrl/Alt shortcuts and named keys
 such as Return and arrows remain visible. These describe shortcuts, not text entry.
 Input failure details that could contain text or encoded keys are omitted; error

@@ -76,6 +76,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         mode = {
             "x11": None,
             "x11-probe": "probe",
+            "x11-keys": "keys",
             "x11-record": True,
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
@@ -103,6 +104,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--width", str(width), "--height", str(height)])
     probes = {
         "probe": "input_probe.py",
+        "keys": "input_probe.py",
         "waits": "wait_probe.py",
         "large-waits": "wait_probe.py",
         "clipboard": "input_probe.py",
@@ -130,6 +132,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         ]
     if mode == "large-waits":
         app.extend(["--nodes", "300", "--depth", "10"])
+    if mode == "keys":
+        app.append("--keys-only")
     command.extend(["--", *app])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
@@ -191,6 +195,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
             if mode not in {
                 "probe",
+                "keys",
                 "clipboard",
                 "qt",
                 "qt-tree",
@@ -852,6 +857,107 @@ def test_key_combination_events(
     final_press = keyboard_events()[-2]
     assert final_press["key"] == "q"
     assert not any(final_press[name] for name in ["ctrl", "shift", "alt"])
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["keys", "x11-keys"], indirect=True)
+def test_punctuation_navigation_and_function_shortcuts(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "200")
+    # Verify the reported Preferences shortcut through the single-command path.
+    cli(demo.directory, "key", "Ctrl+comma")
+    wait_until(lambda: any(event.get("key") == "comma" for event in input_events(demo)))
+    comma = next(event for event in input_events(demo) if event.get("key") == "comma")
+    assert comma["ctrl"] and not comma["shift"] and not comma["alt"]
+    start = len(input_events(demo))
+    cases: list[tuple[str, str, bool, bool]] = []
+    for name, literal, shifted in [
+        ("comma", ",", "less"),
+        ("period", ".", "greater"),
+        ("slash", "/", "question"),
+        ("minus", "-", "underscore"),
+        ("equal", "=", "plus"),
+        ("semicolon", ";", "colon"),
+        ("apostrophe", "'", "quotedbl"),
+        ("bracketleft", "[", "braceleft"),
+        ("bracketright", "]", "braceright"),
+        ("backslash", "\\", "bar"),
+        ("grave", "`", "asciitilde"),
+    ]:
+        cases.extend(
+            [
+                (f"Ctrl+{name}", name, True, False),
+                (f"Ctrl+{literal}", name, True, False),
+                (f"Ctrl+Shift+{name}", shifted, True, True),
+                (f"Ctrl+{shifted}", shifted, True, True),
+            ]
+        )
+    for name, literal in [
+        ("exclam", "!"),
+        ("quotedbl", '"'),
+        ("numbersign", "#"),
+        ("dollar", "$"),
+        ("percent", "%"),
+        ("ampersand", "&"),
+        ("parenleft", "("),
+        ("parenright", ")"),
+        ("asterisk", "*"),
+        ("at", "@"),
+        ("asciicircum", "^"),
+    ]:
+        cases.extend(
+            [
+                (f"Ctrl+{name}", name, True, True),
+                (f"Ctrl+{literal}", name, True, True),
+            ]
+        )
+    cases.extend(
+        [
+            ("Ctrl++", "plus", True, True),
+            ("Alt+Home", "Home", False, False),
+            ("End", "End", False, False),
+            ("Page_Up", "Page_Up", False, False),
+            ("Shift+Page_Down", "Page_Down", False, True),
+            *((f"F{number}", f"F{number}", False, False) for number in range(1, 13)),
+        ]
+    )
+    actions: list[dict[str, str]] = []
+    for chord, _, _, _ in cases:
+        actions.extend(
+            [
+                {"action": "key", "chord": chord},
+                {"action": "key", "chord": "q"},
+            ]
+        )
+    plan = tmp_path / "shortcuts.json"
+    plan.write_text(json.dumps({"actions": actions}))
+    result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    assert result["status"] == "completed"
+    assert result["completed_actions"] == len(actions)
+
+    def presses() -> list[dict[str, str | float | bool]]:
+        return [
+            event
+            for event in input_events(demo)[start:]
+            if event["event"] == "key-press"
+            and event["key"] not in {"Control_L", "Shift_L", "Alt_L"}
+        ]
+
+    wait_until(lambda: len(presses()) >= len(actions))
+    events = presses()
+    assert len(events) == len(actions)
+    for index, (chord, key, ctrl, shift) in enumerate(cases):
+        event, following = events[index * 2 : index * 2 + 2]
+        assert (event["key"], event["ctrl"], event["shift"], event["alt"]) == (
+            key,
+            ctrl,
+            shift,
+            chord.startswith("Alt+"),
+        ), chord
+        assert following["key"] == "q"
+        assert not any(following[name] for name in ["ctrl", "shift", "alt"]), chord
 
 
 @pytest.mark.integration

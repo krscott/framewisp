@@ -277,10 +277,18 @@ def main() -> None:
         help="press and release a key or shortcut",
         description="Send a key with optional Ctrl, Shift, and Alt modifiers. "
         "Names are case-insensitive; letter case does not imply Shift. "
-        "Keys: a-z, 0-9, Space, Return, Tab, BackSpace, Escape, Delete, Left, Right, Up, Down.",
+        "Keys: a-z, 0-9, Space, Return, Tab, BackSpace, Escape, Delete, Left, Right, Up, Down, "
+        "Home, End, Page_Up, Page_Down, F1-F12, and ASCII punctuation names or literals "
+        "(comma, period, slash, minus, equal, semicolon, apostrophe, bracketleft, "
+        "bracketright, backslash, grave, exclam, quotedbl, numbersign, dollar, percent, "
+        "ampersand, parenleft, parenright, asterisk, plus, colon, less, greater, question, "
+        "at, asciicircum, underscore, braceleft, bar, braceright, asciitilde). "
+        "Use plus or a doubled '+' separator, for example Ctrl+plus or Ctrl++.",
     )
     key.add_argument(
-        "chord", metavar="CHORD", help="for example: Return, Ctrl+a, Ctrl+Shift+z"
+        "chord",
+        metavar="CHORD",
+        help="for example: Return, Ctrl+a, Ctrl+comma, Ctrl+Shift+z",
     )
 
     args = parser.parse_args()

@@ -19,6 +19,7 @@ from threading import Event
 from typing import BinaryIO, Literal, TypedDict, cast
 
 from framewisp.errors import SessionError
+from framewisp.keys import parse_chord
 
 
 def retained_parameters(
@@ -32,12 +33,13 @@ def retained_parameters(
         p.pop("text", None)
     elif action == "key":
         chord = cast(str, p.pop("chord"))
-        *modifiers, key = chord.lower().split("+")
+        parsed = parse_chord(chord)
+        assert parsed is not None
+        modifiers, key = parsed
         # Ctrl/Alt chords describe shortcuts. Shift alone can still type text.
-        if {"ctrl", "alt"}.intersection(modifiers) or key not in {
-            *"abcdefghijklmnopqrstuvwxyz0123456789",
-            "space",
-        }:
+        if {"ctrl", "alt"}.intersection(modifiers) or not (
+            len(key) == 1 or key == "space"
+        ):
             p["chord"] = chord
         else:
             p["modifier"] = modifiers
