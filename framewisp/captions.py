@@ -1,4 +1,4 @@
-"""Input action records and captions rendered into completed recordings."""
+"""Input action records and text rendered into completed recordings."""
 
 import json
 import os
@@ -18,6 +18,7 @@ from pathlib import Path
 from threading import Event
 from typing import BinaryIO, Literal, TypedDict, cast
 
+from framewisp.console import PANEL_WIDTH, ConsoleCapture, console_frames
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
 
@@ -281,16 +282,22 @@ def ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02}:{remainder // 100:02}.{remainder % 100:02}"
 
 
-def subtitle_script(captions: list[Caption]) -> str:
-    script = """[Script Info]
+def subtitle_script(
+    captions: list[Caption], *, size: tuple[int, int] = (1280, 720), panel: bool = False
+) -> str:
+    width, height = size
+    scale = height / 720
+    extra = PANEL_WIDTH if panel else 0
+    script = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1280
-PlayResY: 720
+PlayResX: {width + extra}
+PlayResY: {height}
 WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
-Style: Default,Noto Sans,24,&H00FFFFFF,&H80000000,3,8,0,2,24,24,24
+Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{24 * width / 1280},{extra + 24 * width / 1280},{24 * scale}
+Style: Console,DejaVu Sans Mono,18,&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
 
 [Events]
 Format: Layer, Start, End, Style, Text
@@ -303,17 +310,57 @@ Format: Layer, Start, End, Style, Text
     return script
 
 
-def render_captions(
-    destination: Path, *, input_log: Path, origin: float, stopped: float, log: Path
+def render_recording(
+    destination: Path,
+    *,
+    input_log: Path,
+    origin: float,
+    stopped: float,
+    log: Path,
+    captions: bool = True,
+    console: ConsoleCapture | None = None,
+    size: tuple[int, int] = (1280, 720),
 ) -> None:
-    captions = captions_for_clip(input_log, origin=origin, stopped=stopped)
-    if not captions:
+    entries = (
+        captions_for_clip(input_log, origin=origin, stopped=stopped) if captions else []
+    )
+    if not entries and console is None:
         return
     with tempfile.TemporaryDirectory(
         prefix=".framewisp-captions-", dir=destination.parent
     ) as directory:
         work = Path(directory)
-        (work / "captions.ass").write_text(subtitle_script(captions), encoding="utf-8")
+        with (work / "captions.ass").open("w", encoding="utf-8") as script:
+            script.write(subtitle_script(entries, size=size, panel=console is not None))
+            if console is not None:
+                console.snapshot(work / "console.jsonl")
+                x, height = size
+                position = (
+                    f"{{\\pos({x + 16},16)\\clip({x},0,{x + PANEL_WIDTH},{height})}}"
+                )
+                script.write(
+                    f"Dialogue: 0,0:00:00.00,{ass_time(stopped - origin)},Console,"
+                    f"{position}Console (stdout + stderr)\n"
+                )
+                position = (
+                    f"{{\\pos({x + 16},48)\\clip({x},0,{x + PANEL_WIDTH},{height})}}"
+                )
+                for frame in console_frames(
+                    work / "console.jsonl",
+                    origin=origin,
+                    stopped=stopped,
+                    height=height,
+                ):
+                    text = frame.text.translate(
+                        str.maketrans("\\{}", "＼｛｝")
+                    ).replace("\n", r"\N")
+                    script.write(
+                        f"Dialogue: 0,{ass_time(frame.start)},{ass_time(frame.end)},Console,{position}{text}\n"
+                    )
+        filters: list[str] = []
+        if console is not None:
+            filters.append(f"pad=iw+{PANEL_WIDTH}:ih:0:0:color=0x161b22")
+        filters.extend(["ass=captions.ass", "scale=out_range=full"])
         with log.open("w") as output:
             result = subprocess.run(
                 [
@@ -324,7 +371,7 @@ def render_captions(
                     "-i",
                     str(destination),
                     "-vf",
-                    "ass=captions.ass,scale=out_range=full",
+                    ",".join(filters),
                     "-c:v",
                     "libx264",
                     "-preset",
@@ -349,6 +396,6 @@ def render_captions(
             )
         if result.returncode:
             raise RuntimeError(
-                f"Caption rendering failed; uncaptioned video remains at {destination}. See {log}"
+                f"Recording rendering failed; raw video remains at {destination}. See {log}"
             )
         (work / "captioned.mp4").replace(destination)

@@ -78,6 +78,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-probe": "probe",
             "x11-keys": "keys",
             "x11-record": True,
+            "x11-console": "console",
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
             "x11-qt-tree": "qt-tree",
@@ -87,7 +88,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         }[mode]
     recording = (
         tmp_path / "session.mp4"
-        if mode is True or mode in {"large", "uncaptioned"}
+        if mode is True or mode in {"large", "uncaptioned", "console"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -97,6 +98,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.append("--x11")
     if recording is not None:
         command.extend(["--record", str(recording)])
+        if mode == "console":
+            command.append("--console")
         if mode == "uncaptioned":
             command.append("--no-captions")
     if mode in {"large", "odd"}:
@@ -1208,6 +1211,81 @@ def video_patch(path: Path, second: float) -> bytes:
         check=True,
         timeout=20,
     ).stdout
+
+
+def console_panel(path: Path, second: float) -> bytes:
+    return subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(second),
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "crop=640:720:1280:0",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["console", "x11-console"], indirect=True)
+def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> None:
+    screenshot = tmp_path / "gui.png"
+    wait_for_demo_frame(demo, screenshot)
+    assert demo.recording is not None
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert (summary["width"], summary["height"]) == (1920, 720)
+    assert len(recording_frames(demo.recording, size=(1920, 720))) > 1
+    assert (demo.directory / "console.jsonl").stat().st_size > 0
+    for captions in [False, True]:
+        clip = tmp_path / f"console-{captions}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            "--console",
+            *([] if captions else ["--no-captions"]),
+            str(clip),
+        )
+        time.sleep(0.4)
+        cli(demo.directory, "type", "console output")
+        cli(demo.directory, "key", "Return")
+        wait_until(
+            lambda: "Entered: console output"
+            in (demo.directory / "app.log").read_text()
+        )
+        time.sleep(0.5)
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        assert (summary["width"], summary["height"]) == (1920, 720)
+        early = console_panel(clip, 0.1)
+        late = console_panel(clip, summary["duration_seconds"] - 0.2)
+        assert len(early) == len(late) == 640 * 720 * 3
+        assert sum(abs(a - b) for a, b in zip(early, late, strict=True)) > 100000
+        cli(demo.directory, "screenshot", str(screenshot))
+        with Image.open(screenshot) as image:
+            assert image.size == (1280, 720)
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "key", "BackSpace")
+    plain = tmp_path / "plain.mp4"
+    cli(demo.directory, "record-start", "--no-captions", str(plain))
+    time.sleep(0.2)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert (summary["width"], summary["height"]) == (1280, 720)
+    cli(demo.directory, "record-start", "--console", str(tmp_path / "shutdown.mp4"))
+    stopped = json.loads(cli(demo.directory, "stop").stdout)
+    assert stopped["recording"]["width"] == 1920
+    assert demo.process.wait(timeout=20) == 0
 
 
 @pytest.mark.integration

@@ -23,6 +23,9 @@ acceptance application.
   prepare its environment and manage Sway, wayvnc, and optional recorder startup,
   waiting for sockets or the recording header. Each startup helper uses `managed_process` for cleanup and
   yields `None` if shutdown is requested while waiting.
+- `framewisp/console.py` drains the launched app's combined stdout/stderr to raw
+  `app.log` bytes and timestamped UTF-8 chunks in `console.jsonl`. It also builds
+  bounded scrolling text states for optional console panels in recordings.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
   changes the label to `Entered: TEXT`; clicking the button changes it to
   `Applied: TEXT`. A check button with a tooltip, a numbered slider, and a
@@ -169,7 +172,9 @@ before filing issues.
    socket readiness, not application rendering readiness.
 
 Each child runs in its own process session with stdin disconnected and combined
-stdout/stderr directed to its log. The runner monitors all managed children.
+stdout/stderr directed to its log. App output passes through a continuously
+drained pipe to preserve raw bytes and record receipt timestamps. The runner
+monitors all managed children and app-output worker failures.
 The persistent VNC connection runs in the runner's process. Cleanup disconnects it and
 stops its Twisted reactor thread before stopping wayvnc.
 
@@ -570,7 +575,7 @@ any active recorder before stopping the display.
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
-and a `captions` boolean. Replies carry an `error` string or null and optional
+and `captions` and `console` booleans. Replies carry an `error` string or null and optional
 `data`. The runner checks the session directory against its own before acting,
 so copied metadata cannot control another session. Its monitoring loop handles
 recording/status/stop requests; validated input sockets transfer to the worker. It replies only after capture is ready or finalization has finished.
@@ -633,7 +638,7 @@ failures, while unexpected exceptions retain their traceback. Normal
 nonzero returns are recorded as failures. Input logging is independent of
 recording. The runner truncates the log when creating a new session.
 
-For captioned recordings, only wf-recorder receives `WAYLAND_DEBUG=client`.
+For recordings with captions or console panels, only wf-recorder receives `WAYLAND_DEBUG=client`.
 The first screencopy `ready` event in `recorder.log` supplies the first captured
 frame's timestamp. The pinned Sway backend uses the monotonic clock, and the
 pinned wf-recorder makes this frame time zero. This establishes each clip's
@@ -655,11 +660,49 @@ FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the reques
 output. Caption rendering uses a bundled Fontconfig configuration passed only to
 FFmpeg, including Noto Sans, CJK, and monochrome emoji. On success, the rendered
 file replaces the raw recording; on failure, the raw MP4 remains and the command
-fails with the `captions.log` path. The final video preserves dimensions, 30 fps,
+fails with the `captions.log` path. The final video preserves GUI dimensions, 30 fps,
 full-range color, and no audio. `record-stop` waits for rendering, as does normal
 session cleanup. With `--no-captions`, rendering and timestamp extraction are
-skipped, but input logging remains enabled. Caption formatting cannot affect
+skipped unless a console panel is requested, but input logging remains enabled.
+Caption formatting cannot affect
 app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session paths.
+
+## Console output in recordings
+
+Every headless session captures combined app stdout/stderr through a worker-drained
+pipe. `console.py` flushes original bytes to `app.log` and writes JSONL events with
+monotonic receipt `time` and incremental UTF-8 decoded `text` to `console.jsonl`.
+Invalid UTF-8 uses replacement characters only in the decoded sidecar. Capture
+does not wait for line endings, alter the app environment, or use a pseudo-terminal.
+App buffering can delay receipt. Descendants inheriting these descriptors share
+capture; independently activated services do not. No input-content redaction
+applies to app output. Both files are replaced on each new session.
+
+`run --record FILE --console` and `record-start --console FILE` opt individual clips
+into a 640-pixel console panel on the right. `run --console` without `--record` is
+invalid. The control request adds a validated boolean `console`, default false.
+Console capture uses the same first-frame monotonic origin as input captions,
+including with `--no-captions`. A lock protects sidecar snapshots during rendering.
+Session metadata advertises `console_recording: true`. A console request requires
+this capability before connecting, so an older runner cannot silently ignore it.
+The app-output worker is checked during monitoring, joined after app cleanup and
+before final recording rendering, and bounded on shutdown if a pipe writer remains.
+
+The renderer streams the snapshot into bounded text state, strips split ANSI CSI
+and OSC sequences, replaces lines after carriage returns, and handles backspaces,
+tabs, wide characters, wrapping, and a limited scrollback. Line timestamps are
+seconds relative to clip origin; negative values identify pre-clip context. Output
+received at or after the stop request is excluded. Updates coalesce to at most one
+per 30 fps frame. This is plain text rendering, without terminal emulation.
+
+One FFmpeg pass pads the original video, renders console text with DejaVu Sans
+Mono 18 and existing input captions in the GUI area, and preserves video timing,
+30 fps, full-range color, and silent H.264 MP4 output. GUI coordinates, screenshots,
+and captured display size stay unchanged; the finished summary reports the wider
+video. Text cannot inject ASS formatting and is clipped to the panel. Rendering
+uses a temporary file next to the destination. A rendering failure preserves the
+raw GUI MP4 and reports `captions.log`. `console.jsonl` is reserved against capture
+and recording destinations.
 
 
 ## Attached desktop sessions

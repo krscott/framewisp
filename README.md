@@ -564,7 +564,8 @@ On success, `record-stop` prints JSON with the output `path`, `duration_seconds`
 `width`, `height`, and `size_bytes`. Framewisp uses ffprobe and the completed file
 to measure these values after caption rendering; duration is not a wall-clock estimate.
 
-Recordings are silent H.264 MP4 files at 30 fps and the session's display size.
+Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
+with an additional 640 pixels of width when `--console` is enabled.
 Recording requires even width and height. Existing output files are never
 overwritten. The session runner owns the recorder and finalizes an active clip
 on normal app exit, Ctrl+C, or SIGTERM. A recorder failure stops the session;
@@ -572,6 +573,35 @@ an invalid recording request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
 Keep the runner alive until shutdown completes so it can finalize the MP4.
 The development shell includes FFmpeg for video inspection.
+
+Add `--console` to show the launched app's combined stdout/stderr in a scrolling
+text panel on the right:
+
+```sh
+framewisp demo run --record /tmp/startup.mp4 --console -- framewisp-demo
+# Or capture a later clip, with or without input captions:
+framewisp demo record-start --console --no-captions /tmp/console.mp4
+framewisp demo record-stop
+```
+
+The GUI keeps its original size, coordinates, and screenshots. Console lines show
+seconds relative to the clip's first frame. A short tail of earlier output provides
+context with negative timestamps. Text wraps and scrolls within the panel. ANSI
+formatting is stripped; carriage returns replace the current progress line. This
+is plain text capture, without terminal emulation, colors, or cursor positioning.
+
+Every headless session preserves the original output bytes in `app.log` and writes
+received UTF-8 text and monotonic timestamps to `console.jsonl`, including when
+no recording is active. Invalid UTF-8 becomes replacement characters in the
+sidecar and panel. Timestamps describe receipt, so app buffering can delay output;
+Framewisp does not change the app's buffering or attach a pseudo-terminal.
+Only the launched process tree's inherited stdout/stderr is captured. Output from
+separately activated D-Bus services or other processes is outside this capture.
+Console text is not redacted by the input-content policy.
+
+Console rendering and input captions share one FFmpeg pass after capture stops.
+`record-stop` and normal shutdown wait for it. If rendering fails, the raw GUI
+video remains and the error points to `captions.log`.
 
 ## Share media in GitHub comments
 
@@ -888,7 +918,8 @@ After upgrading from a recording-only control protocol, stop the old runner with
 Ctrl+C or SIGTERM and start a fresh session. New control commands reject that old
 protocol before sending a request.
 
-The session directory contains `sway.log`, `wayvnc.log`, and `app.log`, plus
+The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
+timestamped app-output sidecar `console.jsonl`, plus
 `recorder.log` when recording. During a
 run, `session.json` records the private runtime directory, Wayland socket name,
 and managed process IDs. Normal shutdown removes the runtime sockets and
