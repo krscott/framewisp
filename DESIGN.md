@@ -902,11 +902,30 @@ optional conversion does not make otherwise complete observations partial.
 session's private runtime directory. It never consults the caller's SWAYSOCK.
 Each tree read shares the query deadline, takes at most 250 ms, polls cancellation,
 and caps replies at 1 MiB. The before/after tree reads and D-Bus traversal share
-the query timeout. Traversal carries the nearest accessible frame/dialog/window
-reference and its full title. D-Bus GetConnectionUnixProcessID identifies the
-accessible process. PID and exact window title must identify one Sway window;
-duplicate titles remain ambiguous. PID and toplevel geometry reads are cached
+the query timeout. Traversal carries accessible frame/dialog/window references
+and their full titles, nearest first. D-Bus GetConnectionUnixProcessID identifies
+the accessible process. PID and exact window title must identify one Sway window;
+duplicate titles remain ambiguous. An empty accessible title can match only if
+the PID has exactly one Sway window, since GTK may supply a compositor title
+for an untitled window. If a dialog has no compositor match, conversion tries
+its enclosing accessible windows. Ambiguity or a failed geometry check on a
+matching window never triggers fallback. Enclosing window identities must agree
+with the selected compositor window; conflicting matches produce
+`ambiguous-window`, even if their sizes agree. Window selection uses titles
+before fetching geometry, so an unused enclosing window's Component interface
+cannot suppress a valid nearer match. PID and component geometry reads are cached
 only within the query.
+
+For matched controls, conversion reads the component bounds of their traversed
+ancestors up to the nearest accessible window, including ancestors excluded by
+filters. Parents without a Component interface or with empty extents are skipped.
+If a rectangle extends outside a parent's reported rectangle, the control and
+its descendants retain raw `bounds` but receive null `display_bounds` and
+`display_bounds_reason: "bounds-outside-parent"`. This can indicate faulty
+toolkit extents or intentional overflow; framewisp does not infer corrected
+coordinates. Failed ancestor metadata reads leave conversion unavailable without
+making an otherwise complete observation partial. Consistent rectangles do not
+prove that the toolkit reported the drawn position correctly.
 
 The client origin is Sway's absolute `rect` origin plus its relative
 `window_rect` origin, so server-side title bars and borders are excluded. A
@@ -916,7 +935,8 @@ Sway's client size, and the control must fit inside that client area and the dis
 windows, ambiguous mappings, unavailable metadata, geometry mismatches, or
 unsupported transforms produce reasons instead of guesses. The matching window
 must have the same ID, PID, title, visibility, client rectangle, and supported
-transform in both tree snapshots. A changed mapping produces `window-changed`.
+transform in both tree snapshots. Window selection must also choose the same
+accessible ancestor in each snapshot. A changed mapping produces `window-changed`.
 This detects changes between snapshots, not a move away and back between reads
 or changes after inspection. Use a screenshot when conversion is unavailable.
 No semantic input action is provided.

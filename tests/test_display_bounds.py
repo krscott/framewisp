@@ -210,3 +210,88 @@ def test_visible_control_in_partly_offscreen_window(window: Window) -> None:
     )
     assert reason is None
     assert result is not None and result["x"] == 290
+
+
+def test_embedded_dialog_uses_enclosing_window(window: Window) -> None:
+    result, reason = convert_bounds(
+        Rect(10, 20, 80, 23),
+        Rect(0, 0, 600, 240),
+        123,
+        "Preferences",
+        [window],
+        [window],
+        ancestor_titles=("Dialog",),
+    )
+    assert reason is None
+    assert result is not None and result["x"] == 510
+
+
+@pytest.mark.parametrize("case", ["duplicate", "geometry", "appeared", "changed"])
+def test_dialog_fallback_preserves_mapping_guards(window: Window, case: str) -> None:
+    before = [window]
+    after = before
+    dialog = replace(window, id=8, title="Preferences")
+    geometry = Rect(0, 0, 600, 240)
+    if case == "duplicate":
+        before = after = [window, dialog, replace(dialog, id=9)]
+        expected = "ambiguous-window"
+    elif case == "geometry":
+        before = after = [window, dialog]
+        geometry = Rect(0, 0, 500, 240)
+        expected = "window-geometry-mismatch"
+    elif case == "appeared":
+        after = [window, dialog]
+        expected = "window-changed"
+    else:
+        after = [replace(window, title="Changed")]
+        expected = "window-changed"
+    result, reason = convert_bounds(
+        Rect(10, 20, 80, 23),
+        geometry,
+        123,
+        "Preferences",
+        before,
+        after,
+        ancestor_titles=("Missing" if case == "geometry" else "Dialog",),
+    )
+    assert result is None
+    assert reason == expected
+
+
+@pytest.mark.parametrize("case", ["single", "duplicate", "appeared"])
+def test_untitled_accessible_requires_unique_pid_window(
+    window: Window, case: str
+) -> None:
+    before = [window]
+    other = replace(window, id=8, title="Other")
+    after = before
+    if case == "duplicate":
+        before = after = [window, other]
+    elif case == "appeared":
+        after = [window, other]
+    result, reason = convert_bounds(
+        Rect(10, 20, 80, 23), Rect(0, 0, 600, 240), 123, "", before, after
+    )
+    if case == "single":
+        assert reason is None
+        assert result is not None and result["x"] == 510
+    else:
+        assert result is None
+        assert reason == (
+            "ambiguous-window" if case == "duplicate" else "window-changed"
+        )
+
+
+def test_embedded_dialog_title_cannot_select_another_window(window: Window) -> None:
+    other = replace(window, id=8, title="Preferences", content=Rect(10, 10, 600, 240))
+    result, reason = convert_bounds(
+        Rect(10, 20, 80, 23),
+        Rect(0, 0, 600, 240),
+        123,
+        "Preferences",
+        [window, other],
+        [window, other],
+        ancestor_titles=("Dialog",),
+    )
+    assert result is None
+    assert reason == "ambiguous-window"

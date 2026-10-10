@@ -415,3 +415,124 @@ def test_optional_display_metadata_failure_keeps_observation_complete(
     assert nodes[0]["bounds"] is not None
     assert nodes[0]["display_bounds"] is None
     assert nodes[0]["display_bounds_reason"] == "window-metadata-unavailable"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "valid",
+        "outside-parent",
+        "outside-ancestor",
+        "no-component",
+        "unavailable",
+        "unused-window",
+    ],
+)
+def test_filtered_control_checks_embedded_dialog_ancestors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    chain = [ROOT[1], "/app", "/window", "/dialog", "/panel", "/list", "/tab"]
+    rectangles = {
+        "/window": (0, 0, 600, 240),
+        "/dialog": (0, 0, 600, 240),
+        "/panel": (50, 50, 200, 100),
+        "/list": (50, 50, 200, 100),
+        "/tab": (60, 60, 80, 23),
+    }
+    if case == "outside-parent":
+        rectangles["/tab"] = (200, 60, 80, 23)
+    elif case == "outside-ancestor":
+        # The tab fits both parents, but its immediate parent exceeds its own.
+        rectangles["/list"] = (50, 50, 300, 100)
+    roles = {
+        "/app": "application",
+        "/window": "window",
+        "/dialog": "dialog",
+        "/tab": "tab",
+    }
+    calls: list[str] = []
+
+    def init(self: Bus, address: str, timeout: float) -> None:
+        self.deadline = float("inf")
+        self.cancel = Gio.Cancellable()
+
+    def call(
+        self: Bus,
+        ref: tuple[str, str],
+        interface: str,
+        method: str,
+        signature: str = "()",
+        arguments: tuple[object, ...] = (),
+    ) -> object:
+        path = ref[1]
+        if method == "GetChildAtIndex":
+            return (":1.2", chain[chain.index(path) + 1])
+        if method == "GetState":
+            return [0, 0]
+        if method == "GetRoleName":
+            return roles.get(path, "generic")
+        if method == "Get":
+            if arguments[-1] == "ChildCount":
+                return 0 if path == "/tab" else 1
+            return {"/window": "", "/dialog": "Preferences", "/tab": "Projects"}.get(
+                path, ""
+            )
+        if method == "GetInterfaces":
+            return (
+                []
+                if case == "no-component" and path == "/panel"
+                else ["org.a11y.atspi.Component"]
+            )
+        if method == "GetConnectionUnixProcessID":
+            return 123
+        if method == "GetExtents":
+            calls.append(path)
+            if case == "unavailable" and path == "/panel":
+                raise GLib.Error("Ancestor bounds unavailable")
+            if case == "unused-window" and path == "/window":
+                raise GLib.Error("Unused window geometry must not be read")
+            return rectangles[path]
+        raise AssertionError(method)
+
+    def close(self: Bus) -> None:
+        pass
+
+    def windows(*arguments: object) -> tuple[list[Window], None]:
+        return [
+            Window(
+                7,
+                123,
+                "Preferences" if case == "unused-window" else "python",
+                Rect(500, 325, 600, 240),
+                True,
+                True,
+                Rect(0, 0, 1600, 900),
+            )
+        ], None
+
+    monkeypatch.setattr(Bus, "__init__", init)
+    monkeypatch.setattr(Bus, "call", call)
+    monkeypatch.setattr(Bus, "close", close)
+    monkeypatch.setattr("framewisp.inspection.read_windows", windows)
+    observation = inspect_bus(
+        "test", Query(role="tab", name="Projects"), runtime=tmp_path
+    )
+    assert observation["status"] == "ok", observation
+    node = cast(list[dict[str, object]], observation["matches"])[0]
+    assert node["bounds"] is not None
+    if case.startswith("outside"):
+        assert node["display_bounds"] is None
+        assert node["display_bounds_reason"] == "bounds-outside-parent"
+    elif case == "unavailable":
+        assert node["display_bounds"] is None
+        assert node["display_bounds_reason"] == "window-metadata-unavailable"
+    else:
+        assert node["display_bounds_reason"] is None
+        assert node["display_bounds"] == {
+            "x": 560,
+            "y": 385,
+            "width": 80,
+            "height": 23,
+            "coordinate_space": "display",
+        }
+    assert len(calls) == len(set(calls)), "Geometry reads should be cached"

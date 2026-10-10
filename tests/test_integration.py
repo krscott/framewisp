@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from PIL import Image, ImageChops
@@ -116,6 +116,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         "scroll": "scroll_probe.py",
         "large": "input_probe.py",
         "odd": "input_probe.py",
+        "dialog": "dialog_probe.py",
+        "dialog-untitled": "dialog_probe.py",
     }
     app = (
         [sys.executable, str(Path(__file__).with_name(probes[mode]))]
@@ -137,6 +139,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         ]
     if mode == "large-waits":
         app.extend(["--nodes", "300", "--depth", "10"])
+    if mode == "dialog-untitled":
+        app.append("--untitled")
     if mode == "keys":
         app.append("--keys-only")
     command.extend(["--", *app])
@@ -2979,6 +2983,28 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
     )
 
 
+def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
+    # Direct IPC also works in the standalone package test's minimal PATH.
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(5)
+        connection.connect(str(next(runtime.glob("sway-ipc.*.sock"))))
+        connection.sendall(b"i3-ipc" + struct.pack("=II", len(payload), kind) + payload)
+
+        def receive(length: int) -> bytes:
+            data = bytearray()
+            while len(data) < length:
+                chunk = connection.recv(length - len(data))
+                assert chunk, "Sway closed the command connection"
+                data.extend(chunk)
+            return bytes(data)
+
+        header = receive(14)
+        length, reply_kind = struct.unpack("=II", header[6:])
+        assert header[:6] == b"i3-ipc" and reply_kind == kind
+        assert length <= 1024 * 1024
+        return json.loads(receive(length))
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "demo", [None, "x11", "qt-coordinates", "x11-qt-coordinates"], indirect=True
@@ -2992,33 +3018,10 @@ def test_inspect_display_bounds_activate_offset_controls(
     is_qt = qt in log.read_text()
     title = "Coordinates dialog" if is_qt else "Framewisp demo"
     name = "Activate dialog" if is_qt else "Apply text"
-    socket_path = next(demo.runtime.glob("sway-ipc.*.sock"))
     state = json.loads((demo.directory / "session.json").read_text())
 
     # Move away from the origin and request compositor borders. Native Wayland
     # clients can negotiate their own decorations. Xwayland uses server title bars.
-    def sway_request(kind: int, payload: bytes = b"") -> Any:
-        # Direct IPC also works in the standalone package test's minimal PATH.
-        with socket.socket(socket.AF_UNIX) as connection:
-            connection.settimeout(5)
-            connection.connect(str(socket_path))
-            connection.sendall(
-                b"i3-ipc" + struct.pack("=II", len(payload), kind) + payload
-            )
-
-            def receive(length: int) -> bytes:
-                data = bytearray()
-                while len(data) < length:
-                    chunk = connection.recv(length - len(data))
-                    assert chunk, "Sway closed the command connection"
-                    data.extend(chunk)
-                return bytes(data)
-
-            header = receive(14)
-            length, reply_kind = struct.unpack("=II", header[6:])
-            assert header[:6] == b"i3-ipc" and reply_kind == kind
-            assert length <= 1024 * 1024
-            return json.loads(receive(length))
 
     def positioned() -> bool:
         command = (
@@ -3026,7 +3029,7 @@ def test_inspect_display_bounds_activate_offset_controls(
             + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
             + "move position 200 50"
         ).encode()
-        return all(item["success"] for item in sway_request(0, command))
+        return all(item["success"] for item in sway_request(demo.runtime, 0, command))
 
     wait_until(positioned)
     observation: dict[str, Any] = {}
@@ -3034,7 +3037,7 @@ def test_inspect_display_bounds_activate_offset_controls(
     def mapped() -> bool:
         nonlocal observation
         if is_qt:
-            pending = [sway_request(4)]
+            pending = [sway_request(demo.runtime, 4)]
             windows: list[dict[str, Any]] = []
             while pending:
                 window = pending.pop()
@@ -3076,7 +3079,7 @@ def test_inspect_display_bounds_activate_offset_controls(
         wait_until(mapped)
     finally:
         (tmp_path / "positioned-tree.json").write_text(
-            json.dumps(sway_request(4), indent=2)
+            json.dumps(sway_request(demo.runtime, 4), indent=2)
         )
         print(f"Positioned control: {observation}")
         cli(demo.directory, "screenshot", str(tmp_path / "positioned.png"))
@@ -3098,6 +3101,68 @@ def test_inspect_display_bounds_activate_offset_controls(
     wait_until(
         lambda: ("Dialog activated" if is_qt else "Applied: ") in log.read_text()
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["dialog", "dialog-untitled"], indirect=True)
+def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
+    log = demo.directory / "app.log"
+    wait_until(lambda: "Dialog probe ready" in log.read_text())
+
+    def control(role: str, name: str) -> dict[str, Any]:
+        observation = inspect(
+            demo,
+            "--role",
+            role,
+            "--name",
+            name,
+            "--max-depth",
+            "32",
+            "--max-nodes",
+            "4096",
+        )
+        assert observation["status"] == "ok", observation
+        assert observation["match_count"] == 1, observation
+        return cast(dict[str, Any], observation["matches"][0])
+
+    for position in ["tiled", "floating"]:
+        if position == "floating":
+            state = json.loads((demo.directory / "session.json").read_text())
+            command = (
+                f'[pid={state["processes"]["app"]}] floating enable, '
+                "resize set 900 600, move position 180 60"
+            ).encode()
+            assert all(
+                item["success"] for item in sway_request(demo.runtime, 0, command)
+            )
+            wait_until(lambda: control("window", "")["bounds"]["width"] == 900)
+
+        cli(demo.directory, "screenshot", str(tmp_path / f"dialog-{position}.png"))
+        # The parent and dialog both map to the same compositor client.
+        for role in ["window", "dialog"]:
+            node = control(role, "")
+            assert node["display_bounds_reason"] is None, node
+            assert node["display_bounds"] is not None, node
+        assert control("button", "Shallow")["display_bounds"] is not None
+        button = control("button", "Activate General")
+        bounds = button["display_bounds"]
+        assert button["display_bounds_reason"] is None, button
+        assert bounds is not None, button
+        if position == "floating":
+            assert bounds["x"] > button["bounds"]["x"]
+            assert bounds["y"] > button["bounds"]["y"]
+        previous = log.read_text().count("Activated General")
+        cli(
+            demo.directory,
+            "click",
+            str(bounds["x"] + bounds["width"] // 2),
+            str(bounds["y"] + bounds["height"] // 2),
+        )
+        wait_until(lambda: log.read_text().count("Activated General") > previous)
+        tab = control("tab", "Projects")
+        assert tab["bounds"] is not None, tab
+        assert tab["display_bounds"] is None, tab
+        assert tab["display_bounds_reason"] == "bounds-outside-parent", tab
 
 
 @pytest.mark.integration

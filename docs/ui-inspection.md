@@ -154,6 +154,14 @@ window title. Ambiguous windows and window changes between the compositor
 snapshots produce no target. See [DESIGN.md](../DESIGN.md#structured-ui-inspection)
 for geometry checks and race limitations.
 
+Embedded dialogs can map through their enclosing accessible window. An untitled
+window requires a unique compositor window for its PID. Conversion also checks
+ancestor component rectangles. `bounds-outside-parent` retains the toolkit's
+raw `bounds` but withholds `display_bounds`; use a screenshot or keyboard input
+instead of clicking the raw rectangle. This warning can indicate toolkit extents
+that disagree or intentional overflow. Passing these checks does not prove the
+reported geometry matches the image.
+
 `test_inspect_display_bounds_activate_offset_controls` clicks reported centers
 for GTK 4 and Qt Quick on native Wayland and private Xwayland. It moves the GTK
 window and a Qt modal dialog away from the origin and verifies activation in
@@ -161,6 +169,13 @@ each app's log. Xwayland cases also require a server-side title bar offset; nati
 Wayland clients can negotiate their own decorations. The Qt dialog shares a PID with its
 main window. Unit tests cover duplicate titles, absent windows, movement,
 resizing, hidden windows, unsupported transforms, and bounded private IPC reads.
+
+`test_inspect_embedded_dialog_bounds` covers libadwaita 1.9.3's
+`Adw.PreferencesDialog` with GTK 4.22.4. It tests titled and untitled parents,
+clicks a dialog button in tiled and moved floating windows, and verifies that
+view switcher tabs with inconsistent ancestor extents produce a warning. The
+libadwaita dependency belongs to the development shell and package compatibility
+tests, rather than the framewisp runtime.
 
 ## Real-app compatibility runs
 

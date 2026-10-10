@@ -64,7 +64,10 @@
           pkgs.runCommand "framewisp-package-test"
             {
               nativeBuildInputs = [ pkgs.gobject-introspection ];
-              buildInputs = [ pkgs.gtk4 ];
+              buildInputs = [
+                pkgs.gtk4
+                pkgs.libadwaita
+              ];
             }
             ''
               export HOME="$TMPDIR"
@@ -102,7 +105,10 @@
               pkgs.nodejs # For missing libatomic in some environments
               pkgs.gobject-introspection
             ];
-            buildInputs = [ pkgs.gtk4 ];
+            buildInputs = [
+              pkgs.gtk4
+              pkgs.libadwaita
+            ];
             packages = [
               pkgs.python3.pkgs.venvShellHook
               pkgs.sway-unwrapped

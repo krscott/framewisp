@@ -17,6 +17,14 @@ class Rect:
     width: int
     height: int
 
+    def contains(self, other: "Rect") -> bool:
+        return (
+            self.x <= other.x
+            and self.y <= other.y
+            and other.x + other.width <= self.x + self.width
+            and other.y + other.height <= self.y + self.height
+        )
+
     def as_bounds(self, coordinate_space: str) -> dict[str, int | str]:
         return {
             "x": self.x,
@@ -36,6 +44,41 @@ class Window:
     visible: bool
     transform_supported: bool
     output: Rect
+
+
+@dataclass(frozen=True)
+class WindowMatch:
+    window: Window
+    index: int
+
+
+def match_window(
+    pid: int, titles: tuple[str, ...], windows: list[Window]
+) -> WindowMatch | str:
+    def candidates(title: str) -> list[Window]:
+        matches = [window for window in windows if window.pid == pid]
+        # GTK may supply a compositor title for an untitled accessible.
+        return (
+            [window for window in matches if window.title == title]
+            if title
+            else matches
+        )
+
+    for index, title in enumerate(titles):
+        matches = candidates(title)
+        if not matches:
+            continue
+        if len(matches) != 1:
+            return "ambiguous-window"
+        window = matches[0]
+        # A dialog title can also name a different window in the same process.
+        # Enclosing accessible windows must agree on the compositor identity.
+        for ancestor_title in titles[index + 1 :]:
+            enclosing = candidates(ancestor_title)
+            if enclosing and enclosing != matches:
+                return "ambiguous-window"
+        return WindowMatch(window, index)
+    return "window-not-found"
 
 
 def rectangle(value: object) -> Rect:
@@ -140,19 +183,15 @@ def convert_bounds(
     title: str,
     before: list[Window],
     after: list[Window],
+    *,
+    ancestor_titles: tuple[str, ...] = (),
 ) -> tuple[dict[str, int | str] | None, str | None]:
-    def candidates(windows: list[Window]) -> list[Window]:
-        matches = [window for window in windows if window.pid == pid]
-        matches = [window for window in matches if window.title == title]
-        return matches
-
-    matches = candidates(before)
-    if not matches:
-        return None, "window-not-found"
-    if len(matches) != 1:
-        return None, "ambiguous-window"
-    window = matches[0]
-    if candidates(after) != matches:
+    titles = (title, *ancestor_titles)
+    match = match_window(pid, titles, before)
+    if isinstance(match, str):
+        return None, match
+    window = match.window
+    if match_window(pid, titles, after) != match:
         return None, "window-changed"
     if not window.visible:
         return None, "window-not-visible"
