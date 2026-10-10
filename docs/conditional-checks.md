@@ -61,7 +61,7 @@ can be empty and is capped at 1024 characters. Every check accepts an optional
 | Observation setting | Default | Allowed values |
 | --- | ---: | --- |
 | `max_nodes` | 256 | Integer, 1 to 4096 |
-| `max_depth` | 8 | Integer, 1 to 32 |
+| `max_depth` | 8 | Integer, 1 to 64 |
 | `timeout` | 2 seconds | Finite number, greater than 0 and at most 10 seconds |
 
 Unknown settings, booleans in numeric fields, and out-of-range values fail batch
@@ -91,6 +91,11 @@ Incomplete observations still cannot verify a condition. Failure messages name
 complete traversal. A longer check timeout alone does not fix those caps. Query
 timeouts identify both time budgets; stalled app calls recommend retrying or
 taking a screenshot. At hard traversal maxima, screenshots remain the fallback.
+
+If any branch exceeds the configured depth, even a shallow match cannot verify
+a check. For deeply nested apps, set `"observation": {"max_depth": 64}` on each
+needed check. `inspect --max-depth 64` uses the same depth limit. Node and time
+budgets still apply.
 
 ## States and transitions
 

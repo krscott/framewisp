@@ -86,7 +86,7 @@ def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
         {"max_nodes": 1.5},
         {"max_nodes": "256"},
         {"max_depth": 0},
-        {"max_depth": 33},
+        {"max_depth": 65},
         {"max_depth": False},
         {"max_depth": 8.0},
         {"timeout": 0},
@@ -127,7 +127,7 @@ def test_observation_round_trip_and_transition_matching() -> None:
         "condition": condition(),
         "timeout": 10,
         "after": 0,
-        "observation": {"max_nodes": 4096, "max_depth": 32, "timeout": 10},
+        "observation": {"max_nodes": 4096, "max_depth": 64, "timeout": 10},
     }
     batch = Batch.parse({"actions": [baseline, wait]})
     assert Batch.parse(batch.parameters()) == batch
