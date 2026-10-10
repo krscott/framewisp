@@ -27,7 +27,7 @@ from framewisp.inspection import (
     "field,value",
     [
         ("max_depth", 0),
-        ("max_depth", 33),
+        ("max_depth", 65),
         ("limit", 101),
         ("max_nodes", 4097),
         ("timeout", 0),
@@ -284,7 +284,7 @@ def test_failed_call_timing_distinguishes_budget_from_app_stall(
 @pytest.mark.parametrize(
     "reason,query,maximum",
     [
-        ("max-depth", Query(max_depth=32), "32"),
+        ("max-depth", Query(max_depth=64), "64"),
         ("max-nodes", Query(max_nodes=4096), "4096"),
         ("limit", Query(limit=100), "100"),
         ("timeout", Query(timeout=10), "10"),

@@ -85,6 +85,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-qt-coordinates": "qt-coordinates",
             "x11-waits": "waits",
             "x11-large-waits": "large-waits",
+            "x11-deep": "deep",
         }[mode]
     recording = (
         tmp_path / "session.mp4"
@@ -110,6 +111,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         "keys": "input_probe.py",
         "waits": "wait_probe.py",
         "large-waits": "wait_probe.py",
+        "deep": "deep_probe.py",
         "clipboard": "input_probe.py",
         "scroll": "scroll_probe.py",
         "large": "input_probe.py",
@@ -209,6 +211,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                 "qt-coordinates",
                 "waits",
                 "large-waits",
+                "deep",
             }:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
@@ -2565,6 +2568,56 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
     )
     assert duplicate["verified"] is False, duplicate
     assert "ambiguous" in duplicate["error"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["deep", "x11-deep"], indirect=True)
+def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> None:
+    wait_until(lambda: "Deep probe ready" in (demo.directory / "app.log").read_text())
+    shallow = inspect(
+        demo, "--role", "button", "--name", "Shallow", "--max-depth", "32"
+    )
+    assert shallow["status"] == "partial", shallow
+    assert shallow["reasons"] == ["max-depth"], shallow
+    assert shallow["match_count"] == 1, shallow
+    assert any("maximum 64" in hint for hint in shallow["hints"]), shallow
+
+    deep = inspect(demo, "--role", "button", "--name", "Deep", "--max-depth", "64")
+    assert deep["status"] == "ok", deep
+    assert deep["match_count"] == 1, deep
+    assert deep["matches"][0]["depth"] > 40, deep
+
+    def step(action: str, name: str, depth: int) -> dict[str, object]:
+        return {
+            "action": action,
+            "timeout": 5,
+            "condition": {
+                "role": "button",
+                "name": name,
+                "field": "name",
+                "equals": name,
+            },
+            "observation": {"max_depth": depth},
+        }
+
+    failed = checked_batch(demo, tmp_path, [step("assert", "Shallow", 32)])
+    assert failed["verified"] is False, failed
+    assert "maximum 64" in failed["error"], failed
+
+    passed = checked_batch(
+        demo,
+        tmp_path,
+        [
+            step(action, name, 64)
+            for action in ("wait", "assert")
+            for name in ("Shallow", "Deep")
+        ],
+    )
+    assert passed["verified"] is True, passed
+    assert passed["completed_actions"] == 4, passed
+    for result in passed["results"]:
+        assert result["observation"]["status"] == "ok", result
+        assert result["observation_settings"]["max_depth"] == 64, result
 
 
 @pytest.mark.integration
