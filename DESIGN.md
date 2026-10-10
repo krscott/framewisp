@@ -788,6 +788,11 @@ each synchronous call also receives the remaining request budget. An unresponsiv
 application produces a timeout observation without blocking runner status/stop.
 There is no persistent AT-SPI object cache or background observer.
 
+`inspection_limits.py` defines the shared query defaults and maxima. CLI help,
+inspection validation and hints, and batch checks use those constants. The module
+has no GUI imports, so batch validation can run without loading Gio. Inspection
+and batch observations have separate default timeouts.
+
 Traversal is breadth-first, starting with application objects at depth 1. It
 fetches individual child references rather than an unbounded tree. Defaults are
 8 levels, 20 returned matches, 256 visited nodes, and 5 seconds. Hard CLI maxima

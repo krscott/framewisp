@@ -15,6 +15,7 @@ from typing import cast
 
 from gi.repository import Gio, GLib
 
+from framewisp import inspection_limits as limits
 from framewisp.display_bounds import Rect, convert_bounds, read_windows
 from framewisp.errors import SessionError
 
@@ -28,7 +29,6 @@ STATES = (
     "required truncated animated invalid-entry supports-autocompletion selectable-text "
     "is-default visited checkable has-popup read-only"
 ).split()
-TEXT_LIMIT = 1024
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -36,27 +36,32 @@ class Query:
     role: str | None = None
     name: str | None = None
     text: str | None = None
-    max_depth: int = 8
-    limit: int = 20
-    max_nodes: int = 256
-    timeout: float = 5.0
+    max_depth: int = limits.DEFAULT_MAX_DEPTH
+    limit: int = limits.DEFAULT_MATCH_LIMIT
+    max_nodes: int = limits.DEFAULT_MAX_NODES
+    timeout: float = limits.DEFAULT_INSPECT_TIMEOUT
 
     def __post_init__(self) -> None:
         for name, value, maximum in (
-            ("max-depth", self.max_depth, 64),
-            ("limit", self.limit, 100),
-            ("max-nodes", self.max_nodes, 4096),
+            ("max-depth", self.max_depth, limits.MAX_DEPTH),
+            ("limit", self.limit, limits.MAX_MATCH_LIMIT),
+            ("max-nodes", self.max_nodes, limits.MAX_NODES),
         ):
             if not 1 <= value <= maximum:
                 raise ValueError(f"--{name} must be between 1 and {maximum}")
-        if not math.isfinite(self.timeout) or not 0 < self.timeout <= 10:
-            raise ValueError("--timeout must be greater than 0 and at most 10 seconds")
+        if (
+            not math.isfinite(self.timeout)
+            or not 0 < self.timeout <= limits.MAX_TIMEOUT
+        ):
+            raise ValueError(
+                f"--timeout must be greater than 0 and at most {limits.MAX_TIMEOUT} seconds"
+            )
         if any(
-            value is not None and len(value) > TEXT_LIMIT
+            value is not None and len(value) > limits.MAX_TEXT_LENGTH
             for value in (self.role, self.name, self.text)
         ):
             raise ValueError(
-                f"inspection filters must be at most {TEXT_LIMIT} characters"
+                f"inspection filters must be at most {limits.MAX_TEXT_LENGTH} characters"
             )
 
 
@@ -236,9 +241,9 @@ def inspect_bus(
     bus: Bus | None = None
 
     def clipped(value: str) -> str:
-        if len(value) > TEXT_LIMIT:
+        if len(value) > limits.MAX_TEXT_LENGTH:
             reasons.add("text-limit")
-        return value[:TEXT_LIMIT]
+        return value[: limits.MAX_TEXT_LENGTH]
 
     try:
         bus = (
@@ -338,11 +343,11 @@ def inspect_bus(
                                 "org.a11y.atspi.Text",
                                 "GetText",
                                 "(ii)",
-                                (0, min(length, TEXT_LIMIT)),
+                                (0, min(length, limits.MAX_TEXT_LENGTH)),
                             ),
                         )
                     )
-                    if length > TEXT_LIMIT:
+                    if length > limits.MAX_TEXT_LENGTH:
                         reasons.add("text-limit")
                 if query.text is not None and (
                     text is None or query.text.casefold() not in text.casefold()
@@ -439,7 +444,7 @@ def inspect_bus(
                                     )
                                 )
             except GLib.Error as error:
-                message = f"{bus.error_context}{error}"[:TEXT_LIMIT]
+                message = f"{bus.error_context}{error}"[: limits.MAX_TEXT_LENGTH]
                 if bus.cancel.is_cancelled() or time.monotonic() >= bus.deadline:
                     # Preserve the terminal failure even after earlier object errors.
                     if len(errors) == 5:
@@ -460,7 +465,7 @@ def inspect_bus(
         )
         reasons.add(status)
         context = bus.error_context if bus is not None else ""
-        errors.append(f"{context}{error}"[:TEXT_LIMIT])
+        errors.append(f"{context}{error}"[: limits.MAX_TEXT_LENGTH])
     finally:
         if bus is not None:
             bus.close()
@@ -496,9 +501,9 @@ def inspect_bus(
 def retry_hints(query: Query, reasons: set[str]) -> list[str]:
     hints: list[str] = []
     for reason, current, maximum in (
-        ("max-depth", query.max_depth, 64),
-        ("max-nodes", query.max_nodes, 4096),
-        ("limit", query.limit, 100),
+        ("max-depth", query.max_depth, limits.MAX_DEPTH),
+        ("max-nodes", query.max_nodes, limits.MAX_NODES),
+        ("limit", query.limit, limits.MAX_MATCH_LIMIT),
     ):
         if reason in reasons:
             if current < maximum:
@@ -514,11 +519,11 @@ def retry_hints(query: Query, reasons: set[str]) -> list[str]:
             "An app call consumed at least 80% of the query budget. Wait and retry, or take a screenshot; raising limits may not help."
         )
     elif "timeout" in reasons:
-        if query.timeout < 10:
-            hints.append("Raise --timeout (maximum 10 seconds).")
+        if query.timeout < limits.MAX_TIMEOUT:
+            hints.append(f"Raise --timeout (maximum {limits.MAX_TIMEOUT} seconds).")
         else:
             hints.append(
-                "--timeout is already at its maximum (10 seconds); wait and retry, or take a screenshot."
+                f"--timeout is already at its maximum ({limits.MAX_TIMEOUT} seconds); wait and retry, or take a screenshot."
             )
         hints.append(
             "See longest_call_ms for the slowest call; a timeout alone does not prove the app is responsive."
@@ -529,7 +534,7 @@ def retry_hints(query: Query, reasons: set[str]) -> list[str]:
         )
     if "text-limit" in reasons:
         hints.append(
-            "Accessible text is capped at 1024 characters; use a screenshot for omitted content."
+            f"Accessible text is capped at {limits.MAX_TEXT_LENGTH} characters; use a screenshot for omitted content."
         )
     if "action-limit" in reasons:
         hints.append("Action names are capped at 16 per object.")

@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from framewisp import inspection_limits as limits
 from framewisp.errors import SessionError
-
-MAX_CONDITION_TEXT = 1024
 
 
 @dataclass(frozen=True)
@@ -30,14 +29,14 @@ class Condition:
         for selector in (role, name):
             if selector is not None and (
                 not isinstance(selector, str)
-                or not 1 <= len(selector) <= MAX_CONDITION_TEXT
+                or not 1 <= len(selector) <= limits.MAX_TEXT_LENGTH
             ):
                 raise ValueError("role/name must be nonempty bounded strings.")
         if role is None and name is None:
             raise ValueError("condition requires role or name.")
         field, equals = data.get("field"), data.get("equals")
         if field in ("text", "name"):
-            valid = isinstance(equals, str) and len(equals) <= MAX_CONDITION_TEXT
+            valid = isinstance(equals, str) and len(equals) <= limits.MAX_TEXT_LENGTH
         elif field in ("checked", "enabled"):
             valid = type(equals) is bool
         elif field == "value":
@@ -100,9 +99,9 @@ class Condition:
 
 @dataclass(frozen=True)
 class Observation:
-    max_nodes: int = 256
-    max_depth: int = 8
-    timeout: float = 2
+    max_nodes: int = limits.DEFAULT_MAX_NODES
+    max_depth: int = limits.DEFAULT_MAX_DEPTH
+    timeout: float = limits.DEFAULT_CHECK_TIMEOUT
 
     @staticmethod
     def parse(raw: object) -> "Observation":
@@ -115,15 +114,18 @@ class Observation:
         nodes = data.get("max_nodes", defaults.max_nodes)
         depth = data.get("max_depth", defaults.max_depth)
         for name, value, maximum in (
-            ("max_nodes", nodes, 4096),
-            ("max_depth", depth, 64),
+            ("max_nodes", nodes, limits.MAX_NODES),
+            ("max_depth", depth, limits.MAX_DEPTH),
         ):
             if type(value) is not int or not 1 <= value <= maximum:
                 raise ValueError(f"observation.{name} must be between 1 and {maximum}.")
         timeout = data.get("timeout", defaults.timeout)
-        if type(timeout) not in (int, float) or not 0 < cast(float, timeout) <= 10:
+        if (
+            type(timeout) not in (int, float)
+            or not 0 < cast(float, timeout) <= limits.MAX_TIMEOUT
+        ):
             raise ValueError(
-                "observation.timeout must be greater than 0 and at most 10 seconds."
+                f"observation.timeout must be greater than 0 and at most {limits.MAX_TIMEOUT} seconds."
             )
         return Observation(cast(int, nodes), cast(int, depth), cast(float, timeout))
 
@@ -148,9 +150,12 @@ class Check:
         if data.keys() - {"action", "condition", "timeout", "after", "observation"}:
             raise ValueError("Unknown check parameter.")
         timeout = data.get("timeout")
-        if type(timeout) not in (int, float) or not 0 < cast(float, timeout) <= 10:
+        if (
+            type(timeout) not in (int, float)
+            or not 0 < cast(float, timeout) <= limits.MAX_TIMEOUT
+        ):
             raise ValueError(
-                "Checks require a timeout greater than 0 and at most 10 seconds."
+                f"Checks require a timeout greater than 0 and at most {limits.MAX_TIMEOUT} seconds."
             )
         after = data.get("after")
         if "after" in data and (
@@ -201,8 +206,8 @@ def perform_check(
     def failure(message: str) -> SessionError:
         hints: list[str] = []
         for reason, field, maximum in (
-            ("max-nodes", "max_nodes", 4096),
-            ("max-depth", "max_depth", 64),
+            ("max-nodes", "max_nodes", limits.MAX_NODES),
+            ("max-depth", "max_depth", limits.MAX_DEPTH),
         ):
             if reason in reasons:
                 current = check.observation.parameters()[field]
@@ -220,13 +225,16 @@ def perform_check(
             )
             if "app-unresponsive" in reasons:
                 hints.append("An app call was unresponsive; retry or use a screenshot.")
-            elif check.observation.timeout == 10 and check.timeout == 10:
+            elif (
+                check.observation.timeout == limits.MAX_TIMEOUT
+                and check.timeout == limits.MAX_TIMEOUT
+            ):
                 hints.append(
                     "Both time budgets are at their maximum; retry or use a screenshot."
                 )
             else:
                 hints.append(
-                    "Increase observation.timeout and the check timeout if needed (maximum 10 seconds each), or use a screenshot."
+                    f"Increase observation.timeout and the check timeout if needed (maximum {limits.MAX_TIMEOUT} seconds each), or use a screenshot."
                 )
         return SessionError(" ".join([message, *hints]))
 

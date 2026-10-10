@@ -5,6 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import log_input
 from framewisp.connection import request_attached
@@ -81,22 +82,28 @@ def main() -> None:
     inspect.add_argument("--name", help="case-insensitive accessible name substring")
     inspect.add_argument("--text", help="case-insensitive accessible text substring")
     inspect.add_argument(
-        "--max-depth", type=int, default=8, help="tree depth, 1-64 (default: 8)"
+        "--max-depth",
+        type=int,
+        default=limits.DEFAULT_MAX_DEPTH,
+        help=f"tree depth, 1-{limits.MAX_DEPTH} (default: {limits.DEFAULT_MAX_DEPTH})",
     )
     inspect.add_argument(
-        "--limit", type=int, default=20, help="result count, 1-100 (default: 20)"
+        "--limit",
+        type=int,
+        default=limits.DEFAULT_MATCH_LIMIT,
+        help=f"result count, 1-{limits.MAX_MATCH_LIMIT} (default: {limits.DEFAULT_MATCH_LIMIT})",
     )
     inspect.add_argument(
         "--max-nodes",
         type=int,
-        default=256,
-        help="visited nodes, 1-4096 (default: 256)",
+        default=limits.DEFAULT_MAX_NODES,
+        help=f"visited nodes, 1-{limits.MAX_NODES} (default: {limits.DEFAULT_MAX_NODES})",
     )
     inspect.add_argument(
         "--timeout",
         type=seconds,
-        default=5.0,
-        help="query budget, >0 to 10 seconds (default: 5)",
+        default=limits.DEFAULT_INSPECT_TIMEOUT,
+        help=f"query budget, >0 to {limits.MAX_TIMEOUT} seconds (default: {limits.DEFAULT_INSPECT_TIMEOUT:g})",
     )
 
     batch = commands.add_parser(
@@ -104,9 +111,9 @@ def main() -> None:
         help="run ordered headless inputs and optional capture from JSON",
         description="Validate all inputs, execute without interleaving, and print JSON results. "
         "Stop at the first failure; completed actions cannot be rolled back. "
-        "baseline/wait/assert accept observation: {max_nodes: 1..4096 (default 256), "
-        "max_depth: 1..64 (default 8), timeout: >0..10 seconds (default 2)}. "
-        "The required check timeout (>0..10 seconds) caps all observations. "
+        f"baseline/wait/assert accept observation: {{max_nodes: 1..{limits.MAX_NODES} (default {limits.DEFAULT_MAX_NODES}), "
+        f"max_depth: 1..{limits.MAX_DEPTH} (default {limits.DEFAULT_MAX_DEPTH}), timeout: >0..{limits.MAX_TIMEOUT} seconds (default {limits.DEFAULT_CHECK_TIMEOUT})}}. "
+        f"The required check timeout (>0..{limits.MAX_TIMEOUT} seconds) caps all observations. "
         "Use interval 0 for unpaced typing. Capture is not an app acknowledgement.",
     )
     batch.add_argument(
