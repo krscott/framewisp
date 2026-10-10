@@ -510,11 +510,24 @@ framewisp paint key Ctrl+s
 ```
 
 Accepted keys are `a` through `z`, `0` through `9`, `Space`, `Return`, `Tab`,
-`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, and `Down`. Prefix a key
+`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`,
+`Page_Up`, `Page_Down`, and `F1` through `F12`. Prefix a key
 with any combination of `Ctrl+`, `Shift+`, and `Alt+`, each at most once.
 Names are case-insensitive: `Ctrl+A` and `ctrl+a` mean the same shortcut.
 Letter case does not add Shift; use `Shift+a` to send a capital A, or `type`
 to enter literal text.
+
+ASCII punctuation accepts literals and X keysym names: `comma`, `period`, `slash`,
+`minus`, `equal`, `semicolon`, `apostrophe`, `bracketleft`, `bracketright`,
+`backslash`, `grave`, `exclam`, `quotedbl`, `numbersign`, `dollar`, `percent`,
+`ampersand`, `parenleft`, `parenright`, `asterisk`, `plus`, `colon`, `less`,
+`greater`, `question`, `at`, `asciicircum`, `underscore`, `braceleft`, `bar`,
+`braceright`, and `asciitilde`. For example, `key Ctrl+comma` and `key 'Ctrl+,'`
+send the same Preferences shortcut. Use `key Ctrl+plus` or `key 'Ctrl++'` for
+Ctrl with `+`; `Ctrl+` alone is incomplete. Quote literal shell metacharacters.
+Shift selects the US-layout shifted symbol: `Ctrl+Shift+comma` sends Ctrl+`<`.
+Shifted punctuation names and literals imply Shift, so `Ctrl+less` also sends
+Ctrl+`<`. Desktop attachment uses its documented US-layout keycodes.
 
 Each command presses the modifiers, presses and releases the key, then releases
 the modifiers in reverse order on the same connection. Modifiers do not remain
@@ -551,7 +564,8 @@ On success, `record-stop` prints JSON with the output `path`, `duration_seconds`
 `width`, `height`, and `size_bytes`. Framewisp uses ffprobe and the completed file
 to measure these values after caption rendering; duration is not a wall-clock estimate.
 
-Recordings are silent H.264 MP4 files at 30 fps and the session's display size.
+Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
+with an additional 640 pixels of width when `--console` is enabled.
 Recording requires even width and height. Existing output files are never
 overwritten. The session runner owns the recorder and finalizes an active clip
 on normal app exit, Ctrl+C, or SIGTERM. A recorder failure stops the session;
@@ -559,6 +573,35 @@ an invalid recording request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
 Keep the runner alive until shutdown completes so it can finalize the MP4.
 The development shell includes FFmpeg for video inspection.
+
+Add `--console` to show the launched app's combined stdout/stderr in a scrolling
+text panel on the right:
+
+```sh
+framewisp demo run --record /tmp/startup.mp4 --console -- framewisp-demo
+# Or capture a later clip, with or without input captions:
+framewisp demo record-start --console --no-captions /tmp/console.mp4
+framewisp demo record-stop
+```
+
+The GUI keeps its original size, coordinates, and screenshots. Console lines show
+seconds relative to the clip's first frame. A short tail of earlier output provides
+context with negative timestamps. Text wraps and scrolls within the panel. ANSI
+formatting is stripped; carriage returns replace the current progress line. This
+is plain text capture, without terminal emulation, colors, or cursor positioning.
+
+Every headless session preserves the original output bytes in `app.log` and writes
+received UTF-8 text and monotonic timestamps to `console.jsonl`, including when
+no recording is active. Invalid UTF-8 becomes replacement characters in the
+sidecar and panel. Timestamps describe receipt, so app buffering can delay output;
+Framewisp does not change the app's buffering or attach a pseudo-terminal.
+Only the launched process tree's inherited stdout/stderr is captured. Output from
+separately activated D-Bus services or other processes is outside this capture.
+Console text is not redacted by the input-content policy.
+
+Console rendering and input captions share one FFmpeg pass after capture stops.
+`record-stop` and normal shutdown wait for it. If rendering fails, the raw GUI
+video remains and the error points to `captions.log`.
 
 ## Share media in GitHub comments
 
@@ -610,7 +653,7 @@ whether the app responded as intended. A start without an end indicates an
 unfinished command. Reusing a session directory starts a fresh log.
 
 Input logs and captions omit literal typed text by default, including Unicode and
-individual letter, digit, Space, and Shift-only literal key events. Captions say
+individual letter, digit, punctuation, Space, and Shift-only literal key events. Captions say
 "Type text" or "Key" (with any Shift modifier). Ctrl/Alt shortcuts and named keys
 such as Return and arrows remain visible. These describe shortcuts, not text entry.
 Input failure details that could contain text or encoded keys are omitted; error
@@ -875,7 +918,8 @@ After upgrading from a recording-only control protocol, stop the old runner with
 Ctrl+C or SIGTERM and start a fresh session. New control commands reject that old
 protocol before sending a request.
 
-The session directory contains `sway.log`, `wayvnc.log`, and `app.log`, plus
+The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
+timestamped app-output sidecar `console.jsonl`, plus
 `recorder.log` when recording. During a
 run, `session.json` records the private runtime directory, Wayland socket name,
 and managed process IDs. Normal shutdown removes the runtime sockets and

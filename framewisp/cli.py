@@ -168,6 +168,11 @@ def main() -> None:
     record_start.add_argument("path", type=Path, metavar="FILE")
     for recording_parser in (run, record_start):
         recording_parser.add_argument(
+            "--console",
+            action="store_true",
+            help="append timestamped app stdout/stderr beside the recorded GUI",
+        )
+        recording_parser.add_argument(
             "--no-captions",
             action="store_true",
             help="record without input captions (input logging stays enabled)",
@@ -277,10 +282,18 @@ def main() -> None:
         help="press and release a key or shortcut",
         description="Send a key with optional Ctrl, Shift, and Alt modifiers. "
         "Names are case-insensitive; letter case does not imply Shift. "
-        "Keys: a-z, 0-9, Space, Return, Tab, BackSpace, Escape, Delete, Left, Right, Up, Down.",
+        "Keys: a-z, 0-9, Space, Return, Tab, BackSpace, Escape, Delete, Left, Right, Up, Down, "
+        "Home, End, Page_Up, Page_Down, F1-F12, and ASCII punctuation names or literals "
+        "(comma, period, slash, minus, equal, semicolon, apostrophe, bracketleft, "
+        "bracketright, backslash, grave, exclam, quotedbl, numbersign, dollar, percent, "
+        "ampersand, parenleft, parenright, asterisk, plus, colon, less, greater, question, "
+        "at, asciicircum, underscore, braceleft, bar, braceright, asciitilde). "
+        "Use plus or a doubled '+' separator, for example Ctrl+plus or Ctrl++.",
     )
     key.add_argument(
-        "chord", metavar="CHORD", help="for example: Return, Ctrl+a, Ctrl+Shift+z"
+        "chord",
+        metavar="CHORD",
+        help="for example: Return, Ctrl+a, Ctrl+comma, Ctrl+Shift+z",
     )
 
     args = parser.parse_args()
@@ -337,6 +350,10 @@ def main() -> None:
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
     if args.action == "run":
+        if args.console and args.record is None:
+            parser.error(
+                "--console requires --record; use record-start --console for later clips"
+            )
         if args.dbus_service_dir and args.profile != "fresh":
             parser.error("--dbus-service-dir requires --profile fresh")
         if not args.command or args.command == ["--"]:
@@ -396,6 +413,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             command,
             recording=args.record,
             captions=not args.no_captions,
+            console=args.console,
             size=(args.width, args.height),
             x11=args.x11,
             retain_input_content=args.retain_input_content,
@@ -415,6 +433,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 args.action,
                 args.path if args.action == "record-start" else None,
                 captions=not getattr(args, "no_captions", False),
+                console=getattr(args, "console", False),
             )
         )
     elif args.action == "screenshot":

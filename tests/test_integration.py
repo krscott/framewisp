@@ -76,7 +76,9 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         mode = {
             "x11": None,
             "x11-probe": "probe",
+            "x11-keys": "keys",
             "x11-record": True,
+            "x11-console": "console",
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
             "x11-qt-tree": "qt-tree",
@@ -86,7 +88,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         }[mode]
     recording = (
         tmp_path / "session.mp4"
-        if mode is True or mode in {"large", "uncaptioned"}
+        if mode is True or mode in {"large", "uncaptioned", "console"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -96,6 +98,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.append("--x11")
     if recording is not None:
         command.extend(["--record", str(recording)])
+        if mode == "console":
+            command.append("--console")
         if mode == "uncaptioned":
             command.append("--no-captions")
     if mode in {"large", "odd"}:
@@ -103,6 +107,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--width", str(width), "--height", str(height)])
     probes = {
         "probe": "input_probe.py",
+        "keys": "input_probe.py",
         "waits": "wait_probe.py",
         "large-waits": "wait_probe.py",
         "clipboard": "input_probe.py",
@@ -134,6 +139,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         app.extend(["--nodes", "300", "--depth", "10"])
     if mode == "dialog-untitled":
         app.append("--untitled")
+    if mode == "keys":
+        app.append("--keys-only")
     command.extend(["--", *app])
     with runner_log.open("w") as output:
         process = subprocess.Popen(
@@ -195,6 +202,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
             if mode not in {
                 "probe",
+                "keys",
                 "clipboard",
                 "qt",
                 "qt-tree",
@@ -859,6 +867,107 @@ def test_key_combination_events(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", ["keys", "x11-keys"], indirect=True)
+def test_punctuation_navigation_and_function_shortcuts(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "click", "100", "200")
+    # Verify the reported Preferences shortcut through the single-command path.
+    cli(demo.directory, "key", "Ctrl+comma")
+    wait_until(lambda: any(event.get("key") == "comma" for event in input_events(demo)))
+    comma = next(event for event in input_events(demo) if event.get("key") == "comma")
+    assert comma["ctrl"] and not comma["shift"] and not comma["alt"]
+    start = len(input_events(demo))
+    cases: list[tuple[str, str, bool, bool]] = []
+    for name, literal, shifted in [
+        ("comma", ",", "less"),
+        ("period", ".", "greater"),
+        ("slash", "/", "question"),
+        ("minus", "-", "underscore"),
+        ("equal", "=", "plus"),
+        ("semicolon", ";", "colon"),
+        ("apostrophe", "'", "quotedbl"),
+        ("bracketleft", "[", "braceleft"),
+        ("bracketright", "]", "braceright"),
+        ("backslash", "\\", "bar"),
+        ("grave", "`", "asciitilde"),
+    ]:
+        cases.extend(
+            [
+                (f"Ctrl+{name}", name, True, False),
+                (f"Ctrl+{literal}", name, True, False),
+                (f"Ctrl+Shift+{name}", shifted, True, True),
+                (f"Ctrl+{shifted}", shifted, True, True),
+            ]
+        )
+    for name, literal in [
+        ("exclam", "!"),
+        ("quotedbl", '"'),
+        ("numbersign", "#"),
+        ("dollar", "$"),
+        ("percent", "%"),
+        ("ampersand", "&"),
+        ("parenleft", "("),
+        ("parenright", ")"),
+        ("asterisk", "*"),
+        ("at", "@"),
+        ("asciicircum", "^"),
+    ]:
+        cases.extend(
+            [
+                (f"Ctrl+{name}", name, True, True),
+                (f"Ctrl+{literal}", name, True, True),
+            ]
+        )
+    cases.extend(
+        [
+            ("Ctrl++", "plus", True, True),
+            ("Alt+Home", "Home", False, False),
+            ("End", "End", False, False),
+            ("Page_Up", "Page_Up", False, False),
+            ("Shift+Page_Down", "Page_Down", False, True),
+            *((f"F{number}", f"F{number}", False, False) for number in range(1, 13)),
+        ]
+    )
+    actions: list[dict[str, str]] = []
+    for chord, _, _, _ in cases:
+        actions.extend(
+            [
+                {"action": "key", "chord": chord},
+                {"action": "key", "chord": "q"},
+            ]
+        )
+    plan = tmp_path / "shortcuts.json"
+    plan.write_text(json.dumps({"actions": actions}))
+    result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    assert result["status"] == "completed"
+    assert result["completed_actions"] == len(actions)
+
+    def presses() -> list[dict[str, str | float | bool]]:
+        return [
+            event
+            for event in input_events(demo)[start:]
+            if event["event"] == "key-press"
+            and event["key"] not in {"Control_L", "Shift_L", "Alt_L"}
+        ]
+
+    wait_until(lambda: len(presses()) >= len(actions))
+    events = presses()
+    assert len(events) == len(actions)
+    for index, (chord, key, ctrl, shift) in enumerate(cases):
+        event, following = events[index * 2 : index * 2 + 2]
+        assert (event["key"], event["ctrl"], event["shift"], event["alt"]) == (
+            key,
+            ctrl,
+            shift,
+            chord.startswith("Alt+"),
+        ), chord
+        assert following["key"] == "q"
+        assert not any(following[name] for name in ["ctrl", "shift", "alt"]), chord
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("demo", ["scroll"], indirect=True)
 @pytest.mark.parametrize(
     "direction,reverse,axis", [("down", "up", "y"), ("right", "left", "x")]
@@ -1106,6 +1215,81 @@ def video_patch(path: Path, second: float) -> bytes:
         check=True,
         timeout=20,
     ).stdout
+
+
+def console_panel(path: Path, second: float) -> bytes:
+    return subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            str(second),
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "crop=640:720:1280:0",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["console", "x11-console"], indirect=True)
+def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> None:
+    screenshot = tmp_path / "gui.png"
+    wait_for_demo_frame(demo, screenshot)
+    assert demo.recording is not None
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert (summary["width"], summary["height"]) == (1920, 720)
+    assert len(recording_frames(demo.recording, size=(1920, 720))) > 1
+    assert (demo.directory / "console.jsonl").stat().st_size > 0
+    for captions in [False, True]:
+        clip = tmp_path / f"console-{captions}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            "--console",
+            *([] if captions else ["--no-captions"]),
+            str(clip),
+        )
+        time.sleep(0.4)
+        cli(demo.directory, "type", "console output")
+        cli(demo.directory, "key", "Return")
+        wait_until(
+            lambda: "Entered: console output"
+            in (demo.directory / "app.log").read_text()
+        )
+        time.sleep(0.5)
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        assert (summary["width"], summary["height"]) == (1920, 720)
+        early = console_panel(clip, 0.1)
+        late = console_panel(clip, summary["duration_seconds"] - 0.2)
+        assert len(early) == len(late) == 640 * 720 * 3
+        assert sum(abs(a - b) for a, b in zip(early, late, strict=True)) > 100000
+        cli(demo.directory, "screenshot", str(screenshot))
+        with Image.open(screenshot) as image:
+            assert image.size == (1280, 720)
+        cli(demo.directory, "key", "Ctrl+a")
+        cli(demo.directory, "key", "BackSpace")
+    plain = tmp_path / "plain.mp4"
+    cli(demo.directory, "record-start", "--no-captions", str(plain))
+    time.sleep(0.2)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert (summary["width"], summary["height"]) == (1280, 720)
+    cli(demo.directory, "record-start", "--console", str(tmp_path / "shutdown.mp4"))
+    stopped = json.loads(cli(demo.directory, "stop").stdout)
+    assert stopped["recording"]["width"] == 1920
+    assert demo.process.wait(timeout=20) == 0
 
 
 @pytest.mark.integration

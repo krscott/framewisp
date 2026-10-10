@@ -38,7 +38,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--no-captions] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. |
+| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--no-captions] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console` requires `--record`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/32, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -48,7 +48,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
-| `record-start [--no-captions] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
+| `record-start [--console] [--no-captions] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
@@ -75,7 +75,17 @@ For `click` and `drag`, MOD is `ctrl`, `shift`, or `alt`, case-insensitive.
 Repeat `--modifier` for combinations, for example `--modifier ctrl --modifier shift`;
 each modifier may appear once. For `key`, join modifiers and a key with `+`.
 Supported keys are `a` through `z`, `0` through `9`, `Space`, `Return`, `Tab`,
-`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, and `Down`.
+`BackSpace`, `Escape`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`,
+`Page_Up`, `Page_Down`, and `F1` through `F12`. ASCII punctuation accepts literals
+or X keysym names: `comma`, `period`, `slash`, `minus`, `equal`, `semicolon`,
+`apostrophe`, `bracketleft`, `bracketright`, `backslash`, `grave`, `exclam`,
+`quotedbl`, `numbersign`, `dollar`, `percent`, `ampersand`, `parenleft`,
+`parenright`, `asterisk`, `plus`, `colon`, `less`, `greater`, `question`, `at`,
+`asciicircum`, `underscore`, `braceleft`, `bar`, `braceright`, `asciitilde`.
+For Preferences, use `key Ctrl+comma` or `key 'Ctrl+,'`. Use `Ctrl+plus` or
+`'Ctrl++'` for Ctrl with `+`; `Ctrl+` is incomplete. Quote shell metacharacters.
+Shift selects US-layout shifted punctuation, so `Ctrl+Shift+comma` and
+`Ctrl+less` both send Ctrl+`<`. Shifted punctuation implies Shift.
 Names are case-insensitive; `A` does not imply Shift. Use `Shift+a` for that chord.
 `type` rejects newlines, tabs, and other nonprintable characters; send `key Return`
 or `key Tab` separately. X11 sessions support 128 distinct non-ASCII characters
@@ -358,7 +368,7 @@ and produces silent MP4 video. Only one clip may be active. Normal runner
 shutdown also finalizes it. Input captions are embedded by default;
 `--no-captions` disables them for that clip. Every input is still logged to
 `SESSION/inputs.jsonl`. Logs and captions omit typed text (including Unicode) and
-literal key events by default. Letter/digit/Space keys with Shift alone are omitted;
+literal key events by default. Letter/digit/punctuation/Space keys with Shift alone are omitted;
 Ctrl/Alt shortcuts and named keys such as Return and arrows remain visible.
 Start `run` or user-owned `attach` with `--retain-input-content` only when full
 input retention is intended. That session-wide opt-in applies to individual inputs,
@@ -369,6 +379,20 @@ does not redact screens, app logs, shell history, batch files, or runtime input 
 Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
+
+Use `run --record FILE --console` or `record-start --console FILE` to append a
+640-pixel-wide scrolling panel of the launched app's combined stdout/stderr.
+The GUI and screenshots keep their original dimensions. Panel lines show seconds
+relative to the clip; negative timestamps identify earlier output kept for context.
+ANSI formatting is stripped and carriage returns replace progress lines. No
+terminal emulation or app buffering changes occur. Times describe when Framewisp
+receives output, so buffered output can appear late. Output from separately
+activated services is not captured. Every headless session keeps original bytes
+in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
+uses replacement characters in the panel. Console text follows the app-log policy,
+so the input-content policy does not redact it. `--no-captions` still permits the
+console panel. Rendering waits until clip finalization; a failure preserves the
+raw GUI video and reports `captions.log`.
 
 ## Share evidence on GitHub
 
