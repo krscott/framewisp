@@ -22,6 +22,7 @@ from xml.sax.saxutils import escape
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import capture_origin, recorder_output, render_recording
+from framewisp.compact import CompactSettings
 from framewisp.connection import reply as reply
 from framewisp.console import ConsoleCapture, app_output
 from framewisp.environment import caller_environment
@@ -305,6 +306,7 @@ def start_recording(
     stop: Event,
     captions: bool,
     console: ConsoleCapture | None = None,
+    compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
 ) -> Generator[OwnedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
@@ -326,7 +328,7 @@ def start_recording(
         "-f",
         str(destination),
     ]
-    timed = captions or console is not None
+    timed = captions or console is not None or compact is not None
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     with (
         recorder_output(log) as output,
@@ -368,6 +370,7 @@ def start_recording(
             log=log.parent / "captions.log",
             captions=captions,
             console=console,
+            compact=compact,
             size=size,
         )
 
@@ -389,6 +392,7 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
             "app.log",
             "console.jsonl",
             "inputs.jsonl",
+            "activity.jsonl",
             "captions.log",
             "dbus.log",
             "accessibility.log",
@@ -450,7 +454,12 @@ class Recordings:
     last_summary: dict[str, object] | None = None
 
     def start(
-        self, destination: Path, *, captions: bool = True, console: bool = False
+        self,
+        destination: Path,
+        *,
+        captions: bool = True,
+        console: bool = False,
+        compact: CompactSettings | None = None,
     ) -> str | None:
         if self.process is not None:
             return "A recording is already active. Use record-stop first."
@@ -468,6 +477,7 @@ class Recordings:
                     stop=self.stop_requested,
                     captions=captions,
                     console=self.console_capture if console else None,
+                    compact=compact,
                     size=self.size,
                 )
             )
@@ -504,6 +514,7 @@ def session_command(
     *,
     captions: bool = True,
     console: bool = False,
+    compact: CompactSettings | None = None,
     parameters: dict[str, object] | None = None,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
@@ -518,12 +529,18 @@ def session_command(
             "This runner does not support console recordings. Restart the session "
             "with this version of framewisp."
         )
+    if compact is not None and state.get("compact_recording") is not True:
+        raise SessionError(
+            "This runner does not support compact recordings. Restart the session "
+            "with this version of framewisp."
+        )
     request = {
         "action": action,
         "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
         "console": console,
+        "compact": compact.parameters() if compact is not None else None,
         "parameters": parameters,
     }
     if parameters is not None and state.get("persistent_input") is not True:
@@ -646,6 +663,11 @@ def handle_session_command(
             destination = command.get("destination")
             captions = command.get("captions", True)
             console = command.get("console", False)
+            try:
+                compact = CompactSettings.parse(command.get("compact"))
+            except ValueError as failure:
+                reply(connection, error=str(failure))
+                return None
             if not isinstance(destination, str):
                 error = "record-start requires a destination"
             elif not isinstance(captions, bool):
@@ -654,7 +676,10 @@ def handle_session_command(
                 error = "console must be true or false"
             else:
                 error = recordings.start(
-                    Path(destination), captions=captions, console=console
+                    Path(destination),
+                    captions=captions,
+                    console=console,
+                    compact=compact,
                 )
         elif action == "record-stop":
             error = recordings.finish()
@@ -677,6 +702,7 @@ def run_session(
     recording: Path | None = None,
     captions: bool = True,
     console: bool = False,
+    compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
     retain_input_content: bool = False,
@@ -705,6 +731,7 @@ def run_session(
             recording=recording,
             captions=captions,
             console=console,
+            compact=compact,
             size=size,
             x11=x11,
             retain_input_content=retain_input_content,
@@ -721,6 +748,7 @@ def _run_session(
     recording: Path | None,
     captions: bool,
     console: bool,
+    compact: CompactSettings | None,
     size: tuple[int, int],
     x11: bool,
     retain_input_content: bool,
@@ -735,6 +763,7 @@ def _run_session(
 
     (session / "app-exit.json").unlink(missing_ok=True)
     (session / "inputs.jsonl").write_text("", encoding="utf-8")
+    (session / "activity.jsonl").write_text("", encoding="utf-8")
     stop = Event()
     stop_connection: socket.socket | None = None
     shutdown_error: str | None = None
@@ -834,7 +863,9 @@ def _run_session(
             recordings = Recordings(session, env, stop, size, console_capture)
             stack.callback(recordings.close)
             if recording is not None:
-                error = recordings.start(recording, captions=captions, console=console)
+                error = recordings.start(
+                    recording, captions=captions, console=console, compact=compact
+                )
                 if error is not None:
                     if stop.is_set():
                         return 0
@@ -876,6 +907,7 @@ def _run_session(
                         {
                             "control_protocol": 1,
                             "console_recording": True,
+                            "compact_recording": True,
                             "persistent_input": True,
                             "retain_input_content": retain_input_content,
                             "inspection_protocol": 1,

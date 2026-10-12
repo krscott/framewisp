@@ -17,6 +17,7 @@ from framewisp.actions import InputAction
 from framewisp.batch import Batch
 from framewisp.captions import input_error, log_input
 from framewisp.checks import Check, perform_check
+from framewisp.compact import log_activity
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
@@ -182,13 +183,14 @@ class InputWorker:
                             result["baseline_snapshot_id"] = results[action.after][
                                 "baseline_snapshot_id"
                             ]
-                        perform_check(
-                            self.session,
-                            action,
-                            result,
-                            cancelled=lambda: self.cancelled(connection),
-                            wait=lambda seconds: self.wait(connection, seconds),
-                        )
+                        with log_activity(self.session):
+                            perform_check(
+                                self.session,
+                                action,
+                                result,
+                                cancelled=lambda: self.cancelled(connection),
+                                wait=lambda seconds: self.wait(connection, seconds),
+                            )
                     else:
                         self.perform(connection, action)
                 except Exception as error:
@@ -226,8 +228,11 @@ class InputWorker:
             if batch.capture is not None:
                 capture_started = time.monotonic()
                 try:
-                    self.wait(connection, batch.capture.delay)
-                    self.capture(batch.capture.path, lambda: self.cancelled(connection))
+                    with log_activity(self.session):
+                        self.wait(connection, batch.capture.delay)
+                        self.capture(
+                            batch.capture.path, lambda: self.cancelled(connection)
+                        )
                     artifacts.append(str(batch.capture.path))
                 except Exception:
                     data["failed_phase"] = "capture"
@@ -238,10 +243,12 @@ class InputWorker:
             data["verified"] = False
             if batch.failure_capture is not None and not self.cancelled(connection):
                 try:
-                    self.wait(connection, batch.failure_capture.delay)
-                    self.capture(
-                        batch.failure_capture.path, lambda: self.cancelled(connection)
-                    )
+                    with log_activity(self.session):
+                        self.wait(connection, batch.failure_capture.delay)
+                        self.capture(
+                            batch.failure_capture.path,
+                            lambda: self.cancelled(connection),
+                        )
                     artifacts.append(str(batch.failure_capture.path))
                 except (SessionError, InterruptedError, OSError) as error:
                     data["failure_capture_error"] = str(error)

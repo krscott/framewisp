@@ -599,7 +599,38 @@ Only the launched process tree's inherited stdout/stderr is captured. Output fro
 separately activated D-Bus services or other processes is outside this capture.
 Console text is not redacted by the input-content policy.
 
-Console rendering and input captions share one FFmpeg pass after capture stops.
+Add `--compact` to remove gaps between commands when the clip is finalized:
+
+```sh
+framewisp demo run --record /tmp/demo.mp4 --compact -- framewisp-demo
+# Or choose padding for a later clip:
+framewisp demo record-start --compact --compact-before 1 --compact-after 2 /tmp/compact.mp4
+framewisp demo record-stop
+```
+
+Compaction keeps each input's full duration, including paced typing and drags.
+It keeps 1 second before and 2 seconds after by default, merging overlapping
+sections. The same padding keeps the opening 1 second and closing 2 seconds.
+Both padding values accept finite, nonnegative seconds; their options require
+`--compact`, and `run --compact` requires `--record`. Cuts round outward to
+30 fps frames. At least the first and last frames remain even with zero padding.
+
+Batch checks (`baseline`, `wait`, and `assert`) and batch capture delays remain
+in full, including failed and cancelled steps. Their timestamp-only spans are
+stored in `SESSION/activity.jsonl`; conditions and error text are not retained
+there. Inputs that overlap the clip boundary remain for their captured duration.
+Each clip chooses compaction independently; the default keeps the full recording.
+
+Cuts use command timestamps, not pixel changes. Blinking cursors do not prevent
+trimming. Animations, app output, and delayed responses in removed gaps can be
+omitted. Use larger padding or a batch wait when an app needs time to respond;
+leave compaction off when the entire timeline matters. External sleeps between
+commands are gaps and can be removed. Captions and console text stay aligned
+with the retained GUI frames; console timestamps still show original clip time.
+The reported duration measures the compacted MP4. Session logs keep their original
+timestamps and content.
+
+Compaction, console rendering, and input captions share one FFmpeg pass after capture stops.
 `record-stop` and normal shutdown wait for it. If rendering fails, the raw GUI
 video remains and the error points to `captions.log`.
 

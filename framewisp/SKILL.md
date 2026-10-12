@@ -380,6 +380,21 @@ Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 
+Use `run --record FILE --compact` or `record-start --compact FILE` to trim gaps
+between commands during finalization. `--compact-before SECONDS` and
+`--compact-after SECONDS` require `--compact` and accept finite nonnegative
+values (defaults 1 and 2). Each input keeps its full duration plus that padding;
+overlapping sections merge. The opening before-padding and closing after-padding
+also remain, with at least the first and last frames even at zero padding.
+Batch checks and capture delays remain in full, including failed/cancelled steps.
+External sleeps can be cut. Delayed app responses, animations, and output in
+removed gaps can be omitted; increase padding, use a batch wait, or leave
+compaction off when those matter. Captions and console output stay aligned with
+retained GUI frames; console timestamps keep original clip time. Compaction is
+per clip, works with `--no-captions` and `--console`, and leaves logs unchanged.
+Timestamp-only check/capture spans live in `SESSION/activity.jsonl` without
+conditions or error text. The summary reports the compacted video's duration.
+
 Use `run --record FILE --console` or `record-start --console FILE` to append a
 640-pixel-wide scrolling panel of the launched app's combined stdout/stderr.
 The GUI and screenshots keep their original dimensions. Panel lines show seconds
