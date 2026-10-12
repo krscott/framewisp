@@ -125,7 +125,15 @@ def retained_frames(
 
 
 def compact_filter(ranges: list[tuple[int, int]]) -> str:
-    selected = "+".join(f"between(n,{first},{last - 1})" for first, last in ranges)
+    assert ranges
+    terms = [f"between(n,{first},{last - 1})" for first, last in ranges]
+    # FFmpeg limits expression recursion. Balance the sum so many disjoint cuts
+    # add logarithmic depth instead of one level per retained range.
+    while len(terms) > 1:
+        terms = [
+            f"({'+'.join(terms[index:index + 2])})" for index in range(0, len(terms), 2)
+        ]
+    selected = terms[0]
     return f"fps=30,select='{selected}',setpts=N/(30*TB)"
 
 

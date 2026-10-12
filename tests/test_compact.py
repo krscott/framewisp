@@ -9,6 +9,7 @@ from framewisp.captions import render_recording
 from framewisp.compact import (
     CompactSettings,
     activity_events,
+    compact_filter,
     log_activity,
     retained_frames,
 )
@@ -290,3 +291,36 @@ def test_zero_padding_keeps_encoded_end_despite_stop_latency(
     assert sum(frame(raw_video, 0, "320:140:0:100")) == 0
     final = frame(raw_video, 0.025, "320:140:0:100")
     assert sum(final[::3]) / len(final[::3]) > 240
+
+
+@pytest.mark.parametrize("range_count", [135, 1000])
+def test_many_disjoint_cuts_render(
+    tmp_path: Path,
+    raw_video: Path,
+    range_count: int,
+) -> None:
+    filters = tmp_path / "cuts.txt"
+    filters.write_text(
+        compact_filter([(2 * index, 2 * index + 1) for index in range(range_count)])
+    )
+    decoded = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(raw_video),
+            "-/filter:v",
+            str(filters),
+            "-f",
+            "framemd5",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=15,
+    ).stdout
+    frames = [line for line in decoded.splitlines() if not line.startswith("#")]
+    assert len(frames) == 135
+    assert [int(line.split(",")[2]) for line in frames] == list(range(135))
