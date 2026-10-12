@@ -111,7 +111,11 @@ arguments; normal CLI help lists it. A test runs this path without site packages
 or external commands. The Nix package check compares its output in an empty
 environment against the source file. The skill covers the public Nix URL fallback,
 all commands and options, GUI workflows, user-started attachment, and permission
-before filing issues.
+before filing issues. For repeated interactions, it describes optional delegation
+to a fast subagent or a host-provided classifier workflow. The main agent chooses
+the model and whether to use accessibility output, screenshots, or both. Session
+handoffs use absolute paths and one controlling agent at a time. Delegates return
+verification evidence or blockers; orchestration remains outside Framewisp.
 
 1. Create or reuse the requested session directory. Reject directories not owned
    by the caller or writable by group/others. Acquire a nonblocking exclusive
