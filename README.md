@@ -396,13 +396,13 @@ Headless `move`, `click`, `scroll`, and movement to a drag's start use a straigh
 path with gentle acceleration and deceleration over 0.3 seconds by default,
 whether recording is active or not. `--move-duration SECONDS` changes that time;
 `0` moves immediately. Values must be finite, nonnegative, and at most 300 seconds.
-The runner reads the real cursor position from the private compositor before
-each animated approach. A pointer already at the target adds no movement delay.
-The packaged Sway includes a local IPC patch that reports its live seat cursor
-coordinates, including during recording and while the cursor image is hidden.
-An out-of-range starting position uses immediate movement. Cursor-query failures
-report an error before sending the gesture; use `--move-duration 0` to bypass
-the query.
+The runner tracks the last pointer position it sent across commands and batches,
+including drag steps and cancelled movement. The first pointer action positions
+immediately because its starting position is unknown. An unchanged tracked
+position adds no movement delay. Movement by apps or other clients does not
+update this tracking, so the next animation may jump to the tracked position
+before continuing to its target. Tracking works during recording without a
+compositor patch or cursor query.
 Attached desktops retain immediate positioning and reject `--move-duration`.
 
 ```sh
@@ -918,8 +918,8 @@ The bundled GTK demo is the tested X11 target. GPU/game support, desktop service
 and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
 launching has not been verified. The first X11 pointer command primes the virtual
 pointer with a one-pixel motion and a 100 ms pause to avoid losing its first
-motion. Animated approaches prime beside the real starting position; immediate
-approaches prime beside the destination. Later commands reuse that pointer.
+motion. The worker primes beside its tracked position, or beside the destination
+when the position is unknown. Later commands reuse that pointer.
 
 ## Unicode text
 

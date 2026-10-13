@@ -21,7 +21,7 @@ from framewisp.compact import log_activity
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
-from framewisp.pointer import approach, cursor_position
+from framewisp.pointer import approach
 from framewisp.x11 import (
     MAX_UNICODE_CHARACTERS,
     UNICODE_CAPACITY_ERROR,
@@ -55,6 +55,7 @@ class InputWorker:
         self.stop = stop
         self.x11 = x11
         self.pointer_primed = False
+        self.pointer_position: tuple[int, int] | None = None
         self.capture = capture
         self.retain_input_content = retain_input_content
         self.failure: str | None = None
@@ -286,6 +287,7 @@ class InputWorker:
         def move(x: int, y: int) -> None:
             wait()
             self.client.mouseMove(x, y)
+            self.pointer_position = (x, y)
 
         p = action.parameters
         wait()
@@ -296,20 +298,11 @@ class InputWorker:
             retain_input_content=self.retain_input_content,
         ) as logged:
             try:
-                start = None
-                if (
-                    action.action in {"move", "click", "scroll", "drag"}
-                    and p["move_duration"]
-                ):
-                    state = json.loads((self.session / "session.json").read_text())
-                    start = cursor_position(
-                        Path(state["runtime_directory"]),
-                        lambda: self.cancelled(connection),
-                    )
                 modifiers = cast(list[str], p.get("modifier", []))
                 for modifier in modifiers:
                     key(modifier, True)
                 if action.action in {"move", "click", "scroll", "drag"}:
+                    start = self.pointer_position
                     x = cast(int, p["x1" if action.action == "drag" else "x"])
                     y = cast(int, p["y1" if action.action == "drag" else "y"])
                     if self.x11 and not self.pointer_primed:

@@ -242,8 +242,8 @@ error before changing the keymap or sending input. A new session starts with an
 empty allocation. The input worker serializes concurrent typing requests; arbitrary custom X11 keymaps are unsupported.
 
 Before the first X11 pointer command, the worker primes Xwayland with a one-pixel
-motion and a 100 ms pause. Animated movement primes beside the real starting
-position, then restores it; immediate movement primes beside the destination.
+motion and a 100 ms pause beside the tracked position if known, then restores
+it. With no tracked position, it primes beside the destination.
 Xwayland drops the first pointer motion in the tested setup; without this step,
 an initial drag can disappear. Later commands reuse the initialized pointer.
 The requested drag timing starts after its press.
@@ -320,30 +320,22 @@ Headless pointer approaches for `move`, `click`, `scroll`, and drag starts accep
 batch, and direct-request defaults. Validation requires finite, nonnegative
 values no greater than 300 seconds. Batch JSON uses `move_duration`; all requested
 approach durations count toward the shared 300-second pacing budget.
-Zero bypasses querying and moves immediately. Attached desktops keep immediate
+Zero moves immediately. Attached desktops keep immediate
 positioning and reject the option.
 
-`patches/sway-cursor-position.patch` adds `cursor: {x, y}` to each seat's
-GET_SEATS IPC response. It reads `seat->cursor->cursor` directly. The Nix overlay
-supplies this patched Sway to both the development shell and installed package.
-These are live layout coordinates, which equal display pixels on Framewisp's
-sole unscaled output at the origin. They remain available during recording and
-when the cursor image is hidden. Capture-protocol cursor metadata is unsuitable
-for this query because software cursor rendering can leave it stale.
+`InputWorker.pointer_position` starts as `None` and records `(x, y)` after each
+successful VNC `mouseMove`. All pointer approaches, X11 priming, and held drag
+steps use the same move callback. This keeps tracking current during cancelled
+movement as well as completed gestures. The persistent worker shares the
+position across standalone commands and batches. An unknown starting position
+moves immediately; identical tracked start/end positions add no delay. Even in
+these cases, sending the target ensures VNC button events use its coordinates.
+Apps or other clients can move the compositor cursor independently, leaving
+tracking stale; the next animation may jump to the tracked position. This is an
+accepted tradeoff to avoid compositor patches and cursor queries. Recording
+does not affect tracking.
 
-`sway.py` sends bounded IPC requests to the sole `sway-ipc.*.sock` in the private
-runtime directory. It never reads the caller's SWAYSOCK, caps replies at 1 MiB,
-and checks cancellation and deadlines between reads with 20 ms socket timeouts.
-Accessibility display-bound queries share this reader with their 250 ms budget.
-`pointer.py` gives GET_SEATS one second and requires exactly the private seat0.
-It validates finite numeric coordinates and rounds them to screenshot pixels.
-Query failures become actionable errors before modifier or button presses. If
-the starting position cannot fit VNC's unsigned coordinates, positioning is
-immediate rather than guessing a start. No helper process or image capture is
-required.
-Each animated approach queries fresh state, so independent compositor movement
-cannot leave stale coordinates. Identical start/end positions add no delay.
-The path uses smoothstep easing and integer coordinates at approximately 60 Hz;
+`pointer.py` uses smoothstep easing and integer coordinates at approximately 60 Hz;
 monotonic elapsed time includes transport overhead. Cancellation interrupts the
 waits, and the final point is exact. Drag movement while holding a button retains
 its separately configured constant-speed timing.

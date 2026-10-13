@@ -1,52 +1,9 @@
-"""Read the private compositor's cursor and pace pointer approaches."""
+"""Pace pointer approaches from the worker's last sent position."""
 
-import math
 import time
 from collections.abc import Callable
-from pathlib import Path
-from typing import cast
-
-from framewisp.errors import SessionError
-from framewisp.sway import request
 
 DEFAULT_MOVE_DURATION = 0.3
-
-
-def cursor_position(
-    runtime: Path, cancelled: Callable[[], bool]
-) -> tuple[int, int] | None:
-    try:
-        seats = request(
-            runtime, 101, deadline=time.monotonic() + 1, cancelled=cancelled
-        )
-        if not isinstance(seats, list) or len(cast(list[object], seats)) != 1:
-            raise ValueError("Expected exactly one private compositor seat")
-        seat = cast(list[object], seats)[0]
-        if (
-            not isinstance(seat, dict)
-            or cast(dict[str, object], seat).get("name") != "seat0"
-        ):
-            raise ValueError("Expected the private seat0")
-        cursor = cast(dict[str, object], seat).get("cursor")
-        if not isinstance(cursor, dict):
-            raise ValueError("Sway is missing Framewisp's cursor-position IPC patch")
-        coordinates = [cast(dict[str, object], cursor).get(key) for key in ("x", "y")]
-        if any(
-            type(value) not in {int, float}
-            or (isinstance(value, float) and not math.isfinite(value))
-            for value in coordinates
-        ):
-            raise ValueError("Invalid Sway cursor coordinates")
-        x, y = cast(list[float], coordinates)
-    except InterruptedError:
-        raise
-    except (OSError, ValueError, RecursionError) as error:
-        raise SessionError(
-            f"Cannot read private cursor position: {error}. "
-            "Use Framewisp's Nix package/development shell, or --move-duration 0."
-        ) from None
-    # VNC accepts only unsigned 16-bit coordinates; do not invent a starting point.
-    return (round(x), round(y)) if 0 <= x <= 65535 and 0 <= y <= 65535 else None
 
 
 def approach(

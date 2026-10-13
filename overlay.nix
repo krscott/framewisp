@@ -1,10 +1,4 @@
 final: prev: {
-  sway-unwrapped = prev.sway-unwrapped.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [
-      ./patches/sway-cursor-position.patch
-    ];
-  });
-
   wayvnc = prev.wayvnc.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./patches/wayvnc-disable-clipboard.patch
@@ -13,9 +7,7 @@ final: prev: {
 
   python3 = prev.python3.override {
     packageOverrides = _: _: {
-      framewisp = prev.python3.pkgs.callPackage ./default.nix {
-        inherit (final) wayvnc sway-unwrapped;
-      };
+      framewisp = prev.python3.pkgs.callPackage ./default.nix { inherit (final) wayvnc; };
     };
   };
 
