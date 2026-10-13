@@ -47,6 +47,7 @@ class InputWorker:
         stop: Event,
         *,
         x11: bool,
+        size: tuple[int, int],
         capture: Callable[[Path, Callable[[], bool]], int],
         retain_input_content: bool = False,
     ):
@@ -54,6 +55,7 @@ class InputWorker:
         self.client = client
         self.stop = stop
         self.x11 = x11
+        self.size = size
         self.pointer_primed = False
         self.pointer_position: tuple[int, int] | None = None
         self.capture = capture
@@ -284,8 +286,12 @@ class InputWorker:
                 self.client.mouseUp(number)
                 buttons.remove(number)
 
+        def bounded(x: int, y: int) -> tuple[int, int]:
+            return min(x, self.size[0] - 1), min(y, self.size[1] - 1)
+
         def move(x: int, y: int) -> None:
             wait()
+            x, y = bounded(x, y)
             self.client.mouseMove(x, y)
             self.pointer_position = (x, y)
 
@@ -303,8 +309,10 @@ class InputWorker:
                     key(modifier, True)
                 if action.action in {"move", "click", "scroll", "drag"}:
                     start = self.pointer_position
-                    x = cast(int, p["x1" if action.action == "drag" else "x"])
-                    y = cast(int, p["y1" if action.action == "drag" else "y"])
+                    x, y = bounded(
+                        cast(int, p["x1" if action.action == "drag" else "x"]),
+                        cast(int, p["y1" if action.action == "drag" else "y"]),
+                    )
                     if self.x11 and not self.pointer_primed:
                         # Xwayland can discard the first virtual-pointer motion.
                         px, py = start if start is not None else (x, y)
@@ -328,24 +336,16 @@ class InputWorker:
                         button(number, False)
                 elif action.action == "drag":
                     number = CLICK_BUTTONS[cast(str, p["button"])]
+                    x1, y1 = bounded(cast(int, p["x1"]), cast(int, p["y1"]))
+                    x2, y2 = bounded(cast(int, p["x2"]), cast(int, p["y2"]))
                     duration = cast(float, p["duration"])
                     steps = max(1, math.ceil(duration * 60))
                     button(number, True)
                     for step in range(1, steps + 1):
                         wait(duration / steps)
                         move(
-                            round(
-                                cast(int, p["x1"])
-                                + (cast(int, p["x2"]) - cast(int, p["x1"]))
-                                * step
-                                / steps
-                            ),
-                            round(
-                                cast(int, p["y1"])
-                                + (cast(int, p["y2"]) - cast(int, p["y1"]))
-                                * step
-                                / steps
-                            ),
+                            round(x1 + (x2 - x1) * step / steps),
+                            round(y1 + (y2 - y1) * step / steps),
                         )
                     button(number, False)
                 elif action.action == "scroll":

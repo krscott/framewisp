@@ -889,6 +889,7 @@ def _run_session(
                 input_client,
                 stop,
                 x11=x11,
+                size=size,
                 retain_input_content=retain_input_content,
                 capture=lambda path, cancelled: batch_screenshot(
                     session, path, cancelled

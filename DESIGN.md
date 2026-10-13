@@ -320,13 +320,15 @@ Headless pointer approaches for `move`, `click`, `scroll`, and drag starts accep
 batch, and direct-request defaults. Validation requires finite, nonnegative
 values no greater than 300 seconds. Batch JSON uses `move_duration`; all requested
 approach durations count toward the shared 300-second pacing budget.
-Zero moves immediately. Attached desktops keep immediate
-positioning and reject the option.
+Zero moves immediately. Attached desktops keep immediate positioning and reject
+the option.
 
 `InputWorker.pointer_position` starts as `None` and records `(x, y)` after each
 successful VNC `mouseMove`. All pointer approaches, X11 priming, and held drag
-steps use the same move callback. This keeps tracking current during cancelled
-movement as well as completed gestures. The persistent worker shares the
+steps use the same move callback. Targets and sent positions clamp to the
+display's pixel bounds so out-of-display commands do not leave tracking stale.
+This keeps tracking current during cancelled movement as well as completed
+gestures. The persistent worker shares the
 position across standalone commands and batches. An unknown starting position
 moves immediately; identical tracked start/end positions add no delay. Even in
 these cases, sending the target ensures VNC button events use its coordinates.

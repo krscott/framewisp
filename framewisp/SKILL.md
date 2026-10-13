@@ -110,6 +110,7 @@ including when recording is off. The worker tracks every move across commands
 and batches, including drag steps and cancelled movement. The first pointer
 action positions immediately because its start is unknown. Use `0` for
 immediate positioning. An unchanged tracked position adds no movement delay.
+Coordinates beyond the display clamp to its edge.
 Apps or other clients can move the cursor without updating this tracking; the
 next animation may jump to the tracked position. No compositor patch or cursor
 query is required. Drag's `--duration` controls the separate button-held movement.

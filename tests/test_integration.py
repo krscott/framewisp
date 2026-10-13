@@ -985,6 +985,59 @@ def test_first_pointer_action_has_no_animation_delay(demo: Demo, action: str) ->
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("action", ["move", "drag"])
+def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "500", "150", "--move-duration", "0")
+    if action == "drag":
+        cli(
+            demo.directory,
+            "drag",
+            "500",
+            "150",
+            "65535",
+            "150",
+            "--move-duration",
+            "0",
+            "--duration",
+            "0",
+        )
+    else:
+        cli(demo.directory, "move", "65535", "150", "--move-duration", "0")
+    width = json.loads((demo.directory / "session.json").read_text())["width"]
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == width - 1
+            for event in input_events(demo)
+        )
+    )
+    if action == "drag":
+        wait_until(
+            lambda: any(event["event"] == "release" for event in input_events(demo))
+        )
+    before = len(input_events(demo))
+    cli(demo.directory, "move", "500", "150", "--move-duration", "1")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500
+            for event in input_events(demo)[before:]
+        )
+    )
+    motion = [
+        event for event in input_events(demo)[before:] if event["event"] == "motion"
+    ]
+    intermediate = [event for event in motion if 500 < float(event["x"]) < width - 1]
+    assert len(intermediate) >= 3
+    # The cursor must move inward throughout the animation, not only at its end.
+    assert float(motion[-1]["time"]) - float(intermediate[0]["time"]) >= 0.5
+    for event in motion:
+        assert 500 <= float(event["x"]) <= width - 1
+        assert event["y"] == 150
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)

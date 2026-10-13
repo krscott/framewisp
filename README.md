@@ -399,8 +399,9 @@ whether recording is active or not. `--move-duration SECONDS` changes that time;
 The runner tracks the last pointer position it sent across commands and batches,
 including drag steps and cancelled movement. The first pointer action positions
 immediately because its starting position is unknown. An unchanged tracked
-position adds no movement delay. Movement by apps or other clients does not
-update this tracking, so the next animation may jump to the tracked position
+position adds no movement delay. Coordinates beyond the display clamp to its
+edge. Movement by apps or other clients does not update this tracking, so the
+next animation may jump to the tracked position
 before continuing to its target. Tracking works during recording without a
 compositor patch or cursor query.
 Attached desktops retain immediate positioning and reject `--move-duration`.
