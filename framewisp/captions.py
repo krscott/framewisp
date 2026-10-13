@@ -16,8 +16,15 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Event
-from typing import BinaryIO, Literal, TypedDict, cast
+from typing import BinaryIO, Literal, cast
 
+from framewisp.compact import (
+    ActivityEvent,
+    CompactSettings,
+    compact_filter,
+    recording_duration,
+    retained_frames,
+)
 from framewisp.console import PANEL_WIDTH, ConsoleCapture, console_frames
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
@@ -134,10 +141,7 @@ def recorder_output(log: Path) -> Generator[BinaryIO, None, None]:
                     ) from None
 
 
-class InputEvent(TypedDict):
-    id: str
-    event: str
-    time: float
+class InputEvent(ActivityEvent):
     action: str
     parameters: dict[str, object]
     returncode: int | None
@@ -319,12 +323,13 @@ def render_recording(
     log: Path,
     captions: bool = True,
     console: ConsoleCapture | None = None,
+    compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
 ) -> None:
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped) if captions else []
     )
-    if not entries and console is None:
+    if not entries and console is None and compact is None:
         return
     with tempfile.TemporaryDirectory(
         prefix=".framewisp-captions-", dir=destination.parent
@@ -361,6 +366,20 @@ def render_recording(
         if console is not None:
             filters.append(f"pad=iw+{PANEL_WIDTH}:ih:0:0:color=0x161b22")
         filters.extend(["ass=captions.ass", "scale=out_range=full"])
+        if compact is not None:
+            filters.append(
+                compact_filter(
+                    retained_frames(
+                        (input_log, input_log.parent / "activity.jsonl"),
+                        origin=origin,
+                        stopped=stopped,
+                        duration=recording_duration(destination),
+                        settings=compact,
+                    )
+                )
+            )
+        # A long recording can have more cut ranges than fit in an exec argument.
+        (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
         with log.open("w") as output:
             result = subprocess.run(
                 [
@@ -370,8 +389,8 @@ def render_recording(
                     "warning",
                     "-i",
                     str(destination),
-                    "-vf",
-                    ",".join(filters),
+                    "-/filter:v",
+                    "filters.txt",
                     "-c:v",
                     "libx264",
                     "-preset",

@@ -57,6 +57,34 @@ There is no separate controller daemon or framebuffer cache.
 The runner accepts input, recording, status, and stop commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
 
+`compact.py` defines per-clip `CompactSettings` and command-based cut planning
+for `run --record --compact` and `record-start --compact`. The CLI and runner
+validate finite nonnegative before/after padding (defaults 1 and 2 seconds).
+The `compact_recording` metadata capability prevents newer clients from silently
+requesting compaction from an older runner. Input start/end records in
+`inputs.jsonl` supply full input spans; `inputs.py` also writes timestamp-only
+start/end records for batch checks and capture delays to `activity.jsonl`,
+without conditions or error text. Both logs reset at session startup, and their
+paths are reserved against recording/capture destinations. A missing end record
+keeps its span through clip stop; commands crossing either clip boundary are
+clipped to the recording. Only complete JSONL lines enter cut planning so an
+in-progress append cannot discard the earlier start.
+
+Cut planning adds before/after padding to activity spans, keeps the opening
+before-padding and closing after-padding, rounds ranges outward to 30 fps frames,
+and merges touching or overlapping ranges. The first and last frames remain
+even with zero padding. Compaction requires the recorder's first-frame monotonic
+timestamp even with captions and console disabled. Finalization renders overlays
+on the original timeline. ffprobe supplies the encoded duration for closing cuts
+and endpoint frames, independent of stop/encoder latency. The renderer
+normalizes to 30 fps, selects retained frames, then
+assigns contiguous 30 fps timestamps. A filter script file avoids exec argument
+limits for many cut ranges. Rendering uses one FFmpeg pass and replaces the raw
+MP4 only on success. The ordinary recording summary measures the final video.
+Console timestamps retain original clip time; original logs are never rewritten.
+No visual inactivity detector runs, and uncommanded app activity in gaps can be
+omitted. Explicit batch waits remain in full; external sleeps can be cut.
+
 ## Startup
 
 The Nix package adds `-I` to the `framewisp` and `framewisp-demo` entry-point
