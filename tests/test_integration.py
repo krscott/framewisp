@@ -1660,12 +1660,29 @@ def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-def test_unchanged_pointer_position_adds_no_animation_delay(demo: Demo) -> None:
+@pytest.mark.parametrize("action", ["click", "drag"])
+def test_unchanged_pointer_position_adds_no_animation_delay(
+    demo: Demo, action: str
+) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    response = sway_request(demo.runtime, 0, b"seat seat0 cursor set 500 300")
+    assert response[0]["success"]
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500
+            for event in input_events(demo)
+        )
+    )
+    arguments = ["500", "300", "--move-duration", "3"]
+    if action == "drag":
+        arguments += ["550", "325", "--duration", "0"]
     started = time.monotonic()
-    cli(demo.directory, "click", "100", "100", "--move-duration", "3")
+    cli(demo.directory, action, *arguments)
     assert time.monotonic() - started < 2
+    wait_until(lambda: any(event["event"] == "press" for event in input_events(demo)))
+    press = next(event for event in input_events(demo) if event["event"] == "press")
+    assert (press["x"], press["y"]) == (500, 300)
 
 
 @pytest.mark.integration

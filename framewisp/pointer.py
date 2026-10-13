@@ -71,9 +71,9 @@ def approach(
     move: Callable[[int, int], None],
     wait: Callable[[float], None],
 ) -> None:
-    if start == end:
-        return
-    if start is None or duration == 0:
+    if start == end or start is None or duration == 0:
+        # VNC button events reuse the client's last sent coordinates, which can
+        # differ from the compositor after an independent cursor movement.
         move(*end)
         return
     started = time.monotonic()
