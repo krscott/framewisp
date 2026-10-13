@@ -104,6 +104,8 @@ nix run github:krscott/framewisp -- --agent-skill
 
 This prints the bundled [skill body](framewisp/SKILL.md) as plain Markdown and
 exits. It needs no session or display and does not start an app.
+The skill also covers [delegating repeated GUI interactions](framewisp/SKILL.md#delegate-repeated-interactions),
+with model choice and observation method left to the main agent.
 
 ## Try it
 

@@ -16,6 +16,38 @@ The package includes `framewisp-demo`; other target apps must be installed separ
 
 Requires running outside of agent sandbox.
 
+## Delegate repeated interactions
+
+When a task needs repeated observation and input, consider giving the whole GUI
+task to a small, fast subagent. The main agent decides whether delegation is
+worthwhile, which available model can handle the task, and whether it should read
+accessibility output, screenshots, or both. Some apps expose useful text and
+state through `inspect --json`; others need a model that can interpret images.
+Keep short tasks with the main agent when delegation would add overhead.
+
+Give the subagent this guide, the objective and expected result, the absolute
+session path printed at startup, and an artifact directory. Define when it should
+stop and report a blocker, including a time or attempt limit. Delegate a sequence
+of interactions rather than spawning a subagent per command. Only one agent
+should control a session at a time; keep its foreground runner alive through the
+handoff and agree who will stop it.
+
+The subagent should batch known actions, verify accessible outcomes with bounded
+checks, and inspect screenshots for visual outcomes. It should return the observed
+result and relevant check output or artifact paths. If it cannot verify the result
+or encounters a state outside its instructions, it should report the blocker and
+last observation to the main agent. The main agent decides what needs further
+review.
+
+If the host supports workflows, a classifier model can choose among predefined
+app states and their corresponding action batches using accessibility output or
+screenshots, according to its capabilities. Include an unknown outcome for
+unrecognized states or incomplete observations and return control to the main
+agent. Choose this approach when the states and actions are known in advance.
+Subagents, model selection, and classifier workflows are host capabilities;
+Framewisp supplies the session commands. Delegation is an option, not a measured
+speed guarantee.
+
 ## Command reference
 
 Use `framewisp SESSION COMMAND ...`, where SESSION is normally a bare name such
