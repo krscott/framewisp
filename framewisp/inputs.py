@@ -20,6 +20,7 @@ from framewisp.checks import Check, perform_check
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
+from framewisp.pointer import approach, cursor_position
 from framewisp.x11 import (
     MAX_UNICODE_CHARACTERS,
     UNICODE_CAPACITY_ERROR,
@@ -52,6 +53,7 @@ class InputWorker:
         self.client = client
         self.stop = stop
         self.x11 = x11
+        self.pointer_primed = False
         self.capture = capture
         self.retain_input_content = retain_input_content
         self.failure: str | None = None
@@ -287,17 +289,36 @@ class InputWorker:
             retain_input_content=self.retain_input_content,
         ) as logged:
             try:
+                start = None
+                if (
+                    action.action in {"move", "click", "scroll", "drag"}
+                    and p["move_duration"]
+                ):
+                    state = json.loads((self.session / "session.json").read_text())
+                    start = cursor_position(
+                        Path(state["runtime_directory"]) / state["wayland_display"],
+                        lambda: self.cancelled(connection),
+                    )
                 modifiers = cast(list[str], p.get("modifier", []))
                 for modifier in modifiers:
                     key(modifier, True)
                 if action.action in {"move", "click", "scroll", "drag"}:
                     x = cast(int, p["x1" if action.action == "drag" else "x"])
                     y = cast(int, p["y1" if action.action == "drag" else "y"])
-                    if self.x11:
+                    if self.x11 and not self.pointer_primed:
                         # Xwayland can discard the first virtual-pointer motion.
-                        move(x - 1 if x else 1, y)
+                        px, py = start if start is not None else (x, y)
+                        move(px - 1 if px else 1, py)
                         wait(0.1)
-                    move(x, y)
+                        move(px, py)
+                        self.pointer_primed = True
+                    approach(
+                        start,
+                        (x, y),
+                        cast(float, p["move_duration"]),
+                        move=move,
+                        wait=wait,
+                    )
                 if action.action == "click":
                     number = CLICK_BUTTONS[cast(str, p["button"])]
                     for index in range(cast(int, p["count"])):

@@ -4,6 +4,7 @@
   lib,
   pytestCheckHook,
   setuptools,
+  callPackage,
   vncdotool,
   pygobject3,
   pygobject-stubs,
@@ -33,6 +34,7 @@
   noto-fonts-monochrome-emoji,
 }:
 let
+  cursorPosition = callPackage ./cursor-position.nix { };
   captionFonts = makeFontsConf {
     fontDirectories = [
       dejavu_fonts
@@ -85,6 +87,7 @@ buildPythonPackage {
       --set FRAMEWISP_FONTCONFIG_FILE "${captionFonts}"
       --set FRAMEWISP_PROFILE_FONTCONFIG_FILE "${profileFonts}"
       --set FRAMEWISP_ATSPI_REGISTRY "${at-spi2-core}/libexec/at-spi2-registryd"
+      --set FRAMEWISP_CURSOR_POSITION "${cursorPosition}/bin/framewisp-cursor-position"
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${capturePlugins}"
       --prefix PATH : "$out/bin:${
         lib.makeBinPath [
@@ -122,7 +125,12 @@ buildPythonPackage {
   '';
 
   passthru = {
-    inherit captionFonts profileFonts capturePlugins;
+    inherit
+      captionFonts
+      profileFonts
+      capturePlugins
+      cursorPosition
+      ;
     atspiRegistry = "${at-spi2-core}/libexec/at-spi2-registryd";
   };
 

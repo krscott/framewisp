@@ -763,6 +763,60 @@ def test_drag_delivers_paced_motion_and_release(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
+@pytest.mark.parametrize("duration", [None, 0, 0.6])
+def test_pointer_approach_uses_current_compositor_position(
+    demo: Demo, action: str, duration: float | None
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    # Move independently of Framewisp's last command to expose stale tracking.
+    response = sway_request(demo.runtime, 0, b"seat seat0 cursor set 200 150")
+    assert response[0]["success"]
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 200
+            for event in input_events(demo)
+        )
+    )
+    before = len(input_events(demo))
+    options = [] if duration is None else ["--move-duration", str(duration)]
+    arguments = ["500", "300"]
+    if action == "scroll":
+        arguments += ["down"]
+    elif action == "drag":
+        arguments += ["550", "325", "--duration", "0"]
+    started = time.monotonic()
+    cli(demo.directory, action, *arguments, *options)
+    elapsed = time.monotonic() - started
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500
+            for event in input_events(demo)[before:]
+        )
+    )
+    events = input_events(demo)[before:]
+    intermediate = [
+        event
+        for event in events
+        if event["event"] == "motion" and 200 < float(event["x"]) < 500
+    ]
+    expected = 0.3 if duration is None else duration
+    assert elapsed >= expected * 0.9
+    if expected:
+        assert len(intermediate) >= 3
+        for event in intermediate:
+            assert not event["pressed"]
+            assert abs(float(event["y"]) - (150 + (float(event["x"]) - 200) / 2)) <= 1
+    else:
+        assert not intermediate
+    if action in {"click", "drag"}:
+        press = next(event for event in events if event["event"] == "press")
+        assert (press["x"], press["y"]) == (500, 300)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("interval", [None, 0, 5.5])
 @pytest.mark.parametrize("text", ["Ab c", "é中🙂a"])
 def test_typing_paces_received_characters(
@@ -1570,6 +1624,48 @@ def input_request(
         ).encode()
     )
     return connection
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    before = len(input_events(demo))
+    with input_request(
+        demo,
+        "click",
+        {
+            "x": 500,
+            "y": 300,
+            "button": "left",
+            "count": 1,
+            "modifier": ["shift"],
+            "move_duration": 30,
+        },
+    ):
+        wait_until(
+            lambda: any(
+                event["event"] == "motion" and float(event["x"]) > 100
+                for event in input_events(demo)[before:]
+            )
+        )
+        cli(demo.directory, "status")
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    events = input_events(demo)[before:]
+    assert not any(event["event"] == "press" for event in events)
+    motions = [event for event in events if event["event"] == "motion"]
+    assert motions[-1]["x"] == 100 and not motions[-1]["shift"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_unchanged_pointer_position_adds_no_animation_delay(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    started = time.monotonic()
+    cli(demo.directory, "click", "100", "100", "--move-duration", "3")
+    assert time.monotonic() - started < 2
 
 
 @pytest.mark.integration

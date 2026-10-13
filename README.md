@@ -219,10 +219,10 @@ session-independent.
 | `recover` | Recover an abandoned headless session after its owner and supervisors exit, preserving logs. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Headless sessions support crops and JSON origin, dimensions, display size, path, and capture time. Default delay: 0. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
-| `move X Y` | Move the pointer immediately without pressing any button. |
-| `scroll X Y DIRECTION [--steps N]` | Send wheel steps to the pane at these coordinates; directions: up, down, left, right. |
-| `click [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
-| `drag [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
+| `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
+| `scroll [--move-duration SECONDS] X Y DIRECTION [--steps N]` | Move to the pane, then send wheel steps; directions: up, down, left, right. |
+| `click [--move-duration SECONDS] [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
+| `drag [--move-duration SECONDS] [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Move to the start, then hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
 | `type [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
 | `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
@@ -388,7 +388,29 @@ framewisp paint screenshot --delay 1 /tmp/tooltip.png
 ```
 
 `move` sends no button presses. Coordinates start at the display's top left.
-Movement is immediate; the app decides what hover feedback to show and when.
+The app decides what hover feedback to show and when.
+
+Headless `move`, `click`, `scroll`, and movement to a drag's start use a straight
+path with gentle acceleration and deceleration over 0.3 seconds by default,
+whether recording is active or not. `--move-duration SECONDS` changes that time;
+`0` moves immediately. Values must be finite, nonnegative, and at most 300 seconds.
+The runner reads the real cursor position from the private compositor before
+each animated approach. A pointer already at the target adds no movement delay.
+If the compositor cannot report the position, for example because the cursor is
+hidden, movement is immediate. Cursor-query failures report an error before
+sending the gesture; use `--move-duration 0` to bypass the query.
+Attached desktops retain immediate positioning and reject `--move-duration`.
+
+```sh
+framewisp paint click 500 400 --move-duration 0.6
+framewisp paint move 510 50 --move-duration 0
+framewisp paint drag 100 100 500 300 --move-duration 0.3 --duration 1
+```
+
+For drags, `--move-duration` controls the approach to the start and `--duration`
+controls movement while holding the button. Double-click spacing and wheel ticks
+keep their existing timing. Batch actions use `move_duration` with the same
+default; it counts toward the batch's 300-second pacing limit.
 
 ## Right-click and double-click
 
@@ -828,10 +850,10 @@ use zero for immediate input. Input timeouts allow for the requested duration.
 These defaults provide a readable pace, not a simulation of human behavior.
 Scheduling and app rendering can affect the observed timing.
 
-A drag still moves immediately to its starting point, and clicks still move
-immediately to their destination. Smooth movement before clicks, random timing,
-and curved paths are deferred. `screenshot --delay` remains a separate wait
-before capture; it does not change input timing.
+Headless clicks and movement to a drag's starting point take 0.3 seconds by
+default. Use `--move-duration` to change that time, including zero for immediate
+positioning. Paths are straight and timing has no random variation.
+`screenshot --delay` remains a separate wait before capture.
 
 ## Headless X11 apps
 
@@ -859,9 +881,10 @@ it down when the session ends.
 
 The bundled GTK demo is the tested X11 target. GPU/game support, desktop services,
 and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
-launching has not been verified. X11 pointer commands prime the virtual pointer
-one pixel beside the target before moving to it; this adds 100 ms before the
-requested action to avoid losing its first motion.
+launching has not been verified. The first X11 pointer command primes the virtual
+pointer with a one-pixel motion and a 100 ms pause to avoid losing its first
+motion. Animated approaches prime beside the real starting position; immediate
+approaches prime beside the destination. Later commands reuse that pointer.
 
 ## Unicode text
 
