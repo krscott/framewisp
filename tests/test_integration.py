@@ -769,7 +769,14 @@ def test_pointer_approach_uses_current_compositor_position(
     demo: Demo, action: str, duration: float | None
 ) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
     # Move independently of Framewisp's last command to expose stale tracking.
     response = sway_request(demo.runtime, 0, b"seat seat0 cursor set 200 150")
     assert response[0]["success"]
@@ -1636,7 +1643,14 @@ def input_request(
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
     before = len(input_events(demo))
     with input_request(
         demo,
@@ -1677,7 +1691,14 @@ def test_unchanged_pointer_position_adds_no_animation_delay(
     demo: Demo, action: str
 ) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
     response = sway_request(demo.runtime, 0, b"seat seat0 cursor set 500 300")
     assert response[0]["success"]
     wait_until(
@@ -3106,6 +3127,21 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
         inspect(demo, "--name", "Absent control", "--max-nodes", "1024")["status"]
         == "ok"
     )
+
+
+def wait_for_input_probe_window(demo: Demo) -> None:
+    # GTK's map signal can precede Sway mapping the Xwayland window.
+    def mapped() -> bool:
+        nodes = [sway_request(demo.runtime, 4)]
+        while nodes:
+            node = nodes.pop()
+            if node.get("name") == "Input probe":
+                return True
+            nodes.extend(node.get("nodes", []))
+            nodes.extend(node.get("floating_nodes", []))
+        return False
+
+    wait_until(mapped)
 
 
 def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
