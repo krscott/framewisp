@@ -74,9 +74,9 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
-| `move X Y` | Move immediately without pressing a button; useful for hover tooltips. |
+| `move X Y [--move-duration SECONDS]` | Move without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
-| `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move immediately to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration: 0.4 seconds. |
+| `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration while holding the button: 0.4 seconds. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
@@ -102,6 +102,20 @@ image coordinates before sending input: local `(20, 30)` in this crop means
 Inspect the screenshot to choose targets. Keyboard input goes to the focused
 control; click it first when needed. Commands release their keys and buttons
 before returning, so modifiers do not carry over to the next command.
+
+Headless `move`, `click`, `scroll`, and positioning at a drag's start accept
+`--move-duration SECONDS` (default 0.3, maximum 300; finite and nonnegative).
+They follow an eased straight path from the last position Framewisp sent,
+including when recording is off. The worker tracks every move across commands
+and batches, including drag steps and cancelled movement. The first pointer
+action positions immediately because its start is unknown. Use `0` for
+immediate positioning. An unchanged tracked position adds no movement delay.
+Coordinates beyond the display clamp to its edge.
+Apps or other clients can move the cursor without updating this tracking; the
+next animation may jump to the tracked position. No compositor patch or cursor
+query is required. Drag's `--duration` controls the separate button-held movement.
+Attached desktops position immediately and reject `--move-duration`.
+Batch pointer actions use `move_duration`, default 0.3.
 
 For `click` and `drag`, MOD is `ctrl`, `shift`, or `alt`, case-insensitive.
 Repeat `--modifier` for combinations, for example `--modifier ctrl --modifier shift`;
@@ -297,7 +311,7 @@ individual commands. Set `interval: 0` for unpaced checks; omit it for the usual
 
 The whole request is validated before input. Unknown fields are errors. Limits
 per batch are 256 actions, 16,384 typed characters, 10,000 scroll steps, and 300
-seconds of requested typing/drag/capture pacing and check deadlines. The file and serialized request
+seconds of requested pointer/typing/drag/capture pacing and check deadlines. The file and serialized request
 must each fit in 1 MiB. At least one action is required. Capture is optional;
 its delay defaults to zero. Relative capture paths use the CLI's working directory.
 Use a new PNG filename in an existing directory; session files and existing files

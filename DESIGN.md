@@ -241,10 +241,12 @@ session returns an
 error before changing the keymap or sending input. A new session starts with an
 empty allocation. The input worker serializes concurrent typing requests; arbitrary custom X11 keymaps are unsupported.
 
-For VNC pointer commands, the worker first moves one pixel beside the
-requested point and waits 100 ms, then sends the requested motion and buttons.
+Before the first X11 pointer command, the worker primes Xwayland with a one-pixel
+motion and a 100 ms pause beside the tracked position if known, then restores
+it. With no tracked position, it primes beside the destination.
 Xwayland drops the first pointer motion in the tested setup; without this step,
-an initial drag can disappear. The requested drag timing starts after its press.
+an initial drag can disappear. Later commands reuse the initialized pointer.
+The requested drag timing starts after its press.
 
 Integration tests force GTK onto X11, poison inherited display credentials, check
 the rendered demo and input state, and exercise pacing, Unicode, clips and captions.
@@ -308,10 +310,37 @@ display coordinates by adding `(x, y)`; input commands always use display pixels
 Both options require headless sessions with dimensions in their metadata;
 older sessions must restart to use them. Plain screenshots remain compatible.
 
-`move X Y` sends VNC pointer motion without button commands. Movement is
-immediate. Use `screenshot --delay` to wait for app-defined hover feedback.
+`move X Y` sends VNC pointer motion without button commands.
+Use `screenshot --delay` to wait for app-defined hover feedback.
 A GTK test verifies received coordinates, no button events, a visible tooltip,
 and its disappearance after moving away.
+
+Headless pointer approaches for `move`, `click`, `scroll`, and drag starts accept
+`--move-duration`, defaulting to 0.3 seconds. A shared constant supplies CLI,
+batch, and direct-request defaults. Validation requires finite, nonnegative
+values no greater than 300 seconds. Batch JSON uses `move_duration`; all requested
+approach durations count toward the shared 300-second pacing budget.
+Zero moves immediately. Attached desktops keep immediate positioning and reject
+the option.
+
+`InputWorker.pointer_position` starts as `None` and records `(x, y)` after each
+successful VNC `mouseMove`. All pointer approaches, X11 priming, and held drag
+steps use the same move callback. Targets and sent positions clamp to the
+display's pixel bounds so out-of-display commands do not leave tracking stale.
+This keeps tracking current during cancelled movement as well as completed
+gestures. The persistent worker shares the
+position across standalone commands and batches. An unknown starting position
+moves immediately; identical tracked start/end positions add no delay. Even in
+these cases, sending the target ensures VNC button events use its coordinates.
+Apps or other clients can move the compositor cursor independently, leaving
+tracking stale; the next animation may jump to the tracked position. This is an
+accepted tradeoff to avoid compositor patches and cursor queries. Recording
+does not affect tracking.
+
+`pointer.py` uses smoothstep easing and integer coordinates at approximately 60 Hz;
+monotonic elapsed time includes transport overhead. Cancellation interrupts the
+waits, and the final point is exact. Drag movement while holding a button retains
+its separately configured constant-speed timing.
 
 `scroll X Y DIRECTION --steps N` moves the pointer to `(X, Y)` and sends `N`
 wheel-button press/release pairs on the same VNC connection. The VNC buttons are

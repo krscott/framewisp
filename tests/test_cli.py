@@ -322,7 +322,14 @@ def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None
 @pytest.mark.parametrize("value", ["-1", "nan", "inf", "nope"])
 @pytest.mark.parametrize(
     "action,option,arguments",
-    [("drag", "--duration", ["0", "0", "100", "100"]), ("type", "--interval", ["abc"])],
+    [
+        ("drag", "--duration", ["0", "0", "100", "100"]),
+        ("type", "--interval", ["abc"]),
+        ("move", "--move-duration", ["1", "1"]),
+        ("click", "--move-duration", ["1", "1"]),
+        ("scroll", "--move-duration", ["1", "1", "down"]),
+        ("drag", "--move-duration", ["1", "1", "2", "2"]),
+    ],
 )
 def test_invalid_input_timing(
     value: str, action: str, option: str, arguments: list[str], tmp_path: Path

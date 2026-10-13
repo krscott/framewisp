@@ -20,6 +20,7 @@ from framewisp.lib import (
     session_command,
 )
 from framewisp.ownership import recover_session
+from framewisp.pointer import DEFAULT_MOVE_DURATION
 from framewisp.sessions import resolve_session
 
 
@@ -282,6 +283,15 @@ def main() -> None:
         help="time spent dragging (default: 0.4; 0 moves immediately)",
     )
 
+    for pointer in (move, click, scroll, drag):
+        pointer.add_argument(
+            "--move-duration",
+            type=seconds,
+            default=None,
+            metavar="SECONDS",
+            help="time moving to the target or drag start (headless only; default: 0.3; 0 moves immediately; maximum: 300)",
+        )
+
     for gesture in (click, drag):
         gesture.add_argument(
             "--modifier",
@@ -366,6 +376,12 @@ def main() -> None:
         parser.error("each --modifier may only be specified once")
     if args.action == "scroll" and args.steps < 1:
         parser.error("--steps must be a positive integer")
+    if (
+        args.action in {"move", "click", "scroll", "drag"}
+        and args.move_duration is not None
+        and args.move_duration > 300
+    ):
+        parser.error("--move-duration must not exceed 300 seconds")
     if args.action == "type" and any(not char.isprintable() for char in args.text):
         parser.error(
             "type supports printable characters only; use key for Return or Tab"
@@ -498,11 +514,21 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             )
         )
     else:
+        if args.action in {"move", "click", "scroll", "drag"}:
+            if attached:
+                if args.move_duration is not None:
+                    raise SessionError(
+                        "--move-duration is supported only for headless sessions."
+                    )
+            elif args.move_duration is None:
+                args.move_duration = DEFAULT_MOVE_DURATION
         parameters = {
             key: value
             for key, value in vars(args).items()
             if key not in {"session", "action"}
         }
+        if attached:
+            parameters.pop("move_duration", None)
         if attached:
             state = json.loads((session / "session.json").read_text())
             with log_input(

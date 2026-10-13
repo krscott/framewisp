@@ -7,6 +7,7 @@ from typing import cast
 
 from framewisp.actions import InputAction
 from framewisp.checks import Check
+from framewisp.pointer import DEFAULT_MOVE_DURATION
 
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_ACTIONS = 256
@@ -15,10 +16,20 @@ MAX_SCROLL_STEPS = 10000
 MAX_PACING_SECONDS = 300
 
 DEFAULTS: dict[str, dict[str, object]] = {
-    "move": {},
-    "click": {"button": "left", "count": 1, "modifier": []},
-    "drag": {"button": "left", "duration": 0.4, "modifier": []},
-    "scroll": {"steps": 1},
+    "move": {"move_duration": DEFAULT_MOVE_DURATION},
+    "click": {
+        "button": "left",
+        "count": 1,
+        "modifier": [],
+        "move_duration": DEFAULT_MOVE_DURATION,
+    },
+    "drag": {
+        "button": "left",
+        "duration": 0.4,
+        "modifier": [],
+        "move_duration": DEFAULT_MOVE_DURATION,
+    },
+    "scroll": {"steps": 1, "move_duration": DEFAULT_MOVE_DURATION},
     "type": {"interval": 0.08},
     "key": {},
 }
@@ -90,6 +101,8 @@ class Batch:
                 if parameters.keys() != action.parameters.keys():
                     raise ValueError("Unknown action parameter.")
                 actions.append(action)
+                if name in {"move", "click", "drag", "scroll"}:
+                    pacing += cast(float, parameters["move_duration"])
                 if name == "type":
                     length = len(cast(str, parameters["text"]))
                     characters += length

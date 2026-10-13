@@ -75,6 +75,7 @@ def test_defaults_and_capture_resolution(tmp_path: Path) -> None:
         "button": "left",
         "count": 1,
         "modifier": [],
+        "move_duration": 0.3,
     }
     assert batch.actions[1].parameters["interval"] == 0.08
     assert batch.capture is not None
@@ -86,6 +87,21 @@ def test_pacing_limit_is_for_whole_batch() -> None:
     with pytest.raises(ValueError, match="300 seconds"):
         Batch.parse(
             {"actions": [{"action": "type", "text": "ab", "interval": 151}] * 2}
+        )
+
+
+@pytest.mark.parametrize("value", [-1, True, float("nan"), float("inf"), 301])
+def test_invalid_move_duration(value: object) -> None:
+    with pytest.raises(ValueError, match="move_duration"):
+        Batch.parse(
+            {"actions": [{"action": "move", "x": 1, "y": 1, "move_duration": value}]}
+        )
+
+
+def test_move_duration_counts_toward_batch_budget() -> None:
+    with pytest.raises(ValueError, match="300 seconds"):
+        Batch.parse(
+            {"actions": [{"action": "move", "x": 1, "y": 1, "move_duration": 151}] * 2}
         )
 
 

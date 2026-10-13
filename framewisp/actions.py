@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS, key_commands
+from framewisp.pointer import DEFAULT_MOVE_DURATION
 
 
 @dataclass(frozen=True)
@@ -17,11 +18,22 @@ class InputAction:
         if not isinstance(raw, dict) or not isinstance(action, str):
             raise ValueError("Input requires an action and parameters object.")
         p = cast(dict[str, object], raw)
+        if action in {"move", "click", "drag", "scroll"}:
+            p = {"move_duration": DEFAULT_MOVE_DURATION} | p
         fields = {
-            "move": ("x", "y"),
-            "click": ("x", "y", "button", "count", "modifier"),
-            "drag": ("x1", "y1", "x2", "y2", "duration", "button", "modifier"),
-            "scroll": ("x", "y", "direction", "steps"),
+            "move": ("x", "y", "move_duration"),
+            "click": ("x", "y", "button", "count", "modifier", "move_duration"),
+            "drag": (
+                "x1",
+                "y1",
+                "x2",
+                "y2",
+                "duration",
+                "button",
+                "modifier",
+                "move_duration",
+            ),
+            "scroll": ("x", "y", "direction", "steps", "move_duration"),
             "type": ("text", "interval"),
             "key": ("chord",),
         }
@@ -37,7 +49,7 @@ class InputAction:
                     and not 0 <= value <= 65535
                 ):
                     raise ValueError("Coordinates must be between 0 and 65535.")
-            elif name in {"duration", "interval"}:
+            elif name in {"duration", "interval", "move_duration"}:
                 if (
                     type(value) not in {int, float}
                     or not isinstance(value, (int, float))
@@ -45,6 +57,8 @@ class InputAction:
                     or value < 0
                 ):
                     raise ValueError(f"{name} must be finite and nonnegative.")
+                if name == "move_duration" and value > 300:
+                    raise ValueError("move_duration must not exceed 300 seconds.")
             elif name == "modifier":
                 if not isinstance(value, list):
                     raise ValueError("modifier must be a list.")

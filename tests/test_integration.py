@@ -76,6 +76,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         mode = {
             "x11": None,
             "x11-probe": "probe",
+            "x11-record-probe": "record-probe",
             "x11-keys": "keys",
             "x11-record": True,
             "x11-console": "console",
@@ -90,7 +91,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         }[mode]
     recording = (
         tmp_path / "session.mp4"
-        if mode is True or mode in {"large", "uncaptioned", "console", "compact"}
+        if mode is True
+        or mode in {"large", "uncaptioned", "console", "record-probe", "compact"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -113,6 +115,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--width", str(width), "--height", str(height)])
     probes = {
         "probe": "input_probe.py",
+        "record-probe": "input_probe.py",
         "keys": "input_probe.py",
         "waits": "wait_probe.py",
         "large-waits": "wait_probe.py",
@@ -209,6 +212,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
             if mode not in {
                 "probe",
+                "record-probe",
                 "keys",
                 "clipboard",
                 "qt",
@@ -852,6 +856,225 @@ def test_drag_delivers_paced_motion_and_release(
         for event in intermediate:
             # The path is straight, within integer-coordinate rounding.
             assert abs(float(event["y"]) - (100 + (float(event["x"]) - 100) / 2)) <= 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "demo", ["probe", "x11-probe", "record-probe", "x11-record-probe"], indirect=True
+)
+@pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
+@pytest.mark.parametrize("duration", [None, 0, 0.6])
+def test_pointer_approach_uses_tracked_position(
+    demo: Demo, action: str, duration: float | None
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
+    # A batch drag's endpoint becomes the next standalone command's start.
+    plan = demo.directory / "position.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {
+                        "action": "drag",
+                        "x1": 100,
+                        "y1": 100,
+                        "x2": 200,
+                        "y2": 150,
+                        "duration": 0,
+                        "move_duration": 0,
+                    }
+                ]
+            }
+        )
+    )
+    cli(demo.directory, "batch", "--file", str(plan))
+    wait_until(
+        lambda: any(
+            event["event"] == "release" and event["x"] == 200
+            for event in input_events(demo)
+        )
+    )
+    before = len(input_events(demo))
+    options = [] if duration is None else ["--move-duration", str(duration)]
+    arguments = ["500", "300"]
+    if action == "scroll":
+        arguments += ["down"]
+    elif action == "drag":
+        arguments += ["550", "325", "--duration", "0"]
+    started = time.monotonic()
+    cli(demo.directory, action, *arguments, *options)
+    elapsed = time.monotonic() - started
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500
+            for event in input_events(demo)[before:]
+        )
+    )
+    if action in {"click", "drag"}:
+        wait_until(
+            lambda: any(
+                event["event"] == "release" for event in input_events(demo)[before:]
+            )
+        )
+    events = input_events(demo)[before:]
+    approach_events = events
+    if action in {"click", "drag"}:
+        press_index = next(
+            index for index, event in enumerate(events) if event["event"] == "press"
+        )
+        approach_events = events[:press_index]
+    # Every approach point must lie between the previous endpoint and the target.
+    for event in approach_events:
+        if event["event"] == "motion":
+            assert 200 <= float(event["x"]) <= 500
+            assert 150 <= float(event["y"]) <= 300
+    intermediate = [
+        event
+        for event in events
+        if event["event"] == "motion" and 200 < float(event["x"]) < 500
+    ]
+    expected = 0.3 if duration is None else duration
+    assert elapsed >= expected * 0.9
+    if expected:
+        assert len(intermediate) >= 3
+        for event in intermediate:
+            assert not event["pressed"]
+            assert abs(float(event["y"]) - (150 + (float(event["x"]) - 200) / 2)) <= 1
+    else:
+        assert not intermediate
+    if action in {"click", "drag"}:
+        press = next(event for event in events if event["event"] == "press")
+        assert (press["x"], press["y"]) == (500, 300)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
+def test_first_pointer_action_has_no_animation_delay(demo: Demo, action: str) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    arguments = ["200", "150", "--move-duration", "30"]
+    if action == "scroll":
+        arguments += ["down"]
+    elif action == "drag":
+        arguments += ["500", "300", "--duration", "0"]
+    started = time.monotonic()
+    cli(demo.directory, action, *arguments)
+    assert time.monotonic() - started < 2
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 200
+            for event in input_events(demo)
+        )
+    )
+    if action in {"click", "drag"}:
+        wait_until(
+            lambda: any(event["event"] == "press" for event in input_events(demo))
+        )
+        press = next(event for event in input_events(demo) if event["event"] == "press")
+        assert (press["x"], press["y"]) == (200, 150)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("action", ["move", "drag"])
+def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "500", "150", "--move-duration", "0")
+    if action == "drag":
+        cli(
+            demo.directory,
+            "drag",
+            "500",
+            "150",
+            "65535",
+            "150",
+            "--move-duration",
+            "0",
+            "--duration",
+            "0",
+        )
+    else:
+        cli(demo.directory, "move", "65535", "150", "--move-duration", "0")
+    width = json.loads((demo.directory / "session.json").read_text())["width"]
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == width - 1
+            for event in input_events(demo)
+        )
+    )
+    if action == "drag":
+        wait_until(
+            lambda: any(event["event"] == "release" for event in input_events(demo))
+        )
+    before = len(input_events(demo))
+    cli(demo.directory, "move", "500", "150", "--move-duration", "1")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500
+            for event in input_events(demo)[before:]
+        )
+    )
+    motion = [
+        event for event in input_events(demo)[before:] if event["event"] == "motion"
+    ]
+    intermediate = [event for event in motion if 500 < float(event["x"]) < width - 1]
+    assert len(intermediate) >= 3
+    # The cursor must move inward throughout the animation, not only at its end.
+    assert float(motion[-1]["time"]) - float(intermediate[0]["time"]) >= 0.5
+    for event in motion:
+        assert 500 <= float(event["x"]) <= width - 1
+        assert event["y"] == 150
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
+    clip = demo.directory.parent / "continuous.mp4"
+    cli(demo.directory, "record-start", "--no-captions", str(clip))
+    start = (100, 100)
+    for end in ((500, 300), (200, 250), (550, 100)):
+        before = len(input_events(demo))
+        cli(demo.directory, "move", *map(str, end), "--move-duration", "0.6")
+        wait_until(
+            lambda: any(
+                event["event"] == "motion" and (event["x"], event["y"]) == end
+                for event in input_events(demo)[before:]
+            )
+        )
+        motion = [
+            event for event in input_events(demo)[before:] if event["event"] == "motion"
+        ]
+        assert len(motion) >= 3
+        for event in motion:
+            x, y = float(event["x"]), float(event["y"])
+            assert min(start[0], end[0]) <= x <= max(start[0], end[0])
+            assert min(start[1], end[1]) <= y <= max(start[1], end[1])
+            expected_y = start[1] + (x - start[0]) * (end[1] - start[1]) / (
+                end[0] - start[0]
+            )
+            assert abs(y - expected_y) <= 1
+        start = end
+    cli(demo.directory, "record-stop")
+    assert clip.stat().st_size > 0
 
 
 @pytest.mark.integration
@@ -1663,6 +1886,104 @@ def input_request(
         ).encode()
     )
     return connection
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
+    before = len(input_events(demo))
+    with input_request(
+        demo,
+        "click",
+        {
+            "x": 500,
+            "y": 300,
+            "button": "left",
+            "count": 1,
+            "modifier": ["shift"],
+            "move_duration": 3,
+        },
+    ):
+        wait_until(
+            lambda: any(
+                event["event"] == "motion" and float(event["x"]) >= 200
+                for event in input_events(demo)[before:]
+            )
+        )
+        cli(demo.directory, "status")
+    # Drain the cancelled action before choosing the last received position.
+    cli(demo.directory, "key", "q")
+    wait_until(
+        lambda: any(
+            event["event"] == "key-release" and event["key"] == "q"
+            for event in input_events(demo)[before:]
+        )
+    )
+    stopped = [
+        event for event in input_events(demo)[before:] if event["event"] == "motion"
+    ][-1]
+    resumed = len(input_events(demo))
+    cli(demo.directory, "move", "500", "300")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500 and not event["shift"]
+            for event in input_events(demo)[resumed:]
+        )
+    )
+    events = input_events(demo)[before:]
+    assert not any(event["event"] == "press" for event in events)
+    motions = [
+        event for event in input_events(demo)[resumed:] if event["event"] == "motion"
+    ]
+    assert len(motions) >= 3
+    for event in motions:
+        assert float(stopped["x"]) <= float(event["x"]) <= 500
+        assert float(stopped["y"]) <= float(event["y"]) <= 300
+        assert not event["shift"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("action", ["click", "drag"])
+def test_unchanged_pointer_position_adds_no_animation_delay(
+    demo: Demo, action: str
+) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "500", "300", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 500
+            for event in input_events(demo)
+        )
+    )
+    # Even after an external warp, an unchanged tracked target must be sent.
+    response = sway_request(demo.runtime, 0, b"seat seat0 cursor set 100 100")
+    assert response[0]["success"]
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
+    arguments = ["500", "300", "--move-duration", "3"]
+    if action == "drag":
+        arguments += ["550", "325", "--duration", "0"]
+    started = time.monotonic()
+    cli(demo.directory, action, *arguments)
+    assert time.monotonic() - started < 2
+    wait_until(lambda: any(event["event"] == "press" for event in input_events(demo)))
+    press = next(event for event in input_events(demo) if event["event"] == "press")
+    assert (press["x"], press["y"]) == (500, 300)
 
 
 @pytest.mark.integration
@@ -3074,6 +3395,21 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
         inspect(demo, "--name", "Absent control", "--max-nodes", "1024")["status"]
         == "ok"
     )
+
+
+def wait_for_input_probe_window(demo: Demo) -> None:
+    # GTK's map signal can precede Sway mapping the Xwayland window.
+    def mapped() -> bool:
+        nodes = [sway_request(demo.runtime, 4)]
+        while nodes:
+            node = nodes.pop()
+            if node.get("name") == "Input probe":
+                return True
+            nodes.extend(node.get("nodes", []))
+            nodes.extend(node.get("floating_nodes", []))
+        return False
+
+    wait_until(mapped)
 
 
 def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
