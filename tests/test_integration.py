@@ -80,6 +80,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-keys": "keys",
             "x11-record": True,
             "x11-console": "console",
+            "x11-compact": "compact",
             "x11-clipboard": "clipboard",
             "x11-qt": "qt",
             "x11-qt-tree": "qt-tree",
@@ -90,7 +91,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         }[mode]
     recording = (
         tmp_path / "session.mp4"
-        if mode is True or mode in {"large", "uncaptioned", "console", "record-probe"}
+        if mode is True
+        or mode in {"large", "uncaptioned", "console", "record-probe", "compact"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -104,6 +106,10 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             command.append("--console")
         if mode == "uncaptioned":
             command.append("--no-captions")
+        if mode == "compact":
+            command.extend(
+                ["--compact", "--compact-before", "0.25", "--compact-after", "0.25"]
+            )
     if mode in {"large", "odd"}:
         width, height = (1600, 900) if mode == "large" else (1601, 901)
         command.extend(["--width", str(width), "--height", str(height)])
@@ -346,6 +352,94 @@ def test_status_and_stop_finalize_recording(demo: Demo) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", ["compact", "x11-compact"], indirect=True)
+def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
+    demo: Demo, tmp_path: Path
+) -> None:
+    assert demo.recording is not None
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    started = time.monotonic()
+    time.sleep(2)
+    cli(demo.directory, "type", "Compact demo", "--interval", "0.1")
+    cli(demo.directory, "key", "Return")
+    wait_until(
+        lambda: "Entered: Compact demo" in (demo.directory / "app.log").read_text()
+    )
+    time.sleep(2)
+    summary = json.loads(cli(demo.directory, "stop").stdout)["recording"]
+    assert 1.1 <= summary["duration_seconds"] < time.monotonic() - started - 2
+    recording_frames(demo.recording)
+    assert demo.process.wait(timeout=5) == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+def test_compact_clip_preserves_failed_wait_and_capture_delay(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    video = tmp_path / "compact console.mp4"
+    cli(
+        demo.directory,
+        "record-start",
+        "--compact",
+        "--compact-before",
+        "0.1",
+        "--compact-after",
+        "0.1",
+        "--console",
+        "--no-captions",
+        str(video),
+    )
+    time.sleep(2)
+    failure = tmp_path / "failure.png"
+    batch = {
+        "actions": [
+            {
+                "action": "wait",
+                "timeout": 2,
+                "condition": {
+                    "role": "label",
+                    "name": "never present",
+                    "field": "name",
+                    "equals": "secret condition",
+                },
+            }
+        ],
+        "failure_capture": {"path": str(failure), "delay": 1},
+    }
+    plan = tmp_path / "wait.json"
+    plan.write_text(json.dumps(batch))
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "batch", "--file", str(plan)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1, result.stderr
+    assert json.loads(result.stdout)["failed_phase"] == "check"
+    assert failure.exists()
+    time.sleep(2)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert 3 <= summary["duration_seconds"] < 4.5
+    assert summary["width"] == 1920
+    activity = (demo.directory / "activity.jsonl").read_text()
+    assert "secret condition" not in activity
+    assert len(activity.splitlines()) == 4
+    recording_frames(video, size=(1920, 720))
+    assert json.loads(cli(demo.directory, "status").stdout)["app"]["running"]
+
+    # A later ordinary clip must not inherit compaction from the previous clip.
+    ordinary = tmp_path / "ordinary.mp4"
+    cli(demo.directory, "record-start", "--no-captions", str(ordinary))
+    time.sleep(1)
+    assert (
+        json.loads(cli(demo.directory, "record-stop").stdout)["duration_seconds"] >= 1
+    )
+
+
+@pytest.mark.integration
 def test_status_and_stop_reject_copied_session_metadata(
     demo: Demo, tmp_path: Path
 ) -> None:
@@ -367,7 +461,7 @@ def test_status_and_stop_reject_copied_session_metadata(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
+@pytest.mark.parametrize("demo", [True, "compact"], indirect=True)
 def test_stop_reports_recording_finalization_failure(demo: Demo) -> None:
     cli(demo.directory, "type", "caption this")
     (demo.directory / "captions.log").mkdir()

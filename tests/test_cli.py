@@ -43,6 +43,83 @@ def test_console_requires_recording(tmp_path: Path) -> None:
     assert not (tmp_path / "session").exists()
 
 
+@pytest.mark.parametrize("action", ["run", "record-start"])
+@pytest.mark.parametrize(
+    "options,message",
+    [
+        (["--compact-before", "1"], "require --compact"),
+        (["--compact-after", "2"], "require --compact"),
+        (["--compact", "--compact-before", "nan"], "finite, nonnegative"),
+        (["--compact", "--compact-after", "inf"], "finite, nonnegative"),
+        (["--compact", "--compact-before=-1"], "finite, nonnegative"),
+    ],
+)
+def test_invalid_compact_options(
+    tmp_path: Path,
+    action: str,
+    options: list[str],
+    message: str,
+) -> None:
+    session = tmp_path / "session"
+    arguments = (
+        ["--", "framewisp-demo"] if action == "run" else [str(tmp_path / "clip.mp4")]
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session), action, *options, *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert message in result.stderr
+    assert not session.exists()
+
+
+def test_compact_requires_recording(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "run",
+            "--compact",
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "--compact requires --record" in result.stderr
+    assert not (tmp_path / "session").exists()
+
+
+def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"control_protocol": 1}))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path),
+            "record-start",
+            "--compact",
+            str(tmp_path / "clip.mp4"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "does not support compact recordings. Restart" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 @pytest.mark.parametrize("capability", [None, False, 1])
 def test_console_rejects_unsupported_runner_before_connecting(
     tmp_path: Path, capability: object
@@ -208,6 +285,7 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
         "app.log",
         "console.jsonl",
         "inputs.jsonl",
+        "activity.jsonl",
         "captions.log",
         "dbus.log",
         "accessibility.log",

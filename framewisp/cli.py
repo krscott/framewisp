@@ -8,6 +8,7 @@ from pathlib import Path
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import log_input
+from framewisp.compact import CompactSettings
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError, recorded_app_exit
@@ -175,6 +176,23 @@ def main() -> None:
     record_start = commands.add_parser("record-start", help="start recording a clip")
     record_start.add_argument("path", type=Path, metavar="FILE")
     for recording_parser in (run, record_start):
+        recording_parser.add_argument(
+            "--compact",
+            action="store_true",
+            help="trim gaps between inputs, preserving batch waits and capture delays",
+        )
+        recording_parser.add_argument(
+            "--compact-before",
+            type=seconds,
+            metavar="SECONDS",
+            help="padding before inputs and at clip start (default: 1; requires --compact)",
+        )
+        recording_parser.add_argument(
+            "--compact-after",
+            type=seconds,
+            metavar="SECONDS",
+            help="padding after inputs and at clip end (default: 2; requires --compact)",
+        )
         recording_parser.add_argument(
             "--console",
             action="store_true",
@@ -372,7 +390,24 @@ def main() -> None:
         parser.error(
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
+    if args.action in {"run", "record-start"}:
+        if not args.compact and (
+            args.compact_before is not None or args.compact_after is not None
+        ):
+            parser.error("--compact-before and --compact-after require --compact")
+        args.compact_settings = (
+            CompactSettings(
+                before=args.compact_before if args.compact_before is not None else 1.0,
+                after=args.compact_after if args.compact_after is not None else 2.0,
+            )
+            if args.compact
+            else None
+        )
     if args.action == "run":
+        if args.compact and args.record is None:
+            parser.error(
+                "--compact requires --record; use record-start --compact for later clips"
+            )
         if args.console and args.record is None:
             parser.error(
                 "--console requires --record; use record-start --console for later clips"
@@ -437,6 +472,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             recording=args.record,
             captions=not args.no_captions,
             console=args.console,
+            compact=args.compact_settings,
             size=(args.width, args.height),
             x11=args.x11,
             retain_input_content=args.retain_input_content,
@@ -457,6 +493,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 args.path if args.action == "record-start" else None,
                 captions=not getattr(args, "no_captions", False),
                 console=getattr(args, "console", False),
+                compact=getattr(args, "compact_settings", None),
             )
         )
     elif args.action == "screenshot":

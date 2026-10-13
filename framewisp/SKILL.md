@@ -16,6 +16,38 @@ The package includes `framewisp-demo`; other target apps must be installed separ
 
 Requires running outside of agent sandbox.
 
+## Delegate repeated interactions
+
+When a task needs repeated observation and input, consider giving the whole GUI
+task to a small, fast subagent. The main agent decides whether delegation is
+worthwhile, which available model can handle the task, and whether it should read
+accessibility output, screenshots, or both. Some apps expose useful text and
+state through `inspect --json`; others need a model that can interpret images.
+Keep short tasks with the main agent when delegation would add overhead.
+
+Give the subagent this guide, the objective and expected result, the absolute
+session path printed at startup, and an artifact directory. Define when it should
+stop and report a blocker, including a time or attempt limit. Delegate a sequence
+of interactions rather than spawning a subagent per command. Only one agent
+should control a session at a time; keep its foreground runner alive through the
+handoff and agree who will stop it.
+
+The subagent should batch known actions, verify accessible outcomes with bounded
+checks, and inspect screenshots for visual outcomes. It should return the observed
+result and relevant check output or artifact paths. If it cannot verify the result
+or encounters a state outside its instructions, it should report the blocker and
+last observation to the main agent. The main agent decides what needs further
+review.
+
+If the host supports workflows, a classifier model can choose among predefined
+app states and their corresponding action batches using accessibility output or
+screenshots, according to its capabilities. Include an unknown outcome for
+unrecognized states or incomplete observations and return control to the main
+agent. Choose this approach when the states and actions are known in advance.
+Subagents, model selection, and classifier workflows are host capabilities;
+Framewisp supplies the session commands. Delegation is an option, not a measured
+speed guarantee.
+
 ## Command reference
 
 Use `framewisp SESSION COMMAND ...`, where SESSION is normally a bare name such
@@ -391,6 +423,21 @@ does not redact screens, app logs, shell history, batch files, or runtime input 
 Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
+
+Use `run --record FILE --compact` or `record-start --compact FILE` to trim gaps
+between commands during finalization. `--compact-before SECONDS` and
+`--compact-after SECONDS` require `--compact` and accept finite nonnegative
+values (defaults 1 and 2). Each input keeps its full duration plus that padding;
+overlapping sections merge. The opening before-padding and closing after-padding
+also remain, with at least the first and last frames even at zero padding.
+Batch checks and capture delays remain in full, including failed/cancelled steps.
+External sleeps can be cut. Delayed app responses, animations, and output in
+removed gaps can be omitted; increase padding, use a batch wait, or leave
+compaction off when those matter. Captions and console output stay aligned with
+retained GUI frames; console timestamps keep original clip time. Compaction is
+per clip, works with `--no-captions` and `--console`, and leaves logs unchanged.
+Timestamp-only check/capture spans live in `SESSION/activity.jsonl` without
+conditions or error text. The summary reports the compacted video's duration.
 
 Use `run --record FILE --console` or `record-start --console FILE` to append a
 640-pixel-wide scrolling panel of the launched app's combined stdout/stderr.
