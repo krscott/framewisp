@@ -139,7 +139,6 @@
               export FRAMEWISP_TEST_DCONF_SERVICE=${pkgs.dconf}/share/dbus-1/services/ca.desrt.dconf.service
               export FRAMEWISP_TEST_GTK_SCHEMAS=${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas
               export FRAMEWISP_ATSPI_REGISTRY=${pkgs.framewisp.atspiRegistry}
-              export FRAMEWISP_CURSOR_POSITION=${pkgs.framewisp.cursorPosition}/bin/framewisp-cursor-position
               export QML_IMPORT_PATH=${pkgs.qt6.qtdeclarative}/lib/qt-6/qml
               export QT_PLUGIN_PATH=${pkgs.qt6.qtbase}/lib/qt-6/plugins
               runHook venvShellHook

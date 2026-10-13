@@ -291,20 +291,24 @@ approach durations count toward the shared 300-second pacing budget.
 Zero bypasses querying and moves immediately. Attached desktops keep immediate
 positioning and reject the option.
 
-`native/cursor-position.c` is a private one-shot Wayland client. Nix builds it
-against wayland-client and generated image-copy-capture, image-capture-source,
-and foreign-toplevel-list protocol definitions. The installed wrapper and dev
-shell set `FRAMEWISP_CURSOR_POSITION` to the compiled helper. It connects to the
-session's absolute private Wayland socket and requires exactly one output and
-seat. An `ext_image_copy_capture_cursor_session_v1` supplies the cursor hotspot
-in output pixel coordinates, including for apps running inside Xwayland. It
-allocates no image buffer, sends no input, and disconnects after reading state.
+`patches/sway-cursor-position.patch` adds `cursor: {x, y}` to each seat's
+GET_SEATS IPC response. It reads `seat->cursor->cursor` directly. The Nix overlay
+supplies this patched Sway to both the development shell and installed package.
+These are live layout coordinates, which equal display pixels on Framewisp's
+sole unscaled output at the origin. They remain available during recording and
+when the cursor image is hidden. Capture-protocol cursor metadata is unsuitable
+for this query because software cursor rendering can leave it stale.
 
-`pointer.py` bounds each helper to one second, polls caller/session cancellation
-every 20 ms, and kills/reaps it on cancellation or timeout. Query failures become
-actionable errors before modifier or button presses. If the compositor does not
-report a position (such as a hidden cursor), or the hotspot cannot fit VNC's
-unsigned coordinates, positioning is immediate rather than guessing a start.
+`sway.py` sends bounded IPC requests to the sole `sway-ipc.*.sock` in the private
+runtime directory. It never reads the caller's SWAYSOCK, caps replies at 1 MiB,
+and checks cancellation and deadlines between reads with 20 ms socket timeouts.
+Accessibility display-bound queries share this reader with their 250 ms budget.
+`pointer.py` gives GET_SEATS one second and requires exactly the private seat0.
+It validates finite numeric coordinates and rounds them to screenshot pixels.
+Query failures become actionable errors before modifier or button presses. If
+the starting position cannot fit VNC's unsigned coordinates, positioning is
+immediate rather than guessing a start. No helper process or image capture is
+required.
 Each animated approach queries fresh state, so independent compositor movement
 cannot leave stale coordinates. Identical start/end positions add no delay.
 The path uses smoothstep easing and integer coordinates at approximately 60 Hz;

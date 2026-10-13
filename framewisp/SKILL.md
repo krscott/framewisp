@@ -75,9 +75,11 @@ Headless `move`, `click`, `scroll`, and positioning at a drag's start accept
 `--move-duration SECONDS` (default 0.3, maximum 300; finite and nonnegative).
 They read the real cursor position and follow an eased straight path, including
 when recording is off. Use `0` for immediate positioning and no cursor query.
-An unchanged position adds no movement delay. An unreported position, such as a
-hidden cursor, uses immediate movement; query failures return an error before
-the gesture. Drag's `--duration` controls the separate button-held movement.
+An unchanged position adds no movement delay. The packaged Sway reports live
+coordinates during recording and while the cursor image is hidden. An
+out-of-range starting position uses immediate movement; query failures return
+an error before the gesture. Drag's `--duration` controls the separate
+button-held movement.
 Attached desktops position immediately and reject `--move-duration`.
 Batch pointer actions use `move_duration`, default 0.3.
 

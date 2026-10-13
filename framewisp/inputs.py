@@ -296,7 +296,7 @@ class InputWorker:
                 ):
                     state = json.loads((self.session / "session.json").read_text())
                     start = cursor_position(
-                        Path(state["runtime_directory"]) / state["wayland_display"],
+                        Path(state["runtime_directory"]),
                         lambda: self.cancelled(connection),
                     )
                 modifiers = cast(list[str], p.get("modifier", []))

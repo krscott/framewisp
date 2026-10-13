@@ -76,6 +76,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         mode = {
             "x11": None,
             "x11-probe": "probe",
+            "x11-record-probe": "record-probe",
             "x11-keys": "keys",
             "x11-record": True,
             "x11-console": "console",
@@ -89,7 +90,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         }[mode]
     recording = (
         tmp_path / "session.mp4"
-        if mode is True or mode in {"large", "uncaptioned", "console"}
+        if mode is True or mode in {"large", "uncaptioned", "console", "record-probe"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -108,6 +109,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--width", str(width), "--height", str(height)])
     probes = {
         "probe": "input_probe.py",
+        "record-probe": "input_probe.py",
         "keys": "input_probe.py",
         "waits": "wait_probe.py",
         "large-waits": "wait_probe.py",
@@ -204,6 +206,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             assert not any(item.startswith(b"WAYLAND_DISPLAY=") for item in app_env)
             if mode not in {
                 "probe",
+                "record-probe",
                 "keys",
                 "clipboard",
                 "qt",
@@ -762,7 +765,9 @@ def test_drag_delivers_paced_motion_and_release(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize(
+    "demo", ["probe", "x11-probe", "record-probe", "x11-record-probe"], indirect=True
+)
 @pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
 @pytest.mark.parametrize("duration", [None, 0, 0.6])
 def test_pointer_approach_uses_current_compositor_position(
@@ -809,6 +814,18 @@ def test_pointer_approach_uses_current_compositor_position(
             )
         )
     events = input_events(demo)[before:]
+    approach_events = events
+    if action in {"click", "drag"}:
+        press_index = next(
+            index for index, event in enumerate(events) if event["event"] == "press"
+        )
+        approach_events = events[:press_index]
+    # A stale start can jump backward, then follow the same line to the target.
+    # Check every approach point, not only points between start and destination.
+    for event in approach_events:
+        if event["event"] == "motion":
+            assert 200 <= float(event["x"]) <= 500
+            assert 150 <= float(event["y"]) <= 300
     intermediate = [
         event
         for event in events
@@ -826,6 +843,47 @@ def test_pointer_approach_uses_current_compositor_position(
     if action in {"click", "drag"}:
         press = next(event for event in events if event["event"] == "press")
         assert (press["x"], press["y"]) == (500, 300)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_for_input_probe_window(demo)
+    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100
+            for event in input_events(demo)
+        )
+    )
+    clip = demo.directory.parent / "continuous.mp4"
+    cli(demo.directory, "record-start", "--no-captions", str(clip))
+    start = (100, 100)
+    for end in ((500, 300), (200, 250), (550, 100)):
+        before = len(input_events(demo))
+        cli(demo.directory, "move", *map(str, end), "--move-duration", "0.6")
+        wait_until(
+            lambda: any(
+                event["event"] == "motion" and (event["x"], event["y"]) == end
+                for event in input_events(demo)[before:]
+            )
+        )
+        motion = [
+            event for event in input_events(demo)[before:] if event["event"] == "motion"
+        ]
+        assert len(motion) >= 3
+        for event in motion:
+            x, y = float(event["x"]), float(event["y"])
+            assert min(start[0], end[0]) <= x <= max(start[0], end[0])
+            assert min(start[1], end[1]) <= y <= max(start[1], end[1])
+            expected_y = start[1] + (x - start[0]) * (end[1] - start[1]) / (
+                end[0] - start[0]
+            )
+            assert abs(y - expected_y) <= 1
+        start = end
+    cli(demo.directory, "record-stop")
+    assert clip.stat().st_size > 0
 
 
 @pytest.mark.integration

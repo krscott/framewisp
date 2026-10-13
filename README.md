@@ -396,9 +396,11 @@ whether recording is active or not. `--move-duration SECONDS` changes that time;
 `0` moves immediately. Values must be finite, nonnegative, and at most 300 seconds.
 The runner reads the real cursor position from the private compositor before
 each animated approach. A pointer already at the target adds no movement delay.
-If the compositor cannot report the position, for example because the cursor is
-hidden, movement is immediate. Cursor-query failures report an error before
-sending the gesture; use `--move-duration 0` to bypass the query.
+The packaged Sway includes a local IPC patch that reports its live seat cursor
+coordinates, including during recording and while the cursor image is hidden.
+An out-of-range starting position uses immediate movement. Cursor-query failures
+report an error before sending the gesture; use `--move-duration 0` to bypass
+the query.
 Attached desktops retain immediate positioning and reject `--move-duration`.
 
 ```sh

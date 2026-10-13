@@ -1,13 +1,12 @@
 """Conservative conversion of accessible window bounds using private Sway IPC."""
 
-import json
-import socket
-import struct
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+
+from framewisp.sway import request
 
 
 @dataclass(frozen=True)
@@ -144,34 +143,8 @@ def read_windows(
     """Never consult SWAYSOCK or launch a command against the caller's desktop."""
     deadline = min(deadline, time.monotonic() + 0.25)
     try:
-        paths = list(runtime.glob("sway-ipc.*.sock"))
-        if len(paths) != 1 or not paths[0].is_socket():
-            return [], "private-compositor-unavailable"
-        with socket.socket(socket.AF_UNIX) as connection:
-            connection.settimeout(max(0.001, deadline - time.monotonic()))
-            connection.connect(str(paths[0]))
-            connection.sendall(b"i3-ipc" + struct.pack("=II", 0, 4))
-
-            def receive(length: int) -> bytes:
-                result = bytearray()
-                while len(result) < length:
-                    if time.monotonic() >= deadline or (cancelled and cancelled()):
-                        raise TimeoutError("Compositor query timed out")
-                    connection.settimeout(min(0.02, deadline - time.monotonic()))
-                    try:
-                        chunk = connection.recv(length - len(result))
-                    except TimeoutError:
-                        continue
-                    if not chunk:
-                        raise ValueError("Incomplete Sway reply")
-                    result.extend(chunk)
-                return bytes(result)
-
-            header = receive(14)
-            length, kind = struct.unpack("=II", header[6:])
-            if header[:6] != b"i3-ipc" or kind != 4 or length > 1024 * 1024:
-                raise ValueError("Invalid or oversized Sway reply")
-            return windows_from_tree(json.loads(receive(length))), None
+        tree = request(runtime, 4, deadline=deadline, cancelled=cancelled)
+        return windows_from_tree(tree), None
     except (OSError, ValueError, RecursionError):
         return [], "private-compositor-unavailable"
 
