@@ -795,6 +795,12 @@ def test_pointer_approach_uses_current_compositor_position(
             for event in input_events(demo)[before:]
         )
     )
+    if action in {"click", "drag"}:
+        wait_until(
+            lambda: any(
+                event["event"] == "release" for event in input_events(demo)[before:]
+            )
+        )
     events = input_events(demo)[before:]
     intermediate = [
         event
@@ -1652,6 +1658,12 @@ def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> 
         )
         cli(demo.directory, "status")
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_until(
+        lambda: any(
+            event["event"] == "motion" and event["x"] == 100 and not event["shift"]
+            for event in input_events(demo)[before:]
+        )
+    )
     events = input_events(demo)[before:]
     assert not any(event["event"] == "press" for event in events)
     motions = [event for event in events if event["event"] == "motion"]
