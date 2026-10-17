@@ -1,8 +1,16 @@
 """Keep the caller's app environment separate from framewisp's runtime."""
 
 import os
+from pathlib import Path
+from urllib.parse import quote_from_bytes
 
 _caller_environment: dict[str, str] | None = None
+
+
+def unix_bus_address(path: Path) -> str:
+    # D-Bus values escape filesystem bytes; unlike URI values, '~' must be escaped.
+    escaped = quote_from_bytes(os.fsencode(path), safe="/").replace("~", "%7E")
+    return f"unix:path={escaped}"
 
 
 def initialize_environment() -> None:

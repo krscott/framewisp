@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ def test_outside_git_scopes_to_canonical_cwd(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     digest = hashlib.sha256(os.fsencode(tmp_path.resolve())).hexdigest()[:24]
-    expected = Path("/tmp") / f"framewisp-project-{digest}" / "browser"
+    expected = Path(tempfile.gettempdir()) / f"framewisp-project-{digest}" / "browser"
     assert resolve_session("browser") == expected
     child = tmp_path / "child"
     child.mkdir()
@@ -135,7 +136,7 @@ def test_git_root_preserves_filesystem_bytes(
     monkeypatch.chdir(directory)
     digest = hashlib.sha256(os.fsencode(directory.resolve())).hexdigest()[:24]
     assert resolve_session("browser") == (
-        Path("/tmp") / f"framewisp-project-{digest}" / "browser"
+        Path(tempfile.gettempdir()) / f"framewisp-project-{digest}" / "browser"
     )
 
 

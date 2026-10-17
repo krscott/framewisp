@@ -51,7 +51,9 @@ speed guarantee.
 ## Command reference
 
 Use `framewisp SESSION COMMAND ...`, where SESSION is normally a bare name such
-as `demo` or `browser`. Names resolve to `/tmp/framewisp-project-<hash>/NAME`.
+as `demo` or `browser`. Names resolve to `<tempdir>/framewisp-project-<hash>/NAME`,
+where `<tempdir>` is Python's `tempfile.gettempdir()` (`TMPDIR` when writable,
+normally `/tmp` otherwise).
 The hash is the first 24 hexadecimal characters of SHA-256 of the canonical Git
 worktree root, or the canonical current directory outside Git. Subdirectories of
 one worktree agree; separate worktrees differ. Symlinked project paths agree.
@@ -62,7 +64,12 @@ retain their behavior. Bare names never fall back to a legacy directory. Empty
 names and `.`/`..` are invalid; names must fit in 255 bytes. Agents in the same
 project must choose distinct names. Keep launch and control commands in the same
 project (the same working directory outside Git). `Session ready:` and `Attached:`
-print the resolved directory; use that explicit path from another project.
+print the resolved directory; use that explicit path from another project or an
+environment with a different `TMPDIR`. Bare names under different temporary
+directories select different sessions. Headless runtime sockets also use this
+temporary directory. If startup reports the 108-byte socket path limit, set
+`TMPDIR` to a shorter writable directory. Cleanup and recovery use the runtime
+path saved in the ownership journal even if `TMPDIR` changes.
 Project scoping does not change sandbox socket permissions.
 
 In the syntax below, brackets mark optional arguments;

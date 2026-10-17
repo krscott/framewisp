@@ -190,7 +190,9 @@ these commands inside `nix develop` when working on the source.
 
 Every command takes a session name or explicit path before the subcommand: `framewisp SESSION COMMAND ...`.
 Use a bare name such as `browser` or `demo` by default. Names resolve to
-`/tmp/framewisp-project-<hash>/NAME`, where `<hash>` is the first 24 hexadecimal
+`<tempdir>/framewisp-project-<hash>/NAME`, where `<tempdir>` is Python's
+`tempfile.gettempdir()` (`TMPDIR` when set to a writable directory, normally
+`/tmp` otherwise) and `<hash>` is the first 24 hexadecimal
 characters of SHA-256 of the canonical project path. Inside Git, the project is
 the worktree root, so commands from its subdirectories agree. Separate worktrees
 have separate sessions. Outside Git, the project is the current working directory.
@@ -204,7 +206,13 @@ explicitly select those directories. Names must fit in 255 bytes.
 
 Agents in the same project must choose distinct names to avoid sharing a session.
 Both `run` and user-started `attach` print the resolved session directory at
-startup. Use that explicit path to control the session from another project.
+startup. Use that explicit path to control the session from another project or
+an environment with a different `TMPDIR`. The same bare name resolves to different
+sessions under different temporary directories.
+Headless runtime sockets also use this temporary directory. Startup checks the
+108-byte Unix socket limit, including the terminating NUL, and asks for a shorter
+`TMPDIR` if needed. Cleanup and recovery use the runtime path in the ownership
+journal, even when `TMPDIR` changes.
 Project scoping does not change sandbox socket permissions. `--detach` remains
 session-independent.
 

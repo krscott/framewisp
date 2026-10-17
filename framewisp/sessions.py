@@ -3,6 +3,7 @@
 import hashlib
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -50,4 +51,6 @@ def resolve_session(argument: str) -> Path:
         raise ValueError("Session name must fit in 255 bytes.")
     project = project_directory()
     digest = hashlib.sha256(os.fsencode(project)).hexdigest()[:24]
-    return (Path("/tmp") / f"framewisp-project-{digest}" / argument).resolve()
+    return (
+        Path(tempfile.gettempdir()) / f"framewisp-project-{digest}" / argument
+    ).resolve()

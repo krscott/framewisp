@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import stat
+import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,9 +22,38 @@ def identity(path: Path) -> list[int]:
     return [info.st_dev, info.st_ino]
 
 
-def runtime_path(session: Path) -> Path:
+def runtime_name(session: Path) -> str:
     device, inode = identity(session)
-    return Path(f"/tmp/framewisp-{os.getuid()}-{device:x}-{inode:x}")
+    return f"framewisp-{os.getuid()}-{device:x}-{inode:x}"
+
+
+def runtime_path(session: Path) -> Path:
+    return Path(tempfile.gettempdir()) / runtime_name(session)
+
+
+def check_socket_paths(runtime: Path) -> None:
+    # Sway names its IPC socket with a UID and signed 32-bit PID. Budget for
+    # every possible PID before starting any children, plus the terminating NUL.
+    socket_path = runtime / f"sway-ipc.{os.getuid()}.2147483647.sock"
+    size = len(os.fsencode(socket_path)) + 1
+    if size > 108:
+        raise SessionError(
+            f"Runtime directory {runtime} makes socket paths up to {size} bytes "
+            "including the terminating NUL, over the 108-byte limit. "
+            "Set TMPDIR to a shorter directory."
+        )
+
+
+def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
+    # Journals without a path predate TMPDIR support and always used /tmp.
+    legacy = Path("/tmp") / runtime_name(session)
+    value = journal.get("runtime_path", str(legacy))
+    if not isinstance(value, str) or "\0" in value:
+        raise SessionError("Ownership journal runtime path must be an absolute path.")
+    runtime = Path(value)
+    if not runtime.is_absolute() or runtime.name != legacy.name:
+        raise SessionError(f"Invalid ownership journal runtime path: {runtime}")
+    return runtime
 
 
 @contextmanager
@@ -85,7 +115,7 @@ def read_journal(session: Path) -> dict[str, object]:
         raise SessionError(f"Cannot verify ownership at {path}: {error}") from error
 
 
-def write_journal(session: Path, runtime: Path | None) -> None:
+def write_journal(session: Path, runtime: Path, *, created: bool) -> None:
     temporary = session / ".headless-owner.tmp"
     descriptor = os.open(
         temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
@@ -94,7 +124,8 @@ def write_journal(session: Path, runtime: Path | None) -> None:
         json.dump(
             {
                 "session": identity(session),
-                "runtime": identity(runtime) if runtime else None,
+                "runtime_path": str(runtime),
+                "runtime": identity(runtime) if created else None,
             },
             output,
         )
@@ -103,7 +134,7 @@ def write_journal(session: Path, runtime: Path | None) -> None:
 
 def remove_runtime(session: Path) -> None:
     journal = read_journal(session)
-    runtime = runtime_path(session)
+    runtime = journal_runtime(session, journal)
     if runtime.is_symlink():
         raise SessionError(f"Refusing symlink runtime: {runtime}")
     if runtime.exists():
@@ -151,9 +182,10 @@ def refuse_abandoned_ownership(session: Path) -> None:
 def headless_runtime(session: Path) -> Generator[Path, None, None]:
     runtime = runtime_path(session)
     refuse_abandoned_ownership(session)
-    write_journal(session, None)
+    check_socket_paths(runtime)
+    write_journal(session, runtime, created=False)
     runtime.mkdir(mode=0o700)
-    write_journal(session, runtime)
+    write_journal(session, runtime, created=True)
     try:
         yield runtime
     finally:

@@ -153,15 +153,22 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    Refuse existing recording destinations and paths reserved for session logs or
    metadata before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
-3. Atomically write `.headless-owner.json` with the session device/inode and a
-   null runtime identity, create `/tmp/framewisp-UID-DEVICEHEX-INODEHEX` with mode
-   0700, then atomically update the journal with its device/inode. The short path
-   avoids Unix socket path limits. It holds compositor configuration and sockets
+3. Choose `<tempdir>/framewisp-UID-DEVICEHEX-INODEHEX`, using Python's
+   `tempfile.gettempdir()` (`TMPDIR` when writable, normally `/tmp` otherwise).
+   Before creating the runtime or starting children, check the socket path budget
+   against Linux's 108-byte limit, including the terminating NUL. Reserve space
+   for Sway's UID and a ten-digit PID, the longest managed socket filename.
+   An excessive length reports the runtime path and byte budget and asks for a
+   shorter `TMPDIR`. Atomically write `.headless-owner.json` with the session
+   device/inode, the absolute runtime path, and a null runtime identity. Create
+   the runtime with mode 0700, then atomically update the journal with its
+   device/inode. It holds compositor configuration and sockets
    (including `control.sock`) and is removed after successful cleanup.
 4. Prepare separate runtime and caller app environments. Remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
-   and `GSK_RENDERER=cairo`.
+   and `GSK_RENDERER=cairo`. Private D-Bus addresses percent-escape runtime
+   filesystem bytes so temporary paths with spaces or address delimiters work.
    With `--profile fresh`, `profiles.fresh_environment` creates disposable
    HOME/config/cache/data/state/tmp directories under this runtime and clears
    inherited toolkit and locale settings. It writes GTK 3/4 settings.ini with
@@ -271,7 +278,8 @@ the root with `os.fsdecode` to preserve non-UTF-8 filesystem names. Only Git's
 "not a git repository" error permits the cwd fallback; other failures report an
 actionable error instead of silently changing project scope.
 Hash its filesystem bytes with SHA-256, take the
-first 24 hexadecimal characters, and resolve `/tmp/framewisp-project-<hash>/NAME`.
+first 24 hexadecimal characters, and resolve
+`<tempdir>/framewisp-project-<hash>/NAME` under `tempfile.gettempdir()`.
 The hash is stable across processes and separates worktrees, while canonical
 paths make symlink aliases agree. Git is a packaged runtime and test dependency;
 if unavailable, report an actionable error rather than silently choosing a
@@ -280,7 +288,9 @@ directory fallback occurs for names. The existing short runtime socket paths
 remain independent of the session directory.
 
 Agents sharing a project must choose distinct names. Startup diagnostics print
-the resolved directory, which can be used explicitly from another project.
+the resolved directory, which can be used explicitly from another project or an
+environment with a different `TMPDIR`. Bare names under different temporary
+directories select different sessions.
 Desktop attachment remains user-started, and `--detach` is session-independent.
 The resolver does not change session ownership checks, shutdown, recovery, or
 sandbox socket permissions.
@@ -545,9 +555,12 @@ supervisors exit. Before launching children, each supervisor writes an
 removes that record. Failure retains diagnostic information. A killed supervisor
 leaves its record and recovery refuses to remove the runtime.
 
-Recovery verifies the journal's session identity and the fixed runtime's inode,
-owner, permissions, and directory type. It never signals stored PIDs and never
-uses metadata as a runtime path. A null runtime identity permits only rmdir of an
+Recovery verifies the journal's session identity and reads its absolute runtime
+path, whose basename must match the UID and session identity. Journals without a
+path use the original fixed `/tmp` location. Recovery checks the runtime's inode,
+owner, permissions, and directory type regardless of the current `TMPDIR`.
+Normal cleanup reads the same journal path. Recovery never signals stored PIDs
+or uses `session.json` to authorize cleanup. A null runtime identity permits only rmdir of an
 empty directory, covering interruption between mkdir and journal update. Missing
 runtimes are safe to finish recovering. Without a committed journal, recovery
 only clears a partial temporary journal if no runtime or session metadata exists.

@@ -17,6 +17,7 @@ from gi.repository import Gio, GLib
 
 from framewisp import inspection_limits as limits
 from framewisp.display_bounds import Rect, convert_bounds, match_window, read_windows
+from framewisp.environment import unix_bus_address
 from framewisp.errors import SessionError
 
 ACCESSIBLE = "org.a11y.atspi.Accessible"
@@ -204,7 +205,7 @@ def inspect_session(
         )
     # Only the exact private socket created by this runner is eligible. Never fall
     # back to the caller's desktop bus or AT_SPI_BUS_ADDRESS environment variable.
-    expected = f"unix:path={Path(state['runtime_directory']) / 'accessibility.sock'}"
+    expected = unix_bus_address(Path(state["runtime_directory"]) / "accessibility.sock")
     if state.get("accessibility_bus") != expected:
         raise SessionError("Invalid private accessibility bus in session metadata")
     return inspect_bus(

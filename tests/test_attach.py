@@ -19,7 +19,12 @@ from framewisp.attach import KEYCODES, AttachedInput, run_attachment
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError
-from framewisp.ownership import recover_session, session_lease, write_journal
+from framewisp.ownership import (
+    recover_session,
+    runtime_path,
+    session_lease,
+    write_journal,
+)
 from framewisp.portal import DesktopPortal
 
 
@@ -589,7 +594,7 @@ def test_attachment_refuses_headless_ownership(
     with session_lease(session):
         assert run_attachment(session, None) == 1
         assert "still live" in capsys.readouterr().err
-    write_journal(session, None)
+    write_journal(session, runtime_path(session), created=False)
     assert run_attachment(session, None) == 1
     assert "recover first" in capsys.readouterr().err
     assert not (session / "session.json").exists()

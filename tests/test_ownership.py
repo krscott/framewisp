@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -40,10 +41,13 @@ def wait_for(path: Path) -> None:
         "shutdown-metadata",
     ],
 )
-def test_killed_startup_recovers(tmp_path: Path, stage: str) -> None:
+def test_killed_startup_recovers(
+    tmp_path: Path, stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     session = tmp_path / "session"
     session.mkdir()
     ready = tmp_path / "ready"
+    runtime = runtime_path(session)
     script = """
 import os, shutil, sys, time
 from pathlib import Path
@@ -56,7 +60,7 @@ with session_lease(session) as lease:
         ready.touch()
         time.sleep(60)
     if str(stage) in {'journal', 'mkdir'}:
-        write_journal(session, None)
+        write_journal(session, runtime_path(session), created=False)
         if str(stage) == 'mkdir':
             runtime_path(session).mkdir(mode=0o700)
         ready.touch()
@@ -98,6 +102,8 @@ with session_lease(session) as lease:
                     pids.append(int(path.read_text()))
             runner.kill()
             runner.wait(timeout=5)
+            monkeypatch.setenv("TMPDIR", str(tmp_path))
+            monkeypatch.setattr(tempfile, "tempdir", None)
             deadline = time.monotonic() + 10
             while True:
                 try:
@@ -107,11 +113,12 @@ with session_lease(session) as lease:
                     assert "still live" in str(error)
                     assert time.monotonic() < deadline
                     time.sleep(0.05)
-            assert not runtime_path(session).exists()
+            assert not runtime.exists()
             assert not (session / JOURNAL).exists()
             assert all(not Path(f"/proc/{pid}").exists() for pid in pids)
             if stage == "children":
                 assert (session / "app.log").exists()
+            monkeypatch.undo()
             with session_lease(session), headless_runtime(session) as runtime:
                 assert runtime.is_dir()
         finally:
@@ -169,11 +176,13 @@ def test_symlink_ownership_files_refused(tmp_path: Path, name: str) -> None:
 
 @pytest.fixture
 def runtime_backup() -> Generator[Path, None, None]:
-    with TemporaryDirectory(prefix="framewisp-test-", dir="/tmp") as directory:
+    with TemporaryDirectory(prefix="framewisp-test-") as directory:
         yield Path(directory) / "saved"
 
 
-def test_runtime_replacement_refused(tmp_path: Path, runtime_backup: Path) -> None:
+def test_runtime_replacement_refused(
+    tmp_path: Path, runtime_backup: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     runtime = runtime_path(tmp_path)
     original = runtime_backup
     with pytest.raises(SessionError, match="Runtime identity changed"):
@@ -181,6 +190,7 @@ def test_runtime_replacement_refused(tmp_path: Path, runtime_backup: Path) -> No
             runtime.rename(original)
             runtime.mkdir(mode=0o700)
             (runtime / "unrelated").write_text("preserve")
+            monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with pytest.raises(SessionError, match="Runtime identity changed"):
         recover_session(tmp_path)
     assert (runtime / "unrelated").read_text() == "preserve"
