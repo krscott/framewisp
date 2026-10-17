@@ -68,7 +68,17 @@
             inherit pkgs;
             workers = 8;
           };
-        };
+          ci-benchmark-unit-serial = pkgs.framewisp.overrideAttrs {
+            dontUsePytestXdist = true;
+          };
+          ci-benchmark-unit-parallel = pkgs.framewisp;
+        }
+        // builtins.listToAttrs (
+          map (group: {
+            name = "ci-benchmark-shard-${toString group}";
+            value = import ./nix/package-check.nix { inherit pkgs group; };
+          }) (pkgs.lib.range 1 8)
+        );
 
         checks.package = import ./nix/package-check.nix { inherit pkgs; };
 

@@ -1,0 +1,72 @@
+name: CI shard benchmark
+
+on:
+  push:
+    branches: [ "t3code/reduce-github-ci-time-1" ]
+    paths:
+    - .github/workflows/ci-shard-benchmark.yml
+    - .github/ci-shard-trigger
+
+permissions:
+  contents: read
+
+jobs:
+  shards:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - {name: shard-1, group: 1, cache: false}
+        - {name: shard-2, group: 2, cache: false}
+        - {name: shard-3, group: 3, cache: false}
+        - {name: shard-4, group: 4, cache: false}
+        - {name: shard-5, group: 5, cache: false}
+        - {name: shard-6, group: 6, cache: false}
+        - {name: shard-7, group: 7, cache: false}
+        - {name: shard-8, group: 8, cache: false}
+        - {name: cached-shard-1, group: 1, cache: true}
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Restore and save Nix store
+      if: matrix.cache
+      uses: nix-community/cache-nix-action@v7
+      with:
+        primary-key: ci-shard-benchmark-${{ runner.os }}-${{ github.run_id }}
+    - name: Change source without changing behavior
+      run: |
+        printf '\n# Benchmark source variation: %s\n' "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> framewisp/__init__.py
+    - name: Test standalone package shard
+      env:
+        GROUP: ${{ matrix.group }}
+      run: nix build -L ".#ci-benchmark-shard-$GROUP"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: junit-${{ matrix.name }}-${{ github.run_attempt }}
+        path: result/junit.xml
+
+  unit:
+    name: unit-${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [serial, parallel]
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Change source without changing behavior
+      run: |
+        printf '\n# Benchmark source variation: %s\n' "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> framewisp/__init__.py
+    - name: Build package and run unit tests
+      env:
+        MODE: ${{ matrix.mode }}
+      run: nix build -L ".#ci-benchmark-unit-$MODE"

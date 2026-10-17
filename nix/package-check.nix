@@ -1,8 +1,9 @@
 {
   pkgs,
   workers ? 1,
+  group ? null,
 }:
-pkgs.runCommand "framewisp-package-test-${toString workers}"
+pkgs.runCommand "framewisp-package-test-${toString workers}-${toString group}"
   {
     nativeBuildInputs = [ pkgs.gobject-introspection ];
     buildInputs = [
@@ -37,5 +38,7 @@ pkgs.runCommand "framewisp-package-test-${toString workers}"
       }/bin/python \
       -m pytest -c ${../pyproject.toml} ${../tests}/test_profiles.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py ${
         pkgs.lib.optionalString (workers > 1) "-n ${toString workers} --dist worksteal"
-      } --durations=0 --junitxml "$out/junit.xml" --basetemp "$TMPDIR/tests"
+      } ${
+        pkgs.lib.optionalString (group != null) "--test-shards 8 --test-shard ${toString group}"
+      } --rootdir ${../tests} --durations=0 --junitxml "$out/junit.xml" --basetemp "$TMPDIR/tests"
   ''
