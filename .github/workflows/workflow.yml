@@ -41,6 +41,7 @@ jobs:
         nix develop --command python -m pytest \
           tests/test_integration.py::test_agent_can_see_type_and_click \
           tests/test_x11.py \
+          tests/test_tempdirs.py \
           --durations=25 --basetemp "$RUNNER_TEMP/framewisp-tests"
 
     - name: Preserve failed test artifacts

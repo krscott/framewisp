@@ -776,7 +776,6 @@ def _run_session(
         sig: signal.signal(sig, request_stop) for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        # Short paths also fit Wayland and VNC's Unix socket path limits.
         with (
             headless_runtime(session) as runtime,
             ExitStack() as stack,
