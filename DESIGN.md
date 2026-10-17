@@ -1072,7 +1072,8 @@ collected cases by their collection index modulo the shard count. Every runner
 must collect the same cases in the same order. The default shard count of one
 selects every case for ordinary pytest invocations. CI uses all eight groups.
 
-Successful package checks publish JUnit reports. Failed checks retain their Nix
-build directories so CI can upload test logs, recordings, and JUnit reports.
+Successful package checks publish JUnit reports. Failed installed-package checks
+retain their Nix build directories so CI can upload test logs, recordings, and
+JUnit reports.
 The `build` status requires formatting, quality checks, and every package shard to
 succeed. New commits cancel obsolete runs for the same workflow and Git ref.

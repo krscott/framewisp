@@ -90,7 +90,7 @@ jobs:
         TEST_ARTIFACTS: ${{ runner.temp }}/framewisp-package-tests
       run: |
         mkdir -p "$TEST_ARTIFACTS"
-        for directory in /tmp/nix-build-framewisp-package-test-*.drv-*; do
+        for directory in /nix/var/nix/builds/nix-*/build; do
           if sudo test -d "$directory/tests"; then
             sudo cp -r "$directory/tests" "$TEST_ARTIFACTS/"
           fi
