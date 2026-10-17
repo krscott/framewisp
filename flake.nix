@@ -71,7 +71,9 @@
           ci-benchmark-unit-serial = pkgs.framewisp.overrideAttrs {
             dontUsePytestXdist = true;
           };
-          ci-benchmark-unit-parallel = pkgs.framewisp;
+          ci-benchmark-unit-parallel = pkgs.framewisp.overrideAttrs (old: {
+            nativeCheckInputs = old.nativeCheckInputs ++ [ pkgs.python3.pkgs.pytest-xdist ];
+          });
         }
         // builtins.listToAttrs (
           map (group: {

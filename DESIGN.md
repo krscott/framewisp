@@ -1057,3 +1057,24 @@ The complete schema, state/transition semantics, result fields, limits, and
 failure-capture rules are in [conditional checks](docs/conditional-checks.md).
 That document is part of this design specification. Input completion and successful
 PNG capture alone never set batch `verified` to true.
+
+## CI benchmarks
+
+`nix/package-check.nix` runs the installed-package tests in an empty environment
+with explicit GTK, Qt, recording, and Python dependencies. It writes JUnit results
+to its output directory. The default installed-package check runs its complete
+suite serially.
+Benchmark package outputs select four or eight pytest workers, or one of eight
+serial test shards. `tests/conftest.py` assigns collected cases to shards by their
+collection index modulo the shard count. All runners must collect the same tests
+in the same order; the default shard count of one selects every case.
+
+The benchmark workflows compare complete pipelines, separate quality checks,
+isolated GUI shards, and serial versus parallel unit tests on standard Ubuntu
+GitHub runners. The parallel unit benchmark adds pytest-xdist's Nix setup hook,
+which runs unit tests on the available build cores. Ordinary package builds and
+the isolated GUI shards keep serial unit tests.
+Cache comparisons change an application source comment on every run attempt so
+restored dependencies cannot bypass application construction or test execution.
+Rerunning only the cached job within the same workflow run restores its cache.
+The separate cancellation probe verifies that a newer commit stops obsolete work.
