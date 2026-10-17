@@ -3,6 +3,7 @@
   python,
   lib,
   pytestCheckHook,
+  pytest-xdist,
   setuptools,
   vncdotool,
   pygobject3,
@@ -133,6 +134,7 @@ buildPythonPackage {
 
   nativeCheckInputs = [
     pytestCheckHook
+    pytest-xdist
     pygobject-stubs
     pillow
     ffmpeg
