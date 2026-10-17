@@ -1043,21 +1043,26 @@ also mean the app or display exited; inspect the diagnostic before deciding.
 
 ## Development
 
-Enter `nix develop` from a checkout. It creates the development virtual
-environment on first use. Then run:
+Enter `nix develop` from a checkout. Nix supplies runtime and development
+dependencies. On first use, the shell creates a separate `.venv` for the
+checkout and installs only the local project in editable mode, without resolving
+or downloading Python packages. Then run:
 
 ```sh
 python -m pytest
 python -m mypy .
-python -m pyright
+pyright
 ```
 
 Tests run a real compositor, VNC server, and GTK app. They check input through
 the demo's output, compare screenshot regions, decode recordings, and verify
 managed-process cleanup.
 
-After changing Python dependencies or script entry points, refresh the existing
-virtual environment with `python -m pip install -e '.[dev]'` inside `nix develop`.
+Declare Python dependencies in `pyproject.toml` and the corresponding Nix
+packages in `default.nix` (runtime) or `flake.nix` (development tools). Exit and
+re-enter `nix develop` after changing Nix dependencies. To refresh package
+metadata or script entry points in an existing virtual environment, run
+`python -m pip install --no-deps --no-build-isolation -e .` inside that shell.
 
 Run `nix flake check` to test the installed package in an empty environment,
 including real input, screenshots, and recording. This checks that it works

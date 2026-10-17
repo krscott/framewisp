@@ -14,8 +14,7 @@ dependencies = [
 dev = [
     "black",
     "isort",
-    "mypy~=1.9",
-    "pyright",
+    "mypy",
     "pytest",
     "pygobject-stubs",
     "pillow",
