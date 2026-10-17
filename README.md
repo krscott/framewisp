@@ -1064,6 +1064,42 @@ re-enter `nix develop` after changing Nix dependencies. To refresh package
 metadata or script entry points in an existing virtual environment, run
 `python -m pip install --no-deps --no-build-isolation -e .` inside that shell.
 
+Nix is optional. For manual setup, install the native dependencies listed above,
+GStreamer 1.0 and its introspection data, and Just. Building PyGObject with pip
+also needs the Python, Cairo, and GObject Introspection development packages.
+Then create and activate a virtual environment:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[dev]'
+just lint
+```
+
+The dev extra includes the Python pyright wrapper, which provides the `pyright`
+command and may download Node and pyright on first use. `just format` skips Nix
+formatting when Nix is absent and shell formatting when shfmt is absent.
+
+`just test` and `just check` also run the GUI integration suite. For that suite,
+install libadwaita with its introspection data, D-Bus, dconf, AT-SPI, the GTK 4
+demo and its compiled GSettings schemas, a Qt 6 QML runner, and the DejaVu and
+Noto fonts used by the Nix package. Configure these paths for your installation:
+
+| Environment variable | Value |
+| --- | --- |
+| `FRAMEWISP_TEST_GTK_APP` | Absolute path to `gtk4-demo`. |
+| `FRAMEWISP_TEST_GTK_SCHEMAS` | Directory containing the demo's compiled GSettings schemas. |
+| `FRAMEWISP_TEST_DCONF_SERVICE` | Absolute path to `ca.desrt.dconf.service`. |
+| `FRAMEWISP_TEST_DCONF_MODULES` | GIO module directory containing the dconf backend. |
+| `FRAMEWISP_FONTCONFIG_FILE` | Fontconfig configuration file for captions and the demo. |
+| `FRAMEWISP_PROFILE_FONTCONFIG_FILE` | Fontconfig configuration file for fresh profiles. |
+| `FRAMEWISP_ATSPI_REGISTRY` | Path to `at-spi2-registryd`, if it is absent from PATH. |
+
+The font configurations must load the installed fonts without depending on user
+settings. GStreamer needs its base, good, and PipeWire plugins. Qt must find its
+QML modules and platform plugins; set `QML_IMPORT_PATH` and `QT_PLUGIN_PATH` if
+your installation requires them. The Nix shell sets these paths automatically.
+
 Run `nix flake check` to test the installed package in an empty environment,
 including real input, screenshots, and recording. This checks that it works
 without the development shell.

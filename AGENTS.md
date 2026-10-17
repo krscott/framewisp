@@ -24,9 +24,12 @@ nix develop -c python -m pytest
 Run Python tools such as pytest and mypy with `python -m <tool>` so
 they use the active environment and can find its installed packages.
 
-Run `pyright` directly. Nix provides it as a Node program, and it finds packages
-through `python` on PATH, including the active venv. Do not add the PyPI wrapper
-to development dependencies; it downloads pyright from npm outside the Nix lock.
+Run `pyright` directly. In the Nix shell, Nix supplies the Node program and the
+creation hook skips pip dependencies. For manual setup, run
+`python -m pip install -e '.[dev]'` to install the Python wrapper, which provides
+the same command.
+It may download Node and pyright on first use. Nix is optional; install native
+runtime dependencies and Just separately when working without it.
 
 ## Dependencies
 
