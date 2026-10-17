@@ -25,7 +25,7 @@ from framewisp.captions import capture_origin, recorder_output, render_recording
 from framewisp.compact import CompactSettings
 from framewisp.connection import reply as reply
 from framewisp.console import ConsoleCapture, app_output
-from framewisp.environment import caller_environment
+from framewisp.environment import caller_environment, unix_bus_address
 from framewisp.errors import (
     SOCKET_ACCESS_HINT,
     SessionError,
@@ -157,7 +157,7 @@ def start_inspection_buses(
             bus_config.write_text(
                 config.read_text().replace("</busconfig>", services + "</busconfig>")
             )
-        address = f"unix:path={runtime / (name + '.sock')}"
+        address = unix_bus_address(runtime / (name + ".sock"))
         log = session / (name + ".log")
         process = stack.enter_context(
             managed_process(

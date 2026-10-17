@@ -167,7 +167,8 @@ verification evidence or blockers; orchestration remains outside Framewisp.
 4. Prepare separate runtime and caller app environments. Remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
-   and `GSK_RENDERER=cairo`.
+   and `GSK_RENDERER=cairo`. Private D-Bus addresses percent-escape runtime
+   filesystem bytes so temporary paths with spaces or address delimiters work.
    With `--profile fresh`, `profiles.fresh_environment` creates disposable
    HOME/config/cache/data/state/tmp directories under this runtime and clears
    inherited toolkit and locale settings. It writes GTK 3/4 settings.ini with

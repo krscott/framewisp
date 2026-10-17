@@ -22,11 +22,13 @@ from framewisp.ownership import (
 from framewisp.sessions import resolve_session
 
 
-@pytest.fixture
-def temp_roots(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Path, Path]]:
+@pytest.fixture(params=["a", "a,%; é~"])
+def temp_roots(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[tuple[Path, Path]]:
     # Keep the test's own socket paths short regardless of pytest's basetemp.
     with tempfile.TemporaryDirectory(prefix="fw-", dir="/tmp") as directory:
-        first, second = Path(directory) / "a", Path(directory) / "b"
+        first, second = Path(directory) / request.param, Path(directory) / "b"
         first.mkdir()
         second.mkdir()
         monkeypatch.setenv("TMPDIR", str(first))
