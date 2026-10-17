@@ -1,9 +1,10 @@
 {
   pkgs,
-  workers ? 1,
-  group ? null,
+  shard,
+  shards,
 }:
-pkgs.runCommand "framewisp-package-test-${toString workers}-${toString group}"
+assert shards > 0 && shard >= 1 && shard <= shards;
+pkgs.runCommand "framewisp-package-test-${toString shard}-of-${toString shards}"
   {
     nativeBuildInputs = [ pkgs.gobject-introspection ];
     buildInputs = [
@@ -31,14 +32,14 @@ pkgs.runCommand "framewisp-package-test-${toString workers}-${toString group}"
       ${
         (pkgs.python3.withPackages (ps: [
           ps.pytest
-          ps.pytest-xdist
           ps.pillow
           ps.pygobject3
         ]))
       }/bin/python \
-      -m pytest -c ${../pyproject.toml} ${../tests}/test_profiles.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py ${
-        pkgs.lib.optionalString (workers > 1) "-n ${toString workers} --dist worksteal"
-      } ${
-        pkgs.lib.optionalString (group != null) "--test-shards 8 --test-shard ${toString group}"
-      } --rootdir ${../tests} --durations=0 --junitxml "$out/junit.xml" --basetemp "$TMPDIR/tests"
+      -m pytest -c ${../pyproject.toml} \
+      ${../tests}/test_profiles.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py \
+      --test-shards ${toString shards} --test-shard ${toString shard} \
+      --rootdir ${../tests} -p no:cacheprovider --durations=25 \
+      --junitxml "$TMPDIR/junit.xml" --basetemp "$TMPDIR/tests"
+    cp "$TMPDIR/junit.xml" "$out/junit.xml"
   ''

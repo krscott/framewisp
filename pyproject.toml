@@ -17,7 +17,6 @@ dev = [
     "mypy~=1.9",
     "pyright",
     "pytest",
-    "pytest-xdist",
     "pygobject-stubs",
     "pillow",
 ]

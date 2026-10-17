@@ -33,7 +33,6 @@
             isort
             mypy
             pytest
-            pytest-xdist
             pygobject-stubs
           ]
           ++ pkgs.framewisp.propagatedBuildInputs
@@ -59,30 +58,17 @@
         packages = {
           inherit (pkgs) framewisp;
           default = pkgs.framewisp;
-          ci-benchmark-1 = import ./nix/package-check.nix { inherit pkgs; };
-          ci-benchmark-4 = import ./nix/package-check.nix {
-            inherit pkgs;
-            workers = 4;
-          };
-          ci-benchmark-8 = import ./nix/package-check.nix {
-            inherit pkgs;
-            workers = 8;
-          };
-          ci-benchmark-unit-serial = pkgs.framewisp.overrideAttrs {
-            dontUsePytestXdist = true;
-          };
-          ci-benchmark-unit-parallel = pkgs.framewisp.overrideAttrs (old: {
-            nativeCheckInputs = old.nativeCheckInputs ++ [ pkgs.python3.pkgs.pytest-xdist ];
-          });
-        }
-        // builtins.listToAttrs (
-          map (group: {
-            name = "ci-benchmark-shard-${toString group}";
-            value = import ./nix/package-check.nix { inherit pkgs group; };
+        };
+
+        checks = builtins.listToAttrs (
+          map (shard: {
+            name = "package-${toString shard}";
+            value = import ./nix/package-check.nix {
+              inherit pkgs shard;
+              shards = 8;
+            };
           }) (pkgs.lib.range 1 8)
         );
-
-        checks.package = import ./nix/package-check.nix { inherit pkgs; };
 
         devShells = {
           default = pkgs.mkShell {

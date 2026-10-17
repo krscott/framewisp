@@ -1058,23 +1058,21 @@ failure-capture rules are in [conditional checks](docs/conditional-checks.md).
 That document is part of this design specification. Input completion and successful
 PNG capture alone never set batch `verified` to true.
 
-## CI benchmarks
+## Continuous integration
 
-`nix/package-check.nix` runs the installed-package tests in an empty environment
-with explicit GTK, Qt, recording, and Python dependencies. It writes JUnit results
-to its output directory. The default installed-package check runs its complete
-suite serially.
-Benchmark package outputs select four or eight pytest workers, or one of eight
-serial test shards. `tests/conftest.py` assigns collected cases to shards by their
-collection index modulo the shard count. All runners must collect the same tests
-in the same order; the default shard count of one selects every case.
+GitHub Actions runs formatting and development-shell quality checks alongside
+eight installed-package test shards on standard Ubuntu runners. Each shard
+builds the package and runs its unit tests serially, then runs its assigned GUI
+cases serially. `nix flake check` runs all eight checks; a single shard can be run
+with `nix build -L .#checks.x86_64-linux.package-1` through `package-8`.
 
-The benchmark workflows compare complete pipelines, separate quality checks,
-isolated GUI shards, and serial versus parallel unit tests on standard Ubuntu
-GitHub runners. The parallel unit benchmark adds pytest-xdist's Nix setup hook,
-which runs unit tests on the available build cores. Ordinary package builds and
-the isolated GUI shards keep serial unit tests.
-Cache comparisons change an application source comment on every run attempt so
-restored dependencies cannot bypass application construction or test execution.
-Rerunning only the cached job within the same workflow run restores its cache.
-The separate cancellation probe verifies that a newer commit stops obsolete work.
+`nix/package-check.nix` runs installed-package tests in an empty environment with
+explicit GTK, Qt, recording, and Python dependencies. `tests/conftest.py` assigns
+collected cases by their collection index modulo the shard count. Every runner
+must collect the same cases in the same order. The default shard count of one
+selects every case for ordinary pytest invocations. CI uses all eight groups.
+
+Successful package checks publish JUnit reports. Failed checks retain their Nix
+build directories so CI can upload test logs, recordings, and JUnit reports.
+The `build` status requires formatting, quality checks, and every package shard to
+succeed. New commits cancel obsolete runs for the same workflow and Git ref.
