@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   format:
     runs-on: ubuntu-latest
@@ -21,8 +28,9 @@ jobs:
         nix run -L .#format
         git diff --exit-code
 
-  build:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
     - uses: actions/checkout@v5
@@ -52,11 +60,61 @@ jobs:
         path: ${{ runner.temp }}/framewisp-tests
         retention-days: 7
 
-    - name: Test and Build
-      run: nix build -L
-
-    - name: Test standalone package
-      run: nix flake check -L
-
     - name: Check nix
-      run: nix flake show '.?submodules=1'
+      run: |
+        nix flake check --no-build
+        nix flake show '.?submodules=1'
+
+  package:
+    name: package (${{ matrix.shard }}/8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build package and test installed commands
+      env:
+        SHARD: ${{ matrix.shard }}
+      run: nix build -L --keep-failed ".#checks.x86_64-linux.package-$SHARD"
+
+    - name: Preserve failed package test artifacts
+      if: failure()
+      env:
+        TEST_ARTIFACTS: ${{ runner.temp }}/framewisp-package-tests
+      run: |
+        mkdir -p "$TEST_ARTIFACTS"
+        for directory in /nix/var/nix/builds/nix-*/build; do
+          if sudo test -d "$directory/tests"; then
+            sudo cp -r "$directory/tests" "$TEST_ARTIFACTS/"
+          fi
+          if sudo test -f "$directory/junit.xml"; then
+            sudo cp "$directory/junit.xml" "$TEST_ARTIFACTS/"
+          fi
+        done
+        sudo chown -R "$(id -u):$(id -g)" "$TEST_ARTIFACTS"
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: package-tests-${{ matrix.shard }}
+        path: |
+          result/junit.xml
+          ${{ runner.temp }}/framewisp-package-tests
+        retention-days: 7
+
+  build:
+    if: always()
+    needs: [format, quality, package]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Require all CI jobs to pass
+      env:
+        JOB_RESULTS: ${{ toJSON(needs) }}
+      run: jq -e 'all(.[]; .result == "success")' <<< "$JOB_RESULTS"

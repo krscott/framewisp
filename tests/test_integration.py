@@ -669,10 +669,14 @@ def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
 
 
 def input_events(demo: Demo) -> list[dict[str, str | float | bool]]:
+    return read_input_events(demo.directory / "app.log")
+
+
+def read_input_events(log: Path) -> list[dict[str, str | float | bool]]:
     return [
         json.loads(line)
-        for line in (demo.directory / "app.log").read_text().splitlines()
-        if line.startswith('{"event":')
+        for line in log.read_text().splitlines(keepends=True)
+        if line.endswith("\n") and line.startswith('{"event":')
     ]
 
 

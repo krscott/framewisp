@@ -1057,3 +1057,23 @@ The complete schema, state/transition semantics, result fields, limits, and
 failure-capture rules are in [conditional checks](docs/conditional-checks.md).
 That document is part of this design specification. Input completion and successful
 PNG capture alone never set batch `verified` to true.
+
+## Continuous integration
+
+GitHub Actions runs formatting and development-shell quality checks alongside
+eight installed-package test shards on standard Ubuntu runners. Each shard
+builds the package and runs its unit tests serially, then runs its assigned GUI
+cases serially. `nix flake check` runs all eight checks; a single shard can be run
+with `nix build -L .#checks.x86_64-linux.package-1` through `package-8`.
+
+`nix/package-check.nix` runs installed-package tests in an empty environment with
+explicit GTK, Qt, recording, and Python dependencies. `tests/conftest.py` assigns
+collected cases by their collection index modulo the shard count. Every runner
+must collect the same cases in the same order. The default shard count of one
+selects every case for ordinary pytest invocations. CI uses all eight groups.
+
+Successful package checks publish JUnit reports. Failed installed-package checks
+retain their Nix build directories so CI can upload test logs, recordings, and
+JUnit reports.
+The `build` status requires formatting, quality checks, and every package shard to
+succeed. New commits cancel obsolete runs for the same workflow and Git ref.
