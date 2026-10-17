@@ -176,7 +176,7 @@ def test_symlink_ownership_files_refused(tmp_path: Path, name: str) -> None:
 
 @pytest.fixture
 def runtime_backup() -> Generator[Path, None, None]:
-    with TemporaryDirectory(prefix="framewisp-test-", dir="/tmp") as directory:
+    with TemporaryDirectory(prefix="framewisp-test-") as directory:
         yield Path(directory) / "saved"
 
 
