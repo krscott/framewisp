@@ -3403,8 +3403,12 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
 
 def wait_for_input_probe_window(demo: Demo) -> None:
     # GTK's map signal can precede Sway mapping the Xwayland window.
+    tree: dict[str, Any] = {}
+
     def mapped() -> bool:
-        nodes = [sway_request(demo.runtime, 4)]
+        nonlocal tree
+        tree = sway_request(demo.runtime, 4)
+        nodes = [tree]
         while nodes:
             node = nodes.pop()
             if node.get("name") == "Input probe":
@@ -3413,7 +3417,14 @@ def wait_for_input_probe_window(demo: Demo) -> None:
             nodes.extend(node.get("floating_nodes", []))
         return False
 
-    wait_until(mapped)
+    try:
+        wait_until(mapped)
+    except AssertionError:
+        (demo.directory / "sway-tree.json").write_text(json.dumps(tree, indent=2))
+        raise AssertionError(
+            f"Input probe did not map in Sway: {json.dumps(tree)}\n"
+            + (demo.directory / "app.log").read_text()
+        ) from None
 
 
 def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
