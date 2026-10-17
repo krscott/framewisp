@@ -594,6 +594,17 @@ FFmpeg, and the Qt QML regression runner on PATH. Python dependencies are also d
 in `pyproject.toml` and `default.nix`. The demo uses a plain GTK window and GLib
 loop and runs without a D-Bus session.
 
+The development shell creates a separate `.venv` for each checkout. Nix supplies
+runtime dependencies, development tools, and setuptools. The creation hook runs
+`python -m pip install --no-deps --no-build-isolation -e .` to install only the
+local project. New worktrees reuse dependencies from the Nix store without pip
+resolving packages or creating an isolated build environment. Pyright runs as
+Nix's Node program. CI creates the development environment with `PIP_NO_INDEX=1`.
+Nix is optional for development. Manual environments install `.[dev]` with pip,
+including the Python pyright wrapper that provides the `pyright` command. Native
+runtime dependencies and Just must be installed separately. The justfile skips
+Nix formatting when Nix is absent.
+
 The integration test starts the real CLI, waits for the app's initial screenshot,
 types text, sends BackSpace and Return, clicks the button, and verifies both the
 demo's emitted messages and changed screenshot regions. It also exercises Shift+Tab

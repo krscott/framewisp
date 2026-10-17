@@ -11,7 +11,7 @@ test *args:
 
 lint:
     python -m mypy .
-    python -m pyright
+    pyright
 
 check: lint test
 

@@ -9,9 +9,11 @@ Code from the original py-start template may be removed as the project evolves.
 
 ## Development environment
 
-Use `nix develop` to enter the development shell. Its hooks create `.venv` if
-missing, activate it, and install the project with development dependencies on
-creation. Agents can run this themselves; no user restart is needed.
+Use `nix develop` to enter the development shell. Nix supplies runtime and
+development dependencies, including setuptools. Its hooks create `.venv` if
+missing, activate it, and install only the local project in editable mode,
+without resolving or downloading Python packages. Each worktree has its own
+editable installation. Agents can run this themselves; no user restart is needed.
 
 For noninteractive commands, use `nix develop -c <command>`, for example:
 
@@ -19,8 +21,15 @@ For noninteractive commands, use `nix develop -c <command>`, for example:
 nix develop -c python -m pytest
 ```
 
-Run Python tools such as pytest, mypy, and pyright with `python -m <tool>` so
+Run Python tools such as pytest and mypy with `python -m <tool>` so
 they use the active environment and can find its installed packages.
+
+Run `pyright` directly. In the Nix shell, Nix supplies the Node program and the
+creation hook skips pip dependencies. For manual setup, run
+`python -m pip install -e '.[dev]'` to install the Python wrapper, which provides
+the same command.
+It may download Node and pyright on first use. Nix is optional; install native
+runtime dependencies and Just separately when working without it.
 
 ## Dependencies
 
@@ -31,8 +40,9 @@ Declare dependencies before installing them:
 2. Add corresponding Nix runtime packages to `default.nix`. Add development
    tools needed by the Nix environment to `flake.nix` and test dependencies
    needed during package checks to `default.nix` under `nativeCheckInputs`.
-3. Run `python -m pip install -e '.[dev]'` in the development shell to refresh
-   the installation.
+3. Exit and re-enter `nix develop` to load the updated Nix dependencies. To
+   refresh package metadata or script entry points in an existing `.venv`, run
+   `python -m pip install --no-deps --no-build-isolation -e .` in that shell.
 
 For libraries without type hints, add available stub packages to development
 dependencies. If stubs are unavailable, use a mypy override scoped to the
@@ -42,7 +52,7 @@ affected module in `pyproject.toml`.
 
 | Check | Command |
 |-------|---------|
-| Pyright | `python -m pyright` |
+| Pyright | `pyright` |
 | Mypy | `python -m mypy .` |
 | Tests | `python -m pytest` |
 

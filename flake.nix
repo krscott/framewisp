@@ -32,6 +32,7 @@
             black
             isort
             mypy
+            pillow
             pytest
             pygobject-stubs
           ]
@@ -102,7 +103,8 @@
             ];
             venvDir = ".venv";
             postVenvCreation = ''
-              pip install -e '.[dev]'
+              # Nix supplies dependencies and setuptools; only install this worktree's code.
+              python -m pip install --no-deps --no-build-isolation -e .
             '';
             shellHook = ''
               export GST_PLUGIN_SYSTEM_PATH_1_0=${pkgs.framewisp.capturePlugins}
