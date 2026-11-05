@@ -12,15 +12,11 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
+from unittest.mock import Mock
 
 import pytest
 
-from framewisp.attach import (
-    KEYCODES,
-    AttachedInput,
-    foreground_terminal,
-    run_attachment,
-)
+from framewisp.attach import KEYCODES, AttachedInput, attach_session, run_attachment
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
@@ -248,15 +244,24 @@ def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 # R-ATTACH-1
-def test_terminal_outside_foreground_is_refused() -> None:
-    # This process has no controlling relationship with a new PTY.
-    primary, secondary = pty.openpty()
-    try:
-        assert os.isatty(secondary)
-        assert not foreground_terminal(secondary)
-    finally:
-        os.close(primary)
-        os.close(secondary)
+def test_background_process_group_cannot_attach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Stubs model a background job; no terminal is allocated.
+    def background_group(_descriptor: int) -> int:
+        return os.getpgrp() + 1
+
+    def is_terminal(_descriptor: int) -> bool:
+        return True
+
+    monkeypatch.setattr(os, "isatty", is_terminal)
+    monkeypatch.setattr(os, "tcgetpgrp", background_group)
+    monkeypatch.setattr(sys, "stdin", Mock(isatty=lambda: True, fileno=lambda: 0))
+    monkeypatch.setattr(sys, "stdout", Mock(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", Mock(side_effect=AssertionError))
+    assert attach_session(tmp_path / "session") == 1
+    assert "foreground interactive terminal" in capsys.readouterr().err
+    assert not (tmp_path / "session").exists()
 
 
 # R-ATTACH-2

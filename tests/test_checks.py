@@ -359,7 +359,10 @@ def test_stale_text_cannot_verify(state: str) -> None:
 @pytest.mark.parametrize("status", ["partial", "timeout", "unsupported", "unavailable"])
 def test_incomplete_observations_cannot_verify(status: str) -> None:
     check = Condition.parse(condition())
-    observation = {"status": status, "matches": [{"text": "Done", "states": []}]}
+    observation: dict[str, object] = {
+        "status": status,
+        "matches": [{"text": "Done", "states": []}],
+    }
     assert check.evaluate(observation) is None
 
 
