@@ -3699,17 +3699,18 @@ def test_replaced_lock_refused_and_live_session_still_stops(
             if line.strip().startswith("grep ")
         ]
 
-    # grep exits 1 for no match, so a check that cannot run never looks clean.
+    # Output decides the check. grep exits 2 for unreadable /proc entries, but a
+    # shell status of 126 or above means it never ran, which must not look clean.
     checks = process_checks()
     assert len(checks) == 2
-    assert all(check.returncode == 0 and check.stdout for check in checks), checks
+    assert all(check.returncode < 126 and check.stdout for check in checks), checks
     assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
     cli(demo.directory, "stop")
     assert demo.process.wait(timeout=20) == 0
     assert not demo.runtime.exists()
     assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
     checks = process_checks()
-    assert all(check.returncode == 1 and not check.stdout for check in checks), checks
+    assert all(check.returncode < 126 and not check.stdout for check in checks), checks
     cli(demo.directory, "run", "--", sys.executable, "-c", "pass")
 
 

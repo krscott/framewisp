@@ -230,8 +230,9 @@ def run_commands(message: str, prefix: str) -> str:
         subprocess.run(command, shell=True, capture_output=True, text=True, check=False)
         for command in commands
     ]
-    # grep exits 1 for no match, so a command that cannot run never looks clean.
-    assert all(result.returncode in (0, 1) for result in results), results
+    # A shell status of 126 or above means the command never ran, so empty output
+    # would look clean. grep exits 2 for unreadable /proc entries, which is normal.
+    assert all(result.returncode < 126 for result in results), results
     return "".join(result.stdout for result in results)
 
 
