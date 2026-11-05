@@ -86,7 +86,7 @@
             ];
             packages = [
               pkgs.python3.pkgs.venvShellHook
-              pkgs.sway-unwrapped
+              pkgs.framewisp.sway
               pkgs.wayvnc
               pkgs.grim
               pkgs.wf-recorder
