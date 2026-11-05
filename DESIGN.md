@@ -160,9 +160,9 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    for Sway's UID and a ten-digit PID, the longest managed socket filename.
    An excessive length reports the runtime path and byte budget and asks for a
    shorter `TMPDIR`. Atomically write `.headless-owner.json` with the session
-   device/inode, the absolute runtime path, and a null runtime identity. Create
-   the runtime with mode 0700, then atomically update the journal with its
-   device/inode. It holds compositor configuration and sockets
+   device/inode, the held lock's device/inode, the absolute runtime path, and a
+   null runtime identity. Create the runtime with mode 0700, then atomically
+   update the journal with its device/inode. It holds compositor configuration and sockets
    (including `control.sock`) and is removed after successful cleanup.
 4. Prepare separate runtime and caller app environments. Remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
@@ -568,6 +568,11 @@ empty directory, covering interruption between mkdir and journal update. Missing
 runtimes are safe to finish recovering. Without a committed journal, recovery
 only clears a partial temporary journal if no runtime or session metadata exists.
 Copied journals, symlink ownership files, and replaced runtimes fail verification.
+Reading the journal also compares its lock identity with the descriptor the
+caller holds. A replaced or deleted lock leaves recovery holding a different
+inode from any live owner, so it refuses with manual cleanup steps. Journals
+without a valid lock identity are refused the same way. A live owner compares its
+own descriptor, so its cleanup succeeds even if the lock path was replaced.
 Once ownership is verified and no supervisor records remain, recovery removes the
 runtime, `session.json`, its temporary file, and the ownership journal. Logs,
 app-exit diagnostics, inputs, and recordings remain. It reports success as JSON

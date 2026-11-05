@@ -19,6 +19,7 @@ from framewisp.ownership import (
     recover_session,
     runtime_path,
     session_lease,
+    write_journal,
 )
 
 
@@ -32,6 +33,7 @@ def wait_for(path: Path) -> None:
 @pytest.mark.parametrize(
     "stage",
     [
+        "lease",
         "partial-journal",
         "journal",
         "mkdir",
@@ -55,17 +57,20 @@ from framewisp.ownership import session_lease, headless_runtime, write_journal, 
 from framewisp.processes import managed_process
 session, ready, stage, probe = map(Path, sys.argv[1:])
 with session_lease(session) as lease:
+    if str(stage) == 'lease':
+        ready.touch()
+        time.sleep(60)
     if str(stage) == 'partial-journal':
         (session / '.headless-owner.tmp').write_text('{')
         ready.touch()
         time.sleep(60)
     if str(stage) in {'journal', 'mkdir'}:
-        write_journal(session, runtime_path(session), created=False)
+        write_journal(session, runtime_path(session), lease, created=False)
         if str(stage) == 'mkdir':
             runtime_path(session).mkdir(mode=0o700)
         ready.touch()
         time.sleep(60)
-    with headless_runtime(session) as runtime:
+    with headless_runtime(session, lease) as runtime:
         if str(stage) in {'shutdown-runtime', 'shutdown-metadata'}:
             (session / 'session.json').write_text('{}')
             shutil.rmtree(runtime)
@@ -119,7 +124,10 @@ with session_lease(session) as lease:
             if stage == "children":
                 assert (session / "app.log").exists()
             monkeypatch.undo()
-            with session_lease(session), headless_runtime(session) as runtime:
+            with (
+                session_lease(session) as lease,
+                headless_runtime(session, lease) as runtime,
+            ):
                 assert runtime.is_dir()
         finally:
             if runner.poll() is None:
@@ -131,7 +139,7 @@ def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
     session = tmp_path / "session"
     session.mkdir()
     copied = tmp_path / "copy"
-    with session_lease(session), headless_runtime(session) as runtime:
+    with session_lease(session) as lease, headless_runtime(session, lease) as runtime:
         (session / "session.json").write_text(
             json.dumps(
                 {"runtime_directory": str(runtime), "processes": {"app": os.getpid()}}
@@ -153,7 +161,10 @@ def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
 def test_incomplete_cleanup_preserves_resources_and_diagnostics(tmp_path: Path) -> None:
     runtime = runtime_path(tmp_path)
     with pytest.raises(SessionError, match="Cleanup is incomplete"):
-        with session_lease(tmp_path), headless_runtime(tmp_path) as runtime:
+        with (
+            session_lease(tmp_path) as lease,
+            headless_runtime(tmp_path, lease) as runtime,
+        ):
             (runtime / "owner-123.json").write_text('{"error": "signal denied"}')
             (tmp_path / "app.log").write_text("diagnostic")
     with pytest.raises(SessionError, match="owner-123.json"):
@@ -186,7 +197,10 @@ def test_runtime_replacement_refused(
     runtime = runtime_path(tmp_path)
     original = runtime_backup
     with pytest.raises(SessionError, match="Runtime identity changed"):
-        with session_lease(tmp_path), headless_runtime(tmp_path) as runtime:
+        with (
+            session_lease(tmp_path) as lease,
+            headless_runtime(tmp_path, lease) as runtime,
+        ):
             runtime.rename(original)
             runtime.mkdir(mode=0o700)
             (runtime / "unrelated").write_text("preserve")
@@ -197,6 +211,121 @@ def test_runtime_replacement_refused(
     shutil.rmtree(runtime)
     original.rename(runtime)
     recover_session(tmp_path)
+
+
+def replace_lock(session: Path) -> Path:
+    original = session / "original.lock"
+    (session / LOCK).rename(original)
+    os.close(os.open(session / LOCK, os.O_CREAT | os.O_WRONLY, 0o600))
+    return original
+
+
+def run_commands(message: str, prefix: str) -> str:
+    # Refusals are the only manual cleanup guide, so tests run them verbatim.
+    commands = [
+        line.strip() for line in message.splitlines() if line.strip().startswith(prefix)
+    ]
+    assert commands
+    return "".join(
+        subprocess.run(
+            command, shell=True, capture_output=True, text=True, check=False
+        ).stdout
+        for command in commands
+    )
+
+
+@pytest.fixture
+def abandoned(tmp_path: Path) -> Generator[tuple[Path, Path], None, None]:
+    """A session whose owner exited without cleanup, leaving journal and runtime."""
+    session = tmp_path / "session with spaces"
+    session.mkdir()
+    runtime = runtime_path(session)
+    with session_lease(session) as lease:
+        write_journal(session, runtime, lease, created=False)
+        runtime.mkdir(mode=0o700)
+        write_journal(session, runtime, lease, created=True)
+    (runtime / "kept").write_text("preserve")
+    (session / "session.json").write_text("{}")
+    (session / "app.log").write_text("diagnostic")
+    yield session, runtime
+    shutil.rmtree(runtime, ignore_errors=True)
+
+
+def test_replaced_lock_refused_while_session_live(tmp_path: Path) -> None:
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
+        (runtime / "important").write_text("live resource")
+        original = replace_lock(tmp_path)
+        with pytest.raises(SessionError, match="was replaced") as refusal:
+            recover_session(tmp_path)
+        assert (runtime / "important").read_text() == "live resource"
+        assert (tmp_path / JOURNAL).exists()
+        # The refusal is the only manual runbook, so it must name exact targets.
+        message = str(refusal.value)
+        assert "/proc/locks" in message and str(runtime) in message
+        assert original.exists()
+        assert run_commands(message, "grep ':") != ""
+    # The owner still holds the journal's lock, so its own cleanup succeeds.
+    assert not runtime.exists()
+    assert not (tmp_path / JOURNAL).exists()
+
+
+def test_deleted_lock_refused_while_session_live(tmp_path: Path) -> None:
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
+        (tmp_path / LOCK).unlink()
+        with pytest.raises(SessionError, match="was replaced"):
+            recover_session(tmp_path)
+        assert runtime.is_dir()
+    assert not runtime.exists()
+
+
+def test_restoring_original_lock_allows_recovery(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    original = replace_lock(session)
+    with pytest.raises(SessionError, match="move it back"):
+        recover_session(session)
+    assert (runtime / "kept").exists()
+    original.replace(session / LOCK)
+    assert recover_session(session) == 0
+    assert not runtime.exists()
+
+
+def test_lost_lock_manual_cleanup_commands_work(abandoned: tuple[Path, Path]) -> None:
+    session, runtime = abandoned
+    replace_lock(session).unlink()
+    with pytest.raises(SessionError, match="was replaced") as refusal:
+        recover_session(session)
+    message = str(refusal.value)
+    assert run_commands(message, "grep ") == ""
+    run_commands(message, "rm ")
+    assert not runtime.exists()
+    assert (session / "app.log").read_text() == "diagnostic"
+    assert recover_session(session) == 0
+
+
+@pytest.mark.parametrize("lock", [None, "bad", [1], [True, 1]])
+def test_journal_without_valid_lock_identity_refused(
+    abandoned: tuple[Path, Path], lock: object
+) -> None:
+    session, runtime = abandoned
+    journal = json.loads((session / JOURNAL).read_text())
+    if lock is None:
+        del journal["lock"]
+    else:
+        journal["lock"] = lock
+    (session / JOURNAL).write_text(json.dumps(journal))
+    before = (session / JOURNAL).read_bytes()
+    with pytest.raises(SessionError, match="no valid session lock") as refusal:
+        recover_session(session)
+    assert (runtime / "kept").read_text() == "preserve"
+    assert (session / "session.json").exists()
+    assert (session / JOURNAL).read_bytes() == before
+    message = str(refusal.value)
+    assert run_commands(message, "grep ") == ""
+    run_commands(message, "rm ")
+    assert not runtime.exists()
+    assert recover_session(session) == 0
 
 
 def test_writable_session_refused_before_creating_lock(tmp_path: Path) -> None:

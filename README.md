@@ -1014,9 +1014,9 @@ run replaces its logs. An interrupted recording may be incomplete.
 
 Recovery never signals PIDs from metadata or follows its runtime path. Ownership
 is bound to the session directory's device and inode, so copied metadata cannot
-recover the original run. Keep `.headless.lock` in place, including between runs;
-deleting or replacing ownership files while processes are live breaks the lock
-protocol. Use a private session directory. Startup and recovery reject session
+recover the original run. Keep `.headless.lock` in place, including between runs.
+If it is deleted or replaced, recovery refuses, removes nothing, and prints the
+steps to stop the session or clean up manually. `stop` still works. Use a private session directory. Startup and recovery reject session
 directories owned by another user or writable by the group or others. Same-user programs that deliberately
 replace files or remove ownership records are outside this protocol's protection.
 

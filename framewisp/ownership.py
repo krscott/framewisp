@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import shlex
 import shutil
 import stat
 import tempfile
@@ -19,6 +20,13 @@ JOURNAL = ".headless-owner.json"
 
 def identity(path: Path) -> list[int]:
     info = path.lstat()
+    return [info.st_dev, info.st_ino]
+
+
+def lease_identity(lease: int) -> list[int]:
+    # A held descriptor pins its inode, so a matching identity cannot be a reused
+    # inode number while any owner still holds the lease.
+    info = os.fstat(lease)
     return [info.st_dev, info.st_ino]
 
 
@@ -83,7 +91,7 @@ def session_lease(session: Path) -> Generator[int, None, None]:
             raise SessionError(
                 "Session owner or descendant cleanup is still live. Wait for cleanup and retry."
             ) from None
-        if identity(session / LOCK) != [info.st_dev, info.st_ino]:
+        if identity(session / LOCK) != lease_identity(descriptor):
             raise SessionError("Headless lock changed while acquiring ownership.")
         yield descriptor
     finally:
@@ -92,7 +100,52 @@ def session_lease(session: Path) -> Generator[int, None, None]:
         os.close(descriptor)
 
 
-def read_journal(session: Path) -> dict[str, object]:
+def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
+    """Describe manual cleanup for ownership that recovery cannot verify."""
+    framewisp = shlex.join(["framewisp", str(session)])
+    checks = [f"grep -Flsa {shlex.quote(str(runtime))} /proc/*/environ"]
+    metadata = ("session.json", ".session.json", JOURNAL, ".headless-owner.tmp")
+    lines = [
+        f"Confirm the session has exited: `{framewisp} status` must not report "
+        "running, and these commands must print nothing:",
+        *(f"  {check}" for check in (*process_checks, *checks)),
+        "Then delete its runtime directory and metadata, keeping logs:",
+        f"  rm -rf -- {shlex.quote(str(runtime))}",
+        "  " + shlex.join(["rm", "-f", "--", *(str(session / m) for m in metadata)]),
+        f"Then start again with `{framewisp} run -- APP`.",
+    ]
+    return "\n".join(lines)
+
+
+def verify_lock(session: Path, journal: dict[str, object], lease: int) -> None:
+    held = lease_identity(lease)
+    recorded = journal.get("lock")
+    if recorded == held:
+        return
+    runtime = journal_runtime(session, journal)
+    parts = cast(list[object], recorded) if isinstance(recorded, list) else []
+    if len(parts) != 2 or not all(type(part) is int for part in parts):
+        raise SessionError(
+            f"Ownership journal {session / JOURNAL} has no valid session lock "
+            "identity, so recovery cannot prove the session has exited. It may "
+            "predate lock verification. Nothing was removed.\n"
+            + cleanup_steps(session, runtime)
+        )
+    lock = session / LOCK
+    framewisp = shlex.join(["framewisp", str(session)])
+    raise SessionError(
+        f"Session lock {lock} was replaced: the ownership journal records "
+        f"device:inode {parts[0]}:{parts[1]}, but found {held[0]}:{held[1]}. "
+        "A live session may still hold the original lock, so nothing was removed.\n"
+        f"If the session is running, stop it with `{framewisp} stop`.\n"
+        f"If you still have the original lock file, move it back to {lock} and "
+        "run recover again.\n"
+        "If the original lock is lost:\n"
+        + cleanup_steps(session, runtime, f"grep ':{parts[1]} ' /proc/locks")
+    )
+
+
+def read_journal(session: Path, lease: int) -> dict[str, object]:
     path = session / JOURNAL
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -110,12 +163,13 @@ def read_journal(session: Path) -> dict[str, object]:
         journal = cast(dict[str, object], value)
         if journal.get("session") != identity(session):
             raise ValueError("journal does not belong to this session directory")
-        return journal
     except (OSError, ValueError) as error:
         raise SessionError(f"Cannot verify ownership at {path}: {error}") from error
+    verify_lock(session, journal, lease)
+    return journal
 
 
-def write_journal(session: Path, runtime: Path, *, created: bool) -> None:
+def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) -> None:
     temporary = session / ".headless-owner.tmp"
     descriptor = os.open(
         temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
@@ -124,6 +178,7 @@ def write_journal(session: Path, runtime: Path, *, created: bool) -> None:
         json.dump(
             {
                 "session": identity(session),
+                "lock": lease_identity(lease),
                 "runtime_path": str(runtime),
                 "runtime": identity(runtime) if created else None,
             },
@@ -132,8 +187,8 @@ def write_journal(session: Path, runtime: Path, *, created: bool) -> None:
     temporary.replace(session / JOURNAL)
 
 
-def remove_runtime(session: Path) -> None:
-    journal = read_journal(session)
+def remove_runtime(session: Path, lease: int) -> None:
+    journal = read_journal(session, lease)
     runtime = journal_runtime(session, journal)
     if runtime.is_symlink():
         raise SessionError(f"Refusing symlink runtime: {runtime}")
@@ -179,17 +234,17 @@ def refuse_abandoned_ownership(session: Path) -> None:
 
 
 @contextmanager
-def headless_runtime(session: Path) -> Generator[Path, None, None]:
+def headless_runtime(session: Path, lease: int) -> Generator[Path, None, None]:
     runtime = runtime_path(session)
     refuse_abandoned_ownership(session)
     check_socket_paths(runtime)
-    write_journal(session, runtime, created=False)
+    write_journal(session, runtime, lease, created=False)
     runtime.mkdir(mode=0o700)
-    write_journal(session, runtime, created=True)
+    write_journal(session, runtime, lease, created=True)
     try:
         yield runtime
     finally:
-        remove_runtime(session)
+        remove_runtime(session, lease)
         # Keep proof of ownership until metadata is gone, including if shutdown
         # is interrupted after removing the runtime.
         for name in ("session.json", ".session.json"):
@@ -198,7 +253,7 @@ def headless_runtime(session: Path) -> Generator[Path, None, None]:
 
 
 def recover_session(session: Path) -> int:
-    with session_lease(session):
+    with session_lease(session) as lease:
         if not (session / JOURNAL).exists() and not (session / JOURNAL).is_symlink():
             # Before the first journal commit, no runtime or children may exist.
             # A partial temporary journal is disposable, but stale session JSON
@@ -215,7 +270,7 @@ def recover_session(session: Path) -> int:
                     "No verified headless ownership journal. Resources remain; recovery cannot safely clean an older or foreign session."
                 )
         else:
-            remove_runtime(session)
+            remove_runtime(session, lease)
         for name in ("session.json", ".session.json", ".headless-owner.tmp", JOURNAL):
             (session / name).unlink(missing_ok=True)
     print(

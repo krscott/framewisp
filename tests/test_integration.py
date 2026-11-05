@@ -3674,6 +3674,43 @@ def test_session_owns_detached_descendants(
 
 
 @pytest.mark.integration
+def test_replaced_lock_refused_and_live_session_still_stops(
+    demo: Demo, tmp_path: Path
+) -> None:
+    lock = demo.directory / ".headless.lock"
+    lock.rename(tmp_path / "original.lock")
+    os.close(os.open(lock, os.O_CREAT | os.O_WRONLY, 0o600))
+    refused = subprocess.run(
+        ["framewisp", str(demo.directory), "recover"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert refused.returncode == 1, refused
+    assert "was replaced" in refused.stderr
+    assert demo.runtime.is_dir()
+
+    def process_checks() -> list[str]:
+        return [
+            subprocess.run(
+                line.strip(), shell=True, capture_output=True, text=True, timeout=20
+            ).stdout
+            for line in refused.stderr.splitlines()
+            if line.strip().startswith("grep ")
+        ]
+
+    checks = process_checks()
+    assert len(checks) == 2 and all(checks), refused.stderr
+    assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+    cli(demo.directory, "stop")
+    assert demo.process.wait(timeout=20) == 0
+    assert not demo.runtime.exists()
+    assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
+    assert not any(process_checks())
+    cli(demo.directory, "run", "--", sys.executable, "-c", "pass")
+
+
+@pytest.mark.integration
 def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -> None:
     # Keep a second process alive to catch unsafe signalling from stale JSON.
     with subprocess.Popen(
