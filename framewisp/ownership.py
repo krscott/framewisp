@@ -1,5 +1,6 @@
 """Kernel leases and a path-bound journal for headless crash recovery."""
 
+import errno
 import fcntl
 import json
 import os
@@ -66,10 +67,13 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
 
 def unusable_lock(lock: Path, problem: str) -> str:
     recover = shlex.join(["framewisp", str(lock.parent), "recover"])
+    links = shlex.join(["find", str(lock.parent), "-samefile", str(lock)])
     return (
         f"Session lock {lock} is unusable ({problem}): it must be a private regular "
         "file with one link. It may have been replaced, so nothing was changed. "
-        f"If only its mode changed, run chmod 600 on it. Otherwise move it aside. "
+        f"If only its mode changed, run chmod 600 on it. If it has extra links, "
+        f"find them with `{links}` and delete all but the lock. Otherwise move it "
+        "aside. "
         f"Then run `{recover}`, which checks the lock against the session's "
         "ownership journal and reports what to do next."
     )
@@ -90,7 +94,12 @@ def session_lease(session: Path) -> Generator[int, None, None]:
     try:
         descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     except OSError as error:
-        raise SessionError(unusable_lock(lock, str(error.strerror))) from error
+        # Other errors, such as an unwritable directory, say nothing about the lock.
+        if error.errno in (errno.ELOOP, errno.EISDIR, errno.ENXIO) or (
+            error.errno == errno.EACCES and lock.exists()
+        ):
+            raise SessionError(unusable_lock(lock, str(error.strerror))) from error
+        raise
     try:
         info = os.fstat(descriptor)
         if (

@@ -290,13 +290,22 @@ def test_unusable_replacement_lock_refused_while_session_live(
         with pytest.raises(SessionError, match="is unusable") as refusal:
             recover_session(tmp_path)
         assert str(lock) in str(refusal.value)
-        assert "move it aside" in str(refusal.value)
+        assert "move it aside" in " ".join(str(refusal.value).split())
         assert runtime.is_dir()
         lock.rename(tmp_path / "aside")
         with pytest.raises(SessionError, match="was replaced|still live"):
             recover_session(tmp_path)
         assert runtime.is_dir()
     assert not runtime.exists()
+
+
+def test_unwritable_session_is_not_blamed_on_lock(tmp_path: Path) -> None:
+    tmp_path.chmod(0o500)
+    try:
+        with pytest.raises(PermissionError):
+            recover_session(tmp_path)
+    finally:
+        tmp_path.chmod(0o700)
 
 
 def test_deleted_lock_refused_while_session_live(tmp_path: Path) -> None:
