@@ -1,0 +1,28 @@
+Backport of wlroots commit 08a9f9f14fc8fd173d1768588699d2e152b6cde6
+("xwayland/xwm: fix association/map race", Isaac Freund), rebased onto 0.20.2.
+https://gitlab.freedesktop.org/wlroots/wlroots/-/commit/08a9f9f14fc8fd173d1768588699d2e152b6cde6
+
+Without it, an X11 window whose first buffer commit reaches the compositor
+before its WL_SURFACE_SERIAL message is paired but never mapped, so Sway never
+shows it.
+
+TODO: Remove once nixpkgs' wlroots_0_20 is a release that includes 08a9f9f1.
+0.20.2 does not; no release included it when this patch was added.
+
+--- a/xwayland/xwm.c
++++ b/xwayland/xwm.c
+@@ -1237,6 +1237,14 @@
+ 	}
+ 
+ 	wl_signal_emit_mutable(&xsurface->events.associate, NULL);
++
++	// Wlroots communicates with Xwayland over both an X11 socket and a Wayland
++	// socket with no synchronization between the two. There is no guarantee that
++	// e.g. the WL_SURFACE_SERIAL X11 client message will be received on the X11
++	// socket before the first buffer attach/commit on the Wayland socket.
++	if (wlr_surface_has_buffer(surface)) {
++		wlr_surface_map(surface);
++	}
+ }
+ 
+ static void xwm_handle_create_notify(struct wlr_xwm *xwm,

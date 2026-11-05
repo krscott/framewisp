@@ -182,7 +182,10 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    60 Hz, a fallback seat, US keyboard layout,
    and no window borders. Ordinary clipboard copy/paste and primary selection
    stay enabled within the session.
-   Load no host Sway configuration. The CLI validates positive integer dimensions
+   Load no host Sway configuration. The Nix overlay builds framewisp's Sway
+   against wlroots with `patches/wlroots-xwayland-map-race.patch`, so X11 windows
+   whose first frame arrives before their Xwayland surface pairing still map.
+   The CLI validates positive integer dimensions
    before starting the session. Recording requires even dimensions, since
    wf-recorder otherwise crops the last row or column.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.

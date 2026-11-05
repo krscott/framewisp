@@ -123,6 +123,8 @@ buildPythonPackage {
 
   passthru = {
     inherit captionFonts profileFonts capturePlugins;
+    # The dev shell must run the same patched compositor as the package.
+    sway = sway-unwrapped;
     atspiRegistry = "${at-spi2-core}/libexec/at-spi2-registryd";
   };
 
