@@ -200,9 +200,10 @@ Symlinked project paths resolve to the same canonical path. Git must be installe
 (it is included in the Nix package).
 
 Explicit paths such as `/tmp/framewisp-demo`, `./browser`, and `sessions/browser`
-keep their existing behavior. A bare name never falls back to a local or legacy
-session directory. Empty names, `.`/`..`, and names over 255 bytes are invalid (R-SESSION-4); use
-`./` or `../` to explicitly select those directories.
+resolve as given, relative to the current directory. A bare name never falls
+back to a local or legacy session directory (R-SESSION-3). Empty names,
+`.`/`..`, and names over 255 bytes are invalid (R-SESSION-4); use `./` or `../`
+to explicitly select those directories.
 
 Agents in the same project must choose distinct names to avoid sharing a session.
 Both `run` and user-started `attach` print the resolved session directory at
@@ -602,9 +603,9 @@ to measure these values after caption rendering; duration is not a wall-clock es
 
 Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
 with an additional 640 pixels of width when `--console` is enabled.
-Recording requires even width and height. Existing output files are never
-overwritten (R-REC-1). The session runner owns the recorder and finalizes an active clip
-on normal app exit, Ctrl+C, or SIGTERM. A recorder failure stops the session;
+Recording requires even width and height (R-REC-2). Existing output files are
+never overwritten (R-REC-1). The session runner owns the recorder and finalizes
+an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
 an invalid recording request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
 Keep the runner alive until shutdown completes so it can finalize the MP4.

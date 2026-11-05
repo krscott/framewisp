@@ -51,6 +51,7 @@ def test_invalid_wait(extra: dict[str, object]) -> None:
         )
 
 
+# R-CHECK-2
 def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
     baseline = {"action": "baseline", "condition": condition(), "timeout": 1}
     wait = {"action": "wait", "condition": condition(), "timeout": 2, "after": 0}
@@ -73,6 +74,7 @@ def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
         Batch.parse({"actions": [baseline | {"timeout": 10}] * 31})
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "options",
     [
@@ -358,6 +360,7 @@ def test_incomplete_observations_cannot_verify(status: str) -> None:
     assert check.evaluate({"status": status, "matches": [{"text": "Done"}]}) is None
 
 
+# R-CHECK-1
 def test_missing_and_duplicate_matches() -> None:
     check = Condition.parse(condition())
     assert check.evaluate({"status": "ok", "matches": []}) is None

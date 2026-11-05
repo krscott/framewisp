@@ -10,8 +10,8 @@ observable behaviour, not implementation, in short sentences.
 
 - The ID is stable. Never renumber or reuse an ID. To drop a requirement, keep
   its bullet and change its tag to `[retired]`.
-- `[test]`: a test that the verify recipe runs covers it. Each covering test
-  carries the ID in a comment.
+- `[test]`: a test that `python -m pytest` or `nix flake check` runs covers it.
+  Each covering test carries the ID in a comment.
 - `[manual: how]`: no automated test yet. The text says how an agent checks it.
 - `[retired]`: no longer required. Kept so the ID stays taken.
 
@@ -25,11 +25,10 @@ observable behaviour, not implementation, in short sentences.
   session directory.
 - **R-SESSION-4** [test] The CLI rejects a bare name that is empty, contains
   NUL, is `.` or `..`, or is longer than 255 bytes.
-- **R-SESSION-5** [test] Project session directories and runtime directories
-  are under `TMPDIR`.
-- **R-SESSION-6** [test] `run` refuses a session directory that the caller
-  does not own or that group or others can write. It creates no file in that
-  directory.
+- **R-SESSION-5** [test] When `TMPDIR` names a writable directory, new project
+  session directories and runtime directories are under it.
+- **R-SESSION-6** [test] Framewisp refuses to take ownership of a session
+  directory that group or others can write.
 
 ## Target app environment (ENV)
 
@@ -50,7 +49,7 @@ observable behaviour, not implementation, in short sentences.
 - **R-INPUT-3** [test] The CLI and the runner reject invalid command arguments
   before they send any input.
 - **R-INPUT-4** [test] A rejected input command does not affect later input.
-- **R-INPUT-5** [test] A cancelled, disconnected, or stopped command releases
+- **R-INPUT-5** [test] When its caller disconnects, an input command releases
   its held keys and buttons.
 - **R-INPUT-6** [test] Clipboard copy and paste in the app work across input
   commands.
@@ -83,7 +82,7 @@ observable behaviour, not implementation, in short sentences.
 - **R-INSPECT-3** [test] When the window mapping or geometry is uncertain,
   `display_bounds` is null and `display_bounds_reason` gives the cause.
 - **R-INSPECT-4** [test] A vanished or defunct object makes an observation
-  partial. It never produces an `ok` result without that match.
+  partial. It never yields a complete observation with no match.
 - **R-INSPECT-5** [test] When the app stalls a call, `inspect` reports
   `app-unresponsive`, separately from budget limits.
 - **R-INSPECT-6** [test] When the app is unresponsive, `inspect` returns within
@@ -97,7 +96,8 @@ observable behaviour, not implementation, in short sentences.
 
 ## Recording (REC)
 
-- **R-REC-1** [test] Recordings and captures never overwrite an existing file.
+- **R-REC-1** [test] Recordings and batch captures never overwrite an existing
+  file.
 - **R-REC-2** [test] Recording rejects an odd display width or height.
 - **R-REC-3** [test] An active recording is finalized as a playable MP4 when
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
@@ -115,12 +115,12 @@ observable behaviour, not implementation, in short sentences.
   directory usable again.
 - **R-LIFE-5** [test] Recovery refuses copied, tampered, or symlinked ownership
   files and replaced runtime directories.
-- **R-LIFE-6** [test] Session metadata copied from another session cannot
-  control that session.
+- **R-LIFE-6** [test] Session metadata copied to another directory cannot
+  control the original session.
 
 ## Attached desktops (ATTACH)
 
 - **R-ATTACH-1** [test] `attach` starts only from a foreground interactive
   terminal after the user types `ATTACH` exactly.
-- **R-ATTACH-2** [test] `attach` refuses a desktop runtime directory that group
-  or others can access.
+- **R-ATTACH-2** [test] `attach` refuses an `XDG_RUNTIME_DIR` or framewisp
+  desktop directory that group or others can access.

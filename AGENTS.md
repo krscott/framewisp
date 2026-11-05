@@ -55,6 +55,11 @@ affected module in `pyproject.toml`.
 | Pyright | `pyright` |
 | Mypy | `python -m mypy .` |
 | Tests | `python -m pytest` |
+| Installed-package tests | `nix flake check` |
+
+`tests/test_python_environment.py` runs only in the installed-package checks,
+which split cases across eight shards. Run `nix flake check` when changing how
+framewisp or its target apps get their environment.
 
 Both type checkers must pass. Keep any necessary type-checking exceptions narrow
 and explain why they are needed.
