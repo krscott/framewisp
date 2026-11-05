@@ -42,6 +42,18 @@ observable behaviour, not implementation, in short sentences.
 - **R-ENV-3** [test] The target app receives the caller's `PYTHONPATH`
   unchanged.
 
+## Display (DISPLAY)
+
+- **R-DISPLAY-1** [manual: In `nix develop`, pin a shell to two CPUs with
+  `taskset -c 0,1`. In it, start `stress-ng --cpu 8` from
+  `nix shell nixpkgs#stress-ng`, then run 300
+  `framewisp SESSION run --x11 -- python tests/input_probe.py` sessions, four at
+  a time. After `app.log` shows `"event": "ready"`, read `runtime_directory`
+  from `session.json` as RUNTIME and run
+  `SWAYSOCK=$(ls RUNTIME/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
+  must list a window named `Input probe` within 10 seconds.] An X11 app window
+  always appears in Sway, even when the app never redraws after its first frame.
+
 ## Input (INPUT)
 
 - **R-INPUT-1** [test] The app's seat keeps one pointer and one keyboard

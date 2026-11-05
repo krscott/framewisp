@@ -230,7 +230,7 @@ exit. It never guesses an X display or uses the host's address. Sway allocates t
 X sockets and owns the Xwayland process; stopping Sway removes them.
 The Nix overlay builds framewisp's Sway against wlroots with
 `patches/wlroots-xwayland-map-race.patch`, so X11 windows whose first frame
-arrives before their Xwayland surface pairing still map.
+arrives before their Xwayland surface pairing still map (R-DISPLAY-1).
 
 The app environment omits `WAYLAND_DISPLAY`, sets the discovered `DISPLAY`, uses
 `XAUTHORITY=/dev/null` to bypass inherited and home-directory credentials, and
