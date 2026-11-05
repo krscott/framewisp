@@ -64,6 +64,17 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     return runtime
 
 
+def unusable_lock(lock: Path, problem: str) -> str:
+    recover = shlex.join(["framewisp", str(lock.parent), "recover"])
+    return (
+        f"Session lock {lock} is unusable ({problem}): it must be a private regular "
+        "file with one link. It may have been replaced, so nothing was changed. "
+        f"If only its mode changed, run chmod 600 on it. Otherwise move it aside. "
+        f"Then run `{recover}`, which checks the lock against the session's "
+        "ownership journal and reports what to do next."
+    )
+
+
 @contextmanager
 def session_lease(session: Path) -> Generator[int, None, None]:
     directory = session.lstat()
@@ -75,7 +86,11 @@ def session_lease(session: Path) -> Generator[int, None, None]:
         raise SessionError(
             f"Unsafe session directory: {session}. Use a directory you own without group or other write permission (chmod 700)."
         )
-    descriptor = os.open(session / LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    lock = session / LOCK
+    try:
+        descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as error:
+        raise SessionError(unusable_lock(lock, str(error.strerror))) from error
     try:
         info = os.fstat(descriptor)
         if (
@@ -84,7 +99,8 @@ def session_lease(session: Path) -> Generator[int, None, None]:
             or info.st_uid != os.getuid()
             or info.st_mode & 0o077
         ):
-            raise SessionError("Headless lock must be a regular file with one link.")
+            problem = f"{stat.filemode(info.st_mode)}, {info.st_nlink} links"
+            raise SessionError(unusable_lock(lock, problem))
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -103,14 +119,20 @@ def session_lease(session: Path) -> Generator[int, None, None]:
 def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
     """Describe manual cleanup for ownership that recovery cannot verify."""
     framewisp = shlex.join(["framewisp", str(session)])
-    checks = [f"grep -Flsa {shlex.quote(str(runtime))} /proc/*/environ"]
+    quoted = shlex.quote(str(runtime))
+    environment = shlex.quote(f"XDG_RUNTIME_DIR={runtime}")
+    checks = (*process_checks, f"grep -Fxzls {environment} /proc/*/environ")
     metadata = ("session.json", ".session.json", JOURNAL, ".headless-owner.tmp")
     lines = [
-        f"Confirm the session has exited: `{framewisp} status` must not report "
-        "running, and these commands must print nothing:",
-        *(f"  {check}" for check in (*process_checks, *checks)),
+        "Confirm the session has exited. Run these outside any sandbox, in the PID "
+        "namespace that started the session, because they cannot see processes "
+        f"elsewhere. `{framewisp} status` must not report running, and these "
+        "commands must print nothing:",
+        *(f"  {check}" for check in checks),
+        "Inspect any supervisor records, which can report incomplete cleanup:",
+        f"  cat {quoted}/owner-*.json",
         "Then delete its runtime directory and metadata, keeping logs:",
-        f"  rm -rf -- {shlex.quote(str(runtime))}",
+        f"  rm -rf -- {quoted}",
         "  " + shlex.join(["rm", "-f", "--", *(str(session / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
@@ -123,22 +145,24 @@ def verify_lock(session: Path, journal: dict[str, object], lease: int) -> None:
     if recorded == held:
         return
     runtime = journal_runtime(session, journal)
+    framewisp = shlex.join(["framewisp", str(session)])
+    stop = f"If the session is running, stop it with `{framewisp} stop`.\n"
     parts = cast(list[object], recorded) if isinstance(recorded, list) else []
     if len(parts) != 2 or not all(type(part) is int for part in parts):
         raise SessionError(
             f"Ownership journal {session / JOURNAL} has no valid session lock "
             "identity, so recovery cannot prove the session has exited. It may "
             "predate lock verification. Nothing was removed.\n"
+            + stop
+            + "Otherwise:\n"
             + cleanup_steps(session, runtime)
         )
     lock = session / LOCK
-    framewisp = shlex.join(["framewisp", str(session)])
     raise SessionError(
         f"Session lock {lock} was replaced: the ownership journal records "
         f"device:inode {parts[0]}:{parts[1]}, but found {held[0]}:{held[1]}. "
         "A live session may still hold the original lock, so nothing was removed.\n"
-        f"If the session is running, stop it with `{framewisp} stop`.\n"
-        f"If you still have the original lock file, move it back to {lock} and "
+        f"{stop}If you still have the original lock file, move it back to {lock} and "
         "run recover again.\n"
         "If the original lock is lost:\n"
         + cleanup_steps(session, runtime, f"grep ':{parts[1]} ' /proc/locks")

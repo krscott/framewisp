@@ -269,6 +269,36 @@ def test_replaced_lock_refused_while_session_live(tmp_path: Path) -> None:
     assert not (tmp_path / JOURNAL).exists()
 
 
+@pytest.mark.parametrize("kind", ["0644", "hard-link", "fifo", "symlink", "directory"])
+def test_unusable_replacement_lock_refused_while_session_live(
+    tmp_path: Path, kind: str
+) -> None:
+    lock = tmp_path / LOCK
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
+        original = tmp_path / "original.lock"
+        lock.rename(original)
+        if kind == "0644":
+            lock.touch(mode=0o644)
+        elif kind == "hard-link":
+            os.link(original, lock)
+        elif kind == "fifo":
+            os.mkfifo(lock, 0o600)
+        elif kind == "symlink":
+            lock.symlink_to(original)
+        else:
+            lock.mkdir()
+        with pytest.raises(SessionError, match="is unusable") as refusal:
+            recover_session(tmp_path)
+        assert str(lock) in str(refusal.value)
+        assert "move it aside" in str(refusal.value)
+        assert runtime.is_dir()
+        lock.rename(tmp_path / "aside")
+        with pytest.raises(SessionError, match="was replaced|still live"):
+            recover_session(tmp_path)
+        assert runtime.is_dir()
+    assert not runtime.exists()
+
+
 def test_deleted_lock_refused_while_session_live(tmp_path: Path) -> None:
     with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         (tmp_path / LOCK).unlink()
@@ -318,6 +348,7 @@ def test_journal_without_valid_lock_identity_refused(
     before = (session / JOURNAL).read_bytes()
     with pytest.raises(SessionError, match="no valid session lock") as refusal:
         recover_session(session)
+    assert " stop`" in str(refusal.value)
     assert (runtime / "kept").read_text() == "preserve"
     assert (session / "session.json").exists()
     assert (session / JOURNAL).read_bytes() == before
