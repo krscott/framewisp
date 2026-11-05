@@ -226,12 +226,13 @@ def run_commands(message: str, prefix: str) -> str:
         line.strip() for line in message.splitlines() if line.strip().startswith(prefix)
     ]
     assert commands
-    return "".join(
-        subprocess.run(
-            command, shell=True, capture_output=True, text=True, check=False
-        ).stdout
+    results = [
+        subprocess.run(command, shell=True, capture_output=True, text=True, check=False)
         for command in commands
-    )
+    ]
+    # grep exits 1 for no match, so a command that cannot run never looks clean.
+    assert all(result.returncode in (0, 1) for result in results), results
+    return "".join(result.stdout for result in results)
 
 
 @pytest.fixture
