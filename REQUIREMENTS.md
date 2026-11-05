@@ -97,9 +97,8 @@ observable behaviour, not implementation, in short sentences.
   `display_bounds` is null and `display_bounds_reason` gives the cause.
 - **R-INSPECT-4** [test] A vanished or defunct object makes an observation
   partial. It never yields a complete observation with no match.
-- **R-INSPECT-5** [test] When one failed app call uses at least 80% of the query
-  budget and the query reaches its deadline, `inspect` reports
-  `app-unresponsive`. Budget limits alone do not add that reason.
+- **R-INSPECT-5** [test] When a stalled app call uses most of the query budget,
+  `inspect` reports `app-unresponsive`.
 - **R-INSPECT-6** [test] An unresponsive app does not block runner `status` or
   `stop`.
 
