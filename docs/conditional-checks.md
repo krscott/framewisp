@@ -39,8 +39,8 @@ the worker reaches the step, excluding queue time. Requested check deadlines
 count toward the batch's shared 300-second pacing/deadline limit.
 
 A condition selects by `role` and/or `name`, with the same case-insensitive exact
-role and name substring rules as inspection. It must select exactly one object
-in a complete observation. Duplicate matches fail immediately, even if one has
+role and name substring rules as inspection. Only a complete observation with
+exactly one readable match can satisfy it (R-CHECK-1). Duplicate matches fail immediately, even if one has
 the desired value. Missing objects, stale references, truncation, unsupported
 apps, and timeouts never count as success. A wait can retry those observations;
 an unavailable bus fails immediately. There is no absence condition and no
@@ -115,7 +115,8 @@ may differ; they change traversal budgets, not selector or equality semantics:
 }
 ```
 
-The baseline must read one complete, readable control whose value does not match.
+The baseline reads one complete, readable control whose value does not match
+(R-CHECK-2).
 An already matching value, absent control, or incomplete baseline fails before
 input. The later wait resolves the selector again and requires a matching value.
 A replacement widget is allowed: this is a transition of the selected logical

@@ -91,6 +91,7 @@ def test_input_error_keeps_structured_exit_code_only() -> None:
     )
 
 
+# R-LOG-1
 @pytest.mark.parametrize("retain", [False, True])
 @pytest.mark.parametrize(
     "failure",
@@ -138,6 +139,7 @@ def test_content_retention_and_captions(
         assert events[-1]["returncode"] == 7
 
 
+# R-LOG-1
 @pytest.mark.parametrize(
     "chord,visible",
     [

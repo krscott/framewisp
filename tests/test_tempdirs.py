@@ -36,6 +36,7 @@ def temp_roots(
         yield first, second
 
 
+# R-SESSION-5
 def test_paths_follow_tmpdir(
     tmp_path: Path, temp_roots: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -103,6 +104,7 @@ def test_long_tmpdir_fails_without_runtime_or_journal(
     assert not runtime_path(tmp_path).exists()
 
 
+# R-LIFE-5
 @pytest.mark.parametrize("path", [None, 123, "relative", "/", "/tmp/bad\0path"])
 def test_invalid_journal_runtime_path_refused(tmp_path: Path, path: object) -> None:
     with pytest.raises(SessionError, match="runtime path"):

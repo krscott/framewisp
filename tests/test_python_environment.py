@@ -33,6 +33,7 @@ def foreign_python(tmp_path: Path) -> Path:
     return directory
 
 
+# R-ENV-2
 @pytest.mark.parametrize("x11", [False, True])
 def test_packaged_demo_ignores_caller_python_settings(
     tmp_path: Path, foreign_python: Path, x11: bool
@@ -84,6 +85,7 @@ def test_packaged_demo_ignores_caller_python_settings(
         process.wait(timeout=20)
 
 
+# R-ENV-3
 @pytest.mark.parametrize("pythonpath", ["unset", "empty", "foreign"])
 @pytest.mark.parametrize("fresh", [False, True])
 def test_target_app_inherits_caller_pythonpath(
@@ -124,6 +126,7 @@ def test_target_app_inherits_caller_pythonpath(
     assert not (session / ".headless-owner.json").exists()
 
 
+# R-ENV-1
 @pytest.mark.parametrize("value", [None, "", "/caller/sentinel"])
 @pytest.mark.parametrize("fresh", [False, True])
 def test_target_app_preserves_wrapper_variables(
@@ -202,6 +205,7 @@ def test_target_app_accessibility_default(
     )
 
 
+# R-ENV-1
 def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
@@ -226,6 +230,7 @@ def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
     assert (session / "app.log").read_text().strip() == str(venv)
 
 
+# R-ENV-1
 def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None

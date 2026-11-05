@@ -17,7 +17,7 @@ import pytest
 
 from framewisp.attach import KEYCODES, AttachedInput, run_attachment
 from framewisp.connection import request_attached
-from framewisp.desktop import detach_desktop
+from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
 from framewisp.ownership import (
     recover_session,
@@ -241,6 +241,23 @@ def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         yield Path(directory)
 
 
+# R-ATTACH-2
+@pytest.mark.parametrize("target", ["runtime", "framewisp"])
+def test_attach_refuses_shared_desktop_directory(
+    private_runtime: Path, target: str
+) -> None:
+    directory = private_runtime / "framewisp"
+    directory.mkdir(mode=0o700)
+    shared = private_runtime if target == "runtime" else directory
+    shared.chmod(0o755)
+    try:
+        with pytest.raises(RuntimeError, match="private"), reserve_desktop():
+            pass
+    finally:
+        shared.chmod(0o700)
+    assert not (directory / "desktop.lock").exists()
+
+
 @pytest.fixture
 def attach_process(
     tmp_path: Path, request: pytest.FixtureRequest
@@ -368,6 +385,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
         command.wait(timeout=5)
 
 
+# R-ATTACH-1
 def test_attach_requires_user_terminal(tmp_path: Path, private_runtime: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path / "session"), "attach"],
@@ -508,6 +526,7 @@ def read_terminal(descriptor: int, expected: bytes) -> None:
             output += os.read(descriptor, 4096)
 
 
+# R-ATTACH-1
 @pytest.mark.parametrize("confirmation", [b"yes\n", b"\x04"])
 def test_terminal_requires_exact_confirmation(
     tmp_path: Path,

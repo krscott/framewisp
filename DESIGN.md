@@ -90,7 +90,7 @@ omitted. Explicit batch waits remain in full; external sleeps can be cut.
 The Nix package adds `-I` to the `framewisp` and `framewisp-demo` entry-point
 shebangs before Python fixup writes the dependency paths into each script.
 Python ignores inherited import settings and user site-packages, then the
-script adds the packaged dependency paths. The environment variables remain
+script adds the packaged dependency paths (R-ENV-2). The environment variables remain
 available to target apps, including fresh-profile runs and activated services.
 The internal process supervisor and X11 display probe also use `-I`; both need
 only the standard library. Editable installs use the development interpreter
@@ -106,7 +106,8 @@ anonymous `memfd`, then executes the wrapped runtime. Only the descriptor number
 an extra exec argument/environment string. `__main__.main` consumes and closes
 the descriptor through `environment.initialize_environment` before dispatch.
 The runtime keeps Nix's environment for its imports and tools. Target apps use
-the captured caller environment, with the private session settings applied.
+the captured caller environment, with the private session settings applied
+(R-ENV-1, R-ENV-3).
 This boundary covers every wrapper variable without tracking which variables
 Nix adds, prefixes, or defaults, and preserves unset and empty values. Reading
 the initial exec environment also excludes Python's startup locale coercion.
@@ -146,7 +147,7 @@ handoffs use absolute paths and one controlling agent at a time. Delegates retur
 verification evidence or blockers; orchestration remains outside Framewisp.
 
 1. Create or reuse the requested session directory. Reject directories not owned
-   by the caller or writable by group/others. Acquire a nonblocking exclusive
+   by the caller or writable by group/others (R-SESSION-6). Acquire a nonblocking exclusive
    flock on the persistent `.headless.lock` (regular, single-link, private file,
    opened with O_NOFOLLOW). Refuse an existing `session.json` or ownership journal;
    ask the caller to recover abandoned ownership first.
@@ -154,7 +155,8 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    metadata before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
 3. Choose `<tempdir>/framewisp-UID-DEVICEHEX-INODEHEX`, using Python's
-   `tempfile.gettempdir()` (`TMPDIR` when writable, normally `/tmp` otherwise).
+   `tempfile.gettempdir()` (`TMPDIR` when writable, normally `/tmp` otherwise)
+   (R-SESSION-5).
    Before creating the runtime or starting children, check the socket path budget
    against Linux's 108-byte limit, including the terminating NUL. Reserve space
    for Sway's UID and a ten-digit PID, the longest managed socket filename.
@@ -183,7 +185,7 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    and no window borders. Ordinary clipboard copy/paste and primary selection
    stay enabled within the session.
    Load no host Sway configuration. The CLI validates positive integer dimensions
-   before starting the session. Recording requires even dimensions, since
+   before starting the session (R-INPUT-3). Recording requires even dimensions (R-REC-2), since
    wf-recorder otherwise crops the last row or column.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.
    Set `WAYLAND_DISPLAY` to the discovered socket name.
@@ -195,11 +197,13 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    destroy their devices before pending
    clipboard offers arrive. Libwayland discards those offers, leaving gaps in its
    server object map that can make a later offer fail with an invalid object ID.
-   Application clipboard and primary-selection transfers do not use these devices.
+   Application clipboard and primary-selection transfers do not use these devices
+   (R-INPUT-6).
    Open one connection through vncdotool's threaded API with a ten-second
    handshake timeout and a 100 ms focus-settling pause. Then reduce the timeout
    to one second per API call. Keep it connected for input throughout the
-   session so the seat retains a keyboard and pointer between CLI commands.
+   session so the seat retains a keyboard and pointer between CLI commands
+   (R-INPUT-1).
    Without it, Qt dismisses context menus when the last input client disconnects.
 8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
    30 fps, software `libx264`, `yuv420p` with explicit full-range conversion, and
@@ -267,8 +271,8 @@ All CLI commands use `framewisp SESSION COMMAND ...`, with a required positional
 session name or explicit path before the subcommand. There is no implicit session.
 `framewisp/sessions.py` resolves the original string argument before either
 headless or attached dispatch. A slash marks an explicit path, which uses
-`Path.resolve()` as before. Empty names, NUL, and bare `.`/`..` are rejected;
-bare names must fit in 255 filesystem bytes.
+`Path.resolve()` as before. Empty names, NUL, bare `.`/`..`, and bare names
+over 255 filesystem bytes are rejected (R-SESSION-4).
 
 For a bare name, run `git -C <canonical cwd> rev-parse --show-toplevel` with a
 five-second timeout, ignoring inherited `GIT_DIR`, `GIT_WORK_TREE`, and
@@ -280,11 +284,11 @@ actionable error instead of silently changing project scope.
 Hash its filesystem bytes with SHA-256, take the
 first 24 hexadecimal characters, and resolve
 `<tempdir>/framewisp-project-<hash>/NAME` under `tempfile.gettempdir()`.
-The hash is stable across processes and separates worktrees, while canonical
-paths make symlink aliases agree. Git is a packaged runtime and test dependency;
+The hash is stable across processes and separates worktrees (R-SESSION-2), while
+canonical paths make subdirectories and symlink aliases agree (R-SESSION-1). Git is a packaged runtime and test dependency;
 if unavailable, report an actionable error rather than silently choosing a
 different project. Explicit paths do not require Git. No local or legacy
-directory fallback occurs for names. The existing short runtime socket paths
+directory fallback occurs for names (R-SESSION-3). The existing short runtime socket paths
 remain independent of the session directory.
 
 Agents sharing a project must choose distinct names. Startup diagnostics print
@@ -310,8 +314,8 @@ delay does not count toward it. Consumers choose the delay and capture again
 when needed; there is no automatic animation detection.
 
 Headless screenshots accept `--region X Y WIDTH HEIGHT` in display pixels.
-The origin must be nonnegative, dimensions positive, and the entire rectangle
-inside the session's display dimensions. Crops use grim `-g "X,Y WIDTHxHEIGHT"`
+The CLI rejects a negative origin, nonpositive dimensions, and any rectangle
+outside the session's display dimensions (R-INPUT-3). Crops use grim `-g "X,Y WIDTHxHEIGHT"`
 without `-o`; full captures retain `-o HEADLESS-1`. Neither changes resolution.
 `--json` prints `path` (absolute), `x`, `y`, `width`, `height`, `display_width`,
 `display_height`, and `capture_seconds` after success. Timing covers the capture
@@ -328,7 +332,7 @@ and its disappearance after moving away.
 Headless pointer approaches for `move`, `click`, `scroll`, and drag starts accept
 `--move-duration`, defaulting to 0.3 seconds. A shared constant supplies CLI,
 batch, and direct-request defaults. Validation requires finite, nonnegative
-values no greater than 300 seconds. Batch JSON uses `move_duration`; all requested
+values no greater than 300 seconds (R-INPUT-3). Batch JSON uses `move_duration`; all requested
 approach durations count toward the shared 300-second pacing budget.
 Zero moves immediately. Attached desktops keep immediate positioning and reject
 the option.
@@ -404,7 +408,8 @@ prefixed by zero or more `Ctrl+`, `Shift+`, or `Alt+` modifiers.
 Names are case-insensitive, and letter case does not imply Shift.
 Named keys are Space, Return, Tab, BackSpace, Escape,
 Delete, Left, Right, Up, Down, Home, End, Page_Up, Page_Down, and F1 through F12.
-Punctuation accepts each literal and its X keysym name (listed in the CLI help).
+Punctuation accepts each literal and its X keysym name (listed in the CLI help)
+(R-INPUT-2).
 `parse_chord` validates and normalizes names to VNC symbols for both headless
 and attached input and for log redaction. A final literal plus uses `+` alone
 or a doubled separator such as `Ctrl++`; `Ctrl+` remains invalid.
@@ -426,12 +431,13 @@ The runner queues at most 32 pending inputs and executes one action at a time,
 including Unicode helpers. Accepted sockets transfer to the worker; the main loop
 continues handling status, stop and recording commands. Validation checks the full
 action before queueing, including finite timing, printable text, supported names,
-and unsigned 16-bit VNC coordinates. Invalid actions never send partial input.
+and unsigned 16-bit VNC coordinates (R-INPUT-3). A rejected action leaves the
+worker ready for later input (R-INPUT-4).
 
 The CLI waits for a single response. Its disconnect cancels pending or running
 input. Paced VNC waits check cancellation every 20 ms; helper subprocess waits
 check every 50 ms and terminate, then kill after 500 ms if necessary. Held VNC
-keys/buttons release in cleanup. Interrupted XTest helpers explicitly release
+keys/buttons release in cleanup (R-INPUT-5). Interrupted XTest helpers explicitly release
 their possible held keys; wtype's temporary keyboard disappears with its process.
 The worker finishes cleanup before starting another action. Stop sets the same
 cancellation event and joins the worker before stopping the app and recorder.
@@ -463,14 +469,15 @@ The CLI sends one control request with `action: "batch"` and the normalized
 object in `parameters`. Metadata advertises `batch_input: true`; older runners
 are rejected before sending. Control requests are limited to 1 MiB, including
 the envelope and trailing newline. The runner repeats all validation before
-queueing. Each batch occupies one of the worker's 32 pending slots. The worker
+queueing (R-BATCH-1). Each batch occupies one of the worker's 32 pending slots. The worker
 runs each input using its existing logging, pacing, Unicode and cleanup paths.
-Other input jobs cannot interleave, including during the optional final capture.
+Other input jobs cannot interleave, including during the optional final capture
+(R-BATCH-2).
 Status and stop remain on the main thread.
 
 Capture calls grim through the cancellable subprocess path and writes into a
 temporary directory beside the destination. A hard link publishes the completed
-PNG without overwriting a file created since validation. Cleanup removes the
+PNG without overwriting a file created since validation (R-REC-1). Cleanup removes the
 temporary files on success, failure or cancellation. A capture error fails the
 batch but leaves the session running. Captures do not create input captions.
 
@@ -505,7 +512,8 @@ Application exit ends the session and returns its exit code (128 plus the signal
 number for signals). Before cleanup, the runner atomically writes `app-exit.json`
 via `.app-exit.json`, containing the subprocess `returncode` (negative for signals)
 and `time` (Unix seconds). It prints the exit code or signal name and the path to
-`app.log` on stderr. Later session commands report this record even during cleanup.
+`app.log` on stderr. Later session commands report this record even during cleanup
+(R-LIFE-3).
 A new headless run clears the record before startup; an attachment clears it when
 it publishes its state. Requested stops do not create an exit record. SIGINT or SIGTERM
 requests a clean stop and returns zero. A backend exit or startup timeout reports
@@ -517,7 +525,7 @@ single-threaded Python supervisor with `PR_SET_CHILD_SUBREAPER` enabled before
 launching its command. It reports the real app PID and return code over a private,
 non-inherited socket. It resets inherited SIGCHLD dispositions so child exit
 statuses remain waitable. Detached and double-forked descendants reparent to this
-supervisor when their parents exit. App exit also initiates tree cleanup.
+supervisor when their parents exit (R-LIFE-1). App exit also initiates tree cleanup.
 
 Cleanup enumerates only the supervisor's immediate children through
 `/proc/self/task/PID/children`, signals them through pidfds, and reaps them. It
@@ -542,7 +550,7 @@ the same implementation. Ownership covers forked descendants, not work requested
 from an existing external service. It does not restrict app access to user files
 or protect against an app deliberately killing its supervisor.
 
-The runtime directory and `session.json` are removed; logs remain. The recorder
+The runtime directory and `session.json` are removed; logs remain (R-LIFE-2). The recorder
 handles SIGTERM by flushing its encoder and MP4 trailer while Sway is still alive.
 A nonzero recorder exit during finalization names its destination and log. A killed
 recorder may leave an incomplete file. Socket EOF requests cleanup when its supervisor survives.
@@ -556,7 +564,8 @@ removes that record. Failure retains diagnostic information. A killed supervisor
 leaves its record and recovery refuses to remove the runtime.
 
 Recovery verifies the journal's session identity and reads its absolute runtime
-path, whose basename must match the UID and session identity. Journals without a
+path. It refuses a path whose basename does not match the UID and session
+identity (R-LIFE-5). Journals without a
 path use the original fixed `/tmp` location. Recovery checks the runtime's inode,
 owner, permissions, and directory type regardless of the current `TMPDIR`.
 Normal cleanup reads the same journal path. Recovery never signals stored PIDs
@@ -564,15 +573,16 @@ or uses `session.json` to authorize cleanup. A null runtime identity permits onl
 empty directory, covering interruption between mkdir and journal update. Missing
 runtimes are safe to finish recovering. Without a committed journal, recovery
 only clears a partial temporary journal if no runtime or session metadata exists.
-Copied journals, symlink ownership files, and replaced runtimes fail verification.
+Copied journals, symlink ownership files, and replaced runtimes fail verification
+(R-LIFE-5).
 Once ownership is verified and no supervisor records remain, recovery removes the
-runtime, `session.json`, its temporary file, and the ownership journal. Logs,
+runtime, `session.json`, its temporary file, and the ownership journal (R-LIFE-4). Logs,
 app-exit diagnostics, inputs, and recordings remain. It reports success as JSON
 or a nonzero error identifying resources that remain. Running again replaces logs.
 
-The lock file persists across runs and must not be unlinked or replaced. Session
-directories must be private; malicious same-user filesystem mutation is outside
-the protocol. Old sessions without journals require manual inspection. Recovery
+The lock file persists across runs and must not be unlinked or replaced. Startup
+refuses session directories that are not private (R-SESSION-6); malicious
+same-user filesystem mutation is outside the protocol. Old sessions without journals require manual inspection. Recovery
 cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
 records and runtime remain for manual investigation. Attached sessions acquire this same session lease before writing metadata and
 refuse abandoned headless journals. They retain their separate desktop reservation
@@ -637,7 +647,7 @@ its process alongside the display tools; it does not implement a frame queue or
 feed repeated PNG screenshots into an encoder.
 
 The pinned recorder tags H.264 as full-range. Its default conversion produced
-a white canvas decoded as RGB 235 instead of 255. `scale=out_range=full` keeps
+a white canvas decoded as RGB 235 instead of 255 (R-REC-4). `scale=out_range=full` keeps
 the conversion consistent with that tag; recording tests compare a decoded
 background patch with the screenshot to catch brightness shifts.
 
@@ -655,14 +665,14 @@ The runner owns a `Recordings` object with an optional recorder process and an
 `ExitStack` for its lifetime. `run --record FILE` and `record-start FILE` use the
 same startup path. `record-stop` closes that recorder's stack, finalizes the MP4,
 and clears its process reference without stopping the app. Runner cleanup closes
-any active recorder before stopping the display.
+any active recorder before stopping the display (R-REC-3).
 
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
 and `captions` and `console` booleans. Replies carry an `error` string or null and optional
 `data`. The runner checks the session directory against its own before acting,
-so copied metadata cannot control another session. Its monitoring loop handles
+so copied metadata cannot control another session (R-LIFE-6). Its monitoring loop handles
 recording/status/stop requests; validated input sockets transfer to the worker. It replies only after capture is ready or finalization has finished.
 Metadata includes `control_protocol: 1`. The CLI rejects an absent or unknown
 version before connecting. Input also requires `persistent_input: true`; a legacy recording-only runner would otherwise
@@ -688,7 +698,7 @@ retain their independent emergency detach mechanism.
 State updates use `.session.json` followed by an atomic rename. The `processes`
 map includes `recorder` only while recording. Both metadata filenames are reserved
 along with the session logs when choosing recording destinations. Recording
-requests reject odd display dimensions, existing/reserved output paths, a start
+requests reject odd display dimensions (R-REC-2), existing/reserved output paths (R-REC-1), a start
 while already active, and a stop while inactive. Each start replaces `recorder.log`.
 
 ## Input logs and captions
@@ -705,7 +715,7 @@ read it from metadata. Recording captions use the retained parameters from the l
 so all clips follow the same policy even with `--no-captions`. No command or batch
 parameter overrides it.
 
-By default, type parameters omit `text` while retaining `interval`. Literal key
+By default, type parameters omit `text` while retaining `interval` (R-LOG-1). Literal key
 chords (letters, digits, punctuation, Space, optionally Shift) omit the key and retain only
 modifiers. Ctrl/Alt shortcuts and named navigation/control keys retain their chord.
 Captions use "Type text" and "Key" for omitted content. Opt-in preserves full text
@@ -750,7 +760,7 @@ full-range color, and no audio. `record-stop` waits for rendering, as does norma
 session cleanup. With `--no-captions`, rendering and timestamp extraction are
 skipped unless a console panel is requested, but input logging remains enabled.
 Caption formatting cannot affect
-app screenshots. Both `inputs.jsonl` and `captions.log` are reserved session paths.
+app screenshots (R-LOG-2). Both `inputs.jsonl` and `captions.log` are reserved session paths.
 
 ## Console output in recordings
 
@@ -796,7 +806,7 @@ and recording destinations.
 not launch or own that desktop's app or compositor. The CLI requires a controlling
 terminal with this process group in the foreground, prints stop-binding and access
 instructions, and requires the exact typed confirmation ATTACH before creating any
-portal connection. Agents receiving a rejection must ask the user to run the
+portal connection (R-ATTACH-1). Agents receiving a rejection must ask the user to run the
 command in another terminal. There is no noninteractive override. This prevents
 accidental startup, not deliberate bypass by another program under the same UID.
 
@@ -834,7 +844,8 @@ Desktop verification status and required setup live in docs/desktop-sharing-tray
 
 An exclusive flock on $XDG_RUNTIME_DIR/framewisp/desktop.lock limits desktop access
 to one owner per user runtime directory, including while permission is pending.
-The directory must be private and owned by the user. The lock inode is never
+Attach refuses a directory that is not private and owned by the user
+(R-ATTACH-2). The lock inode is never
 removed. After acquiring the lock, a new owner removes stale socket and global
 metadata files. Atomic JSON writes publish global desktop.json and session.json;
 the latter records kind, the runtime directory, an attachment token, and the PID
@@ -907,8 +918,8 @@ been verified without that flag.
 
 Metadata carries `inspection_protocol: 1` and the private accessibility address.
 The CLI requires that address to equal the runtime directory's accessibility
-socket. It never uses the caller's desktop bus, autolaunches a bus, or inspects
-attached sessions. Gio, already a dependency, connects directly to this address
+socket. It never uses the caller's desktop bus (R-INSPECT-1), autolaunches a bus, or
+inspects attached sessions. Gio, already a dependency, connects directly to this address
 and calls read-only AT-SPI methods. No additional Python package is needed.
 
 For fresh profiles, repeated `--dbus-service-dir` paths become XML-escaped
@@ -922,7 +933,8 @@ Metadata records `app_profile` as `"fresh"` or null.
 The CLI owns each query connection independently of the input/control socket.
 A Gio cancellable with a deadline timer bounds connection setup and requests;
 each synchronous call also receives the remaining request budget. An unresponsive
-application produces a timeout observation without blocking runner status/stop.
+application produces a timeout observation without blocking runner status/stop
+(R-INSPECT-6).
 There is no persistent AT-SPI object cache or background observer.
 
 `inspection_limits.py` defines the shared query defaults and maxima. CLI help,
@@ -959,7 +971,7 @@ to reach the bus/registry. Non-ok observations still print JSON and exit 1.
 `longest_call_ms` measures the slowest synchronous D-Bus method call, including
 failed calls but excluding connection setup. A failed call to an app that spends
 at least 80% of the entire query budget and reaches the deadline adds the
-`app-unresponsive` reason. This is evidence of a slow or blocked app, not proof
+`app-unresponsive` reason (R-INSPECT-5). This is evidence of a slow or blocked app, not proof
 of a hung process. Absence of this reason does not prove responsiveness: an app
 can block late in traversal. Cancellation before the deadline does not add it.
 Up to five bounded error strings include the failed call's bus name, object
@@ -976,25 +988,25 @@ IDs are unique only within that snapshot. They cannot be passed back as selector
 or reused across queries. Duplicate matches are returned separately; ordering is
 not a selection rule. Every query reads fresh state, but the reads are not atomic:
 the app can change between objects or fields, or after the response. Failed or
-defunct references are reported as partial, never converted into proof of absence.
+defunct references are reported as partial (R-INSPECT-4).
 `bounds`, when valid, uses AT-SPI's window-relative coordinate system in toolkit
 units. `display_bounds` uses the same rectangle shape with `coordinate_space:
-"display"`; its center can be passed directly to pointer commands. Failed
+"display"`; its center can be passed directly to pointer commands (R-INSPECT-2). Failed
 conversion leaves `display_bounds` null and sets `display_bounds_reason`. This
 optional conversion does not make otherwise complete observations partial.
 
 `display_bounds.py` reads GET_TREE directly from the sole Sway IPC socket in the
-session's private runtime directory. It never consults the caller's SWAYSOCK.
+session's private runtime directory, not the caller's SWAYSOCK (R-INSPECT-1).
 Each tree read shares the query deadline, takes at most 250 ms, polls cancellation,
 and caps replies at 1 MiB. The before/after tree reads and D-Bus traversal share
 the query timeout. Traversal carries accessible frame/dialog/window references
 and their full titles, nearest first. D-Bus GetConnectionUnixProcessID identifies
-the accessible process. PID and exact window title must identify one Sway window;
-duplicate titles remain ambiguous. An empty accessible title can match only if
+the accessible process. Conversion requires PID and exact window title to
+identify one Sway window (R-INSPECT-3); duplicate titles remain ambiguous. An empty accessible title can match only if
 the PID has exactly one Sway window, since GTK may supply a compositor title
 for an untitled window. If a dialog has no compositor match, conversion tries
 its enclosing accessible windows. Ambiguity or a failed geometry check on a
-matching window never triggers fallback. Enclosing window identities must agree
+matching window never triggers fallback. Enclosing window identities have to agree
 with the selected compositor window; conflicting matches produce
 `ambiguous-window`, even if their sizes agree. Window selection uses titles
 before fetching geometry, so an unused enclosing window's Component interface
@@ -1015,13 +1027,14 @@ prove that the toolkit reported the drawn position correctly.
 The client origin is Sway's absolute `rect` origin plus its relative
 `window_rect` origin, so server-side title bars and borders are excluded. A
 conversion requires a visible window on an unscaled, unrotated output at the
-origin. The accessible toplevel must start at window (0, 0), its size must match
-Sway's client size, and the control must fit inside that client area and the display. Missing
+origin. Conversion also requires the accessible toplevel to start at window (0, 0), its
+size to match Sway's client size, and the control to fit inside that client area
+and the display (R-INSPECT-3). Missing
 windows, ambiguous mappings, unavailable metadata, geometry mismatches, or
 unsupported transforms produce reasons instead of guesses. The matching window
-must have the same ID, PID, title, visibility, client rectangle, and supported
-transform in both tree snapshots. Window selection must also choose the same
-accessible ancestor in each snapshot. A changed mapping produces `window-changed`.
+has to keep the same ID, PID, title, visibility, client rectangle, and supported
+transform in both tree snapshots, and window selection has to choose the same
+accessible ancestor in each snapshot (R-INSPECT-3). A changed mapping produces `window-changed`.
 This detects changes between snapshots, not a move away and back between reads
 or changes after inspection. Use a screenshot when conversion is unavailable.
 No semantic input action is provided.
@@ -1042,14 +1055,14 @@ batch. Parsing validates all selectors, typed expected values, positive bounded
 deadlines, and backward baseline references before any input. The worker executes
 checks in sequence and retains the last observation in each result. Each query
 resolves the selector afresh; no accessible object handle survives an observation.
-Only a complete observation with exactly one readable match can verify state.
-A baseline must establish a nonmatching value before a transition wait can run.
+Verification needs a complete observation with one readable match (R-CHECK-1).
+Transition waits depend on a nonmatching baseline (R-CHECK-2).
 Replacement widgets are allowed under the same logical selector.
 
 Each step's optional `observation` object controls `max_nodes` (default 256,
 maximum 4096), `max_depth` (default 8, maximum 64), and per-query `timeout`
-(default 2 seconds, maximum 10). Counts must be positive integers; time must be
-finite and positive. The two-match ambiguity limit remains fixed. Each query
+(default 2 seconds, maximum 10). Validation rejects counts that are not positive
+integers and times that are not finite and positive (R-INPUT-3). The two-match ambiguity limit remains fixed. Each query
 receives the smaller of its configured time budget and the remaining monotonic
 step deadline. Only step deadlines count toward the shared batch budget.
 Baseline references compare conditions, allowing different observation budgets.
@@ -1067,7 +1080,7 @@ remains responsive while its serialized input worker polls.
 The complete schema, state/transition semantics, result fields, limits, and
 failure-capture rules are in [conditional checks](docs/conditional-checks.md).
 That document is part of this design specification. Input completion and successful
-PNG capture alone never set batch `verified` to true.
+PNG capture alone do not verify a batch (R-CHECK-3).
 
 ## Continuous integration
 

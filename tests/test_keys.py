@@ -19,6 +19,7 @@ def test_shortcut_releases_modifiers_in_reverse_order() -> None:
     ]
 
 
+# R-INPUT-2
 @pytest.mark.parametrize(
     "name,literal,shifted",
     [
@@ -56,6 +57,7 @@ def test_punctuation_aliases_and_shift(name: str, literal: str, shifted: str) ->
     assert InputAction.parse("key", {"chord": f"Ctrl+{name}"}).action == "key"
 
 
+# R-INPUT-2
 @pytest.mark.parametrize(
     "name,literal",
     [

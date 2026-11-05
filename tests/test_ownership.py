@@ -29,6 +29,7 @@ def wait_for(path: Path) -> None:
         time.sleep(0.02)
 
 
+# R-LIFE-4
 @pytest.mark.parametrize(
     "stage",
     [
@@ -127,6 +128,7 @@ with session_lease(session) as lease:
                 runner.wait(timeout=5)
 
 
+# R-LIFE-5
 def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
     session = tmp_path / "session"
     session.mkdir()
@@ -164,6 +166,7 @@ def test_incomplete_cleanup_preserves_resources_and_diagnostics(tmp_path: Path) 
     recover_session(tmp_path)
 
 
+# R-LIFE-5
 @pytest.mark.parametrize("name", [LOCK, JOURNAL])
 def test_symlink_ownership_files_refused(tmp_path: Path, name: str) -> None:
     target = tmp_path / "unrelated"
@@ -180,6 +183,7 @@ def runtime_backup() -> Generator[Path, None, None]:
         yield Path(directory) / "saved"
 
 
+# R-LIFE-5
 def test_runtime_replacement_refused(
     tmp_path: Path, runtime_backup: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -199,6 +203,7 @@ def test_runtime_replacement_refused(
     recover_session(tmp_path)
 
 
+# R-SESSION-6
 def test_writable_session_refused_before_creating_lock(tmp_path: Path) -> None:
     tmp_path.chmod(0o777)
     try:

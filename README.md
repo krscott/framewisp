@@ -201,8 +201,8 @@ Symlinked project paths resolve to the same canonical path. Git must be installe
 
 Explicit paths such as `/tmp/framewisp-demo`, `./browser`, and `sessions/browser`
 keep their existing behavior. A bare name never falls back to a local or legacy
-session directory. Empty names and `.`/`..` are invalid; use `./` or `../` to
-explicitly select those directories. Names must fit in 255 bytes.
+session directory. Empty names, `.`/`..`, and names over 255 bytes are invalid (R-SESSION-4); use
+`./` or `../` to explicitly select those directories.
 
 Agents in the same project must choose distinct names to avoid sharing a session.
 Both `run` and user-started `attach` print the resolved session directory at
@@ -247,8 +247,8 @@ the clipboard-offer crash described in [#30](https://github.com/krscott/framewis
 
 The display defaults to 1280 by 720 pixels. Set `run --width 1600 --height 900`
 for more room. Screenshots and input use those pixel dimensions, with `(0, 0)`
-at the top left. Width and height must be positive integers; recording also
-requires both to be even, because the recorder crops odd dimensions.
+at the top left. Width and height are positive integers (R-INPUT-3); recording also
+requires both to be even (R-REC-2), because the recorder crops odd dimensions.
 
 `Session ready:` means the display and input sockets exist and the application
 process has started. The app may still be drawing its first frame. A screenshot
@@ -327,7 +327,8 @@ entries in `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` ar
 Close Settings before editing that file. Add the entries inside its existing
 outer braces, keeping your other bindings.
 
-The user must start sharing from an interactive terminal on their desktop:
+Sharing starts only from an interactive terminal on the user's desktop
+(R-ATTACH-1):
 
 ```sh
 framewisp /tmp/debug-app attach
@@ -403,7 +404,7 @@ The app decides what hover feedback to show and when.
 Headless `move`, `click`, `scroll`, and movement to a drag's start use a straight
 path with gentle acceleration and deceleration over 0.3 seconds by default,
 whether recording is active or not. `--move-duration SECONDS` changes that time;
-`0` moves immediately. Values must be finite, nonnegative, and at most 300 seconds.
+`0` moves immediately. Values are finite, nonnegative, and at most 300 seconds (R-INPUT-3).
 The runner tracks the last pointer position it sent across commands and batches,
 including drag steps and cancelled movement. The first pointer action positions
 immediately because its starting position is unknown. An unchanged tracked
@@ -493,7 +494,7 @@ commands. Checks support known accessible text, name, value, and checked/enabled
 state. Checks keep conservative traversal defaults. For larger trees, set
 `"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` on each
 `baseline`, `wait`, or `assert` step. The step's own `timeout` remains the total
-deadline; partial observations never verify state. See [conditional checks](docs/conditional-checks.md) for waits, assertions,
+deadline; partial observations never verify state (R-CHECK-1). See [conditional checks](docs/conditional-checks.md) for waits, assertions,
 transition baselines, and failure screenshots. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
 for the schema and error handling, and [batch measurements](docs/batch-latency.md)
 for complete CLI timings with app acknowledgements.
@@ -524,8 +525,8 @@ framewisp paint scroll 500 400 down --steps 3
 framewisp paint scroll 500 400 up --steps 3
 ```
 
-Directions are `up`, `down`, `left`, and `right`. The step count must be a positive
-integer and defaults to one. Steps are discrete wheel ticks, not pixels; the
+Directions are `up`, `down`, `left`, and `right`. The step count is a positive
+integer (R-INPUT-3) and defaults to one. Steps are discrete wheel ticks, not pixels; the
 widget under the pointer determines how far content moves. Each step presses and
 releases its wheel button. All steps use one connection, with no buttons left
 held. There is no smooth scrolling or momentum control.
@@ -602,7 +603,7 @@ to measure these values after caption rendering; duration is not a wall-clock es
 Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
 with an additional 640 pixels of width when `--console` is enabled.
 Recording requires even width and height. Existing output files are never
-overwritten. The session runner owns the recorder and finalizes an active clip
+overwritten (R-REC-1). The session runner owns the recorder and finalizes an active clip
 on normal app exit, Ctrl+C, or SIGTERM. A recorder failure stops the session;
 an invalid recording request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
@@ -734,7 +735,7 @@ but do not support recordings.
 Recordings show input captions by default, including shortcuts and pointer gestures. Captions stay visible during paced input and briefly after quick
 commands, until the next action. Opted-in text is abbreviated in the video; the log
 keeps the full text. Inputs between clips are excluded from the next clip.
-Captions appear only in recordings, never in app screenshots.
+Captions appear only in recordings, never in app screenshots (R-LOG-2).
 
 Disable captions for a clip with:
 

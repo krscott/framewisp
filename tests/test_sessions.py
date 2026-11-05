@@ -57,6 +57,7 @@ def test_outside_git_scopes_to_canonical_cwd(
     assert not expected.exists()
 
 
+# R-SESSION-1, R-SESSION-2
 def test_git_subdirectories_symlinks_and_worktrees(
     repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -158,6 +159,7 @@ def test_explicit_absolute_path(
     assert resolve_session(str(tmp_path)) == tmp_path.resolve()
 
 
+# R-SESSION-4
 @pytest.mark.parametrize("argument", ["", ".", "..", "bad\0name", "a" * 256, "é" * 128])
 def test_invalid_names(argument: str) -> None:
     with pytest.raises(ValueError):
@@ -170,6 +172,7 @@ def test_names_require_git(monkeypatch: pytest.MonkeyPatch) -> None:
         resolve_session("browser")
 
 
+# R-SESSION-3
 @pytest.mark.parametrize("attached", [False, True])
 def test_cli_resolves_named_control_without_legacy_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attached: bool

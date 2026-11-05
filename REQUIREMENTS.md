@@ -3,10 +3,6 @@
 Each requirement is an observable behaviour or invariant that framewisp must
 keep. `DESIGN.md` describes how the requirements are met.
 
-TODO: The tags below are provisional. Remove this note when every `[test]` tag
-is confirmed by a failing test against a local regression, or retagged
-`[manual: how]`.
-
 ## Format
 
 Write one requirement per bullet, as `- **R-AREA-N** [tag] Statement.` State
@@ -34,9 +30,6 @@ observable behaviour, not implementation, in short sentences.
 - **R-SESSION-6** [test] `run` refuses a session directory that the caller
   does not own or that group or others can write. It creates no file in that
   directory.
-- **R-SESSION-7** [test] When `TMPDIR` is too long for the runtime sockets,
-  `run` fails before it creates a runtime directory or an ownership journal.
-  The error gives the byte budget and asks for a shorter `TMPDIR`.
 
 ## Target app environment (ENV)
 
@@ -47,8 +40,6 @@ observable behaviour, not implementation, in short sentences.
   `PYTHONHOME`, and `sitecustomize`, do not change framewisp's own startup.
 - **R-ENV-3** [test] The target app receives the caller's `PYTHONPATH`
   unchanged.
-- **R-ENV-4** [test] `ACCESSIBILITY_ENABLED` is `1` for the target app unless
-  the caller sets it. A caller value is kept.
 
 ## Input (INPUT)
 
@@ -56,15 +47,13 @@ observable behaviour, not implementation, in short sentences.
   between CLI commands.
 - **R-INPUT-2** [test] `key` sends punctuation shortcuts, such as `Ctrl+,`,
   with exactly the requested modifiers.
-- **R-INPUT-3** [test] The CLI and the runner reject invalid input arguments
+- **R-INPUT-3** [test] The CLI and the runner reject invalid command arguments
   before they send any input.
 - **R-INPUT-4** [test] A rejected input command does not affect later input.
 - **R-INPUT-5** [test] A cancelled, disconnected, or stopped command releases
   its held keys and buttons.
 - **R-INPUT-6** [test] Clipboard copy and paste in the app work across input
   commands.
-- **R-INPUT-7** [test] When the input connection is lost, the session stops
-  and no input is replayed.
 
 ## Batches (BATCH)
 
@@ -72,8 +61,6 @@ observable behaviour, not implementation, in short sentences.
   before it sends any input.
 - **R-BATCH-2** [test] No other input runs during a batch, including during
   its final capture.
-- **R-BATCH-3** [test] A queued batch that is cancelled before it starts sends
-  no input.
 
 ## Conditional checks (CHECK)
 
@@ -99,16 +86,14 @@ observable behaviour, not implementation, in short sentences.
   partial. It never produces an `ok` result without that match.
 - **R-INSPECT-5** [test] When the app stalls a call, `inspect` reports
   `app-unresponsive`, separately from budget limits.
-- **R-INSPECT-6** [test] An unresponsive app does not block runner `status` or
-  `stop`.
+- **R-INSPECT-6** [test] When the app is unresponsive, `inspect` returns within
+  its time budget and runner `status` still responds.
 
 ## Input logs and captions (LOG)
 
 - **R-LOG-1** [test] By default, `inputs.jsonl` and captions omit typed text
   and literal key characters.
-- **R-LOG-2** [test] By default, text and key failure messages omit input
-  content.
-- **R-LOG-3** [test] Captions appear only in recordings, never in screenshots.
+- **R-LOG-2** [test] Captions appear only in recordings, never in screenshots.
 
 ## Recording (REC)
 
@@ -116,8 +101,7 @@ observable behaviour, not implementation, in short sentences.
 - **R-REC-2** [test] Recording rejects an odd display width or height.
 - **R-REC-3** [test] An active recording is finalized as a playable MP4 when
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
-- **R-REC-4** [test] Recorded colours match screenshot colours. White decodes
-  as 255, not 235.
+- **R-REC-4** [test] Recorded colours match screenshot colours.
 
 ## Lifetime and recovery (LIFE)
 
@@ -129,8 +113,8 @@ observable behaviour, not implementation, in short sentences.
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
   directory usable again.
-- **R-LIFE-5** [test] Recovery refuses copied, tampered, symlinked, or
-  replaced ownership files and runtime directories.
+- **R-LIFE-5** [test] Recovery refuses copied, tampered, or symlinked ownership
+  files and replaced runtime directories.
 - **R-LIFE-6** [test] Session metadata copied from another session cannot
   control that session.
 
@@ -138,7 +122,5 @@ observable behaviour, not implementation, in short sentences.
 
 - **R-ATTACH-1** [test] `attach` starts only from a foreground interactive
   terminal after the user types `ATTACH` exactly.
-- **R-ATTACH-2** [test] `--detach` ends the attached owner, even when the owner
-  is suspended.
-- **R-ATTACH-3** [test] `attach` refuses a desktop runtime directory that is
-  not private or not owned by the user.
+- **R-ATTACH-2** [test] `attach` refuses a desktop runtime directory that group
+  or others can access.

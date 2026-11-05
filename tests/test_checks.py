@@ -156,6 +156,30 @@ def readable_observation(
     }
 
 
+# R-CHECK-2
+@pytest.mark.parametrize("text", ["Done", None])
+def test_baseline_requires_a_nonmatching_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str | None
+) -> None:
+    def inspect(
+        session: Path,
+        query: inspection.Query,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, object]:
+        observation = readable_observation(text=text or "")
+        if text is None:
+            observation["matches"] = []
+        return observation
+
+    monkeypatch.setattr(inspection, "inspect_session", inspect)
+    check = Check.parse("baseline", {"condition": condition(), "timeout": 1})
+    result: dict[str, object] = {}
+    with pytest.raises(SessionError, match="nonmatching"):
+        perform_check(tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None)
+    assert "baseline_snapshot_id" not in result
+
+
 @pytest.mark.parametrize("action", ["baseline", "wait", "assert"])
 def test_query_settings_and_authoritative_deadline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str
@@ -316,6 +340,7 @@ def test_incomplete_check_diagnostics(
         perform_check(tmp_path, check, {}, cancelled=lambda: False, wait=lambda _: None)
 
 
+# R-CHECK-1
 @pytest.mark.parametrize("state", ["stale", "defunct"])
 def test_stale_text_cannot_verify(state: str) -> None:
     assert (
@@ -326,6 +351,7 @@ def test_stale_text_cannot_verify(state: str) -> None:
     )
 
 
+# R-CHECK-1
 @pytest.mark.parametrize("status", ["partial", "timeout", "unsupported", "unavailable"])
 def test_incomplete_observations_cannot_verify(status: str) -> None:
     check = Condition.parse(condition())
