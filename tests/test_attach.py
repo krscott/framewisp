@@ -15,7 +15,12 @@ from threading import Event
 
 import pytest
 
-from framewisp.attach import KEYCODES, AttachedInput, run_attachment
+from framewisp.attach import (
+    KEYCODES,
+    AttachedInput,
+    foreground_terminal,
+    run_attachment,
+)
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
@@ -94,6 +99,7 @@ def test_invalid_attached_chord_sends_no_keys(
     assert portal_calls == []
 
 
+# R-INPUT-5
 def test_stop_releases_drag_and_modifiers(
     portal_calls: list[tuple[str, tuple[object, ...]]],
     monkeypatch: pytest.MonkeyPatch,
@@ -241,6 +247,18 @@ def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         yield Path(directory)
 
 
+# R-ATTACH-1
+def test_terminal_outside_foreground_is_refused() -> None:
+    # This process has no controlling relationship with a new PTY.
+    primary, secondary = pty.openpty()
+    try:
+        assert os.isatty(secondary)
+        assert not foreground_terminal(secondary)
+    finally:
+        os.close(primary)
+        os.close(secondary)
+
+
 # R-ATTACH-2
 @pytest.mark.parametrize("target", ["runtime", "framewisp"])
 def test_attach_refuses_shared_desktop_directory(
@@ -255,6 +273,28 @@ def test_attach_refuses_shared_desktop_directory(
             pass
     finally:
         shared.chmod(0o700)
+    assert not (directory / "desktop.lock").exists()
+
+
+# R-ATTACH-2
+@pytest.mark.parametrize(
+    "target,message",
+    [
+        ("runtime", "XDG_RUNTIME_DIR must be owned by you"),
+        ("framewisp", "must be a private directory owned by you"),
+    ],
+)
+def test_attach_refuses_desktop_directory_of_another_user(
+    private_runtime: Path, target: str, message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = private_runtime / "framewisp"
+    directory.mkdir(mode=0o700)
+    if target == "framewisp":
+        monkeypatch.setattr("framewisp.desktop.desktop_directory", lambda: directory)
+    other = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: other)
+    with pytest.raises(RuntimeError, match=message), reserve_desktop():
+        pass
     assert not (directory / "desktop.lock").exists()
 
 

@@ -288,8 +288,8 @@ canonical paths make subdirectories and symlink aliases agree (R-SESSION-1). Git
 is a packaged runtime and test dependency; if unavailable, report an actionable
 error rather than silently choosing a different project. Explicit paths do not
 require Git. No local or legacy directory fallback occurs for names
-(R-SESSION-3). The existing short runtime socket paths remain independent of the
-session directory.
+(R-SESSION-3). Short runtime socket paths are independent of the session
+directory.
 
 Agents sharing a project must choose distinct names. Startup diagnostics print
 the resolved directory, which can be used explicitly from another project or an
@@ -584,9 +584,10 @@ ownership journal (R-LIFE-4). Logs, app-exit diagnostics, inputs, and recordings
 remain. It reports success as JSON or a nonzero error identifying resources that
 remain. Running again replaces logs.
 
-The lock file persists across runs and must not be unlinked or replaced. Startup
-refuses session directories that are not private (R-SESSION-6); malicious
-same-user filesystem mutation is outside the protocol. Old sessions without journals require manual inspection. Recovery
+The lock file persists across runs and must not be unlinked or replaced. Acquiring
+the lease refuses session directories that the caller does not own or that
+group or others can write (R-SESSION-6); malicious same-user filesystem mutation is outside the protocol.
+Old sessions without journals require manual inspection. Recovery
 cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
 records and runtime remain for manual investigation. Attached sessions acquire this same session lease before writing metadata and
 refuse abandoned headless journals. They retain their separate desktop reservation
@@ -944,8 +945,8 @@ Metadata records `app_profile` as `"fresh"` or null.
 The CLI owns each query connection independently of the input/control socket.
 A Gio cancellable with a deadline timer bounds connection setup and requests;
 each synchronous call also receives the remaining request budget. An unresponsive
-application produces a timeout observation without blocking runner status
-(R-INSPECT-6) or stop.
+application produces a timeout observation without blocking runner status/stop
+(R-INSPECT-6).
 There is no persistent AT-SPI object cache or background observer.
 
 `inspection_limits.py` defines the shared query defaults and maxima. CLI help,
@@ -978,8 +979,8 @@ Only `ok` exits zero. An `ok` empty list means no match in the fully traversed
 exposed tree. `unsupported` means no accessible application has registered yet;
 it can also occur while an app is starting. `partial` reports limits or vanished
 objects, `timeout` reports an exhausted budget, and `unavailable` reports
-failure to reach the bus/registry. Non-ok observations still print JSON and exit
-1. `longest_call_ms` measures the slowest synchronous D-Bus method call,
+failure to reach the bus/registry. Non-ok observations still print JSON and
+exit 1. `longest_call_ms` measures the slowest synchronous D-Bus method call,
 including failed calls but excluding connection setup. A failed call to an app
 that spends at least 80% of the entire query budget and reaches the deadline
 adds the `app-unresponsive` reason (R-INSPECT-5). This is evidence of a slow or

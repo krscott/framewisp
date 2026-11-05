@@ -319,7 +319,7 @@ def test_interrupt_stops_session(demo: Demo) -> None:
             os.kill(pid, 0)
 
 
-# R-REC-3
+# R-LIFE-2, R-REC-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True, "x11-record"], indirect=True)
 def test_status_and_stop_finalize_recording(demo: Demo) -> None:

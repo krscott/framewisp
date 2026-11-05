@@ -219,6 +219,7 @@ def test_control_commands_reject_legacy_session_before_connecting(
     assert "Traceback" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("delay", ["-1", "nan", "inf", "nope"])
 def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
     destination = tmp_path / "capture.png"
@@ -356,6 +357,7 @@ def test_invalid_input_timing(
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "chord",
     [
@@ -391,6 +393,7 @@ def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("steps", ["0", "-1", "1.5", "nope"])
 def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
     result = subprocess.run(
@@ -415,6 +418,7 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "option,value",
     [
@@ -449,6 +453,7 @@ def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "action,coordinates",
     [("click", ["100", "100"]), ("drag", ["100", "100", "200", "200"])],
@@ -540,6 +545,7 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     assert not recording.exists()
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "text", ["line\nbreak", "tab\tstop", "escape\x1b", "join\u200der"]
 )

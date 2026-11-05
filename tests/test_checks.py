@@ -178,7 +178,9 @@ def test_baseline_requires_a_nonmatching_value(
     check = Check.parse("baseline", {"condition": condition(), "timeout": 1})
     result: dict[str, object] = {}
     with pytest.raises(SessionError, match="nonmatching"):
-        perform_check(tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None)
+        perform_check(
+            tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None
+        )
     assert "baseline_snapshot_id" not in result
 
 
@@ -357,7 +359,8 @@ def test_stale_text_cannot_verify(state: str) -> None:
 @pytest.mark.parametrize("status", ["partial", "timeout", "unsupported", "unavailable"])
 def test_incomplete_observations_cannot_verify(status: str) -> None:
     check = Condition.parse(condition())
-    assert check.evaluate({"status": status, "matches": [{"text": "Done"}]}) is None
+    observation = {"status": status, "matches": [{"text": "Done", "states": []}]}
+    assert check.evaluate(observation) is None
 
 
 # R-CHECK-1

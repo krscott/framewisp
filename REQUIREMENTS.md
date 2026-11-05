@@ -23,12 +23,13 @@ observable behaviour, not implementation, in short sentences.
   separate session directories.
 - **R-SESSION-3** [test] A bare name never resolves to a local or legacy
   session directory.
-- **R-SESSION-4** [test] The CLI rejects a bare name that is empty, contains
+- **R-SESSION-4** [test] Framewisp rejects a bare name that is empty, contains
   NUL, is `.` or `..`, or is longer than 255 bytes.
 - **R-SESSION-5** [test] When `TMPDIR` names a writable directory, new project
   session directories and runtime directories are under it.
-- **R-SESSION-6** [test] Framewisp refuses to take ownership of a session
-  directory that group or others can write.
+- **R-SESSION-6** [test] `run` refuses a session directory that the caller
+  does not own or that group or others can write. It creates no file in that
+  directory.
 
 ## Target app environment (ENV)
 
@@ -36,7 +37,8 @@ observable behaviour, not implementation, in short sentences.
   private session settings applied. Variables from framewisp's Nix wrapper do
   not reach the app.
 - **R-ENV-2** [test] The caller's Python settings, such as `PYTHONPATH`,
-  `PYTHONHOME`, and `sitecustomize`, do not change framewisp's own startup.
+  `PYTHONHOME`, and `sitecustomize`, do not change how the installed Nix package
+  starts.
 - **R-ENV-3** [test] The target app receives the caller's `PYTHONPATH`
   unchanged.
 
@@ -49,7 +51,7 @@ observable behaviour, not implementation, in short sentences.
 - **R-INPUT-3** [test] The CLI and the runner reject invalid command arguments
   before they send any input.
 - **R-INPUT-4** [test] A rejected input command does not affect later input.
-- **R-INPUT-5** [test] When its caller disconnects, an input command releases
+- **R-INPUT-5** [test] A cancelled, disconnected, or stopped command releases
   its held keys and buttons.
 - **R-INPUT-6** [test] Clipboard copy and paste in the app work across input
   commands.
@@ -83,10 +85,11 @@ observable behaviour, not implementation, in short sentences.
   `display_bounds` is null and `display_bounds_reason` gives the cause.
 - **R-INSPECT-4** [test] A vanished or defunct object makes an observation
   partial. It never yields a complete observation with no match.
-- **R-INSPECT-5** [test] When the app stalls a call, `inspect` reports
-  `app-unresponsive`, separately from budget limits.
-- **R-INSPECT-6** [test] When the app is unresponsive, `inspect` returns within
-  its time budget and runner `status` still responds.
+- **R-INSPECT-5** [test] When one failed app call uses at least 80% of the query
+  budget and the query reaches its deadline, `inspect` reports
+  `app-unresponsive`. Budget limits alone do not add that reason.
+- **R-INSPECT-6** [test] An unresponsive app does not block runner `status` or
+  `stop`.
 
 ## Input logs and captions (LOG)
 
@@ -96,8 +99,8 @@ observable behaviour, not implementation, in short sentences.
 
 ## Recording (REC)
 
-- **R-REC-1** [test] Recordings and batch captures never overwrite an existing
-  file.
+- **R-REC-1** [test] Recording rejects a destination that already exists. A
+  batch capture never replaces an existing file.
 - **R-REC-2** [test] Recording rejects an odd display width or height.
 - **R-REC-3** [test] An active recording is finalized as a playable MP4 when
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
@@ -113,8 +116,8 @@ observable behaviour, not implementation, in short sentences.
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
   directory usable again.
-- **R-LIFE-5** [test] Recovery refuses copied, tampered, or symlinked ownership
-  files and replaced runtime directories.
+- **R-LIFE-5** [test] Recovery refuses copied, tampered, symlinked, or
+  replaced ownership files and runtime directories.
 - **R-LIFE-6** [test] Session metadata copied to another directory cannot
   control the original session.
 
@@ -122,5 +125,5 @@ observable behaviour, not implementation, in short sentences.
 
 - **R-ATTACH-1** [test] `attach` starts only from a foreground interactive
   terminal after the user types `ATTACH` exactly.
-- **R-ATTACH-2** [test] `attach` refuses an `XDG_RUNTIME_DIR` or framewisp
-  desktop directory that group or others can access.
+- **R-ATTACH-2** [test] `attach` refuses a desktop runtime directory that is
+  not private or not owned by the user.

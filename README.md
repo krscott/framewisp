@@ -200,10 +200,10 @@ Symlinked project paths resolve to the same canonical path. Git must be installe
 (it is included in the Nix package).
 
 Explicit paths such as `/tmp/framewisp-demo`, `./browser`, and `sessions/browser`
-resolve as given, relative to the current directory. A bare name never falls
-back to a local or legacy session directory (R-SESSION-3). Empty names,
-`.`/`..`, and names over 255 bytes are invalid (R-SESSION-4); use `./` or `../`
-to explicitly select those directories.
+resolve as ordinary paths; relative ones use the current directory. A bare name
+never falls back to a local or legacy session directory (R-SESSION-3). Empty
+names and `.`/`..` are invalid (R-SESSION-4); use `./` or `../` to explicitly
+select those directories. Names over 255 bytes are also invalid (R-SESSION-4).
 
 Agents in the same project must choose distinct names to avoid sharing a session.
 Both `run` and user-started `attach` print the resolved session directory at

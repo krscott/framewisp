@@ -90,6 +90,7 @@ def test_pacing_limit_is_for_whole_batch() -> None:
         )
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("value", [-1, True, float("nan"), float("inf"), 301])
 def test_invalid_move_duration(value: object) -> None:
     with pytest.raises(ValueError, match="move_duration"):

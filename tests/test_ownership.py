@@ -203,9 +203,81 @@ def test_runtime_replacement_refused(
     recover_session(tmp_path)
 
 
+# R-LIFE-5
+def test_symlinked_runtime_refused(
+    tmp_path: Path, runtime_backup: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = runtime_path(tmp_path)
+    with pytest.raises(SessionError, match="Refusing symlink runtime"):
+        with session_lease(tmp_path), headless_runtime(tmp_path) as runtime:
+            (runtime / "preserved").write_text("preserve")
+            runtime.rename(runtime_backup)
+            runtime.symlink_to(runtime_backup)
+            monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with pytest.raises(SessionError, match="Refusing symlink runtime"):
+        recover_session(tmp_path)
+    assert (runtime_backup / "preserved").read_text() == "preserve"
+    runtime.unlink()
+    runtime_backup.rename(runtime)
+    recover_session(tmp_path)
+
+
 # R-SESSION-6
-def test_writable_session_refused_before_creating_lock(tmp_path: Path) -> None:
-    tmp_path.chmod(0o777)
+@pytest.mark.parametrize("mode", [0o720, 0o702])
+def test_run_refuses_writable_session_without_creating_files(
+    tmp_path: Path, mode: int
+) -> None:
+    session = tmp_path / "session"
+    session.mkdir()
+    session.chmod(mode)
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session), "run", "--", "true"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "Unsafe session directory" in result.stderr
+    assert list(session.iterdir()) == []
+
+
+# R-SESSION-6
+@pytest.mark.skipif(
+    Path("/").stat().st_uid == os.getuid(),
+    reason="Needs a directory owned by another user",
+)
+def test_run_refuses_session_owned_by_another_user() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", "/", "run", "--", "true"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "Unsafe session directory" in result.stderr
+
+
+# R-SESSION-6
+def test_session_lease_refuses_another_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmp_path.chmod(0o700)
+    other = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: other)
+    with pytest.raises(SessionError, match="Unsafe session directory"):
+        with session_lease(tmp_path):
+            pass
+    assert not (tmp_path / LOCK).exists()
+
+
+# R-SESSION-6
+@pytest.mark.parametrize("mode", [0o720, 0o702])
+def test_writable_session_refused_before_creating_lock(
+    tmp_path: Path, mode: int
+) -> None:
+    tmp_path.chmod(mode)
     try:
         with pytest.raises(SessionError, match="Unsafe session directory"):
             recover_session(tmp_path)
