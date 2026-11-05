@@ -182,10 +182,7 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    60 Hz, a fallback seat, US keyboard layout,
    and no window borders. Ordinary clipboard copy/paste and primary selection
    stay enabled within the session.
-   Load no host Sway configuration. The Nix overlay builds framewisp's Sway
-   against wlroots with `patches/wlroots-xwayland-map-race.patch`, so X11 windows
-   whose first frame arrives before their Xwayland surface pairing still map.
-   The CLI validates positive integer dimensions
+   Load no host Sway configuration. The CLI validates positive integer dimensions
    before starting the session. Recording requires even dimensions, since
    wf-recorder otherwise crops the last row or column.
 6. Wait up to ten seconds for its Wayland socket, checking for process exit.
@@ -227,6 +224,9 @@ A Sway `exec` child writes its `DISPLAY` to a file in the private runtime direct
 The runner waits up to ten seconds for that file, checking shutdown and compositor
 exit. It never guesses an X display or uses the host's address. Sway allocates the
 X sockets and owns the Xwayland process; stopping Sway removes them.
+The Nix overlay builds framewisp's Sway against wlroots with
+`patches/wlroots-xwayland-map-race.patch`, so X11 windows whose first frame
+arrives before their Xwayland surface pairing still map.
 
 The app environment omits `WAYLAND_DISPLAY`, sets the discovered `DISPLAY`, uses
 `XAUTHORITY=/dev/null` to bypass inherited and home-directory credentials, and

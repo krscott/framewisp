@@ -871,7 +871,6 @@ def test_drag_delivers_paced_motion_and_release(
 def test_pointer_approach_uses_tracked_position(
     demo: Demo, action: str, duration: float | None
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
     wait_until(
@@ -963,7 +962,6 @@ def test_pointer_approach_uses_tracked_position(
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
 def test_first_pointer_action_has_no_animation_delay(demo: Demo, action: str) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)
     arguments = ["200", "150", "--move-duration", "30"]
     if action == "scroll":
@@ -991,7 +989,6 @@ def test_first_pointer_action_has_no_animation_delay(demo: Demo, action: str) ->
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("action", ["move", "drag"])
 def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "500", "150", "--move-duration", "0")
     if action == "drag":
@@ -1043,7 +1040,6 @@ def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> No
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
     wait_until(
@@ -1895,7 +1891,6 @@ def input_request(
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "100", "100", "--move-duration", "0")
     wait_until(
@@ -1961,7 +1956,6 @@ def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> 
 def test_unchanged_pointer_position_adds_no_animation_delay(
     demo: Demo, action: str
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     wait_for_input_probe_window(demo)
     cli(demo.directory, "move", "500", "300", "--move-duration", "0")
     wait_until(
@@ -3402,6 +3396,7 @@ def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
 
 
 def wait_for_input_probe_window(demo: Demo) -> None:
+    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
     # GTK's map signal can precede Sway mapping the Xwayland window.
     tree: dict[str, Any] = {}
     windows: list[str | None] = []
