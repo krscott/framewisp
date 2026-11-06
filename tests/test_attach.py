@@ -1,5 +1,6 @@
 """Cancellation tests replace portal I/O; live consent is tested on the desktop."""
 
+import errno
 import json
 import os
 import pty
@@ -18,10 +19,12 @@ from unittest.mock import Mock
 
 import pytest
 
+from framewisp import attach
 from framewisp.attach import (
     KEYCODES,
     AttachedInput,
     attach_session,
+    open_destination,
     run_attachment,
     write_png,
 )
@@ -635,11 +638,54 @@ def test_screenshot_reaches_a_descriptor(tmp_path: Path) -> None:
 
 # R-CONTROL-2
 def test_screenshot_write_failure_fails_only_that_command(tmp_path: Path) -> None:
+    # The log's directory is missing, as a full disk would refuse the log too.
+    log = tmp_path / "missing" / "log"
     with open("/dev/full", "wb") as output:
         with pytest.raises(ValueError, match="Could not write"):
-            write_png(
-                "videotestsrc num-buffers=1", output.fileno(), Event(), tmp_path / "log"
-            )
+            write_png("videotestsrc num-buffers=1", output.fileno(), Event(), log)
+
+
+class CapturePortal:
+    node = 1
+
+    def capture_fd(self) -> int:
+        return os.open(os.devnull, os.O_RDONLY)
+
+
+# R-CONTROL-2
+def test_truncate_failure_fails_only_that_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(descriptor: int, length: int) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "ftruncate", refuse)
+    with pytest.raises(ValueError, match="Cannot save screenshot"):
+        open_destination(tmp_path / "x.png")
+
+
+# R-CONTROL-2
+def test_failure_closing_the_destination_fails_only_that_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written: list[int] = []
+    close = os.close
+
+    def fail_on_output(descriptor: int) -> None:
+        close(descriptor)
+        if descriptor in written:
+            # The number is free for reuse once closed.
+            written.remove(descriptor)
+            raise OSError(errno.EDQUOT, "Disk quota exceeded")
+
+    def write(source: str, output: int, stop: Event, log: Path) -> None:
+        written.append(output)
+
+    monkeypatch.setattr(attach, "write_png", write)
+    monkeypatch.setattr(os, "close", fail_on_output)
+    portal = cast(DesktopPortal, CapturePortal())
+    with pytest.raises(ValueError, match="Could not write"):
+        attach.capture(portal, tmp_path / "x.png", Event(), tmp_path / "log")
 
 
 # R-CONTROL-2

@@ -225,19 +225,29 @@ class AttachedInput:
             self.release()
 
 
-def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
-    """Capture to a regular file. A bad destination fails only this command."""
+def open_destination(destination: Path) -> int:
+    """Open an empty regular file. Failing here fails only this command."""
+    failure = f"Cannot save screenshot to {destination}"
     try:
         # Without O_NONBLOCK, a FIFO would hold the input lock until it has a reader.
         output = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_NONBLOCK, 0o666)
     except OSError as error:
-        raise ValueError(f"Cannot save screenshot to {destination}: {error}") from None
+        raise ValueError(f"{failure}: {error}") from None
     try:
         if not stat.S_ISREG(os.fstat(output).st_mode):
-            raise ValueError(
-                f"Cannot save screenshot to {destination}: not a regular file."
-            )
+            raise ValueError(f"{failure}: not a regular file.")
         os.ftruncate(output, 0)
+    except (OSError, ValueError) as error:
+        os.close(output)
+        raise ValueError(
+            str(error) if isinstance(error, ValueError) else f"{failure}: {error}"
+        ) from None
+    return output
+
+
+def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+    output = open_destination(destination)
+    try:
         # Capture lives in the owner process: even SIGKILL closes every capture FD.
         descriptor = portal.capture_fd()
         try:
@@ -250,7 +260,11 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         finally:
             os.close(descriptor)
     finally:
-        os.close(output)
+        try:
+            os.close(output)
+        except OSError as error:
+            # Network filesystems can report a failed write only here.
+            raise ValueError(f"Could not write the screenshot: {error}") from None
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -277,12 +291,13 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
             if message is not None:
                 if message.type == Gst.MessageType.ERROR:
                     error, detail = message.parse_error()
-                    log.write_text(f"{error}\n{detail}\n")
                     if message.src == sink:
-                        # A full disk fails this command, not the attachment.
+                        # A full disk fails this command, not the attachment, and
+                        # the log may be on that disk.
                         raise ValueError(
                             f"Could not write the screenshot: {error.message}"
                         )
+                    log.write_text(f"{error}\n{detail}\n")
                     raise RuntimeError(f"Desktop capture failed. See {log}")
                 return
             if time.monotonic() >= deadline:
