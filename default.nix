@@ -145,6 +145,7 @@ buildPythonPackage {
   preCheck = ''
     export FRAMEWISP_ATSPI_REGISTRY="${at-spi2-core}/libexec/at-spi2-registryd"
     export FRAMEWISP_FONTCONFIG_FILE="${captionFonts}"
+    export GST_PLUGIN_SYSTEM_PATH_1_0="${capturePlugins}"
   '';
 
   # Skip integration tests during build (they require the installed executable)
