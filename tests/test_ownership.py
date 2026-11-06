@@ -812,13 +812,38 @@ def test_recovery_refuses_when_a_temporary_location_cannot_be_checked(
     monkeypatch.setenv("TMPDIR", str(closed / "temporary"))
     closed.chmod(0)
     try:
-        with pytest.raises(SessionError, match="journal is missing"):
+        with pytest.raises(SessionError, match="journal is missing") as refusal:
             recover_session(session)
         assert (session / ".headless-owner.tmp").exists()
+        assert "Restore access or unset TMPDIR" in " ".join(str(refusal.value).split())
+        # The printed fix clears the refusal without restoring access.
+        monkeypatch.delenv("TMPDIR")
+        assert recover_session(session) == 0
     finally:
         closed.chmod(0o700)
-    # Restored access confirms no runtime is there.
-    assert recover_session(session) == 0
+
+
+# R-LIFE-7
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can write a read-only directory")
+def test_relative_read_only_tmpdir_is_still_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "relative").mkdir()
+    monkeypatch.setenv("TMPDIR", "relative")
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    session = tmp_path / "session"
+    session.mkdir()
+    runtime = tmp_path / "relative" / runtime_path(session).name
+    runtime.mkdir(mode=0o700)
+    (tmp_path / "relative").chmod(0o500)
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    try:
+        with pytest.raises(SessionError, match="journal is missing") as refusal:
+            recover_session(session)
+        assert str(runtime) in str(refusal.value)
+    finally:
+        (tmp_path / "relative").chmod(0o700)
 
 
 # R-LIFE-7

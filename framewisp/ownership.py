@@ -12,7 +12,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from framewisp.errors import SessionError
 
@@ -63,33 +63,42 @@ def temporary_parents() -> list[Path]:
     """List where a session's runtime can be when no journal says which."""
     # gettempdir() skips a directory it cannot write to, such as a full or read-only
     # one, so a session may have started in any of these.
-    values = (os.environ.get("TMPDIR"), "/tmp")
-    parents = [Path(value) for value in values if value and Path(value).is_absolute()]
+    parents: list[Path] = []
     try:
-        parents.insert(0, Path(tempfile.gettempdir()))
+        parents.append(Path(tempfile.gettempdir()))
     except OSError:
         pass
+    for value in (os.environ.get("TMPDIR"), "/tmp"):
+        try:
+            if value:
+                parents.append(Path(value).absolute())
+        except OSError:
+            # A relative TMPDIR has no location without a working directory.
+            pass
     return list(dict.fromkeys(parents))
 
 
-def confirmed_absent(path: Path) -> bool:
-    # Only a confirmed absence may read as finished cleanup, so a path that cannot be
-    # checked counts as present. Path.exists() cannot tell these apart.
+def path_status(path: Path) -> Literal["present", "absent", "unchecked"]:
+    # Only a confirmed absence may read as finished cleanup. Path.exists() cannot
+    # tell that from a path it failed to check.
     try:
         path.lstat()
     except (FileNotFoundError, NotADirectoryError):
-        return True
+        return "absent"
     except OSError:
-        return False
-    return False
+        return "unchecked"
+    return "present"
 
 
 def likely_runtime(session: Path) -> Path:
     """Find this session's runtime directory, for refusals and for checking leftovers."""
     name = runtime_name(session)
     runtimes = [parent / name for parent in temporary_parents()]
-    remaining = [runtime for runtime in runtimes if not confirmed_absent(runtime)]
-    return (remaining or runtimes)[0]
+    for status in ("present", "unchecked"):
+        for runtime in runtimes:
+            if path_status(runtime) == status:
+                return runtime
+    return runtimes[0]
 
 
 def check_socket_paths(runtime: Path) -> None:
@@ -281,8 +290,15 @@ def derived_steps(session: Path) -> str:
         runtime = likely_runtime(session)
     except OSError:
         return missing_session_steps(session)
+    unchecked = (
+        f"Cannot check {runtime}, so a runtime may remain there. Restore access or "
+        "unset TMPDIR, then run recover again.\n"
+        if path_status(runtime) == "unchecked"
+        else ""
+    )
     return (
-        stop_step(session)
+        unchecked
+        + stop_step(session)
         + f"Otherwise follow these steps, which assume TMPDIR is {runtime.parent}. "
         "If the session started with another TMPDIR, set it and run recover again "
         "for steps with that path.\n" + cleanup_steps(session, runtime)
@@ -520,7 +536,7 @@ def recover_session(session: Path) -> int:
             # A partial temporary journal is disposable, but stale session JSON
             # without an ownership journal belongs to an unsupported older run.
             if (
-                not confirmed_absent(likely_runtime(session))
+                path_status(likely_runtime(session)) != "absent"
                 or (session / "session.json").exists()
                 or (session / "session.json").is_symlink()
                 or (session / ".session.json").exists()
