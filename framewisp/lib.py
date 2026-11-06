@@ -550,10 +550,10 @@ def session_command(
             "This runner does not support caption modes. Restart the session "
             "with this version of framewisp."
         )
-    if action == "record-start" and state.get("console_panels") is not True:
+    if console is not None and state.get("console_panels") is not True:
         raise SessionError(
-            "This runner does not support console panel requests. Restart the "
-            "session with this version of framewisp."
+            "This runner does not support console panel options. Restart the session "
+            "with this version of framewisp."
         )
     if compact is not None and state.get("compact_recording") is not True:
         raise SessionError(
@@ -569,16 +569,18 @@ def session_command(
             "This runner does not support click pings. Restart the session with "
             "this version of framewisp, or pass --no-click-pings."
         )
-    request = {
+    request: dict[str, object] = {
         "action": action,
         "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
         "click_pings": click_pings,
-        "console": console.parameters() if console is not None else None,
         "compact": compact.parameters() if compact is not None else None,
         "parameters": parameters,
     }
+    # An older runner rejects this key even when it is null.
+    if console is not None:
+        request["console"] = console.parameters()
     if parameters is not None and state.get("persistent_input") is not True:
         raise SessionError(
             "This runner does not support persistent input. Restart the session with this version of framewisp."

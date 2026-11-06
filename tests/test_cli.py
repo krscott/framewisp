@@ -1,10 +1,16 @@
 import json
 import os
+import socket
 import subprocess
 import sys
+import tempfile
+import threading
 from pathlib import Path
 
 import pytest
+
+from framewisp.layout import ConsolePanel
+from framewisp.lib import session_command
 
 
 def test_cli_help() -> None:
@@ -212,9 +218,7 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
 
 def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps(
-            {"control_protocol": 1, "caption_modes": True, "console_panels": True}
-        )
+        json.dumps({"control_protocol": 1, "caption_modes": True})
     )
     result = subprocess.run(
         [
@@ -236,10 +240,9 @@ def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
     assert "Traceback" not in result.stderr
 
 
-@pytest.mark.parametrize("options", [[], ["--console"]])
 @pytest.mark.parametrize("capability", [None, False, 1])
-def test_record_start_rejects_runner_without_console_panels_before_connecting(
-    tmp_path: Path, capability: object, options: list[str]
+def test_console_rejects_unsupported_runner_before_connecting(
+    tmp_path: Path, capability: object
 ) -> None:
     state: dict[str, object] = {
         "control_protocol": 1,
@@ -257,7 +260,7 @@ def test_record_start_rejects_runner_without_console_panels_before_connecting(
             "framewisp",
             str(tmp_path),
             "record-start",
-            *options,
+            "--console",
             str(destination),
         ],
         capture_output=True,
@@ -266,9 +269,53 @@ def test_record_start_rejects_runner_without_console_panels_before_connecting(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "does not support console panel requests. Restart" in result.stderr
+    assert "does not support console panel options. Restart" in result.stderr
     assert "Traceback" not in result.stderr
     assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("panel", "expected"),
+    [(None, None), (ConsolePanel("top", 200), {"position": "top", "size": 200})],
+)
+def test_record_start_sends_console_only_for_a_panel(
+    panel: ConsolePanel | None, expected: dict[str, object] | None
+) -> None:
+    received: list[dict[str, object]] = []
+
+    def runner(server: socket.socket) -> None:
+        connection, _ = server.accept()
+        with connection, connection.makefile("rw") as stream:
+            received.append(json.loads(stream.readline()))
+            stream.write(json.dumps({"error": None, "data": None}) + "\n")
+
+    # Pytest's own paths can exceed the Unix socket path limit.
+    with tempfile.TemporaryDirectory() as directory:
+        session = Path(directory)
+        (session / "session.json").write_text(
+            json.dumps(
+                {
+                    "control_protocol": 1,
+                    "caption_modes": True,
+                    "click_pings_recording": True,
+                    "console_panels": True,
+                    "runtime_directory": directory,
+                }
+            )
+        )
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(str(session / "control.sock"))
+            server.listen()
+            thread = threading.Thread(target=runner, args=(server,))
+            thread.start()
+            result = session_command(
+                session, "record-start", session / "clip.mp4", console=panel
+            )
+            thread.join(timeout=5)
+    assert result == 0
+    # An older runner fails on any `console` key, including null.
+    assert ("console" in received[0]) is (panel is not None)
+    assert received[0].get("console") == expected
 
 
 @pytest.mark.parametrize("capability", [None, False, 1])
@@ -278,7 +325,6 @@ def test_default_clip_rejects_runner_without_click_pings(
     state: dict[str, object] = {
         "control_protocol": 1,
         "caption_modes": True,
-        "console_panels": True,
         "runtime_directory": str(tmp_path),
     }
     if capability is not None:

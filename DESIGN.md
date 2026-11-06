@@ -855,14 +855,15 @@ height for `top` and `bottom`, default 640 pixels (R-REC-13). The other panel
 dimension equals the matching GUI dimension. `run --console` without `--record` is
 invalid. The parser rejects either placement option without `--console`, on both
 commands, before it starts a session or clip. The control request's `console`
-value is null or an object with exactly `position` and `size`, so a position can't
+value is absent, null, or an object with exactly `position` and `size`, so a position can't
 exist without a panel.
 Console capture uses the same first-frame monotonic origin as input captions,
 including with `--captions none`. A lock protects sidecar snapshots during rendering.
-Session metadata advertises `console_panels: true`. Every `record-start`, with or
-without `--console`, requires this capability before connecting, because an older
-runner rejects both the object and null. The error tells the user to restart the
-session.
+Session metadata advertises `console_panels: true`. Every `--console` request,
+including the default placement, requires this capability before connecting, because
+an older runner can't read the object. The error tells the user to restart the
+session. A clip without a panel omits `console`, because an older runner also rejects
+null, so it still works there.
 The app-output worker is checked during monitoring, joined after app cleanup and
 before final recording rendering, and bounded on shutdown if a pipe writer remains.
 
@@ -877,9 +878,9 @@ coalesce to at most one per 30 fps frame. This is plain text rendering, without
 terminal emulation.
 
 `video_layout` turns the display size and panel request into a `VideoLayout`: video
-size, GUI rectangle, and panel rectangle. It is the only code that branches on the
-position. `ConsolePanel` also checks the position's minimum size, and no other module
-reads it. `pad`, the ASS play resolution, click pings, captions, and console text all
+size, GUI rectangle, and panel rectangle. `layout.py` is the only module that branches
+on the position: `video_layout` for the rectangles and `ConsolePanel` for each edge's
+minimum size. `pad`, the ASS play resolution, click pings, captions, and console text all
 read those rectangles, and a clip without a panel has a GUI rectangle that fills the
 video. Caption and ping scale follows GUI height, not video height, so a top or
 bottom panel doesn't resize them. Caption margins come from the distance between the
