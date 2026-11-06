@@ -100,6 +100,7 @@ def display_command(
             stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            errors="replace",
         ) as process:
             deadline = time.monotonic() + timeout
             try:

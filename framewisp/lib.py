@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 from types import FrameType
-from typing import cast
+from typing import Literal, cast, get_args
 from xml.sax.saxutils import escape
 
 from framewisp.actions import InputAction
@@ -30,7 +30,12 @@ from framewisp.captions import (
     render_recording,
 )
 from framewisp.compact import CompactSettings
-from framewisp.connection import reply as reply
+from framewisp.connection import (
+    parse_command,
+    receive_request,
+    reply,
+    resolved_request_path,
+)
 from framewisp.console import ConsoleCapture, app_output
 from framewisp.environment import caller_environment, unix_bus_address
 from framewisp.errors import (
@@ -521,6 +526,7 @@ def recording_summary(destination: Path) -> dict[str, object]:
         ],
         capture_output=True,
         text=True,
+        errors="replace",
         check=False,
         timeout=10,
     )
@@ -566,10 +572,10 @@ class Recordings:
         layout = video_layout(self.size, console)
         if isinstance(layout, str):
             return layout
-        error = recording_path_error(self.session, destination)
-        if error is not None:
-            return error
         try:
+            error = recording_path_error(self.session, destination)
+            if error is not None:
+                return error
             self.process = self.resources.enter_context(
                 start_recording(
                     destination,
@@ -705,6 +711,84 @@ def session_command(
     return 0
 
 
+@dataclass(frozen=True)
+class RecordStart:
+    destination: Path
+    captions: CaptionMode
+    click_pings: bool
+    console: ConsolePanel | None
+    compact: CompactSettings | None
+
+    @staticmethod
+    def parse(command: dict[str, object]) -> "RecordStart":
+        compact = CompactSettings.parse(command.get("compact"))
+        console = ConsolePanel.parse(command.get("console"))
+        destination = command.get("destination")
+        captions = command.get("captions")
+        click_pings = command.get("click_pings", True)
+        if not isinstance(destination, str):
+            raise ValueError("record-start requires a destination")
+        if captions not in CAPTION_MODES:
+            raise ValueError(f"captions must be one of {', '.join(CAPTION_MODES)}")
+        if not isinstance(click_pings, bool):
+            raise ValueError("click_pings must be true or false")
+        path = Path(destination)
+        if not path.is_absolute():
+            raise ValueError("destination must be absolute in runner requests.")
+        return RecordStart(
+            resolved_request_path(path, "destination"),
+            captions,
+            click_pings,
+            console,
+            compact,
+        )
+
+
+SessionAction = Literal["stop", "status", "record-stop"]
+SESSION_ACTIONS: tuple[SessionAction, ...] = get_args(SessionAction)
+ControlRequest = SessionAction | RecordStart | InputAction | Batch
+
+
+def parse_batch(raw: object, recordings: Recordings) -> Batch:
+    batch = Batch.parse(raw)
+    for capture in (batch.capture, batch.failure_capture):
+        if capture is None:
+            continue
+        if not capture.path.parent.is_dir():
+            raise ValueError("capture.path requires an existing parent directory.")
+        resolved = resolved_request_path(capture.path, "capture.path")
+        path_error = recording_path_error(recordings.session, resolved)
+        if path_error is not None:
+            raise ValueError(path_error.replace("recording path", "capture path"))
+        if resolved == recordings.destination:
+            raise ValueError(
+                f"{capture.path} is the active recording's destination. "
+                "Choose a new capture path."
+            )
+    return batch
+
+
+def parse_request(line: bytes, recordings: Recordings) -> ControlRequest:
+    """Validate one request line, changing no session state."""
+    command = parse_command(line)
+    if command.get("session") != str(recordings.session):
+        raise ValueError(
+            "Session metadata points to a different session. Use the original session directory."
+        )
+    action = command.get("action")
+    if not isinstance(action, str):
+        raise ValueError("action must be a string.")
+    if action in SESSION_ACTIONS:
+        return action
+    if action == "record-start":
+        return RecordStart.parse(command)
+    if action == "batch":
+        return parse_batch(command.get("parameters"), recordings)
+    if action in {"move", "click", "drag", "scroll", "type", "key"}:
+        return InputAction.parse(action, command.get("parameters"))
+    raise ValueError("Unsupported headless session command.")
+
+
 def handle_session_command(
     listener: socket.socket,
     recordings: Recordings,
@@ -712,72 +796,29 @@ def handle_session_command(
     status: Callable[[], dict[str, object]],
     inputs: InputWorker,
 ) -> socket.socket | None:
-    """Return a stop caller's connection for the runner to reply after cleanup."""
+    """Return a stop caller's connection for the runner to reply after cleanup.
+
+    Execution is not guarded: an unexpected error in it is a runner failure and
+    ends the session.
+    """
     try:
         connection, _ = listener.accept()
     except TimeoutError:
         return None
     stopping = False
     try:
-        connection.settimeout(2)
-        with connection.makefile("rb") as request:
-            try:
-                line = request.readline(MAX_REQUEST_BYTES + 1)
-                if len(line) > MAX_REQUEST_BYTES:
-                    reply(connection, error="Session request exceeds the 1 MiB limit.")
-                    return None
-                raw: object = json.loads(line)
-            except (ValueError, OSError, RecursionError):
-                return None
-        if not isinstance(raw, dict):
-            reply(connection, error="Expected a session command object.")
+        request: ControlRequest | None = receive_request(
+            connection,
+            lambda failure: reply(connection, error=failure),
+            lambda line: parse_request(line, recordings),
+        )
+        if request is None:
             return None
-        command = cast(dict[str, object], raw)
-        if command.get("session") != str(recordings.session):
-            reply(
-                connection,
-                error="Session metadata points to a different session. Use the original session directory.",
-            )
-            return None
-        action = command.get("action")
-        if not isinstance(action, str):
-            reply(connection, error="action must be a string.")
-            return None
-        error = None
-        data = None
-        if action == "stop":
+        if request == "stop":
             stopping = True
             return connection
-        if action in {"move", "click", "drag", "scroll", "type", "key", "batch"}:
-            try:
-                input_action: InputAction | Batch
-                if action == "batch":
-                    input_action = Batch.parse(command.get("parameters"))
-                    for capture in (input_action.capture, input_action.failure_capture):
-                        if capture is None:
-                            continue
-                        if not capture.path.parent.is_dir():
-                            raise ValueError(
-                                "capture.path requires an existing parent directory."
-                            )
-                        path_error = recording_path_error(
-                            recordings.session, capture.path.resolve()
-                        )
-                        if path_error is not None:
-                            raise ValueError(
-                                path_error.replace("recording path", "capture path")
-                            )
-                        if capture.path.resolve() == recordings.destination:
-                            raise ValueError(
-                                f"{capture.path} is the active recording's destination. "
-                                "Choose a new capture path."
-                            )
-                else:
-                    input_action = InputAction.parse(action, command.get("parameters"))
-            except (ValueError, TypeError, OverflowError, OSError) as failure:
-                reply(connection, error=str(failure))
-                return None
-            if inputs.submit(connection, input_action):
+        if isinstance(request, (InputAction, Batch)):
+            if inputs.submit(connection, request):
                 # The worker now owns the socket until completion or cancellation.
                 stopping = True
             else:
@@ -786,33 +827,11 @@ def handle_session_command(
                     error="Input queue is full. Wait for pending actions to finish.",
                 )
             return None
-        if action == "status":
+        error = None
+        data = None
+        if request == "status":
             data = status()
-        elif action == "record-start":
-            destination = command.get("destination")
-            captions = command.get("captions")
-            click_pings = command.get("click_pings", True)
-            try:
-                compact = CompactSettings.parse(command.get("compact"))
-                console = ConsolePanel.parse(command.get("console"))
-            except ValueError as failure:
-                reply(connection, error=str(failure))
-                return None
-            if not isinstance(destination, str):
-                error = "record-start requires a destination"
-            elif captions not in CAPTION_MODES:
-                error = f"captions must be one of {', '.join(CAPTION_MODES)}"
-            elif not isinstance(click_pings, bool):
-                error = "click_pings must be true or false"
-            else:
-                error = recordings.start(
-                    Path(destination),
-                    captions=captions,
-                    click_pings=click_pings,
-                    console=console,
-                    compact=compact,
-                )
-        elif action == "record-stop":
+        elif request == "record-stop":
             try:
                 error = recordings.finish()
             except SessionError as failure:
@@ -822,7 +841,13 @@ def handle_session_command(
             if error is None:
                 data = recordings.last_summary
         else:
-            error = "Unsupported headless session command."
+            error = recordings.start(
+                request.destination,
+                captions=request.captions,
+                click_pings=request.click_pings,
+                console=request.console,
+                compact=request.compact,
+            )
         write_state()
         reply(connection, error=error, data=data)
     finally:

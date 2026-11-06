@@ -1,22 +1,33 @@
 """Cancellation tests replace portal I/O; live consent is tested on the desktop."""
 
+import errno
 import json
 import os
 import pty
 import select
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from threading import Event
+from threading import Event, Timer
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
-from framewisp.attach import KEYCODES, AttachedInput, attach_session, run_attachment
+from framewisp import attach
+from framewisp.attach import (
+    KEYCODES,
+    AttachedInput,
+    attach_session,
+    open_destination,
+    run_attachment,
+    write_png,
+)
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
@@ -521,6 +532,185 @@ def test_old_session_cannot_control_new_attachment(
     assert request_attached(old, "key", {"chord": "a"}) == 1
     assert not (tmp_path / "events").exists()
     assert attach_process.poll() is None
+
+
+def control_reply(session: Path, message: bytes) -> dict[str, object]:
+    state = json.loads((session / "session.json").read_text())
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(10)
+        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        connection.sendall(message)
+        connection.shutdown(socket.SHUT_WR)
+        return cast(dict[str, object], json.loads(connection.makefile().readline()))
+
+
+# R-CONTROL-1, R-CONTROL-2
+def test_malformed_requests_leave_the_attachment_running(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    session = tmp_path / "session"
+    token = json.loads((session / "session.json").read_text())["attachment"]
+    os.mkfifo(tmp_path / "fifo")
+    requests: list[dict[str, object]] = [
+        {},
+        {"action": 1, "parameters": {}},
+        {"action": "key"},
+        {"action": "key", "parameters": []},
+        {"action": "key", "parameters": {}},
+        {"action": "key", "parameters": {"chord": []}},
+        {"action": "key", "parameters": {"chord": "\ud800"}},
+        {"action": "unknown", "parameters": {}},
+        {"action": "record-start", "parameters": {}},
+        {"action": "click", "parameters": {"x": "a", "y": 0}},
+        {"action": "screenshot"},
+        {"action": "screenshot", "parameters": {"path": 1}},
+        {"action": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
+        {"action": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
+        {"action": "screenshot", "parameters": {"path": "x.png"}},
+        {"action": "screenshot", "parameters": {"path": ""}},
+        {"action": "screenshot", "parameters": {"path": str(tmp_path)}},
+        {"action": "screenshot", "parameters": {"path": str(tmp_path / "fifo")}},
+        {"action": "screenshot", "parameters": {"path": "/dev/full"}},
+        {
+            "action": "screenshot",
+            "parameters": {"path": str(tmp_path / "missing" / "x.png")},
+        },
+        {
+            "action": "screenshot",
+            "parameters": {"path": str(tmp_path / ("a" * 300))},
+        },
+    ]
+    for message in (
+        b"",
+        b"\n",
+        b"not json\n",
+        b"\xff\n",
+        b"[]\n",
+        b"[" * 100000 + b"\n",
+        *((json.dumps({"attachment": token} | r) + "\n").encode() for r in requests),
+    ):
+        response = control_reply(session, message)
+        assert response["status"] == 1
+        assert isinstance(response["error"], str) and response["error"]
+        assert attach_process.poll() is None
+    assert not (tmp_path / "events").exists()
+    assert request_attached(session, "key", {"chord": "a"}) == 0
+    assert (tmp_path / "events").exists()
+    click: dict[str, object] = {"x": 10, "y": 20, "button": "left", "count": 1}
+    assert request_attached(session, "click", click) == 0
+    assert attach_process.poll() is None
+
+
+# R-CONTROL-1, R-CONTROL-2
+def test_trickling_client_gets_a_reply_from_the_attachment(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    session = tmp_path / "session"
+    state = json.loads((session / "session.json").read_text())
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        started = time.monotonic()
+        while not select.select([connection], [], [], 0.3)[0]:
+            # Without a total deadline, this client is never answered.
+            assert time.monotonic() - started < 10
+            connection.sendall(b" ")
+        assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
+    assert request_attached(session, "key", {"chord": "a"}) == 0
+    assert attach_process.poll() is None
+
+
+def test_screenshot_reaches_a_descriptor(tmp_path: Path) -> None:
+    clip = tmp_path / "\udc80.png"
+    with clip.open("wb") as output:
+        write_png(
+            "videotestsrc num-buffers=1", output.fileno(), Event(), tmp_path / "log"
+        )
+    assert clip.read_bytes().startswith(b"\x89PNG")
+
+
+# R-CONTROL-2
+def test_screenshot_write_failure_fails_only_that_command(tmp_path: Path) -> None:
+    # The log's directory is missing, as a full disk would refuse the log too.
+    log = tmp_path / "missing" / "log"
+    with open("/dev/full", "wb") as output:
+        with pytest.raises(ValueError, match="Could not write"):
+            write_png("videotestsrc num-buffers=1", output.fileno(), Event(), log)
+
+
+class CapturePortal:
+    node = 1
+
+    def capture_fd(self) -> int:
+        return os.open(os.devnull, os.O_RDONLY)
+
+
+# R-CONTROL-2
+def test_truncate_failure_fails_only_that_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    closed: list[int] = []
+    close = os.close
+
+    def refuse(descriptor: int, length: int) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+    def refuse_close(descriptor: int) -> None:
+        close(descriptor)
+        closed.append(descriptor)
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "ftruncate", refuse)
+    monkeypatch.setattr(os, "close", refuse_close)
+    with pytest.raises(ValueError, match="Cannot save screenshot"):
+        open_destination(tmp_path / "x.png")
+    monkeypatch.undo()
+    assert len(closed) == 1
+
+
+# R-CONTROL-2
+@pytest.mark.parametrize("failure", [None, RuntimeError("capture failed")])
+def test_failure_closing_the_destination_fails_only_that_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception | None
+) -> None:
+    written: list[int] = []
+    close = os.close
+
+    def fail_on_output(descriptor: int) -> None:
+        close(descriptor)
+        if descriptor in written:
+            # The number is free for reuse once closed.
+            written.remove(descriptor)
+            raise OSError(errno.EDQUOT, "Disk quota exceeded")
+
+    def write(source: str, output: int, stop: Event, log: Path) -> None:
+        written.append(output)
+        if failure is not None:
+            raise failure
+
+    monkeypatch.setattr(attach, "write_png", write)
+    monkeypatch.setattr(os, "close", fail_on_output)
+    portal = cast(DesktopPortal, CapturePortal())
+    # A fatal capture failure stays fatal, whatever closing the file does.
+    expected = RuntimeError if failure is not None else ValueError
+    with pytest.raises(expected):
+        attach.capture(portal, tmp_path / "x.png", Event(), tmp_path / "log")
+
+
+# R-CONTROL-2
+@pytest.mark.parametrize("interval", [1e10, 1e300, 2**70])
+def test_huge_attached_wait_is_cancellable(interval: float) -> None:
+    stop = Event()
+    Timer(0.05, stop.set).start()
+    with pytest.raises(InterruptedError):
+        input_without_bus(stop).wait(interval)
 
 
 def test_portal_failure_closes_owner(

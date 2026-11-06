@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import socket
@@ -2089,6 +2090,160 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
             assert json.loads(response.readline())["error"] == (
                 "click_pings must be true or false"
             )
+
+
+def control_reply(demo: Demo, message: bytes) -> bytes:
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(demo.runtime / "control.sock"))
+        connection.sendall(message)
+        connection.shutdown(socket.SHUT_WR)
+        return connection.makefile("rb").readline()
+
+
+def assert_session_running(demo: Demo) -> None:
+    status = json.loads(cli(demo.directory, "status").stdout)
+    assert status["status"] == "running" and status["app"]["running"]
+    assert demo.process.poll() is None
+
+
+# R-CONTROL-1, R-CONTROL-2
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_unusable_recording_destination_leaves_the_app_running(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(demo)
+    session = str(demo.directory.resolve())
+    for destination, message in (
+        (f"{tmp_path}/nul\0.mp4", "destination is not a usable path"),
+        (f"{tmp_path}/\ud800.mp4", "destination is not a usable path"),
+        # The failing stage depends on the Python version.
+        (f"{tmp_path}/{'a' * 300}.mp4", ""),
+    ):
+        request = {
+            "action": "record-start",
+            "session": session,
+            "destination": destination,
+            "captions": "keys",
+        }
+        line = control_reply(demo, (json.dumps(request) + "\n").encode())
+        assert_session_running(demo)
+        error = json.loads(line)["error"]
+        assert error and message in error
+    assert list(tmp_path.glob("*.mp4")) == []
+    accepted = tmp_path / "accepted.mp4"
+    cli(demo.directory, "record-start", str(accepted))
+    time.sleep(0.5)
+    cli(demo.directory, "record-stop")
+    assert accepted.stat().st_size > 0
+
+
+# R-CONTROL-2
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> None:
+    wait_for_input_probe_window(demo)
+    clip = tmp_path / "\udc80.mp4"
+    request = {
+        "action": "record-start",
+        "session": str(demo.directory.resolve()),
+        "destination": str(clip),
+        "captions": "keys",
+    }
+    line = control_reply(demo, (json.dumps(request) + "\n").encode())
+    assert_session_running(demo)
+    assert json.loads(line)["error"] is None
+    time.sleep(0.5)
+    cli(demo.directory, "record-stop")
+    assert_session_running(demo)
+    assert clip.stat().st_size > 0
+
+
+# R-CONTROL-1, R-CONTROL-2
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_trickling_client_cannot_hold_the_control_loop(demo: Demo) -> None:
+    wait_for_input_probe_window(demo)
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(demo.runtime / "control.sock"))
+        started = time.monotonic()
+        while not select.select([connection], [], [], 0.3)[0]:
+            # Without a total deadline, this client is never answered.
+            assert time.monotonic() - started < 10
+            connection.sendall(b" ")
+        assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
+    assert_session_running(demo)
+    assert json.loads(cli(demo.directory, "stop").stdout)["status"] == "stopped"
+    assert demo.process.wait(timeout=10) == 0
+
+
+# R-CONTROL-1, R-CONTROL-2
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> None:
+    wait_for_input_probe_window(demo)
+    session = str(demo.directory.resolve())
+
+    def encoded(request: dict[str, object]) -> bytes:
+        return (json.dumps({"session": session} | request) + "\n").encode()
+
+    not_requests = [
+        b"",
+        b"\n",
+        b"not json\n",
+        b"\xff\xfe\n",
+        b'{"action"',
+        b"[" * 100000 + b"\n",
+        b'{"action": ' + b"9" * 5000 + b"}\n",
+        b"[]\n",
+    ]
+    other_session = [
+        (json.dumps({"session": "/nonexistent", "action": name}) + "\n").encode()
+        for name in ("stop", "status", "record-stop")
+    ]
+    bad_commands: list[dict[str, object]] = [
+        {},
+        {"action": 1},
+        {"action": "unknown"},
+        {"action": "record-start"},
+        {"action": "record-start", "destination": "x.mp4", "captions": "keys"},
+        {"action": "record-start", "destination": "/tmp/x.mp4", "captions": []},
+        {
+            "action": "record-start",
+            "destination": "/tmp/x.mp4",
+            "captions": "keys",
+            "compact": {"before": 10**400, "after": 0},
+        },
+        {"action": "move"},
+        {"action": "click"},
+        {"action": "drag"},
+        {"action": "scroll"},
+        {"action": "type"},
+        {"action": "key"},
+        {"action": "batch"},
+        {"action": "move", "parameters": {"x": [], "y": 0}},
+        {"action": "click", "parameters": {"x": 0, "y": 0, "button": []}},
+        {"action": "type", "parameters": {"text": "\0", "interval": 0}},
+        {"action": "key", "parameters": {"chord": "\ud800"}},
+        {"action": "batch", "parameters": {"actions": [{"action": []}]}},
+        {
+            "action": "batch",
+            "parameters": {
+                "actions": [{"action": "move", "x": 0, "y": 0}],
+                "capture": {"path": "/tmp/\ud800.png"},
+            },
+        },
+    ]
+    for message in (
+        *not_requests,
+        *other_session,
+        *(encoded(command) for command in bad_commands),
+    ):
+        line = control_reply(demo, message)
+        assert_session_running(demo)
+        response = json.loads(line)
+        assert isinstance(response["error"], str) and response["error"]
+        assert response["data"] is None
 
 
 # R-REC-7

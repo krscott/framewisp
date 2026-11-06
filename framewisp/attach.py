@@ -1,7 +1,7 @@
 """Share an existing desktop without owning its app or compositor processes."""
 
 # pyright: reportMissingModuleSource=false
-# Required command fields are validated by argparse before socket dispatch.
+# `parse_attached_request` validates required command fields before `perform`.
 # pyright: reportTypedDictNotRequiredAccess=false
 
 import json
@@ -11,21 +11,29 @@ import select
 import shlex
 import signal
 import socket
+import stat
 import sys
 import time
 import traceback
 import uuid
+from contextlib import suppress
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import TIMEOUT_MAX, Event, Lock, Thread
 from types import FrameType
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import gi
 
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from framewisp.actions import InputAction
 from framewisp.captions import input_error
+from framewisp.connection import (
+    parse_command,
+    receive_request,
+    resolved_request_path,
+)
 from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
@@ -49,7 +57,6 @@ class InputParameters(TypedDict, total=False):
     text: str
     interval: float
     chord: str
-    path: str
 
 
 # Linux evdev keycodes for the tested desktop's US layout.
@@ -104,7 +111,7 @@ class AttachedInput:
         self.buttons: set[int] = set()
 
     def wait(self, seconds: float = 0) -> None:
-        if self.stop.wait(seconds):
+        if self.stop.wait(min(seconds, TIMEOUT_MAX)):
             raise InterruptedError("Attached session disconnected; input cancelled.")
 
     def key(self, code: int, pressed: bool) -> None:
@@ -219,23 +226,64 @@ class AttachedInput:
             self.release()
 
 
+def open_destination(destination: Path) -> int:
+    """Open an empty regular file. Failing here fails only this command."""
+    failure = f"Cannot save screenshot to {destination}"
+    try:
+        # Without O_NONBLOCK, a FIFO would hold the input lock until it has a reader.
+        output = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_NONBLOCK, 0o666)
+    except OSError as error:
+        raise ValueError(f"{failure}: {error}") from None
+    try:
+        if stat.S_ISREG(os.fstat(output).st_mode):
+            os.ftruncate(output, 0)
+            return output
+        reason = "not a regular file."
+    except OSError as error:
+        reason = str(error)
+    with suppress(OSError):
+        os.close(output)
+    raise ValueError(f"{failure}: {reason}")
+
+
 def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
-    # Capture lives in the owner process: even SIGKILL closes every capture FD.
+    output = open_destination(destination)
+    try:
+        # Capture lives in the owner process: even SIGKILL closes every capture FD.
+        descriptor = portal.capture_fd()
+        try:
+            write_png(
+                f"pipewiresrc fd={descriptor} path={portal.node} num-buffers=1",
+                output,
+                stop,
+                log,
+            )
+        finally:
+            os.close(descriptor)
+    except BaseException:
+        # A close failure must not hide why the capture failed.
+        with suppress(OSError):
+            os.close(output)
+        raise
+    try:
+        os.close(output)
+    except OSError as error:
+        # Network filesystems can report a failed write only here.
+        raise ValueError(f"Could not write the screenshot: {error}") from None
+
+
+def write_png(source: str, output: int, stop: Event, log: Path) -> None:
+    """Write one frame of a GStreamer source to a descriptor."""
     Gst.init(None)
-    descriptor = portal.capture_fd()
     pipeline: Gst.Element | None = None
     try:
         pipeline = Gst.parse_launch(
-            "pipewiresrc name=source num-buffers=1 ! videoconvert ! "
-            "pngenc snapshot=true ! filesink name=sink"
+            f"{source} ! videoconvert ! pngenc snapshot=true ! fdsink name=sink"
         )
         assert isinstance(pipeline, Gst.Bin)
-        source = pipeline.get_by_name("source")
         sink = pipeline.get_by_name("sink")
-        assert source is not None and sink is not None
-        source.set_property("fd", descriptor)
-        source.set_property("path", str(portal.node))
-        sink.set_property("location", str(destination))
+        assert sink is not None
+        sink.set_property("fd", output)
         bus = pipeline.get_bus()
         assert bus is not None
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
@@ -248,6 +296,12 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
             if message is not None:
                 if message.type == Gst.MessageType.ERROR:
                     error, detail = message.parse_error()
+                    if message.src == sink:
+                        # A full disk fails this command, not the attachment, and
+                        # the log may be on that disk.
+                        raise ValueError(
+                            f"Could not write the screenshot: {error.message}"
+                        )
                     log.write_text(f"{error}\n{detail}\n")
                     raise RuntimeError(f"Desktop capture failed. See {log}")
                 return
@@ -257,7 +311,31 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
     finally:
         if pipeline is not None:
             pipeline.set_state(Gst.State.NULL)
-        os.close(descriptor)
+
+
+def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
+    """Validate a request: a screenshot destination, or an input action."""
+    command = parse_command(line)
+    if command.get("attachment") != attachment:
+        raise ValueError(
+            "Attached session is disconnected. Ask the user to attach again."
+        )
+    action = command.get("action")
+    if not isinstance(action, str):
+        raise ValueError("action must be a string.")
+    if action.startswith("record-"):
+        raise ValueError("Recording attached sessions is not supported yet.")
+    raw = command.get("parameters")
+    if not isinstance(raw, dict):
+        raise ValueError("Input requires an action and parameters object.")
+    parameters = cast(dict[str, object], raw)
+    if action != "screenshot":
+        defaults: dict[str, object] = {"modifier": []}
+        return InputAction.parse(action, defaults | parameters)
+    path = parameters.get("path")
+    if not isinstance(path, str) or not Path(path).is_absolute():
+        raise ValueError("screenshot requires an absolute path.")
+    return resolved_request_path(Path(path), "path")
 
 
 def foreground_terminal(descriptor: int) -> bool:
@@ -354,40 +432,39 @@ def _run_attachment(
     def handle(connection: socket.socket) -> None:
         assert portal is not None and inputs is not None
         with connection:
-            status, error = 0, None
-            action: str = ""
-            try:
-                connection.settimeout(2)
-                with connection.makefile("r") as source:
-                    line = source.readline(1024 * 1024 + 1)
-                if len(line) > 1024 * 1024:
-                    raise ValueError("Input request is too large.")
-                request = json.loads(line)
-                if request.get("attachment") != attachment:
-                    raise ValueError(
-                        "Attached session is disconnected. Ask the user to attach again."
+
+            def answer(status: int, error: str | None) -> None:
+                try:
+                    connection.sendall(
+                        (json.dumps({"status": status, "error": error}) + "\n").encode()
                     )
-                action = request["action"]
-                parameters: InputParameters = request["parameters"]
+                except OSError:
+                    pass
+
+            def parse(line: bytes) -> InputAction | Path:
+                request = parse_attached_request(line, attachment)
                 if not ready.is_set():
                     raise ValueError("Attach is waiting for desktop permission.")
+                return request
+
+            request = receive_request(
+                connection, lambda failure: answer(1, failure), parse
+            )
+            if request is None:
+                return
+            status, error = 0, None
+            action = "screenshot" if isinstance(request, Path) else request.action
+            try:
                 while not lock.acquire(timeout=0.05):
                     inputs.wait()
                 try:
                     inputs.wait()
-                    if action == "screenshot":
-                        capture(
-                            portal,
-                            Path(parameters["path"]),
-                            stop,
-                            session / "capture.log",
-                        )
-                    elif action.startswith("record-"):
-                        raise ValueError(
-                            "Recording attached sessions is not supported yet."
-                        )
+                    if isinstance(request, Path):
+                        capture(portal, request, stop, session / "capture.log")
                     else:
-                        inputs.perform(action, parameters)
+                        inputs.perform(
+                            action, cast(InputParameters, request.parameters)
+                        )
                 finally:
                     lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
@@ -404,12 +481,7 @@ def _run_attachment(
                 traceback.print_exception(
                     RuntimeError(error).with_traceback(failure.__traceback__)
                 )
-            try:
-                connection.sendall(
-                    (json.dumps({"status": status, "error": error}) + "\n").encode()
-                )
-            except OSError:
-                pass
+            answer(status, error)
 
     def serve(listener: socket.socket, emergency: socket.socket) -> None:
         try:

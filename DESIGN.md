@@ -770,7 +770,7 @@ any active recorder before stopping the display (R-REC-3).
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
-a `captions` mode, and `click_pings` and `console` booleans. Replies carry an `error` string or null
+a `captions` mode, a `click_pings` boolean, and optional `console` and `compact` objects. Replies carry an `error` string or null
 and optional `data`. The runner checks the session directory against its own
 before acting, so copied metadata cannot control another session (R-LIFE-6). Its
 monitoring loop handles recording/status/stop requests; validated input sockets
@@ -781,6 +781,27 @@ true`; a legacy recording-only runner would otherwise interpret new status or
 stop requests as recording-stop requests. Validation/startup errors are returned
 to the caller without stopping the app. Unexpected recorder exit or finalization
 failure still fails the session, after `record-stop` replies with the error.
+
+The runner and an attachment handle each request in two stages, and the stage
+decides what a failure means. `receive_request` in `connection.py` reads the line
+and has the owner's parser turn it into a typed request. Neither changes session
+state, so every failure there gets an error reply and the session continues
+(R-CONTROL-1, R-CONTROL-2). That holds for any command, and for a request the
+owner cannot read or decode. A client has `REQUEST_SECONDS` in total to send its
+line, however slowly it sends, so one connection holds the runner's control loop
+for no longer than that. A failure to log a validator bug does not end the session either. Resolving a
+requested path refuses a NUL byte and
+any lone surrogate that the filesystem encoding cannot represent. The surrogates
+that stand for undecodable filename bytes stay valid, so a non-UTF-8 destination
+records normally. `REJECTED_REQUEST` lists what validators raise for a bad request, and
+the reply carries that message. Any other exception there is a validator bug: the
+reply names its type, and the traceback goes to the owner's stderr without the
+message, which can quote typed text. In the runner, an error during execution that
+is not returned as a reply is a runner failure and ends the session, even if it is
+a `ValueError`. An attachment's execution keeps its own rule: a `ValueError` or
+cancellation is that command's reply, and anything else closes the portal. So a
+screenshot opens its destination before capture starts and accepts only a regular
+file. Failing to open it, or to write it, is that command's error.
 
 `record-stop` returns a summary in `data`, printed as JSON by the CLI. After
 finalization and caption rendering, ffprobe supplies duration and dimensions;
@@ -1062,7 +1083,8 @@ the latter records kind, the runtime directory, an attachment token, and the PID
 for inspection. Commands carry the token, so stale session metadata cannot direct
 input to a later attachment using the same global socket.
 
-`connection.py` sends newline-delimited JSON requests over control.sock. A listener
+`connection.py` sends newline-delimited JSON requests over control.sock and shares
+the request stage with the runner (see Recording controls). A listener
 thread accepts requests; workers serialize actions with a lock. Before portal
 consent they reject input. Paced actions and queued workers check a shared stop
 Event. Unexpected worker errors stop access and print a traceback. Shutdown closes
