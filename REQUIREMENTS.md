@@ -117,7 +117,7 @@ observable behaviour, not implementation, in short sentences.
 - **R-LOG-7** [test] An incomplete last line in `inputs.jsonl`, as left by an
   interrupted write, does not fail recording rendering.
 - **R-LOG-8** [test] A newline-terminated line in `inputs.jsonl` that is not
-  valid JSON fails recording rendering (R-REC-10).
+  valid JSON fails any recording rendering that reads the log (R-REC-10).
 
 ## Recording (REC)
 
