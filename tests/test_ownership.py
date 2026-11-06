@@ -603,6 +603,9 @@ def test_lock_changed_while_acquiring_refused_with_working_manual_steps(
     session, runtime = abandoned
     lock = session / LOCK
     real_flock = fcntl.flock
+    # A live owner's descriptor pins the original inode. Without one, a filesystem
+    # may give a new lock the same inode, which correctly proves no owner remains.
+    owner = os.open(lock, os.O_RDONLY)
 
     def change_lock_then_flock(descriptor: int, operation: int) -> None:
         real_flock(descriptor, operation)
@@ -610,16 +613,21 @@ def test_lock_changed_while_acquiring_refused_with_working_manual_steps(
         if change == "replaced":
             lock.touch(mode=0o600)
 
-    with monkeypatch.context() as patch:
-        patch.setattr(fcntl, "flock", change_lock_then_flock)
-        with pytest.raises(SessionError, match="changed while acquiring") as refusal:
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(fcntl, "flock", change_lock_then_flock)
+            with pytest.raises(
+                SessionError, match="changed while acquiring"
+            ) as refusal:
+                recover_session(session)
+        message = str(refusal.value)
+        assert "Nothing was removed" in message and " recover`" in message
+        assert (session / JOURNAL).exists() and (runtime / "kept").exists()
+        # Running recover again compares the lock with the journal.
+        with pytest.raises(SessionError, match="was replaced"):
             recover_session(session)
-    message = str(refusal.value)
-    assert "Nothing was removed" in message and " recover`" in message
-    assert (session / JOURNAL).exists() and (runtime / "kept").exists()
-    # Running recover again compares the lock with the journal.
-    with pytest.raises(SessionError, match="was replaced"):
-        recover_session(session)
+    finally:
+        os.close(owner)
     assert run_commands(message, "grep ") == ""
     run_commands(message, "rm ")
     assert not runtime.exists()
