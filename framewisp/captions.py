@@ -220,7 +220,8 @@ def log_input(
 
 def capture_origin(log: Path) -> float:
     """Read the first captured frame's monotonic timestamp on our Sway backend."""
-    with log.open() as source:
+    # The recorder logs its output path, which can be any bytes.
+    with log.open(encoding="utf-8", errors="replace") as source:
         for line in source:
             match = re.search(
                 r"zwlr_screencopy_frame_v1[#@]\d+\.ready\((\d+), (\d+), (\d+)\)",

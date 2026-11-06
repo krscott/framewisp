@@ -620,6 +620,16 @@ def session_command(
     return 0
 
 
+def resolved_request_path(path: Path, field: str) -> Path:
+    """Resolve a requested path, refusing what the filesystem API cannot encode."""
+    try:
+        return path.resolve()
+    except (ValueError, RuntimeError) as failure:
+        # NUL and most lone surrogates raise ValueError. Before Python 3.13, so
+        # does a symlink loop, as RuntimeError.
+        raise ValueError(f"{field} is not a usable path: {failure}") from None
+
+
 @dataclass(frozen=True)
 class RecordStart:
     destination: Path
@@ -641,19 +651,23 @@ class RecordStart:
             raise ValueError(f"captions must be one of {', '.join(CAPTION_MODES)}")
         if not isinstance(click_pings, bool):
             raise ValueError("click_pings must be true or false")
-        try:
-            # The lookup refuses what no path can hold: NUL and lone surrogates.
-            resolved = Path(destination).resolve()
-        except ValueError as failure:
-            raise ValueError(f"destination is not a usable path: {failure}") from None
-        return RecordStart(resolved, captions, click_pings, console, compact)
+        path = Path(destination)
+        if not path.is_absolute():
+            raise ValueError("destination must be absolute in runner requests.")
+        return RecordStart(
+            resolved_request_path(path, "destination"),
+            captions,
+            click_pings,
+            console,
+            compact,
+        )
 
 
 SessionAction = Literal["stop", "status", "record-stop"]
 SESSION_ACTIONS: tuple[SessionAction, ...] = get_args(SessionAction)
 ControlRequest = SessionAction | RecordStart | InputAction | Batch
 # What validators raise for a bad request. Anything else is a validator bug.
-REJECTED_REQUEST = (ValueError, TypeError, OverflowError, OSError, RecursionError)
+REJECTED_REQUEST = (ValueError, TypeError, OverflowError, OSError)
 
 
 def parse_batch(raw: object, session: Path) -> Batch:
@@ -663,7 +677,9 @@ def parse_batch(raw: object, session: Path) -> Batch:
             continue
         if not capture.path.parent.is_dir():
             raise ValueError("capture.path requires an existing parent directory.")
-        path_error = recording_path_error(session, capture.path.resolve())
+        path_error = recording_path_error(
+            session, resolved_request_path(capture.path, "capture.path")
+        )
         if path_error is not None:
             raise ValueError(path_error.replace("recording path", "capture path"))
     return batch
@@ -697,8 +713,11 @@ def parse_request(line: bytes, session: Path) -> ControlRequest:
 
 
 def read_request(connection: socket.socket, session: Path) -> ControlRequest:
-    with connection.makefile("rb") as request:
-        line = request.readline(MAX_REQUEST_BYTES + 1)
+    try:
+        with connection.makefile("rb") as request:
+            line = request.readline(MAX_REQUEST_BYTES + 1)
+    except TimeoutError:
+        raise ValueError("Timed out waiting for a complete session request.") from None
     if len(line) > MAX_REQUEST_BYTES:
         raise ValueError("Session request exceeds the 1 MiB limit.")
     return parse_request(line, session)
@@ -714,8 +733,8 @@ def handle_session_command(
     """Return a stop caller's connection for the runner to reply after cleanup.
 
     Reading a request changes no state, so every failure there is rejected and
-    the session continues. Execution has no catch-all: an unexpected error in it
-    is a runner failure and ends the session.
+    the session continues. Execution is not guarded: an unexpected error in it is
+    a runner failure and ends the session.
     """
     try:
         connection, _ = listener.accept()
@@ -731,14 +750,14 @@ def handle_session_command(
             return None
         except Exception as failure:
             name = type(failure).__name__
-            # The message is left out because it can quote typed text.
-            print(f"Bug validating a control request: {name}", file=sys.stderr)
-            traceback.print_tb(failure.__traceback__)
             reply(
                 connection,
                 error=f"Framewisp bug: validating this request raised {name}. "
                 "See the runner's stderr.",
             )
+            # The message is left out because it can quote typed text.
+            print(f"Bug validating a control request: {name}", file=sys.stderr)
+            traceback.print_tb(failure.__traceback__)
             return None
         if request == "stop":
             stopping = True

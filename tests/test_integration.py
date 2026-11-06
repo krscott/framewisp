@@ -2024,7 +2024,8 @@ def test_unusable_recording_destination_leaves_the_app_running(
     for destination, message in (
         (f"{tmp_path}/nul\0.mp4", "destination is not a usable path"),
         (f"{tmp_path}/\ud800.mp4", "destination is not a usable path"),
-        (f"{tmp_path}/{'a' * 300}.mp4", "Recorder exited"),
+        # The failing stage depends on the Python version.
+        (f"{tmp_path}/{'a' * 300}.mp4", ""),
     ):
         request = {
             "action": "record-start",
@@ -2034,13 +2035,35 @@ def test_unusable_recording_destination_leaves_the_app_running(
         }
         line = control_reply(demo, (json.dumps(request) + "\n").encode())
         assert_session_running(demo)
-        assert message in json.loads(line)["error"]
+        error = json.loads(line)["error"]
+        assert error and message in error
     assert list(tmp_path.glob("*.mp4")) == []
     accepted = tmp_path / "accepted.mp4"
     cli(demo.directory, "record-start", str(accepted))
     time.sleep(0.5)
     cli(demo.directory, "record-stop")
     assert accepted.stat().st_size > 0
+
+
+# R-CONTROL-2
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> None:
+    wait_for_input_probe_window(demo)
+    clip = tmp_path / "\udc80.mp4"
+    request = {
+        "action": "record-start",
+        "session": str(demo.directory.resolve()),
+        "destination": str(clip),
+        "captions": "keys",
+    }
+    line = control_reply(demo, (json.dumps(request) + "\n").encode())
+    assert_session_running(demo)
+    assert json.loads(line)["error"] is None
+    time.sleep(0.5)
+    cli(demo.directory, "record-stop")
+    assert_session_running(demo)
+    assert clip.stat().st_size > 0
 
 
 # R-CONTROL-1, R-CONTROL-2
@@ -2072,6 +2095,7 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         {"action": 1},
         {"action": "unknown"},
         {"action": "record-start"},
+        {"action": "record-start", "destination": "x.mp4", "captions": "keys"},
         {"action": "record-start", "destination": "/tmp/x.mp4", "captions": []},
         {
             "action": "record-start",
