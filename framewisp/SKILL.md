@@ -69,7 +69,8 @@ environment with a different `TMPDIR`. Bare names under different temporary
 directories select different sessions. Headless runtime sockets also use this
 temporary directory. If startup reports the 108-byte socket path limit, set
 `TMPDIR` to a shorter writable directory. Cleanup and recovery use the runtime
-path saved in the ownership journal even if `TMPDIR` changes.
+path saved in the ownership journal even if `TMPDIR` changes. If the journal is
+unreadable, the manual steps recovery prints assume the current `TMPDIR`.
 Project scoping does not change sandbox socket permissions.
 
 In the syntax below, brackets mark optional arguments;

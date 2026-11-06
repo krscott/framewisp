@@ -569,18 +569,19 @@ is still alive. A nonzero recorder exit during finalization names its
 destination and log. Its incomplete clip is not published. Socket EOF requests
 cleanup when its supervisor survives.
 
-`recover` acquires the same session lease without reading `session.json`. Each
+`recover` acquires the same session lease without using `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The
 runner closes the descriptor without LOCK_UN; recovery remains excluded until all
 supervisors exit. Before launching children, each supervisor writes an
 `owner-PID.json` record in the private runtime. Only successful descendant cleanup
 removes that record. Failure retains diagnostic information. A killed supervisor
-leaves its record and recovery refuses to remove the runtime.
+leaves its record and recovery refuses to remove the runtime, printing manual
+cleanup steps.
 
 Recovery verifies the journal's session identity and reads its absolute runtime
 path. It refuses a path whose basename does not match the UID and session
-identity (R-LIFE-5). Journals without a path use the original fixed `/tmp`
-location. Recovery checks the runtime's inode, owner, permissions, and directory
+identity, or whose status cannot be checked, and a journal without a path
+(R-LIFE-5). Recovery checks the runtime's inode, owner, permissions, and directory
 type regardless of the current `TMPDIR`. Normal cleanup reads the same journal
 path. Recovery never signals stored PIDs or uses `session.json` to authorize
 cleanup. A null runtime identity permits only rmdir of an empty directory,
@@ -591,18 +592,53 @@ journals, symlink ownership files, and replaced runtimes fail verification
 (R-LIFE-5). Reading the journal also compares its lock identity with the
 descriptor the caller holds. A replaced or deleted lock leaves recovery holding a
 different inode from any live owner, so it refuses with manual cleanup steps
-(R-LIFE-5). Journals without a valid lock identity are refused the same way. A
-live owner compares its own descriptor, so its cleanup succeeds even if the lock
-path was replaced. Once ownership is verified and no supervisor records remain,
+(R-LIFE-5). A live owner compares its own descriptor, so its cleanup succeeds even
+if the lock path was replaced.
+
+`read_journal` is the one check for every other unreadable journal: an open,
+ownership, size, parse, session, runtime-path, runtime-identity, or lock-identity
+failure removes nothing and prints manual cleanup steps (R-LIFE-7). A missing
+journal with resources remaining prints the same steps. Those steps use the runtime
+path derived from the session identity and the current TMPDIR, because a damaged
+journal cannot be trusted and a copied one could name another session. Running
+recover under the session's TMPDIR prints its real path. `gettempdir()` skips a full
+or read-only directory, so these steps and the no-journal check look for the runtime
+in `gettempdir()`, `TMPDIR`, and `/tmp`. A location that cannot be checked counts as
+holding it, so recovery refuses, names it, and says to restore access. Unsetting
+`TMPDIR` only stops the check, so it is offered just for a session known not to have
+run there. A lock that changes while the lease is acquired prints them too,
+and running recover again compares the new lock with the journal. A missing session
+directory has no identity to derive a name from, so those steps list runtime
+directory names and the names running processes use. They never single out a
+directory to delete, because a starting session has no marked process yet, and a
+leftover directory only uses disk. A directory moved within its filesystem keeps its
+identity and recovers at its new path. Once the journal is
+verified, a replaced, symlinked, or changed runtime, or a null runtime identity with
+a runtime that cannot be removed, prints steps using the journal's path
+(R-LIFE-7). Every set of manual steps looks for live processes by the runtime
+directory's name, which is the same under any TMPDIR. Stale attachment metadata
+without a journal gets attachment steps instead, because `run`, `status`, and `stop`
+do not apply to it (R-LIFE-7). That is the only use of `session.json`, and it only
+selects the message; recovery reads it as untrusted input, like the journal.
+
+Once ownership is verified and no supervisor records remain,
 recovery removes the runtime, `session.json`, its temporary file, and the
 ownership journal (R-LIFE-4). Logs, app-exit diagnostics, inputs, and recordings
 remain. It reports success as JSON or a nonzero error identifying resources that
 remain. Running again replaces logs.
 
+Each journal commit syncs the temporary file, renames it, then syncs the session
+directory, so it survives power loss. The first commit is durable before mkdir, and
+the second before any child starts. Without those syncs a filesystem may persist the
+rename without the contents, or lose the rename, leaving a session that needs manual
+cleanup. A filesystem that cannot sync directories returns EINVAL, which is
+ignored. Removal is not synced: after power loss recovery either accepts a journal
+with a missing runtime or refuses resources without a journal, with manual steps.
+
 The lock file persists across runs and must not be unlinked or replaced. Acquiring
 the lease refuses session directories that the caller does not own or that
 group or others can write (R-SESSION-6); malicious same-user filesystem mutation is outside the protocol.
-Old sessions without journals require manual inspection. Recovery
+Recovery
 cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
 records and runtime remain for manual investigation. Attached sessions acquire this same session lease before writing metadata and
 refuse abandoned headless journals. They retain their separate desktop reservation
@@ -710,7 +746,9 @@ named it, until `recover` or the next clip clears the link. A symlink is created
 atomically, so `recover` never reads a partial value. `recover` reports that path as
 `interrupted_recording` and removes the link. The directory and clip stay for the
 user to inspect or delete (R-REC-20). If no clip was written yet, `recover`
-removes the empty directory. Each private directory has a unique name, so a
+removes the empty directory. A refusal runs none of this: it removes nothing, names
+any kept clip, and its manual steps leave the link for a later `recover` to report
+(R-LIFE-7, R-REC-20). Each private directory has a unique name, so a
 leftover never affects a later recording, even to the same destination.
 
 ## Capture decision
