@@ -8,7 +8,13 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from framewisp.captions import render_recording, subtitle_script
+from framewisp.captions import (
+    CAPTION_MODES,
+    DEFAULT_CAPTIONS,
+    CaptionMode,
+    render_recording,
+    subtitle_script,
+)
 from framewisp.compact import CompactSettings, recording_duration, retained_frames
 from framewisp.console import PANEL_WIDTH, ConsoleCapture
 from framewisp.pings import PING_SECONDS, Ping, pings_for_clip
@@ -168,7 +174,7 @@ def test_ring_is_centred_and_starts_within_the_tolerance(
     raw_video: Path, log: Path, second: float
 ) -> None:
     log.write_text(ping_line(second, 300, 200))
-    render(raw_video, log, captions=False)
+    render(raw_video, log, captions="none")
     decoded = frames(raw_video, 28, 50)
     shown = [
         (28 + index, box)
@@ -190,7 +196,7 @@ def test_ring_is_centred_and_starts_within_the_tolerance(
 # R-REC-5
 def test_double_click_draws_two_concurrent_rings(raw_video: Path, log: Path) -> None:
     log.write_text(ping_line(1, 300, 200) + ping_line(1.2, 300, 200))
-    render(raw_video, log, captions=False)
+    render(raw_video, log, captions="none")
     frame = frames(raw_video, 37, 37)[0]
     row = [frame.getpixel((x, 200)) for x in range(240, 301)]
     edges = [
@@ -242,7 +248,7 @@ def test_compaction_maps_pings_to_retained_frames(
     render(
         raw_video,
         log,
-        captions=False,
+        captions="none",
         compact=settings,
         console=ConsoleCapture(tmp_path) if console else None,
     )
@@ -279,7 +285,7 @@ def test_zero_padding_retains_every_ping_frame(raw_video: Path, log: Path) -> No
 def test_clip_end_cuts_a_late_ping_short(raw_video: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(5.7, 5.71) + ping_line(5.8, 300, 200))
-    render(raw_video, log, captions=False, compact=CompactSettings(before=0, after=0))
+    render(raw_video, log, captions="none", compact=CompactSettings(before=0, after=0))
     shown = compacted_ring_frames(raw_video, size=SIZE)
     assert 4 <= len(shown) < 15
     assert max(shown) == round(recording_duration(raw_video) * 30) - 1
@@ -292,7 +298,7 @@ def test_zero_padding_keeps_each_ping_whole(raw_video: Path, log: Path) -> None:
     render(
         raw_video,
         log,
-        captions=False,
+        captions="none",
         compact=CompactSettings(before=0, after=0),
     )
     shown = compacted_ring_frames(raw_video, size=SIZE)
@@ -307,7 +313,7 @@ def test_ring_clips_at_the_console_panel(
 ) -> None:
     (tmp_path / "console.jsonl").write_text("")
     log.write_text(ping_line(1, SIZE[0] - 5, 400) + ping_line(3, 600, 300))
-    render(raw_video, log, captions=False, console=ConsoleCapture(tmp_path))
+    render(raw_video, log, captions="none", console=ConsoleCapture(tmp_path))
     size = (SIZE[0] + PANEL_WIDTH, SIZE[1])
     edge = frames(raw_video, 36, 36, size=size)[0]
     inside = frames(raw_video, 96, 96, size=size)[0]
@@ -320,13 +326,32 @@ def test_ring_clips_at_the_console_panel(
 
 
 # R-REC-11
-@pytest.mark.parametrize("captions", [False, True])
-def test_pings_ignore_the_caption_choice(
-    raw_video: Path, log: Path, captions: bool
+@pytest.mark.parametrize("captions", CAPTION_MODES)
+def test_pings_ignore_the_caption_mode(
+    raw_video: Path, log: Path, captions: CaptionMode
 ) -> None:
     log.write_text(command_lines(1, 1.1) + ping_line(1.05, 300, 200))
     render(raw_video, log, captions=captions)
     assert red_box(frames(raw_video, 36, 36)[0]) is not None
+
+
+# R-REC-11
+def test_default_mode_pings_a_clip_without_keyboard_input(
+    raw_video: Path, log: Path
+) -> None:
+    log.write_text(command_lines(1, 1.1) + ping_line(1.05, 300, 200))
+    render(raw_video, log)
+    assert red_box(frames(raw_video, 36, 36)[0]) is not None
+
+
+# R-REC-7
+@pytest.mark.parametrize("captions", CAPTION_MODES)
+def test_opt_out_applies_with_every_caption_mode(
+    raw_video: Path, log: Path, captions: CaptionMode
+) -> None:
+    log.write_text(command_lines(1, 1.1) + ping_line(1.05, 300, 200))
+    render(raw_video, log, captions=captions, click_pings=False)
+    assert red_box(frames(raw_video, 36, 36)[0]) is None
 
 
 # R-REC-7
@@ -335,14 +360,14 @@ def test_disabled_pings_leave_the_raw_recording_untouched(
 ) -> None:
     before = raw_video.read_bytes()
     log.write_text(ping_line(1, 300, 200))
-    render(raw_video, log, captions=False, click_pings=False)
+    render(raw_video, log, captions="none", click_pings=False)
     assert raw_video.read_bytes() == before
 
 
 def test_clip_without_presses_is_not_encoded_again(raw_video: Path, log: Path) -> None:
     before = raw_video.read_bytes()
     log.write_text("")
-    render(raw_video, log, captions=False)
+    render(raw_video, log, captions="none")
     assert raw_video.read_bytes() == before
 
 
@@ -363,8 +388,13 @@ def assert_raw_clip_survived(video: Path, before: bytes, error: str) -> None:
 
 
 # R-REC-10
-def test_failed_encoder_leaves_uncaptioned_clip_playable(
-    raw_video: Path, log: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("captions", ["none", DEFAULT_CAPTIONS])
+def test_failed_encoder_leaves_pings_only_clip_playable(
+    raw_video: Path,
+    log: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captions: CaptionMode,
 ) -> None:
     before = raw_video.read_bytes()
     log.write_text(ping_line(1, 300, 200))
@@ -376,17 +406,18 @@ def test_failed_encoder_leaves_uncaptioned_clip_playable(
     with monkeypatch.context() as patch:
         patch.setenv("PATH", path)
         with pytest.raises(RuntimeError) as failure:
-            render(raw_video, log, captions=False)
+            render(raw_video, log, captions=captions)
     assert "status 3" in str(failure.value)
     assert_raw_clip_survived(raw_video, before, str(failure.value))
 
 
 # R-REC-10
-def test_malformed_log_leaves_uncaptioned_clip_playable(
-    raw_video: Path, log: Path
+@pytest.mark.parametrize("captions", ["none", DEFAULT_CAPTIONS])
+def test_malformed_log_leaves_pings_only_clip_playable(
+    raw_video: Path, log: Path, captions: CaptionMode
 ) -> None:
     before = raw_video.read_bytes()
     log.write_text("not json\n")
     with pytest.raises(RuntimeError) as failure:
-        render(raw_video, log, captions=False)
+        render(raw_video, log, captions=captions)
     assert_raw_clip_survived(raw_video, before, str(failure.value))

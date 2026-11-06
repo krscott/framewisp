@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 from threading import Event
-from typing import BinaryIO, Literal, ParamSpec, cast
+from typing import BinaryIO, Literal, ParamSpec, cast, get_args
 
 from framewisp.compact import (
     ActivityEvent,
@@ -30,6 +30,18 @@ from framewisp.console import PANEL_WIDTH, ConsoleCapture, console_frames
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
 from framewisp.pings import PING_STYLE, Ping, ping_text, pings_for_clip
+
+CaptionMode = Literal["none", "keys", "pointer", "all"]
+CAPTION_MODES: tuple[CaptionMode, ...] = get_args(CaptionMode)
+DEFAULT_CAPTIONS: CaptionMode = "keys"
+KEY_ACTIONS = frozenset({"key", "type"})
+POINTER_ACTIONS = frozenset({"move", "click", "drag", "scroll"})
+CAPTIONED_ACTIONS: dict[CaptionMode, frozenset[str]] = {
+    "none": frozenset(),
+    "keys": KEY_ACTIONS,
+    "pointer": POINTER_ACTIONS,
+    "all": KEY_ACTIONS | POINTER_ACTIONS,
+}
 
 
 def retained_parameters(
@@ -253,7 +265,11 @@ class Caption:
     text: str
 
 
-def captions_for_clip(log: Path, *, origin: float, stopped: float) -> list[Caption]:
+def captions_for_clip(
+    log: Path, *, origin: float, stopped: float, captions: CaptionMode
+) -> list[Caption]:
+    """Unselected actions never become captions, so they also never shorten one."""
+    selected = CAPTIONED_ACTIONS[captions]
     events: list[InputEvent] = [
         json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
     ]
@@ -261,12 +277,14 @@ def captions_for_clip(log: Path, *, origin: float, stopped: float) -> list[Capti
         (
             event
             for event in events
-            if event["event"] == "start" and origin <= event["time"] < stopped
+            if event["event"] == "start"
+            and origin <= event["time"] < stopped
+            and event["action"] in selected
         ),
         key=lambda event: event["time"],
     )
     ends = {event["id"]: event for event in events if event["event"] == "end"}
-    captions: list[Caption] = []
+    entries: list[Caption] = []
     for index, event in enumerate(starts):
         end = ends.get(event["id"])
         finished = end["time"] if end is not None else stopped
@@ -274,14 +292,14 @@ def captions_for_clip(log: Path, *, origin: float, stopped: float) -> list[Capti
         text = caption_text(event)
         if end is not None and (end["returncode"] != 0 or end["error"] is not None):
             text += " (failed)"
-        captions.append(
+        entries.append(
             Caption(
                 event["time"] - origin,
                 min(max(finished, event["time"] + 0.8), limit, stopped) - origin,
                 text,
             )
         )
-    return captions
+    return entries
 
 
 def ass_time(seconds: float) -> str:
@@ -355,14 +373,16 @@ def render_recording(
     origin: float,
     stopped: float,
     log: Path,
-    captions: bool = True,
+    captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
     console: ConsoleCapture | None = None,
     compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
 ) -> None:
     entries = (
-        captions_for_clip(input_log, origin=origin, stopped=stopped) if captions else []
+        captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
+        if captions != "none"
+        else []
     )
     pings = (
         pings_for_clip(input_log, origin=origin, stopped=stopped) if click_pings else []

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.captions import render_recording
+from framewisp.captions import CaptionMode, render_recording
 from framewisp.compact import (
     CompactSettings,
     activity_events,
@@ -214,7 +214,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         origin=100,
         stopped=109,
         log=tmp_path / "render.log",
-        captions=overlays,
+        captions="keys" if overlays else "none",
         console=ConsoleCapture(tmp_path) if overlays else None,
         compact=CompactSettings(before=0.5, after=0.5),
         size=(320, 240),
@@ -256,6 +256,69 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         assert len(set(frame(video, 2.2, "640:150:320:48"))) > 30
 
 
+# R-LOG-4
+@pytest.mark.parametrize(
+    "captions,pointer_shown,key_shown",
+    [
+        ("none", False, False),
+        ("keys", False, True),
+        ("pointer", True, False),
+        ("all", True, True),
+    ],
+)
+@pytest.mark.parametrize("console", [False, True])
+def test_caption_modes_stay_aligned_with_compaction_and_console(
+    logs: tuple[Path, Path],
+    tmp_path: Path,
+    raw_video: Path,
+    captions: CaptionMode,
+    pointer_shown: bool,
+    key_shown: bool,
+    console: bool,
+) -> None:
+    logs[0].write_text(
+        "".join(
+            json.dumps(
+                {
+                    "id": action,
+                    "action": action,
+                    "parameters": parameters,
+                    "event": event,
+                    "time": timestamp,
+                    "returncode": 0,
+                    "error": None,
+                }
+            )
+            + "\n"
+            for action, parameters, start in (
+                ("move", {"x": 10, "y": 20}, 102),
+                ("key", {"chord": "Return"}, 106),
+            )
+            for event, timestamp in (("start", start), ("end", start + 0.5))
+        )
+    )
+    (tmp_path / "console.jsonl").write_text("")
+    render_recording(
+        raw_video,
+        input_log=logs[0],
+        origin=100,
+        stopped=109,
+        log=tmp_path / "render.log",
+        captions=captions,
+        console=ConsoleCapture(tmp_path) if console else None,
+        compact=CompactSettings(before=0.5, after=0.5),
+        size=(320, 240),
+    )
+
+    def shown(second: float) -> bool:
+        return len(set(frame(raw_video, second, "320:50:0:190"))) > 30
+
+    # Compaction keeps 0-0.5, 1.5-3, and 5.5-7 in every mode. That moves the
+    # pointer input from 2s to 1s and the key input from 6s to 2.5s.
+    assert shown(1.3) is pointer_shown
+    assert shown(2.8) is key_shown
+
+
 def test_zero_padding_keeps_encoded_end_despite_stop_latency(
     logs: tuple[Path, Path],
     tmp_path: Path,
@@ -267,7 +330,7 @@ def test_zero_padding_keeps_encoded_end_despite_stop_latency(
         origin=100,
         stopped=110,
         log=tmp_path / "render.log",
-        captions=False,
+        captions="none",
         compact=CompactSettings(before=0, after=0),
         size=(320, 240),
     )

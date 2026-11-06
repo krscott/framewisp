@@ -94,6 +94,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode is True
         or mode
         in {"large", "uncaptioned", "no-pings", "console", "record-probe", "compact"}
+        or (isinstance(mode, str) and mode.startswith("captions-"))
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -109,6 +110,11 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             command.append("--no-captions")
         if mode == "no-pings":
             command.append("--no-click-pings")
+        if mode == "record-probe":
+            # The pointer tests also cover rendering every pointer caption.
+            command.extend(["--captions", "all"])
+        if isinstance(mode, str) and mode.startswith("captions-"):
+            command.extend(["--captions", mode.removeprefix("captions-")])
         if mode == "compact":
             command.extend(
                 ["--compact", "--compact-before", "0.25", "--compact-after", "0.25"]
@@ -1549,6 +1555,31 @@ def video_patch(path: Path, second: float) -> bytes:
     ).stdout
 
 
+def caption_patches(path: Path) -> list[bytes]:
+    """Return the caption area of the video, sampled five times per second."""
+    data = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-vf",
+            "fps=5,crop=600:64:340:644",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    ).stdout
+    size = 600 * 64 * 3
+    return [data[offset : offset + size] for offset in range(0, len(data), size)]
+
+
 RING_CROP = 100
 
 
@@ -1668,6 +1699,8 @@ def test_startup_recording_pings_gestures(demo: Demo) -> None:
     [
         ([], True),
         (["--no-captions"], True),
+        (["--captions", "pointer"], True),
+        (["--captions", "all"], True),
         (["--console"], True),
         (["--compact", "--compact-before", "0.1", "--compact-after", "0"], False),
         (
@@ -1773,12 +1806,13 @@ def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) ->
 @pytest.mark.parametrize("demo", [None], indirect=True)
 @pytest.mark.parametrize("failure", ["unwritable-log", "malformed-input-log"])
 @pytest.mark.parametrize("command", ["record-stop", "stop"])
-def test_failed_ping_render_leaves_no_captions_clip_playable(
-    demo: Demo, tmp_path: Path, failure: str, command: str
+@pytest.mark.parametrize("options", [["--no-captions"], []])
+def test_failed_ping_render_leaves_pings_only_clip_playable(
+    demo: Demo, tmp_path: Path, failure: str, command: str, options: list[str]
 ) -> None:
     wait_for_demo_frame(demo, tmp_path / "before.png")
-    clip = tmp_path / "no captions.mp4"
-    cli(demo.directory, "record-start", "--no-captions", str(clip))
+    clip = tmp_path / "pings only.mp4"
+    cli(demo.directory, "record-start", *options, str(clip))
     cli(demo.directory, "click", "120", "100")
     time.sleep(0.3)
     if failure == "unwritable-log":
@@ -1958,6 +1992,167 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
         cli(demo.directory, "key", "Ctrl+a")
         cli(demo.directory, "type", "Between clips")
     assert "Entered: café 日本語 😀" in (demo.directory / "app.log").read_text()
+
+
+def exercise_caption_clip(demo: Demo) -> None:
+    time.sleep(0.4)
+    cli(demo.directory, "move", "300", "300", "--move-duration", "0")
+    time.sleep(1.2)
+    cli(demo.directory, "key", "Return")
+    time.sleep(1.2)
+
+
+def clip_inputs(demo: Demo, before: int) -> list[dict[str, Any]]:
+    lines = (demo.directory / "inputs.jsonl").read_text().splitlines()
+    return [json.loads(line) for line in lines[before:]]
+
+
+def caption_differs(patch: bytes, other: bytes) -> bool:
+    # A short caption is thin white text, so it changes few bytes of the patch.
+    return sum(abs(a - b) > 20 for a, b in zip(patch, other, strict=True)) > 200
+
+
+def check_clip_captions(
+    demo: Demo, clip: Path, before: int, *, pointer: bool, keys: bool
+) -> list[tuple[object, ...]]:
+    """Check each input's caption, and return the clip's log without timestamps."""
+    events = clip_inputs(demo, before)
+    if pointer or keys:
+        timestamp = re.search(
+            r"\.ready\((\d+), (\d+), (\d+)\)",
+            (demo.directory / "recorder.log").read_text(),
+        )
+        assert timestamp is not None
+        high, low, nanos = map(int, timestamp.groups())
+        origin = (high << 32) + low + nanos / 1e9
+        moved, pressed = (
+            next(
+                event["time"] - origin
+                for event in events
+                if event["event"] == "start" and event["action"] == action
+            )
+            for action in ("move", "key")
+        )
+        idle = video_patch(clip, moved - 0.15)
+        assert caption_differs(video_patch(clip, moved + 0.4), idle) is pointer
+        assert caption_differs(video_patch(clip, pressed + 0.4), idle) is keys
+    else:
+        # This clip has no first-frame timestamp. The app paints once at startup,
+        # so a caption would make the patch change again after it first settles.
+        frames = caption_patches(clip)
+        settled = next(
+            index
+            for index, patch in enumerate(frames)
+            if not caption_differs(patch, frames[-1])
+        )
+        assert not any(caption_differs(patch, frames[-1]) for patch in frames[settled:])
+    return [
+        (
+            event["event"],
+            event["action"],
+            event["parameters"],
+            event["returncode"],
+            event["error"],
+        )
+        for event in events
+    ]
+
+
+# R-LOG-4
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "demo,pointer,keys",
+    [
+        (True, False, True),
+        ("uncaptioned", False, False),
+        ("captions-none", False, False),
+        ("captions-keys", False, True),
+        ("captions-pointer", True, False),
+        ("captions-all", True, True),
+    ],
+    indirect=["demo"],
+)
+def test_startup_recording_captions_selected_inputs(
+    demo: Demo, tmp_path: Path, pointer: bool, keys: bool
+) -> None:
+    assert demo.recording is not None
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    exercise_caption_clip(demo)
+    cli(demo.directory, "record-stop")
+    check_clip_captions(demo, demo.recording, 0, pointer=pointer, keys=keys)
+
+
+# R-LOG-4, R-LOG-5
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    logged: list[list[tuple[object, ...]]] = []
+    cases: list[tuple[list[str], bool, bool]] = [
+        ([], False, True),
+        (["--no-captions"], False, False),
+        (["--captions", "none"], False, False),
+        (["--captions", "keys"], False, True),
+        (["--captions", "pointer"], True, False),
+        (["--captions", "all"], True, True),
+        (["--console", "--captions", "keys"], False, True),
+        (["--console", "--captions", "pointer"], True, False),
+    ]
+    for index, (options, pointer, keys) in enumerate(cases):
+        clip = tmp_path / f"clip-{index}.mp4"
+        before = len(clip_inputs(demo, 0))
+        cli(demo.directory, "record-start", *options, str(clip))
+        exercise_caption_clip(demo)
+        cli(demo.directory, "record-stop")
+        logged.append(
+            check_clip_captions(demo, clip, before, pointer=pointer, keys=keys)
+        )
+    assert len(logged[0]) == 4
+    assert all(entries == logged[0] for entries in logged)
+
+    # Compaction treats an input as activity whether or not its clip captions it.
+    for mode in ("none", "keys", "pointer", "all"):
+        clip = tmp_path / f"compact-{mode}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            "--console",
+            "--compact",
+            "--compact-before",
+            "0.25",
+            "--compact-after",
+            "0.25",
+            "--captions",
+            mode,
+            str(clip),
+        )
+        time.sleep(1.5)
+        cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
+        time.sleep(1.5)
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        assert 1 <= summary["duration_seconds"] < 2.5
+        assert summary["width"] == 1920
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_runner_rejects_invalid_caption_mode(demo: Demo, tmp_path: Path) -> None:
+    destination = tmp_path / "clip.mp4"
+    for value in (True, "mouse", ["keys"], None):
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(str(demo.runtime / "control.sock"))
+            request = {
+                "action": "record-start",
+                "session": str(demo.directory),
+                "destination": str(destination),
+                "captions": value,
+            }
+            connection.sendall((json.dumps(request) + "\n").encode())
+            reply = json.loads(connection.makefile().readline())
+        assert reply["error"] == "captions must be one of none, keys, pointer, all"
+        assert not destination.exists()
 
 
 @pytest.mark.integration

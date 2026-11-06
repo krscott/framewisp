@@ -7,7 +7,7 @@ from pathlib import Path
 
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import log_input
+from framewisp.captions import CAPTION_MODES, DEFAULT_CAPTIONS, log_input
 from framewisp.compact import CompactSettings
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
@@ -198,10 +198,19 @@ def main() -> None:
             action="store_true",
             help="append timestamped app stdout/stderr beside the recorded GUI",
         )
-        recording_parser.add_argument(
+        # None marks "not given", so run can require --record for either option.
+        caption_options = recording_parser.add_mutually_exclusive_group()
+        caption_options.add_argument(
+            "--captions",
+            choices=CAPTION_MODES,
+            help=f"inputs to caption: keys (key, type), pointer (move, click, drag, scroll), all, or none (default: {DEFAULT_CAPTIONS}; input logging stays enabled)",
+        )
+        caption_options.add_argument(
             "--no-captions",
-            action="store_true",
-            help="record without input captions (input logging stays enabled)",
+            dest="captions",
+            action="store_const",
+            const="none",
+            help="shorthand for --captions none",
         )
         recording_parser.add_argument(
             "--no-click-pings",
@@ -408,6 +417,15 @@ def main() -> None:
             if args.compact
             else None
         )
+        if args.action == "run" and args.captions and args.record is None:
+            parser.error(
+                "--captions and --no-captions require --record; use record-start for later clips"
+            )
+        args.captions = args.captions or DEFAULT_CAPTIONS
+        if args.action == "run" and args.no_click_pings and args.record is None:
+            parser.error(
+                "--no-click-pings requires --record; use record-start --no-click-pings for later clips"
+            )
     if args.action == "run":
         if args.compact and args.record is None:
             parser.error(
@@ -475,7 +493,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             session,
             command,
             recording=args.record,
-            captions=not args.no_captions,
+            captions=args.captions,
             click_pings=not args.no_click_pings,
             console=args.console,
             compact=args.compact_settings,
@@ -497,7 +515,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 session,
                 args.action,
                 args.path if args.action == "record-start" else None,
-                captions=not getattr(args, "no_captions", False),
+                captions=getattr(args, "captions", DEFAULT_CAPTIONS),
                 click_pings=not getattr(args, "no_click_pings", False),
                 console=getattr(args, "console", False),
                 compact=getattr(args, "compact_settings", None),

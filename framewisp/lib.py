@@ -21,7 +21,14 @@ from xml.sax.saxutils import escape
 
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import capture_origin, recorder_output, render_recording
+from framewisp.captions import (
+    CAPTION_MODES,
+    DEFAULT_CAPTIONS,
+    CaptionMode,
+    capture_origin,
+    recorder_output,
+    render_recording,
+)
 from framewisp.compact import CompactSettings
 from framewisp.connection import reply as reply
 from framewisp.console import ConsoleCapture, app_output
@@ -304,7 +311,7 @@ def start_recording(
     log: Path,
     env: dict[str, str],
     stop: Event,
-    captions: bool,
+    captions: CaptionMode,
     click_pings: bool,
     console: ConsoleCapture | None = None,
     compact: CompactSettings | None = None,
@@ -329,7 +336,9 @@ def start_recording(
         "-f",
         str(destination),
     ]
-    timed = captions or click_pings or console is not None or compact is not None
+    timed = (
+        captions != "none" or click_pings or console is not None or compact is not None
+    )
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     with (
         recorder_output(log) as output,
@@ -459,7 +468,7 @@ class Recordings:
         self,
         destination: Path,
         *,
-        captions: bool = True,
+        captions: CaptionMode = DEFAULT_CAPTIONS,
         click_pings: bool = True,
         console: bool = False,
         compact: CompactSettings | None = None,
@@ -516,7 +525,7 @@ def session_command(
     action: str,
     destination: Path | None = None,
     *,
-    captions: bool = True,
+    captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
     console: bool = False,
     compact: CompactSettings | None = None,
@@ -527,6 +536,11 @@ def session_command(
         raise SessionError(
             "This session uses an older or unsupported control protocol. "
             "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
+            "with this version of framewisp."
+        )
+    if action == "record-start" and state.get("caption_modes") is not True:
+        raise SessionError(
+            "This runner does not support caption modes. Restart the session "
             "with this version of framewisp."
         )
     if console and state.get("console_recording") is not True:
@@ -676,7 +690,7 @@ def handle_session_command(
             data = status()
         elif action == "record-start":
             destination = command.get("destination")
-            captions = command.get("captions", True)
+            captions = command.get("captions")
             click_pings = command.get("click_pings", True)
             console = command.get("console", False)
             try:
@@ -686,8 +700,8 @@ def handle_session_command(
                 return None
             if not isinstance(destination, str):
                 error = "record-start requires a destination"
-            elif not isinstance(captions, bool):
-                error = "captions must be true or false"
+            elif captions not in CAPTION_MODES:
+                error = f"captions must be one of {', '.join(CAPTION_MODES)}"
             elif not isinstance(click_pings, bool):
                 error = "click_pings must be true or false"
             elif not isinstance(console, bool):
@@ -724,7 +738,7 @@ def run_session(
     command: list[str],
     *,
     recording: Path | None = None,
-    captions: bool = True,
+    captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
     console: bool = False,
     compact: CompactSettings | None = None,
@@ -772,7 +786,7 @@ def _run_session(
     *,
     lease: int,
     recording: Path | None,
-    captions: bool,
+    captions: CaptionMode,
     click_pings: bool,
     console: bool,
     compact: CompactSettings | None,
@@ -940,6 +954,7 @@ def _run_session(
                             "console_recording": True,
                             "compact_recording": True,
                             "click_pings_recording": True,
+                            "caption_modes": True,
                             "persistent_input": True,
                             "retain_input_content": retain_input_content,
                             "inspection_protocol": 1,
