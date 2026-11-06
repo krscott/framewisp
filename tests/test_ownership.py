@@ -376,9 +376,9 @@ def pad_journal(session: Path, _: Path) -> None:
         journal.write(" " * (1 << 16))
 
 
-def remove_runtime_identity(session: Path, _: Path) -> None:
+def remove_journal_field(session: Path, field: str) -> None:
     journal = json.loads((session / JOURNAL).read_text())
-    del journal["runtime"]
+    del journal[field]
     (session / JOURNAL).write_text(json.dumps(journal))
 
 
@@ -406,7 +406,8 @@ DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
     ),
     "invalid-runtime-identity": lambda s, _: rewrite_journal(s, runtime="bad"),
     "null-runtime-identity": lambda s, _: rewrite_journal(s, runtime=None),
-    "no-runtime-identity": remove_runtime_identity,
+    "no-runtime-identity": lambda s, _: remove_journal_field(s, "runtime"),
+    "no-runtime-path": lambda s, _: remove_journal_field(s, "runtime_path"),
 }
 
 
@@ -448,6 +449,27 @@ def test_unreadable_journal_steps_find_session_under_another_tmpdir(
         finally:
             survivor.kill()
     assert f"/proc/{survivor.pid}/environ" in found
+
+
+# R-LIFE-5
+def test_journal_without_runtime_path_refused_outside_default_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    session = tmp_path / "session"
+    session.mkdir()
+    runtime = runtime_path(session)
+    with session_lease(session) as lease:
+        write_journal(session, runtime, lease, created=False)
+        runtime.mkdir(mode=0o700)
+        write_journal(session, runtime, lease, created=True)
+    (runtime / "owner-123.json").write_text("{}")
+    remove_journal_field(session, "runtime_path")
+    with pytest.raises(SessionError, match="journal runtime path") as refusal:
+        recover_session(session)
+    assert str(runtime) in str(refusal.value)
+    assert (session / JOURNAL).exists()
+    assert (runtime / "owner-123.json").exists()
 
 
 # R-LIFE-5

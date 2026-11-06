@@ -576,8 +576,8 @@ leaves its record and recovery refuses to remove the runtime.
 
 Recovery verifies the journal's session identity and reads its absolute runtime
 path. It refuses a path whose basename does not match the UID and session
-identity, or whose status cannot be checked (R-LIFE-5). Journals without a path
-use the original fixed `/tmp` location. Recovery checks the runtime's inode, owner, permissions, and directory
+identity, or whose status cannot be checked, and a journal without a path
+(R-LIFE-5). Recovery checks the runtime's inode, owner, permissions, and directory
 type regardless of the current `TMPDIR`. Normal cleanup reads the same journal
 path. Recovery never signals stored PIDs or uses `session.json` to authorize
 cleanup. A null runtime identity permits only rmdir of an empty directory,

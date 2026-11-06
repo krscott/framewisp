@@ -73,13 +73,11 @@ def check_socket_paths(runtime: Path) -> None:
 
 def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     """Return the journal's runtime path, or raise ValueError or OSError."""
-    # Journals without a path predate TMPDIR support and always used /tmp.
-    legacy = Path("/tmp") / runtime_name(session)
-    value = journal.get("runtime_path", str(legacy))
+    value = journal.get("runtime_path")
     if not isinstance(value, str) or "\0" in value:
         raise ValueError("journal runtime path must be an absolute path")
     runtime = Path(value)
-    if not runtime.is_absolute() or runtime.name != legacy.name:
+    if not runtime.is_absolute() or runtime.name != runtime_name(session):
         raise ValueError(f"journal has an invalid runtime path: {value!r}")
     # Path.exists() reports a path that cannot be checked as missing, which would
     # read as a finished cleanup. Only a confirmed absence may.
