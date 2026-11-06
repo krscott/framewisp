@@ -219,10 +219,10 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--captions MODE \| --no-captions] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE \| --no-captions] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--captions MODE \| --no-captions] [--no-click-pings] FILE` | Start a clip in the running session. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE \| --no-captions] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -602,7 +602,7 @@ On success, `record-stop` prints JSON with the output `path`, `duration_seconds`
 to measure these values after caption rendering; duration is not a wall-clock estimate.
 
 Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
-with an additional 640 pixels of width when `--console` is enabled.
+plus the console panel when `--console` is enabled, 640 pixels of width by default.
 Recording requires even width and height (R-REC-2). Existing output files are
 never overwritten (R-REC-1). The session runner owns the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
@@ -612,14 +612,26 @@ Keep the runner alive until shutdown completes so it can finalize the MP4.
 The development shell includes FFmpeg for video inspection.
 
 Add `--console` to show the launched app's combined stdout/stderr in a scrolling
-text panel on the right:
+text panel, on the right and 640 pixels wide by default:
 
 ```sh
 framewisp demo run --record /tmp/startup.mp4 --console -- framewisp-demo
 # Or capture a later clip, with or without input captions:
 framewisp demo record-start --console --no-captions /tmp/console.mp4
 framewisp demo record-stop
+# Or place a 200-pixel panel under the GUI:
+framewisp demo record-start --console --console-position bottom --console-size 200 /tmp/below.mp4
+framewisp demo record-stop
 ```
+
+`--console-position` takes `left`, `right`, `top`, or `bottom`. `--console-size`
+sets the panel's width for `left` and `right` and its height for `top` and `bottom`;
+the other dimension follows the GUI. Both options require `--console` and can differ
+per clip. The size must be even, and the panel must hold at least 20 text columns and
+3 text rows, so at least 390 pixels wide and 136 tall, including the dimension that
+follows the GUI. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
+`record-start` leaves the app running. Sessions started by an older framewisp version
+reject `--console`; restart the session to use it.
 
 The GUI keeps its original size, coordinates, and screenshots. Console lines show
 seconds relative to the clip's first frame. A short tail of earlier output provides

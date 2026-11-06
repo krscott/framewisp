@@ -16,12 +16,25 @@ from framewisp.captions import (
     subtitle_script,
 )
 from framewisp.compact import CompactSettings, recording_duration, retained_frames
-from framewisp.console import PANEL_WIDTH, ConsoleCapture
+from framewisp.console import ConsoleCapture
+from framewisp.layout import (
+    ConsolePanel,
+    ConsolePosition,
+    VideoLayout,
+    plain_layout,
+    video_layout,
+)
 from framewisp.pings import PING_SECONDS, Ping, pings_for_clip
 
 SIZE = (1280, 720)
 ORIGIN = 100.0
 STOPPED = 106.0
+
+
+def panel_layout(position: ConsolePosition, pixels: int = 640) -> VideoLayout:
+    layout = video_layout(SIZE, ConsolePanel(position, pixels))
+    assert isinstance(layout, VideoLayout)
+    return layout
 
 
 def ping_line(time: float, x: int, y: int) -> str:
@@ -143,8 +156,7 @@ def render(video: Path, log: Path, **options: object) -> None:
         origin=ORIGIN,
         stopped=STOPPED,
         log=log.parent / "captions.log",
-        size=SIZE,
-        **options,  # type: ignore[arg-type]
+        **({"layout": plain_layout(SIZE), "console": ConsoleCapture(log.parent)} | options),  # type: ignore[arg-type]
     )
 
 
@@ -228,14 +240,15 @@ def ring_centre(
 
 
 # R-REC-8, R-REC-9
-@pytest.mark.parametrize("console", [False, True])
+@pytest.mark.parametrize("position", [None, "right", "left", "bottom"])
 def test_compaction_maps_pings_to_retained_frames(
-    raw_video: Path, log: Path, tmp_path: Path, console: bool
+    raw_video: Path, log: Path, tmp_path: Path, position: ConsolePosition | None
 ) -> None:
     (tmp_path / "console.jsonl").write_text("")
     (tmp_path / "activity.jsonl").write_text("")
     log.write_text(command_lines(4, 4.3) + ping_line(4.25, 600, 300))
     settings = CompactSettings(before=0.2, after=0.1)
+    layout = plain_layout(SIZE) if position is None else panel_layout(position)
     ranges = retained_frames(
         (log, tmp_path / "activity.jsonl"),
         origin=ORIGIN,
@@ -250,9 +263,9 @@ def test_compaction_maps_pings_to_retained_frames(
         log,
         captions="none",
         compact=settings,
-        console=ConsoleCapture(tmp_path) if console else None,
+        layout=layout,
     )
-    size = (SIZE[0] + (PANEL_WIDTH if console else 0), SIZE[1])
+    size = (layout.width, layout.height)
     shown = compacted_ring_frames(raw_video, size=size)
     first = source.index(math.ceil(4.25 * 30))
     # The render keeps the whole animation, not only its opening frames.
@@ -260,7 +273,7 @@ def test_compaction_maps_pings_to_retained_frames(
     assert round(recording_duration(raw_video) * 30) == len(source)
     assert first <= min(shown) <= first + 1
     assert ring_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
-        (600, 300), abs=1
+        (layout.gui.x + 600, layout.gui.y + 300), abs=1
     )
     assert source[max(shown)] / 30 > 4.25 + 0.3
 
@@ -308,21 +321,51 @@ def test_zero_padding_keeps_each_ping_whole(raw_video: Path, log: Path) -> None:
 
 
 # R-REC-9
+@pytest.mark.parametrize(
+    ("position", "x", "y"),
+    [
+        ("left", 5, 400),
+        ("right", SIZE[0] - 5, 400),
+        ("top", 600, 5),
+        ("bottom", 600, SIZE[1] - 5),
+    ],
+)
+@pytest.mark.parametrize("pixels", [640, 400])
 def test_ring_clips_at_the_console_panel(
-    raw_video: Path, log: Path, tmp_path: Path
+    raw_video: Path,
+    log: Path,
+    tmp_path: Path,
+    position: ConsolePosition,
+    pixels: int,
+    x: int,
+    y: int,
 ) -> None:
     (tmp_path / "console.jsonl").write_text("")
-    log.write_text(ping_line(1, SIZE[0] - 5, 400) + ping_line(3, 600, 300))
-    render(raw_video, log, captions="none", console=ConsoleCapture(tmp_path))
-    size = (SIZE[0] + PANEL_WIDTH, SIZE[1])
+    log.write_text(ping_line(1, x, y) + ping_line(3, 600, 300))
+    layout = panel_layout(position, pixels)
+    assert layout.panel is not None
+    render(raw_video, log, captions="none", layout=layout)
+    size = (layout.width, layout.height)
     edge = frames(raw_video, 36, 36, size=size)[0]
     inside = frames(raw_video, 96, 96, size=size)[0]
-    assert red_box(edge.crop((0, 0, SIZE[0], SIZE[1]))) is not None
-    assert red_box(edge.crop((SIZE[0], 0, size[0], SIZE[1]))) is None
+    gui, panel = layout.gui, layout.panel
+    assert red_box(edge.crop((gui.x, gui.y, gui.right, gui.bottom))) is not None
+    assert red_box(edge.crop((panel.x, panel.y, panel.right, panel.bottom))) is None
+    # The ring reaches the shared edge, so the clip sits on it rather than inside it.
+    box = red_box(edge)
+    assert box is not None
+    if position == "left":
+        assert box[0] == gui.x
+    elif position == "right":
+        assert box[2] == gui.right - 1
+    elif position == "top":
+        assert box[1] == gui.y
+    else:
+        assert box[3] == gui.bottom - 1
     box = red_box(inside)
     assert box is not None
-    assert (box[0] + box[2]) / 2 == pytest.approx(600, abs=1)
-    assert (box[1] + box[3]) / 2 == pytest.approx(300, abs=1)
+    assert (box[0] + box[2]) / 2 == pytest.approx(gui.x + 600, abs=1)
+    assert (box[1] + box[3]) / 2 == pytest.approx(gui.y + 300, abs=1)
 
 
 # R-REC-11
@@ -372,7 +415,9 @@ def test_clip_without_presses_is_not_encoded_again(raw_video: Path, log: Path) -
 
 
 def test_script_has_one_dialogue_per_ping() -> None:
-    script = subtitle_script([], pings=[Ping(1, 2, 3), Ping(2, 4, 5)])
+    script = subtitle_script(
+        [], pings=[Ping(1, 2, 3), Ping(2, 4, 5)], layout=plain_layout(SIZE)
+    )
     assert script.count("Dialogue: 1,") == 2
     assert script.count("\\pos(2,3)") == 1
 

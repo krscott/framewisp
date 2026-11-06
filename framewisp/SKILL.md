@@ -77,7 +77,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--captions MODE \| --no-captions] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console` and the caption options require `--record`. |
+| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE \| --no-captions] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console` and the caption options require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -87,7 +87,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
-| `record-start [--console] [--captions MODE \| --no-captions] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE \| --no-captions] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
@@ -455,8 +455,15 @@ per clip, works with `--captions` and `--console`, and leaves logs unchanged.
 Timestamp-only check/capture spans live in `SESSION/activity.jsonl` without
 conditions or error text. The summary reports the compacted video's duration.
 
-Use `run --record FILE --console` or `record-start --console FILE` to append a
-640-pixel-wide scrolling panel of the launched app's combined stdout/stderr.
+Use `run --record FILE --console` or `record-start --console FILE` to add a
+scrolling panel of the launched app's combined stdout/stderr, on the right and
+640 pixels wide by default. `--console-position left|right|top|bottom` picks the
+video edge. `--console-size PIXELS` sets the panel's width for left or right and its
+height for top or bottom; the other dimension follows the GUI. The size must be even,
+and the panel needs at least 390 pixels of width and 136 of height, including the
+dimension that follows the GUI. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
+A rejected `record-start` leaves the app running. If `--console` reports an older
+runner, restart the session.
 The GUI and screenshots keep their original dimensions. Panel lines show seconds
 relative to the clip; negative timestamps identify earlier output kept for context.
 ANSI formatting is stripped and carriage returns replace progress lines. No
