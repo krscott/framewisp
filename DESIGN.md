@@ -213,8 +213,9 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    Without it, Qt dismisses context menus when the last input client disconnects.
 8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
    30 fps, software `libx264`, `yuv420p` with explicit full-range conversion, and
-   the MP4 muxer. Wait up to ten seconds
-   for a nonempty output file, checking for recorder exit. With the pinned
+   the MP4 muxer. It writes to a private clip, not the destination (see
+   "Recording destinations"). Wait up to ten seconds
+   for a nonempty clip, checking for recorder exit. With the pinned
    wf-recorder, the MP4 header is written after the first frame is received.
 9. Launch the application with the private environment and no shell expansion.
 10. Write `session.json` atomically and print `Session ready:`. This indicates process and
@@ -565,8 +566,8 @@ or protect against an app deliberately killing its supervisor.
 The runtime directory and `session.json` are removed; logs remain (R-LIFE-2).
 The recorder handles SIGTERM by flushing its encoder and MP4 trailer while Sway
 is still alive. A nonzero recorder exit during finalization names its
-destination and log. A killed recorder may leave an incomplete file. Socket EOF
-requests cleanup when its supervisor survives.
+destination and log. Its incomplete clip is not published. Socket EOF requests
+cleanup when its supervisor survives.
 
 `recover` acquires the same session lease without reading `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The
@@ -669,6 +670,48 @@ The pinned recorder tags H.264 as full-range. Its default conversion produced a
 white canvas decoded as RGB 235 instead of 255. `scale=out_range=full` keeps the
 conversion consistent with that tag (R-REC-4); recording tests compare a decoded
 background patch with the screenshot to catch brightness shifts.
+
+## Recording destinations
+
+wf-recorder gives a destination no protection (R-REC-1). Its only guard is a
+startup prompt that treats EOF on stdin as consent, and it later opens the path
+with `O_TRUNC` when the first frame arrives. Rendering also renames over the path
+it reads. Framewisp therefore keeps both away from the requested path.
+
+`start_recording` creates a private `.framewisp-recording-*` directory beside the
+destination, so both share a filesystem. wf-recorder and `render_recording` work
+only on `recording.mp4` inside it. After finalization, `destination.hardlink_to`
+publishes the clip. That is the only write to the requested path, and `link(2)`
+fails rather than replaces, so no race window exists. Batch captures publish the
+same way. `recording_path_error` is the early rejection for the common case.
+
+The destination therefore does not exist until finalization. Batch validation
+rejects the active recording's destination explicitly, because the existence
+check cannot see it.
+
+The private directory is removed after publishing and after a failed or cancelled
+start. A finalized clip is published even when rendering failed (R-REC-10). A clip
+the recorder did not finalize stays private, so an incomplete file never takes
+the requested path. If a file already holds the destination, the clip also stays
+private, and the error includes any render failure (R-REC-18). Both take the
+ordinary finalization failure path, which ends the session. `Recordings.close`
+adds the kept clip's path to any finalization error.
+
+Before starting the recorder, framewisp creates a file with the destination's
+name inside the private directory and hard-links it, so an unusable name or a
+filesystem without hard links fails at clip start rather than after the capture
+(R-REC-19). There is no copy fallback, because a copy would make a partly written
+destination visible.
+
+During a clip, the `.active-recording` symlink in the session directory points at
+its private clip. The link goes when the clip is published or discarded. A kept
+clip stays linked, because a later teardown failure can replace the error that
+named it, until `recover` or the next clip clears the link. A symlink is created
+atomically, so `recover` never reads a partial value. `recover` reports that path as
+`interrupted_recording` and removes the link. The directory and clip stay for the
+user to inspect or delete (R-REC-20). If no clip was written yet, `recover`
+removes the empty directory. Each private directory has a unique name, so a
+leftover never affects a later recording, even to the same destination.
 
 ## Capture decision
 
@@ -801,7 +844,7 @@ command spans to clip stop. Captions show requested actions; they do not claim
 application acknowledgement. The video keeps its original idle and input timing.
 
 FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the
-requested output. Caption rendering uses a bundled Fontconfig configuration
+private clip. Caption rendering uses a bundled Fontconfig configuration
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
 remains and the command fails with the `captions.log` path. A single wrapper

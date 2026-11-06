@@ -122,7 +122,8 @@ observable behaviour, not implementation, in short sentences.
 ## Recording (REC)
 
 - **R-REC-1** [test] Recording rejects a destination that already exists. A
-  batch capture never replaces an existing file.
+  recording or batch capture never replaces an existing file, including one
+  created after the destination was checked.
 - **R-REC-2** [test] Recording rejects an odd display width or height.
 - **R-REC-3** [test] An active recording is finalized as a playable MP4 when
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
@@ -153,6 +154,13 @@ observable behaviour, not implementation, in short sentences.
 - **R-REC-16** [test] Framewisp rejects a console panel that it cannot encode or
   that cannot show readable text, before it starts a clip.
 - **R-REC-17** [test] A rejected console panel leaves the app running.
+- **R-REC-18** [test] When a file takes a recording's destination before the
+  clip is finalized, the finished clip remains at another path, and the error
+  names that path.
+- **R-REC-19** [test] Framewisp rejects a recording on a filesystem without hard
+  links before it starts the clip, and the error names that limit.
+- **R-REC-20** [test] After the runner is killed during a clip, `recover` reports
+  the path of the interrupted clip. That clip does not block later recordings.
 
 ## Lifetime and recovery (LIFE)
 
