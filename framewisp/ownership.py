@@ -373,7 +373,7 @@ def remove_runtime(session: Path, lease: int) -> None:
                         runtime,
                         f"Cleanup is incomplete; resources remain at {runtime}. "
                         "Inspect supervisor records: "
-                        f"{', '.join(str(path) for path in pending)}",
+                        f"{', '.join(repr(str(path)) for path in pending)}",
                     )
                 )
             shutil.rmtree(runtime)

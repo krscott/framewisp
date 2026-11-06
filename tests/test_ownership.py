@@ -533,6 +533,17 @@ def test_changed_runtime_refused_with_working_manual_steps(
     assert recover_session(session) == 0
 
 
+# R-LIFE-7
+def test_supervisor_record_names_cannot_add_manual_steps(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    (runtime / "owner-x\n  rm -rf -- planted\n.json").write_text("{}")
+    with pytest.raises(SessionError, match="Cleanup is incomplete") as refusal:
+        recover_session(session)
+    assert "  rm -rf -- planted" not in str(refusal.value).splitlines()
+
+
 # R-LIFE-5, R-LIFE-7
 def test_null_runtime_identity_steps_use_the_journal_path(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
