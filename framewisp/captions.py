@@ -22,6 +22,7 @@ from typing import BinaryIO, Literal, ParamSpec, cast, get_args
 from framewisp.compact import (
     ActivityEvent,
     CompactSettings,
+    activity_events,
     compact_filter,
     recording_duration,
     retained_frames,
@@ -272,9 +273,7 @@ def captions_for_clip(
 ) -> list[Caption]:
     """Unselected actions never become captions, so they also never shorten one."""
     selected = CAPTIONED_ACTIONS[captions]
-    events: list[InputEvent] = [
-        json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
-    ]
+    events = cast(list[InputEvent], activity_events(log))
     starts = sorted(
         (
             event
