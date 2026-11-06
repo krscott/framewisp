@@ -19,6 +19,26 @@ from typing import Any, cast
 import pytest
 from PIL import Image, ImageChops
 
+# Startup clips, one session each: position, size in pixels, caption mode.
+CONSOLE_STARTS = {
+    "console-left": ("left", 640, "keys"),
+    "console-right": ("right", 400, "none"),
+    "console-top": ("top", 200, "keys"),
+    "console-bottom": ("bottom", 300, "none"),
+}
+
+
+def console_options(position: str, pixels: int, captions: str) -> list[str]:
+    return [
+        "--console",
+        "--console-position",
+        position,
+        "--console-size",
+        str(pixels),
+        "--captions",
+        captions,
+    ]
+
 
 @dataclass(frozen=True)
 class Demo:
@@ -135,6 +155,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode is True
         or mode
         in {"large", "uncaptioned", "no-pings", "console", "record-probe", "compact"}
+        or mode in CONSOLE_STARTS
         or (isinstance(mode, str) and mode.startswith("captions-"))
         else None
     )
@@ -147,6 +168,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         command.extend(["--record", str(recording)])
         if mode == "console":
             command.append("--console")
+        if mode in CONSOLE_STARTS:
+            command.extend(console_options(*CONSOLE_STARTS[mode]))
         if mode == "uncaptioned":
             command.append("--no-captions")
         if mode == "no-pings":
@@ -176,7 +199,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         "odd": "input_probe.py",
         "dialog": "dialog_probe.py",
         "dialog-untitled": "dialog_probe.py",
-    }
+    } | dict.fromkeys(CONSOLE_STARTS, "input_probe.py")
     app = (
         [sys.executable, str(Path(__file__).with_name(probes[mode]))]
         if mode in probes
@@ -1570,7 +1593,7 @@ def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
     assert demo.process.poll() is None
 
 
-def video_patch(path: Path, second: float) -> bytes:
+def video_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
     return subprocess.run(
         [
             "ffmpeg",
@@ -1583,7 +1606,7 @@ def video_patch(path: Path, second: float) -> bytes:
             "-frames:v",
             "1",
             "-vf",
-            "crop=600:64:340:644",
+            f"crop=600:64:{x + 340}:{y + 644}",
             "-pix_fmt",
             "rgb24",
             "-f",
@@ -1809,6 +1832,152 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     assert not any(
         patch[offset] - patch[offset + 1] > 40 for offset in range(0, len(patch), 3)
     )
+
+
+def exercise_console_clip(demo: Demo, tmp_path: Path) -> None:
+    """Click and press a key, leaving time for the caption to end."""
+    time.sleep(0.4)
+    presses = sum(event["event"] == "press" for event in input_events(demo))
+    cli(demo.directory, "click", "300", "200")
+    wait_until(
+        lambda: sum(event["event"] == "press" for event in input_events(demo)) > presses
+    )
+    press = [event for event in input_events(demo) if event["event"] == "press"][-1]
+    assert (press["x"], press["y"]) == (300, 200)
+    cli(demo.directory, "key", "a")
+    shot = tmp_path / "console-clip.png"
+    cli(demo.directory, "screenshot", str(shot))
+    with Image.open(shot) as image:
+        assert image.size == (1280, 720)
+    time.sleep(1.2)
+
+
+def check_console_clip(
+    demo: Demo,
+    clip: Path,
+    summary: dict[str, Any],
+    placement: tuple[str, int, str],
+) -> None:
+    """Check that the extended clip shows its overlays at the offset GUI."""
+    position, pixels, captions = placement
+    gui_x = pixels if position == "left" else 0
+    gui_y = pixels if position == "top" else 0
+    assert (summary["width"], summary["height"]) == (
+        (1280 + pixels, 720) if position in {"left", "right"} else (1280, 720 + pixels)
+    )
+    assert len(ring_frames(clip, gui_x + 300, gui_y + 200)) >= 8
+    origin = clip_origin(demo)
+    pressed = next(
+        event["time"] - origin
+        for event in reversed(clip_inputs(demo, 0))
+        if event["event"] == "start" and event["action"] == "key"
+    )
+    shown = video_patch(clip, pressed + 0.4, gui_x, gui_y)
+    ended = video_patch(clip, pressed + 1.1, gui_x, gui_y)
+    assert caption_differs(shown, ended) is (captions == "keys")
+
+
+# R-REC-12, R-REC-13, R-REC-14, R-REC-15
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("demo", "placement"), CONSOLE_STARTS.items(), indirect=["demo"]
+)
+def test_startup_clip_extends_the_video_around_the_gui(
+    demo: Demo, tmp_path: Path, placement: tuple[str, int, str]
+) -> None:
+    assert demo.recording is not None
+    wait_for_input_probe_window(demo)
+    exercise_console_clip(demo, tmp_path)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    check_console_clip(demo, demo.recording, summary, placement)
+
+
+# R-REC-12, R-REC-13, R-REC-14, R-REC-15
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_later_clips_pick_their_own_console_panel(demo: Demo, tmp_path: Path) -> None:
+    wait_for_input_probe_window(demo)
+    for index, placement in enumerate(
+        [
+            ("left", 640, "keys"),
+            ("left", 400, "none"),
+            ("right", 400, "keys"),
+            ("right", 640, "none"),
+            ("top", 200, "keys"),
+            ("top", 640, "none"),
+            ("bottom", 640, "keys"),
+            ("bottom", 136, "none"),
+        ]
+    ):
+        clip = tmp_path / f"clip-{index}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            *console_options(*placement),
+            str(clip),
+        )
+        exercise_console_clip(demo, tmp_path)
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        check_console_clip(demo, clip, summary, placement)
+
+
+# R-REC-16, R-REC-17
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_rejected_console_panel_leaves_the_app_running(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(demo)
+    rejected = tmp_path / "rejected.mp4"
+    for size in ("16000", "9" * 4299 + "8"):
+        result = subprocess.run(
+            [
+                "framewisp",
+                str(demo.directory),
+                "record-start",
+                "--console",
+                "--console-size",
+                size,
+                str(rejected),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert result.returncode != 0
+        assert "16384" in result.stderr
+        assert "--console-size" in result.stderr
+        assert not rejected.exists()
+    for value, message in (
+        (True, "console must be null or an object"),
+        ({"position": "left"}, "console requires only position and size"),
+        ({"position": "up", "size": 640}, "console position must be one of"),
+        ({"position": "left", "size": 641}, "must be even"),
+        ({"position": "left", "size": True}, "positive even"),
+        ({"position": "left", "size": 2}, "at least 390"),
+        ({"position": "left", "size": int("9" * 4300)}, "at most 16384"),
+    ):
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(str(demo.runtime / "control.sock"))
+            request = {
+                "action": "record-start",
+                "session": str(demo.directory.resolve()),
+                "destination": str(rejected),
+                "captions": "keys",
+                "console": value,
+            }
+            connection.sendall((json.dumps(request) + "\n").encode())
+            reply = json.loads(connection.makefile().readline())
+        assert message in reply["error"]
+        assert not rejected.exists()
+    assert demo.process.poll() is None
+    cli(demo.directory, "status")
+    accepted = tmp_path / "accepted.mp4"
+    cli(demo.directory, "record-start", "--console", str(accepted))
+    time.sleep(0.5)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert summary["width"] == 1920
 
 
 @pytest.mark.integration

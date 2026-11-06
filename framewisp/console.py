@@ -18,7 +18,7 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import BinaryIO, Literal, TextIO
 
-PANEL_WIDTH = 640
+from framewisp.layout import Rect, text_columns, text_rows
 
 
 @dataclass
@@ -104,7 +104,7 @@ def app_output(capture: ConsoleCapture) -> Generator[BinaryIO, None, None]:
 @dataclass
 class ConsoleText:
     rows: int
-    columns: int = 41
+    columns: int
     lines: deque[tuple[float, str]] = field(
         default_factory=lambda: deque[tuple[float, str]]()
     )
@@ -189,10 +189,10 @@ class ConsoleFrame:
 
 
 def console_frames(
-    log: Path, *, origin: float, stopped: float, height: int
+    log: Path, *, origin: float, stopped: float, panel: Rect
 ) -> Generator[ConsoleFrame, None, None]:
     """Keep pre-clip context and coalesce bursts to at most one update per frame."""
-    state = ConsoleText(rows=max(1, (height - 64) // 24))
+    state = ConsoleText(rows=text_rows(panel.height), columns=text_columns(panel.width))
     start = 0.0
     screen = ""
     with log.open(encoding="utf-8") as source:

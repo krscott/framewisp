@@ -137,6 +137,18 @@ observable behaviour, not implementation, in short sentences.
   capture remains at the requested path. The error names that path and
   `captions.log`.
 - **R-REC-11** [test] `--no-captions` does not change click pings.
+- **R-REC-12** [test] `--console-position` places the console panel on the left,
+  right, top, or bottom edge of the video. The default is right.
+- **R-REC-13** [test] `--console-size` sets the panel width for `left` and
+  `right`, and the panel height for `top` and `bottom`. The default is 640
+  pixels.
+- **R-REC-14** [test] A console panel does not scale or crop the GUI in the
+  video. It does not change input coordinates or screenshots.
+- **R-REC-15** [test] With `--console`, a caption stays centred on the GUI. It
+  never draws on the console panel.
+- **R-REC-16** [test] Framewisp rejects a console panel that it cannot encode or
+  that cannot show readable text, before it starts a clip.
+- **R-REC-17** [test] A rejected console panel leaves the app running.
 
 ## Lifetime and recovery (LIFE)
 

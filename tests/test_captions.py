@@ -29,6 +29,7 @@ from framewisp.captions import (
 )
 from framewisp.errors import SessionError
 from framewisp.keys import KEYS, parse_chord
+from framewisp.layout import plain_layout
 
 
 def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
@@ -379,7 +380,10 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
 
 
 def test_caption_text_cannot_inject_ass_formatting() -> None:
-    script = subtitle_script([Caption(0.25, 1.5, r"Type: {\pos(0,0)}\N日本語")])
+    script = subtitle_script(
+        [Caption(0.25, 1.5, r"Type: {\pos(0,0)}\N日本語")],
+        layout=plain_layout((1280, 720)),
+    )
     assert "0:00:00.25,0:00:01.50" in script
     assert r"\pos" not in script
     assert r"\N" not in script
