@@ -12,8 +12,9 @@ import pytest
 
 from framewisp.actions import InputAction
 from framewisp.console import ConsoleCapture
+from framewisp.errors import SessionError, display_command
 from framewisp.inputs import InputWorker
-from framewisp.lib import Recordings, handle_session_command
+from framewisp.lib import Recordings, handle_session_command, recording_summary
 
 SECRET = "typed secret"
 
@@ -144,3 +145,22 @@ def test_destination_lookup_failure_is_an_error_reply(
     monkeypatch.setattr(Path, "exists", exists)
     response = handle(listener, recordings, start_request(tmp_path))
     assert "File name too long" in cast(str, response["error"])
+
+
+def test_tool_error_naming_a_non_utf8_path_stays_a_session_error(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "session.json").write_text(
+        json.dumps({"wayland_display": "wayland-1", "runtime_directory": "/run"})
+    )
+    with pytest.raises(SessionError, match="caf"):
+        display_command(
+            tmp_path, ["sh", "-c", r"printf 'caf\351' >&2; exit 1"], timeout=5
+        )
+
+
+def test_inspecting_a_missing_non_utf8_recording_is_a_session_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(SessionError, match="Could not inspect recording"):
+        recording_summary(tmp_path / "\udc80gone.mp4")

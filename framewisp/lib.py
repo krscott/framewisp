@@ -440,6 +440,7 @@ def recording_summary(destination: Path) -> dict[str, object]:
         ],
         capture_output=True,
         text=True,
+        errors="replace",
         check=False,
         timeout=10,
     )
