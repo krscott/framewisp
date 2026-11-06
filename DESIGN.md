@@ -593,13 +593,17 @@ if the lock path was replaced.
 
 `read_journal` is the one check for every other unreadable journal: an open,
 ownership, size, parse, session, runtime-path, runtime-identity, or lock-identity
-failure removes nothing and prints manual cleanup steps (R-LIFE-5). A missing
-journal with resources remaining, and a null runtime identity with a runtime that
-cannot be removed, print the same steps. Those steps use the runtime path derived
-from the session identity and the current TMPDIR, because a damaged journal cannot
-be trusted and a copied one could name another session. Running recover under the
-session's TMPDIR prints its real path. Every set of manual steps looks for live
-processes by the runtime directory's name, which is the same under any TMPDIR.
+failure removes nothing and prints manual cleanup steps (R-LIFE-7). A missing
+journal with resources remaining prints the same steps. Those steps use the runtime
+path derived from the session identity and the current TMPDIR, because a damaged
+journal cannot be trusted and a copied one could name another session. Running
+recover under the session's TMPDIR prints its real path. Once the journal is
+verified, a replaced, symlinked, or changed runtime, or a null runtime identity with
+a runtime that cannot be removed, prints steps using the journal's path
+(R-LIFE-7). Every set of manual steps looks for live processes by the runtime
+directory's name, which is the same under any TMPDIR. Stale attachment metadata
+without a journal gets attachment steps instead, because `run`, `status`, and `stop`
+do not apply to it (R-LIFE-7).
 
 Once ownership is verified and no supervisor records remain,
 recovery removes the runtime, `session.json`, its temporary file, and the
@@ -618,7 +622,7 @@ with a missing runtime or refuses resources without a journal, with manual steps
 The lock file persists across runs and must not be unlinked or replaced. Acquiring
 the lease refuses session directories that the caller does not own or that
 group or others can write (R-SESSION-6); malicious same-user filesystem mutation is outside the protocol.
-Old sessions without journals require manual inspection. Recovery
+Recovery
 cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
 records and runtime remain for manual investigation. Attached sessions acquire this same session lease before writing metadata and
 refuse abandoned headless journals. They retain their separate desktop reservation

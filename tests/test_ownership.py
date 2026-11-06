@@ -1,6 +1,7 @@
 import errno
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -229,7 +230,9 @@ def replace_lock(session: Path) -> Path:
 def run_commands(message: str, prefix: str) -> str:
     # Refusals are the only manual cleanup guide, so tests run them verbatim.
     commands = [
-        line.strip() for line in message.splitlines() if line.strip().startswith(prefix)
+        line.strip()
+        for line in message.splitlines()
+        if line.strip().removeprefix("LC_ALL=C ").startswith(prefix)
     ]
     assert commands
     results = [
@@ -278,7 +281,7 @@ def test_replaced_lock_refused_while_session_live(tmp_path: Path) -> None:
     assert not (tmp_path / JOURNAL).exists()
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 @pytest.mark.parametrize("kind", ["0644", "hard-link", "fifo", "symlink", "directory"])
 def test_unusable_replacement_lock_refused_while_session_live(
     tmp_path: Path, kind: str
@@ -342,7 +345,7 @@ def test_restoring_original_lock_allows_recovery(
     assert not runtime.exists()
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 def test_lost_lock_manual_cleanup_commands_work(abandoned: tuple[Path, Path]) -> None:
     session, runtime = abandoned
     replace_lock(session).unlink()
@@ -405,13 +408,12 @@ DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
         s, runtime_path=f"{s}/app.log/{r.name}"
     ),
     "invalid-runtime-identity": lambda s, _: rewrite_journal(s, runtime="bad"),
-    "null-runtime-identity": lambda s, _: rewrite_journal(s, runtime=None),
     "no-runtime-identity": lambda s, _: remove_journal_field(s, "runtime"),
     "no-runtime-path": lambda s, _: remove_journal_field(s, "runtime_path"),
 }
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 @pytest.mark.parametrize("kind", DAMAGED_JOURNALS)
 def test_unreadable_journal_refused_with_working_manual_steps(
     abandoned: tuple[Path, Path], kind: str
@@ -432,7 +434,7 @@ def test_unreadable_journal_refused_with_working_manual_steps(
     assert recover_session(session) == 0
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 def test_unreadable_journal_steps_find_session_under_another_tmpdir(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -451,7 +453,7 @@ def test_unreadable_journal_steps_find_session_under_another_tmpdir(
     assert f"/proc/{survivor.pid}/environ" in found
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 def test_journal_without_runtime_path_refused_outside_default_tmpdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -465,14 +467,14 @@ def test_journal_without_runtime_path_refused_outside_default_tmpdir(
         write_journal(session, runtime, lease, created=True)
     (runtime / "owner-123.json").write_text("{}")
     remove_journal_field(session, "runtime_path")
-    with pytest.raises(SessionError, match="journal runtime path") as refusal:
+    with pytest.raises(SessionError, match="no runtime path") as refusal:
         recover_session(session)
     assert str(runtime) in str(refusal.value)
     assert (session / JOURNAL).exists()
     assert (runtime / "owner-123.json").exists()
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 def test_missing_journal_refused_with_working_manual_steps(
     abandoned: tuple[Path, Path],
 ) -> None:
@@ -486,7 +488,99 @@ def test_missing_journal_refused_with_working_manual_steps(
     assert recover_session(session) == 0
 
 
-# R-LIFE-5
+def replace_runtime(session: Path, runtime: Path) -> None:
+    runtime.rename(session / "moved-runtime")
+    runtime.mkdir(mode=0o700)
+    (runtime / "kept").write_text("preserve")
+
+
+def symlink_runtime(session: Path, runtime: Path) -> None:
+    runtime.rename(session / "moved-runtime")
+    runtime.symlink_to(session / "moved-runtime")
+
+
+def open_runtime_permissions(_: Path, runtime: Path) -> None:
+    runtime.chmod(0o755)
+
+
+# R-LIFE-5, R-LIFE-7
+@pytest.mark.parametrize(
+    "change",
+    [replace_runtime, symlink_runtime, open_runtime_permissions],
+    ids=["replaced", "symlink", "permissions"],
+)
+def test_changed_runtime_refused_with_working_manual_steps(
+    abandoned: tuple[Path, Path],
+    change: Callable[[Path, Path], object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, runtime = abandoned
+    change(session, runtime)
+    # The journal's verified path applies even under another TMPDIR.
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with pytest.raises(SessionError, match="Nothing was removed") as refusal:
+        recover_session(session)
+    message = str(refusal.value)
+    assert " stop`" in message and shlex.quote(str(runtime)) in message
+    assert (session / JOURNAL).exists()
+    assert (runtime / "kept").read_text() == "preserve"
+    assert run_commands(message, "grep ") == ""
+    run_commands(message, "rm ")
+    assert not runtime.exists() and not runtime.is_symlink()
+    assert recover_session(session) == 0
+
+
+# R-LIFE-5, R-LIFE-7
+def test_null_runtime_identity_steps_use_the_journal_path(
+    abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    rewrite_journal(session, runtime=None)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with pytest.raises(SessionError, match="no runtime identity") as refusal:
+        recover_session(session)
+    message = str(refusal.value)
+    assert " stop`" in message and (runtime / "kept").read_text() == "preserve"
+    assert (session / JOURNAL).exists()
+    run_commands(message, "rm ")
+    assert not runtime.exists()
+    assert recover_session(session) == 0
+
+
+# R-LIFE-7
+def test_stale_attachment_gets_attachment_steps(tmp_path: Path) -> None:
+    (tmp_path / "session.json").write_text('{"kind": "attached"}')
+    with pytest.raises(SessionError, match="--detach") as refusal:
+        recover_session(tmp_path)
+    message = str(refusal.value)
+    assert " run -- APP" not in message
+    assert (tmp_path / "session.json").exists()
+    run_commands(message, "rm ")
+    assert recover_session(tmp_path) == 0
+
+
+# R-LIFE-7
+def test_process_check_finds_session_under_non_utf8_tmpdir(
+    abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    (session / JOURNAL).write_text("{")
+    with pytest.raises(SessionError) as refusal:
+        recover_session(session)
+    environment = os.environb | {
+        b"XDG_RUNTIME_DIR": b"/tmp/x\xff/" + os.fsencode(runtime.name),
+    }
+    monkeypatch.setenv("LC_ALL", "C.UTF-8")
+    with subprocess.Popen(["sleep", "60"], env=environment) as survivor:
+        try:
+            found = run_commands(str(refusal.value), "grep ")
+        finally:
+            survivor.kill()
+    assert f"/proc/{survivor.pid}/environ" in found
+
+
+# R-LIFE-5, R-LIFE-7
 def test_foreign_journal_steps_leave_its_runtime_alone(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
@@ -536,7 +630,7 @@ def test_journal_commit_tolerates_filesystem_without_directory_sync(
     assert (tmp_path / JOURNAL).exists()
 
 
-# R-LIFE-5
+# R-LIFE-5, R-LIFE-7
 @pytest.mark.parametrize("lock", [None, "bad", [1], [True, 1]])
 def test_journal_without_valid_lock_identity_refused(
     abandoned: tuple[Path, Path], lock: object

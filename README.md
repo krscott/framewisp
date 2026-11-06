@@ -1068,9 +1068,9 @@ If a supervisor dies or cannot finish cleanup, recovery fails and lists the
 remaining supervisor records in the runtime directory. Inspect those records and
 processes manually; their PIDs are diagnostic, not safe signal targets. Resources
 and ownership metadata remain so recovery cannot claim success. Recovery also
-refuses replaced runtimes. It refuses missing or unverifiable journals too, removes
-nothing, and prints the steps to stop the session or clean up manually. It does not recover desktop
-attachments; use `framewisp --detach` for those. Attachment shares the session
+refuses missing or unverifiable journals and replaced runtimes. It removes nothing
+and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
+not recover desktop attachments; use `framewisp --detach` for those. Attachment shares the session
 metadata lock and refuses directories with abandoned headless ownership.
 
 Headless sessions start private D-Bus session and accessibility buses plus an

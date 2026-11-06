@@ -152,6 +152,8 @@ observable behaviour, not implementation, in short sentences.
   replaced ownership files and runtime directories.
 - **R-LIFE-6** [test] Session metadata copied to another directory cannot
   control the original session.
+- **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
+  and its error gives manual cleanup steps.
 
 ## Attached desktops (ATTACH)
 
