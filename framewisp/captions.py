@@ -360,8 +360,9 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
         try:
             render(*args, **kwargs)
         except Exception as error:
+            raw_video = kwargs.get("published_as") or args[0]
             raise RuntimeError(
-                f"Recording rendering failed; raw video remains at {args[0]} without "
+                f"Recording rendering failed; raw video remains at {raw_video} without "
                 f"captions, click pings, console panel or cuts. See {kwargs['log']} and "
                 f"{kwargs['input_log']}. Cause: {error}"
             ) from error
@@ -383,7 +384,9 @@ def render_recording(
     console: ConsoleCapture,
     compact: CompactSettings | None = None,
     layout: VideoLayout,
+    published_as: Path | None = None,
 ) -> None:
+    """Render over `destination`, or leave it raw and name `published_as`."""
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
         if captions != "none"

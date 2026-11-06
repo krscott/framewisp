@@ -9,7 +9,8 @@ import struct
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from inspect import FrameInfo, getsource, stack
 from pathlib import Path
@@ -419,6 +420,7 @@ def test_status_and_stop_finalize_recording(demo: Demo) -> None:
             os.kill(pid, 0)
     assert demo.process.wait(timeout=5) == 0
     recording_frames(demo.recording)
+    assert not private_directories(demo.recording.parent)
     log = (demo.directory / "recorder.log").read_text()
     assert len(re.findall(r"zwlr_screencopy_frame_v1[#@]\d+\.ready", log)) == 1
     assert "get_registry" not in log
@@ -590,6 +592,56 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
         assert "Traceback" not in result.stderr
 
 
+def private_directories(parent: Path) -> list[Path]:
+    return list(parent.glob(".framewisp-recording-*"))
+
+
+def private_clip(parent: Path) -> Path:
+    [directory] = private_directories(parent)
+    return directory / "recording.mp4"
+
+
+def recorder_pid(parent: Path) -> int | None:
+    """Find the recorder writing under `parent`."""
+    for path in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            argv = path.read_bytes().split(b"\0")
+        except OSError:
+            continue  # Other system processes can exit during enumeration.
+        if argv[0].endswith(b"wf-recorder") and any(
+            argument.startswith(str(parent).encode()) for argument in argv
+        ):
+            return int(path.parent.name)
+    return None
+
+
+@contextmanager
+def recorder_before_first_frame(
+    demo: Demo, destination: Path
+) -> Generator[tuple[subprocess.Popen[str], int]]:
+    """Hold `record-start` after validation, before the recorder opens its file.
+
+    The recorder cannot receive a frame from a stopped Sway, so this window stays
+    open until the block ends. Yields the waiting command and the recorder's PID.
+    """
+    state = json.loads((demo.directory / "session.json").read_text())
+    sway_pid = state["processes"]["sway"]
+    os.kill(sway_pid, signal.SIGSTOP)
+    with subprocess.Popen(
+        ["framewisp", str(demo.directory), "record-start", str(destination)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as start:
+        try:
+            wait_until(lambda: recorder_pid(destination.parent) is not None)
+            pid = recorder_pid(destination.parent)
+            assert pid is not None
+            yield start, pid
+        finally:
+            os.kill(sway_pid, signal.SIGCONT)
+
+
 def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
@@ -641,6 +693,7 @@ def test_recording_finalizes_on_shutdown(
     demo.process.send_signal(stop_signal)
     assert demo.process.wait(timeout=20) == 0
     assert len(recording_frames(demo.recording)) > 1
+    assert not private_directories(demo.recording.parent)
     # Check a uniform background patch against the screenshot. A range mismatch
     # can produce a playable video with visibly shifted brightness.
     with Image.open(screenshot) as image:
@@ -693,7 +746,11 @@ def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -
             "--",
             sys.executable,
             "-c",
-            "from pathlib import Path; import sys; assert Path(sys.argv[1]).stat().st_size > 0",
+            "from pathlib import Path; import sys; "
+            "[clip] = Path(sys.argv[1]).glob('.framewisp-recording-*/recording.mp4'); "
+            "assert clip.stat().st_size > 0; "
+            "assert not Path(sys.argv[2]).exists()",
+            str(tmp_path),
             str(video),
         ],
         capture_output=True,
@@ -703,6 +760,7 @@ def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -
     )
     assert result.returncode == 0, result.stderr
     recording_frames(video)
+    assert not private_directories(tmp_path)
 
 
 @pytest.mark.integration
@@ -722,13 +780,15 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
 def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
     session = tmp_path / "session"
     marker = tmp_path / "app-started"
+    read_only = tmp_path / "read only"
+    read_only.mkdir(mode=0o500)
     result = subprocess.run(
         [
             "framewisp",
             str(session),
             "run",
             "--record",
-            str(tmp_path / "missing" / "capture.mp4"),
+            str(read_only / "capture.mp4"),
             "--",
             sys.executable,
             "-c",
@@ -741,7 +801,7 @@ def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
         timeout=20,
     )
     assert result.returncode != 0
-    assert "recorder.log" in result.stderr
+    assert "Cannot record to" in result.stderr
     assert not marker.exists()
     assert not (session / "session.json").exists()
 
@@ -1532,7 +1592,7 @@ def test_record_multiple_clips_without_restarting_app(
         return result.stderr
 
     assert "No recording" in rejected("record-stop")
-    assert "recorder.log" in rejected(
+    assert "existing parent directory" in rejected(
         "record-start", str(tmp_path / "missing" / "bad.mp4")
     )
     assert "reserved" in rejected("record-start", str(state_path))
@@ -1546,7 +1606,8 @@ def test_record_multiple_clips_without_restarting_app(
         cli(demo.directory, "type", f"Setup {index}")
         clip = tmp_path / f"clip {index}.mp4"
         cli(demo.directory, "record-start", str(clip))
-        assert clip.stat().st_size > 0
+        assert not clip.exists()
+        assert private_clip(tmp_path).stat().st_size > 0
         assert "recorder" in json.loads(state_path.read_text())["processes"]
         refused = tmp_path / "refused.mp4"
         assert "already active" in rejected("record-start", str(refused))
@@ -3450,6 +3511,156 @@ def test_batch_capture_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> 
     assert response["data"]["artifacts"] == []
     assert capture.read_bytes() == b"another client's artifact"
     assert not list(tmp_path.glob(".framewisp-capture-*"))
+
+
+# R-REC-1
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_capture_rejects_active_recording_destination(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    cli(demo.directory, "record-start", str(clip))
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [{"action": "type", "text": "", "interval": 0}],
+            "capture": {"path": str(clip)},
+        },
+    ) as connection:
+        response = json.loads(connection.recv(8192))
+    assert "active recording" in response["error"]
+    cli(demo.directory, "record-stop")
+    recording_frames(clip)
+
+
+# R-REC-1, R-REC-18
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_recording_keeps_file_created_before_recorder_opens(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    with recorder_before_first_frame(demo, clip) as (start, _):
+        clip.write_bytes(b"another client's file")
+    assert start.wait(timeout=20) == 0
+    cli(demo.directory, "type", "recorded")
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "record-stop"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert demo.process.wait(timeout=20) == 1
+    assert clip.read_bytes() == b"another client's file"
+    kept = private_clip(tmp_path)
+    assert str(kept) in " ".join(result.stderr.split())
+    assert len(recording_frames(kept)) > 1
+
+
+# R-REC-1, R-REC-18
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_finalizing_keeps_video_moved_onto_destination(
+    demo: Demo, tmp_path: Path
+) -> None:
+    first = tmp_path / "first.mp4"
+    cli(demo.directory, "record-start", str(first))
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "record-stop")
+    other = first.read_bytes()
+    clip = tmp_path / "clip.mp4"
+    cli(demo.directory, "record-start", str(clip))
+    cli(demo.directory, "click", "120", "100")
+    first.replace(clip)
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "stop"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert clip.read_bytes() == other
+    kept = private_clip(tmp_path)
+    assert str(kept) in " ".join(result.stderr.split())
+    assert kept.read_bytes() != other
+    assert len(recording_frames(kept)) > 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_failed_recording_start_removes_private_directory(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    with recorder_before_first_frame(demo, clip) as (start, recorder):
+        os.kill(recorder, signal.SIGKILL)
+        _, error = start.communicate(timeout=20)
+    assert start.returncode == 1
+    assert "recorder.log" in error
+    assert demo.process.poll() is None
+    assert not private_directories(tmp_path)
+    assert not clip.exists()
+    assert not (demo.directory / ".active-recording").is_symlink()
+    cli(demo.directory, "record-start", str(clip))
+    cli(demo.directory, "record-stop")
+    recording_frames(clip)
+
+
+# R-REC-20
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
+    assert demo.recording is not None
+    interrupted = private_clip(tmp_path)
+    demo.process.kill()
+    demo.process.wait(timeout=5)
+
+    def recovered() -> subprocess.CompletedProcess[str] | None:
+        result = subprocess.run(
+            ["framewisp", str(demo.directory), "recover"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        return result if result.returncode == 0 else None
+
+    deadline = time.monotonic() + 10
+    while (result := recovered()) is None:
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+    report = json.loads(result.stdout)
+    assert report["status"] == "recovered"
+    assert report["interrupted_recording"] == str(interrupted)
+    assert interrupted.stat().st_size > 0
+    assert not demo.recording.exists()
+    assert not (demo.directory / ".active-recording").is_symlink()
+
+    rerun = subprocess.run(
+        [
+            "framewisp",
+            str(demo.directory),
+            "run",
+            "--record",
+            str(demo.recording),
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert rerun.returncode == 0, rerun.stderr
+    recording_frames(demo.recording)
+    assert private_clip(tmp_path) == interrupted
 
 
 @pytest.mark.integration

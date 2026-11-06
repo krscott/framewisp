@@ -213,8 +213,9 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    Without it, Qt dismisses context menus when the last input client disconnects.
 8. If recording, start wf-recorder for `HEADLESS-1` with continuous capture (`-D`),
    30 fps, software `libx264`, `yuv420p` with explicit full-range conversion, and
-   the MP4 muxer. Wait up to ten seconds
-   for a nonempty output file, checking for recorder exit. With the pinned
+   the MP4 muxer. It writes to a private clip, not the destination (see
+   "Recording destinations"). Wait up to ten seconds
+   for a nonempty clip, checking for recorder exit. With the pinned
    wf-recorder, the MP4 header is written after the first frame is received.
 9. Launch the application with the private environment and no shell expansion.
 10. Write `session.json` atomically and print `Session ready:`. This indicates process and
@@ -565,8 +566,9 @@ or protect against an app deliberately killing its supervisor.
 The runtime directory and `session.json` are removed; logs remain (R-LIFE-2).
 The recorder handles SIGTERM by flushing its encoder and MP4 trailer while Sway
 is still alive. A nonzero recorder exit during finalization names its
-destination and log. A killed recorder may leave an incomplete file. Socket EOF
-requests cleanup when its supervisor survives.
+destination and log, and whatever it wrote is published. A killed recorder may
+leave an incomplete file. Socket EOF requests cleanup when its supervisor
+survives.
 
 `recover` acquires the same session lease without reading `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The
@@ -669,6 +671,43 @@ The pinned recorder tags H.264 as full-range. Its default conversion produced a
 white canvas decoded as RGB 235 instead of 255. `scale=out_range=full` keeps the
 conversion consistent with that tag (R-REC-4); recording tests compare a decoded
 background patch with the screenshot to catch brightness shifts.
+
+## Recording destinations
+
+wf-recorder gives a destination no protection (R-REC-1). Its only guard is a
+startup prompt that treats EOF on stdin as consent, and it later opens the path
+with `O_TRUNC` when the first frame arrives. Rendering also renames over the path
+it reads. Framewisp therefore keeps both away from the requested path.
+
+`start_recording` creates a private `.framewisp-recording-*` directory beside the
+destination, so both share a filesystem. wf-recorder and `render_recording` work
+only on `recording.mp4` inside it. After finalization, `destination.hardlink_to`
+publishes the clip. That is the only write to the requested path, and `link(2)`
+fails rather than replaces, so no race window exists. Batch captures publish the
+same way. `recording_path_error` remains the early rejection for the common case.
+
+The destination therefore does not exist until finalization. Batch validation
+rejects the active recording's destination explicitly, because the existence
+check cannot see it.
+
+The private directory is removed after publishing and after a failed or cancelled
+start. Everything captured is published, including a raw clip after a failed
+render (R-REC-10) and a clip whose recorder failed to finalize. If a file already
+holds the destination, the error names the private clip and the directory stays
+(R-REC-18). This takes the ordinary finalization failure path, which ends the
+session.
+
+Before starting the recorder, framewisp links a probe file inside the private
+directory, so a filesystem without hard links fails at clip start rather than
+after the capture (R-REC-19). There is no copy fallback, because a copy would make
+a partly written destination visible.
+
+While a clip is active, the `.active-recording` symlink in the session directory
+points at its private clip. A symlink is created atomically, so `recover` never
+reads a partial value. After a runner is killed, `recover` reports that path as
+`interrupted_recording` and removes the link. The directory and clip stay for the
+user to inspect or delete (R-REC-20). Each private directory has a unique name,
+so a leftover never affects a later recording, even to the same destination.
 
 ## Capture decision
 

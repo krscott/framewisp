@@ -604,7 +604,17 @@ to measure these values after caption rendering; duration is not a wall-clock es
 Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
 plus the console panel when `--console` is enabled, 640 pixels of width by default.
 Recording requires even width and height (R-REC-2). Existing output files are
-never overwritten (R-REC-1). The session runner owns the recorder and finalizes
+never overwritten (R-REC-1). The output file does not exist until the clip is
+finalized. Until then, framewisp records to a hidden `.framewisp-recording-*`
+directory beside it, so the output directory must be writable and on a filesystem
+with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
+when the clip starts (R-REC-19).
+
+If another file appears at the output path during a clip, framewisp leaves that
+file alone, reports the path of the finished clip in the hidden directory, and
+ends the session like any other finalization failure (R-REC-18).
+
+The session runner owns the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
 an invalid recording request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
@@ -1065,7 +1075,11 @@ cleanup on runner loss. Recovery refuses while the runner or any supervisor
 holds the kernel ownership lock; wait a few seconds and retry. It removes the
 owned runtime and stale session metadata, preserves logs and recordings, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
-run replaces its logs. An interrupted recording may be incomplete.
+run replaces its logs. If a clip was being recorded, the JSON also has
+`interrupted_recording`, the path of that clip in a hidden
+`.framewisp-recording-*` directory beside the destination. The clip may be
+incomplete. Recovery leaves it in place, and it does not block later recordings.
+Move what you want to keep and delete the directory.
 
 Recovery never signals PIDs from metadata or follows its runtime path. Ownership
 is bound to the session directory's device and inode, so copied metadata cannot
