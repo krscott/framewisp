@@ -367,7 +367,7 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
         if end is not None:
             events.append(entry | {"event": "end", "time": end, "returncode": 0})
     log = tmp_path / "inputs.jsonl"
-    log.write_text("\n".join(json.dumps(event) for event in events))
+    log.write_text("".join(json.dumps(event) + "\n" for event in events))
     captions = captions_for_clip(log, origin=10.0, stopped=14.0, captions="keys")
     assert len(captions) == 2
     assert captions[0].start == pytest.approx(0.2)
@@ -377,6 +377,42 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     assert captions[1].end == 4.0
     assert captions[1].text == "Type: still typing"
     assert captions_for_clip(log, origin=17.0, stopped=20.0, captions="keys") == []
+
+
+# R-LOG-7
+@pytest.mark.parametrize(
+    "unfinished",
+    [
+        b'{"id": "next", "event": "st',
+        # The write stopped after the first byte of a retained "é".
+        b'{"id": "next", "event": "start", "parameters": {"text": "caf\xc3',
+        # Only the newline is missing, so the record is still unfinished.
+        b'{"id": "next", "event": "start", "time": 2.0}',
+    ],
+)
+def test_unfinished_last_line_is_ignored(tmp_path: Path, unfinished: bytes) -> None:
+    log = input_log(tmp_path, ("type", {}, 1.0))
+    with log.open("ab") as output:
+        output.write(unfinished)
+    captions = captions_for_clip(log, origin=0, stopped=5, captions="keys")
+    assert captions == [Caption(1.0, 1.8, "Type text")]
+
+
+def test_retained_line_separator_stays_inside_its_record(tmp_path: Path) -> None:
+    with log_input(
+        tmp_path,
+        "type",
+        {"text": "one\u2028two\x85three", "interval": 0},
+        retain_input_content=True,
+    ) as result:
+        result.returncode = 0
+    captions = captions_for_clip(
+        tmp_path / "inputs.jsonl",
+        origin=0,
+        stopped=time.monotonic() + 1,
+        captions="keys",
+    )
+    assert [caption.text for caption in captions] == ["Type: one\u2028two\x85three"]
 
 
 def test_caption_text_cannot_inject_ass_formatting() -> None:
