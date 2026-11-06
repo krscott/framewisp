@@ -30,6 +30,7 @@ def wait_for(path: Path) -> None:
         time.sleep(0.02)
 
 
+# R-LIFE-4
 @pytest.mark.parametrize(
     "stage",
     [
@@ -135,6 +136,7 @@ with session_lease(session) as lease:
                 runner.wait(timeout=5)
 
 
+# R-LIFE-5
 def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
     session = tmp_path / "session"
     session.mkdir()
@@ -175,6 +177,7 @@ def test_incomplete_cleanup_preserves_resources_and_diagnostics(tmp_path: Path) 
     recover_session(tmp_path)
 
 
+# R-LIFE-5
 @pytest.mark.parametrize("name", [LOCK, JOURNAL])
 def test_symlink_ownership_files_refused(tmp_path: Path, name: str) -> None:
     target = tmp_path / "unrelated"
@@ -191,6 +194,7 @@ def runtime_backup() -> Generator[Path, None, None]:
         yield Path(directory) / "saved"
 
 
+# R-LIFE-5
 def test_runtime_replacement_refused(
     tmp_path: Path, runtime_backup: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -253,6 +257,7 @@ def abandoned(tmp_path: Path) -> Generator[tuple[Path, Path], None, None]:
     shutil.rmtree(runtime, ignore_errors=True)
 
 
+# R-LIFE-5
 def test_replaced_lock_refused_while_session_live(tmp_path: Path) -> None:
     with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         (runtime / "important").write_text("live resource")
@@ -271,6 +276,7 @@ def test_replaced_lock_refused_while_session_live(tmp_path: Path) -> None:
     assert not (tmp_path / JOURNAL).exists()
 
 
+# R-LIFE-5
 @pytest.mark.parametrize("kind", ["0644", "hard-link", "fifo", "symlink", "directory"])
 def test_unusable_replacement_lock_refused_while_session_live(
     tmp_path: Path, kind: str
@@ -310,6 +316,7 @@ def test_unwritable_session_is_not_blamed_on_lock(tmp_path: Path) -> None:
         tmp_path.chmod(0o700)
 
 
+# R-LIFE-5
 def test_deleted_lock_refused_while_session_live(tmp_path: Path) -> None:
     with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         (tmp_path / LOCK).unlink()
@@ -319,6 +326,7 @@ def test_deleted_lock_refused_while_session_live(tmp_path: Path) -> None:
     assert not runtime.exists()
 
 
+# R-LIFE-5
 def test_restoring_original_lock_allows_recovery(
     abandoned: tuple[Path, Path],
 ) -> None:
@@ -332,6 +340,7 @@ def test_restoring_original_lock_allows_recovery(
     assert not runtime.exists()
 
 
+# R-LIFE-5
 def test_lost_lock_manual_cleanup_commands_work(abandoned: tuple[Path, Path]) -> None:
     session, runtime = abandoned
     replace_lock(session).unlink()
@@ -345,6 +354,7 @@ def test_lost_lock_manual_cleanup_commands_work(abandoned: tuple[Path, Path]) ->
     assert recover_session(session) == 0
 
 
+# R-LIFE-5
 @pytest.mark.parametrize("lock", [None, "bad", [1], [True, 1]])
 def test_journal_without_valid_lock_identity_refused(
     abandoned: tuple[Path, Path], lock: object
@@ -370,8 +380,84 @@ def test_journal_without_valid_lock_identity_refused(
     assert recover_session(session) == 0
 
 
-def test_writable_session_refused_before_creating_lock(tmp_path: Path) -> None:
-    tmp_path.chmod(0o777)
+# R-LIFE-5
+def test_symlinked_runtime_refused(
+    tmp_path: Path, runtime_backup: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = runtime_path(tmp_path)
+    with pytest.raises(SessionError, match="Refusing symlink runtime"):
+        with (
+            session_lease(tmp_path) as lease,
+            headless_runtime(tmp_path, lease) as runtime,
+        ):
+            (runtime / "preserved").write_text("preserve")
+            runtime.rename(runtime_backup)
+            runtime.symlink_to(runtime_backup)
+            monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with pytest.raises(SessionError, match="Refusing symlink runtime"):
+        recover_session(tmp_path)
+    assert (runtime_backup / "preserved").read_text() == "preserve"
+    runtime.unlink()
+    runtime_backup.rename(runtime)
+    recover_session(tmp_path)
+
+
+# R-SESSION-6
+@pytest.mark.parametrize("mode", [0o720, 0o702])
+def test_run_refuses_writable_session_without_creating_files(
+    tmp_path: Path, mode: int
+) -> None:
+    session = tmp_path / "session"
+    session.mkdir()
+    session.chmod(mode)
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session), "run", "--", "true"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "Unsafe session directory" in result.stderr
+    assert list(session.iterdir()) == []
+
+
+# R-SESSION-6
+@pytest.mark.skipif(
+    Path("/").stat().st_uid == os.getuid(),
+    reason="Needs a directory owned by another user",
+)
+def test_run_refuses_session_owned_by_another_user() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", "/", "run", "--", "true"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "Unsafe session directory" in result.stderr
+
+
+# R-SESSION-6
+def test_session_lease_refuses_another_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tmp_path.chmod(0o700)
+    other = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: other)
+    with pytest.raises(SessionError, match="Unsafe session directory"):
+        with session_lease(tmp_path):
+            pass
+    assert not (tmp_path / LOCK).exists()
+
+
+# R-SESSION-6
+@pytest.mark.parametrize("mode", [0o720, 0o702])
+def test_writable_session_refused_before_creating_lock(
+    tmp_path: Path, mode: int
+) -> None:
+    tmp_path.chmod(mode)
     try:
         with pytest.raises(SessionError, match="Unsafe session directory"):
             recover_session(tmp_path)

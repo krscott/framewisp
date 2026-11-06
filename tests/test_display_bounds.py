@@ -26,6 +26,7 @@ def window() -> Window:
     )
 
 
+# R-INSPECT-2
 def test_title_bar_offset_and_multiple_windows(window: Window) -> None:
     other = replace(window, id=8, title="Main", content=Rect(0, 0, 1600, 900))
     result, reason = convert_bounds(
@@ -46,6 +47,7 @@ def test_title_bar_offset_and_multiple_windows(window: Window) -> None:
     }
 
 
+# R-INSPECT-3
 @pytest.mark.parametrize(
     "change,reason",
     [
@@ -63,6 +65,7 @@ def test_changed_window_is_not_a_pointer_target(
     assert actual == reason
 
 
+# R-INSPECT-3
 @pytest.mark.parametrize(
     "case,reason",
     [
@@ -117,6 +120,7 @@ def tree() -> dict[str, object]:
     }
 
 
+# R-INSPECT-2
 def test_tree_includes_floating_client_origin(
     tree: dict[str, object], window: Window
 ) -> None:
@@ -178,14 +182,25 @@ def test_private_ipc_is_bounded_and_validated(
     assert not server.is_alive()
 
 
+# R-INSPECT-1
 def test_no_host_compositor_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("SWAYSOCK", "/run/user/1000/host.sock")
-    assert read_windows(tmp_path, time.monotonic() + 1, None) == (
-        [],
-        "private-compositor-unavailable",
-    )
+    # A live host socket must stay unused even when the private one is missing.
+    with (
+        tempfile.TemporaryDirectory(prefix="fw-host-", dir="/tmp") as directory,
+        socket.socket(socket.AF_UNIX) as host,
+    ):
+        host.bind(str(Path(directory) / "host.sock"))
+        host.listen()
+        host.setblocking(False)
+        monkeypatch.setenv("SWAYSOCK", str(Path(directory) / "host.sock"))
+        assert read_windows(tmp_path, time.monotonic() + 1, None) == (
+            [],
+            "private-compositor-unavailable",
+        )
+        with pytest.raises(BlockingIOError):
+            host.accept()
 
 
 @pytest.mark.parametrize(
@@ -212,6 +227,7 @@ def test_visible_control_in_partly_offscreen_window(window: Window) -> None:
     assert result is not None and result["x"] == 290
 
 
+# R-INSPECT-2
 def test_embedded_dialog_uses_enclosing_window(window: Window) -> None:
     result, reason = convert_bounds(
         Rect(10, 20, 80, 23),
@@ -226,6 +242,7 @@ def test_embedded_dialog_uses_enclosing_window(window: Window) -> None:
     assert result is not None and result["x"] == 510
 
 
+# R-INSPECT-3
 @pytest.mark.parametrize("case", ["duplicate", "geometry", "appeared", "changed"])
 def test_dialog_fallback_preserves_mapping_guards(window: Window, case: str) -> None:
     before = [window]

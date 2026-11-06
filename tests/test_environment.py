@@ -19,6 +19,7 @@ def test_unwrapped_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["CALLER_ONLY"] == "editable install"
 
 
+# R-ENV-1
 @pytest.mark.parametrize("minimal", [False, True])
 def test_launcher_captures_all_variables(tmp_path: Path, minimal: bool) -> None:
     source = Path(__file__).parents[1]

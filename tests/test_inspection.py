@@ -41,6 +41,7 @@ def test_query_rejects_unbounded_arguments(field: str, value: object) -> None:
         Query(**{field: value})  # type: ignore[arg-type]
 
 
+# R-INSPECT-1
 @pytest.mark.parametrize(
     "state",
     [
@@ -61,6 +62,7 @@ def test_inspection_never_falls_back_to_desktop(
         inspect_session(tmp_path, Query())
 
 
+# R-INSPECT-4
 def test_disappearing_object_is_partial_not_no_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,6 +102,7 @@ def test_disappearing_object_is_partial_not_no_match(
     assert observation["errors"]
 
 
+# R-INSPECT-4
 @pytest.mark.parametrize(
     "query", [Query(), Query(role="button"), Query(name="Apply"), Query(text="Applied")]
 )
@@ -242,6 +245,7 @@ def test_inspection_cleanup_after_bus_disconnect(
     bus.close()
 
 
+# R-INSPECT-5
 @pytest.mark.parametrize(
     "ref,elapsed,duration,unresponsive",
     [

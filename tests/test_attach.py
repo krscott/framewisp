@@ -12,12 +12,13 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
+from unittest.mock import Mock
 
 import pytest
 
-from framewisp.attach import KEYCODES, AttachedInput, run_attachment
+from framewisp.attach import KEYCODES, AttachedInput, attach_session, run_attachment
 from framewisp.connection import request_attached
-from framewisp.desktop import detach_desktop
+from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
 from framewisp.ownership import (
     recover_session,
@@ -94,6 +95,7 @@ def test_invalid_attached_chord_sends_no_keys(
     assert portal_calls == []
 
 
+# R-INPUT-5
 def test_stop_releases_drag_and_modifiers(
     portal_calls: list[tuple[str, tuple[object, ...]]],
     monkeypatch: pytest.MonkeyPatch,
@@ -241,6 +243,66 @@ def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         yield Path(directory)
 
 
+# R-ATTACH-1
+def test_background_process_group_cannot_attach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Stubs model a background job; no terminal is allocated.
+    def background_group(_descriptor: int) -> int:
+        return os.getpgrp() + 1
+
+    def is_terminal(_descriptor: int) -> bool:
+        return True
+
+    monkeypatch.setattr(os, "isatty", is_terminal)
+    monkeypatch.setattr(os, "tcgetpgrp", background_group)
+    monkeypatch.setattr(sys, "stdin", Mock(isatty=lambda: True, fileno=lambda: 0))
+    monkeypatch.setattr(sys, "stdout", Mock(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", Mock(side_effect=AssertionError))
+    assert attach_session(tmp_path / "session") == 1
+    assert "foreground interactive terminal" in capsys.readouterr().err
+    assert not (tmp_path / "session").exists()
+
+
+# R-ATTACH-2
+@pytest.mark.parametrize("target", ["runtime", "framewisp"])
+def test_attach_refuses_shared_desktop_directory(
+    private_runtime: Path, target: str
+) -> None:
+    directory = private_runtime / "framewisp"
+    directory.mkdir(mode=0o700)
+    shared = private_runtime if target == "runtime" else directory
+    shared.chmod(0o755)
+    try:
+        with pytest.raises(RuntimeError, match="private"), reserve_desktop():
+            pass
+    finally:
+        shared.chmod(0o700)
+    assert not (directory / "desktop.lock").exists()
+
+
+# R-ATTACH-2
+@pytest.mark.parametrize(
+    "target,message",
+    [
+        ("runtime", "XDG_RUNTIME_DIR must be owned by you"),
+        ("framewisp", "must be a private directory owned by you"),
+    ],
+)
+def test_attach_refuses_desktop_directory_of_another_user(
+    private_runtime: Path, target: str, message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = private_runtime / "framewisp"
+    directory.mkdir(mode=0o700)
+    if target == "framewisp":
+        monkeypatch.setattr("framewisp.desktop.desktop_directory", lambda: directory)
+    other = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: other)
+    with pytest.raises(RuntimeError, match=message), reserve_desktop():
+        pass
+    assert not (directory / "desktop.lock").exists()
+
+
 @pytest.fixture
 def attach_process(
     tmp_path: Path, request: pytest.FixtureRequest
@@ -368,6 +430,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
         command.wait(timeout=5)
 
 
+# R-ATTACH-1
 def test_attach_requires_user_terminal(tmp_path: Path, private_runtime: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path / "session"), "attach"],
@@ -508,6 +571,7 @@ def read_terminal(descriptor: int, expected: bytes) -> None:
             output += os.read(descriptor, 4096)
 
 
+# R-ATTACH-1
 @pytest.mark.parametrize("confirmation", [b"yes\n", b"\x04"])
 def test_terminal_requires_exact_confirmation(
     tmp_path: Path,

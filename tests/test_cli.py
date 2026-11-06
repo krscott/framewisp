@@ -219,6 +219,7 @@ def test_control_commands_reject_legacy_session_before_connecting(
     assert "Traceback" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("delay", ["-1", "nan", "inf", "nope"])
 def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
     destination = tmp_path / "capture.png"
@@ -242,6 +243,7 @@ def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
     assert not destination.exists()
 
 
+# R-REC-1
 def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     destination = tmp_path / "existing.mp4"
     destination.write_bytes(b"keep this recording")
@@ -319,6 +321,7 @@ def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None
     assert not session.exists()
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("value", ["-1", "nan", "inf", "nope"])
 @pytest.mark.parametrize(
     "action,option,arguments",
@@ -354,6 +357,7 @@ def test_invalid_input_timing(
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "chord",
     [
@@ -389,6 +393,7 @@ def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("steps", ["0", "-1", "1.5", "nope"])
 def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
     result = subprocess.run(
@@ -413,6 +418,7 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "option,value",
     [
@@ -447,6 +453,7 @@ def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "action,coordinates",
     [("click", ["100", "100"]), ("drag", ["100", "100", "200", "200"])],
@@ -482,6 +489,7 @@ def test_invalid_pointer_gesture(
     assert "session.json" not in result.stderr
 
 
+# R-INPUT-3
 @pytest.mark.parametrize("option", ["--width", "--height"])
 @pytest.mark.parametrize("value", ["0", "-1", "1.5", "nope"])
 def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
@@ -507,6 +515,7 @@ def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
     assert not session.exists()
 
 
+# R-REC-2
 @pytest.mark.parametrize("option", ["--width", "--height"])
 def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     session = tmp_path / "session"
@@ -536,6 +545,7 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     assert not recording.exists()
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "text", ["line\nbreak", "tab\tstop", "escape\x1b", "join\u200der"]
 )

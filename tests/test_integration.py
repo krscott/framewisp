@@ -308,6 +308,7 @@ def test_screenshot_waits_before_capture(demo: Demo, tmp_path: Path) -> None:
         assert image.size == (1280, 720)
 
 
+# R-LIFE-2
 @pytest.mark.integration
 def test_interrupt_stops_session(demo: Demo) -> None:
     demo.process.send_signal(signal.SIGINT)
@@ -318,6 +319,7 @@ def test_interrupt_stops_session(demo: Demo) -> None:
             os.kill(pid, 0)
 
 
+# R-LIFE-2, R-REC-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True, "x11-record"], indirect=True)
 def test_status_and_stop_finalize_recording(demo: Demo) -> None:
@@ -439,6 +441,7 @@ def test_compact_clip_preserves_failed_wait_and_capture_delay(
     )
 
 
+# R-LIFE-6
 @pytest.mark.integration
 def test_status_and_stop_reject_copied_session_metadata(
     demo: Demo, tmp_path: Path
@@ -542,6 +545,7 @@ def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[
     return frames
 
 
+# R-REC-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True, "uncaptioned"], indirect=True)
 @pytest.mark.parametrize("stop_signal", [signal.SIGINT, signal.SIGTERM])
@@ -602,6 +606,7 @@ def test_recording_finalizes_on_shutdown(
             os.kill(pid, 0)
 
 
+# R-REC-3
 @pytest.mark.integration
 def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -> None:
     video = tmp_path / "quick.mp4"
@@ -812,6 +817,7 @@ def test_pointer_gesture_holds_and_releases_modifiers(
     assert not any(plain[modifier] for modifier in ("ctrl", "shift", "alt"))
 
 
+# R-INPUT-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_input_devices_remain_between_commands(demo: Demo) -> None:
@@ -1185,6 +1191,7 @@ def test_key_combination_events(
     assert not any(final_press[name] for name in ["ctrl", "shift", "alt"])
 
 
+# R-INPUT-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["keys", "x11-keys"], indirect=True)
 def test_punctuation_navigation_and_function_shortcuts(
@@ -1326,6 +1333,7 @@ def test_scroll_targets_pane_and_returns_to_start(
     assert position("right") == 0
 
 
+# R-INPUT-6
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["clipboard", "x11-clipboard"], indirect=True)
 def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
@@ -1426,6 +1434,7 @@ def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
     )
 
 
+# R-REC-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, True, "x11-record"], indirect=True)
 def test_record_multiple_clips_without_restarting_app(
@@ -1493,6 +1502,7 @@ def test_record_multiple_clips_without_restarting_app(
     recording_frames(final_clip)
 
 
+# R-REC-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["odd"], indirect=True)
 def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
@@ -1611,6 +1621,7 @@ def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> No
     assert demo.process.wait(timeout=20) == 0
 
 
+# R-LOG-1, R-LOG-2, R-REC-4
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11", "-retain", "x11-retain"], indirect=True)
 def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
@@ -1984,6 +1995,7 @@ def test_unchanged_pointer_position_adds_no_animation_delay(
     assert (press["x"], press["y"]) == (500, 300)
 
 
+# R-INPUT-5
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
@@ -2123,6 +2135,7 @@ def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
     assert demo.process.wait(timeout=2) == 0
 
 
+# R-INPUT-3, R-INPUT-4
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_reject_invalid_input_without_poisoning_connection(demo: Demo) -> None:
@@ -2196,6 +2209,7 @@ def test_lost_vnc_connection_does_not_replay_input(demo: Demo) -> None:
     assert not (demo.directory / "session.json").exists()
 
 
+# R-INPUT-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["qt", "x11-qt"], indirect=True)
 def test_qt_menu_survives_between_commands(demo: Demo, tmp_path: Path) -> None:
@@ -2299,6 +2313,7 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
     assert len(json.dumps(truncated)) < 10000
 
 
+# R-INSPECT-5, R-INSPECT-6
 @pytest.mark.integration
 def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
@@ -2410,6 +2425,7 @@ def test_inspection_private_buses_and_unsupported_apps(
         runner.wait(timeout=20)
 
 
+# R-CHECK-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11", "-retain", "x11-retain"], indirect=True)
 def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
@@ -2459,6 +2475,7 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
     assert logged[6]["parameters"]["chord"] == "Return"
 
 
+# R-BATCH-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> None:
@@ -2492,6 +2509,7 @@ def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> N
     cli(demo.directory, "key", "a")
 
 
+# R-BATCH-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_batch_no_interleaving_through_final_capture(
@@ -2740,6 +2758,7 @@ def test_batch_disconnect_during_capture(demo: Demo, tmp_path: Path) -> None:
     cli(demo.directory, "key", "a")
 
 
+# R-REC-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_batch_capture_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> None:
@@ -2982,6 +3001,7 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
     assert "ambiguous" in duplicate["error"]
 
 
+# R-CHECK-4
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["deep", "x11-deep"], indirect=True)
 def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> None:
@@ -3190,6 +3210,7 @@ def frozen_demo(demo: Demo) -> Iterator[Demo]:
         os.kill(app_pid, signal.SIGCONT)
 
 
+# R-INPUT-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11", "odd"], indirect=True)
 def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
@@ -3282,6 +3303,7 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
         )
 
 
+# R-LIFE-3
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "script,exit_code,reason,returncode",
@@ -3451,6 +3473,7 @@ def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
         return json.loads(receive(length))
 
 
+# R-INSPECT-2
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "demo", [None, "x11", "qt-coordinates", "x11-qt-coordinates"], indirect=True
@@ -3549,6 +3572,7 @@ def test_inspect_display_bounds_activate_offset_controls(
     )
 
 
+# R-INSPECT-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["dialog", "dialog-untitled"], indirect=True)
 def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
@@ -3611,6 +3635,7 @@ def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
         assert tab["display_bounds_reason"] == "bounds-outside-parent", tab
 
 
+# R-LIFE-1
 @pytest.mark.integration
 @pytest.mark.parametrize("ending", ["stop", "exit", "SIGINT", "SIGTERM"])
 def test_session_owns_detached_descendants(
@@ -3673,6 +3698,7 @@ def test_session_owns_detached_descendants(
         runner.wait(timeout=20)
 
 
+# R-LIFE-5
 @pytest.mark.integration
 def test_replaced_lock_refused_and_live_session_still_stops(
     demo: Demo, tmp_path: Path
@@ -3714,6 +3740,7 @@ def test_replaced_lock_refused_and_live_session_still_stops(
     cli(demo.directory, "run", "--", sys.executable, "-c", "pass")
 
 
+# R-LIFE-4
 @pytest.mark.integration
 def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -> None:
     # Keep a second process alive to catch unsafe signalling from stale JSON.

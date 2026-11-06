@@ -43,6 +43,7 @@ def wait_for_tree(root: Path) -> list[int]:
     return [int((root / name).read_text()) for name in ("app", "helper", "detached")]
 
 
+# R-LIFE-1
 @pytest.mark.parametrize("exit_app", [False, True])
 def test_owned_descendants_and_independent_trees(
     tmp_path: Path, exit_app: bool

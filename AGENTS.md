@@ -55,6 +55,11 @@ affected module in `pyproject.toml`.
 | Pyright | `pyright` |
 | Mypy | `python -m mypy .` |
 | Tests | `python -m pytest` |
+| Installed-package tests | `nix flake check` |
+
+`tests/test_python_environment.py` runs only in the installed-package checks,
+which split cases across eight shards. Run `nix flake check` when changing how
+framewisp or its target apps get their environment.
 
 Both type checkers must pass. Keep any necessary type-checking exceptions narrow
 and explain why they are needed.
@@ -70,7 +75,16 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 - Prefer composition over inheritance and keep data easy to inspect, test,
   and serialize.
 
-## Design documentation
+## Requirements and design documentation
 
-Keep `DESIGN.md` current with application requirements and architecture. It
-should contain enough detail for an agent to reproduce the application.
+`REQUIREMENTS.md` lists the observable behaviours and invariants framewisp must
+keep, by stable ID. Keep `DESIGN.md` current with the architecture that meets
+them. Together they should contain enough detail for an agent to reproduce the
+application.
+
+## Change order
+
+- Work flows from `REQUIREMENTS.md` to `DESIGN.md` to code and tests. Start at the highest layer the change affects; most PRs change only design and code, or only code.
+- For a bug fix, check whether a requirement was missing or violated. Add a missing one.
+- Any diff to `REQUIREMENTS.md` (addition, edit or retirement) needs explicit approval from a human reviewer. List every requirement ID added, changed or retired under its own heading at the top of the PR description, and don't merge until a human reviewer approves them.
+- Never renumber, reuse or delete a requirement ID; tag it `[retired]` instead. Tests covering a `[test]` requirement carry its ID in a comment.

@@ -51,6 +51,7 @@ def test_invalid_wait(extra: dict[str, object]) -> None:
         )
 
 
+# R-CHECK-2
 def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
     baseline = {"action": "baseline", "condition": condition(), "timeout": 1}
     wait = {"action": "wait", "condition": condition(), "timeout": 2, "after": 0}
@@ -73,6 +74,7 @@ def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
         Batch.parse({"actions": [baseline | {"timeout": 10}] * 31})
 
 
+# R-INPUT-3
 @pytest.mark.parametrize(
     "options",
     [
@@ -154,6 +156,32 @@ def readable_observation(
         "matches": [{"text": text, "states": [], "role": "label"}],
         "reasons": reasons or [],
     }
+
+
+# R-CHECK-2
+@pytest.mark.parametrize("text", ["Done", None])
+def test_baseline_requires_a_nonmatching_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str | None
+) -> None:
+    def inspect(
+        session: Path,
+        query: inspection.Query,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, object]:
+        observation = readable_observation(text=text or "")
+        if text is None:
+            observation["matches"] = []
+        return observation
+
+    monkeypatch.setattr(inspection, "inspect_session", inspect)
+    check = Check.parse("baseline", {"condition": condition(), "timeout": 1})
+    result: dict[str, object] = {}
+    with pytest.raises(SessionError, match="nonmatching"):
+        perform_check(
+            tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None
+        )
+    assert "baseline_snapshot_id" not in result
 
 
 @pytest.mark.parametrize("action", ["baseline", "wait", "assert"])
@@ -316,6 +344,7 @@ def test_incomplete_check_diagnostics(
         perform_check(tmp_path, check, {}, cancelled=lambda: False, wait=lambda _: None)
 
 
+# R-CHECK-1
 @pytest.mark.parametrize("state", ["stale", "defunct"])
 def test_stale_text_cannot_verify(state: str) -> None:
     assert (
@@ -326,12 +355,18 @@ def test_stale_text_cannot_verify(state: str) -> None:
     )
 
 
+# R-CHECK-1
 @pytest.mark.parametrize("status", ["partial", "timeout", "unsupported", "unavailable"])
 def test_incomplete_observations_cannot_verify(status: str) -> None:
     check = Condition.parse(condition())
-    assert check.evaluate({"status": status, "matches": [{"text": "Done"}]}) is None
+    observation: dict[str, object] = {
+        "status": status,
+        "matches": [{"text": "Done", "states": []}],
+    }
+    assert check.evaluate(observation) is None
 
 
+# R-CHECK-1
 def test_missing_and_duplicate_matches() -> None:
     check = Condition.parse(condition())
     assert check.evaluate({"status": "ok", "matches": []}) is None
