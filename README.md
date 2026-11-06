@@ -694,8 +694,9 @@ timestamps and content.
 
 Compaction, console rendering, input captions, and click pings share one FFmpeg
 pass after capture stops. `record-stop` and normal shutdown wait for it. If
-rendering fails, the raw GUI video remains playable at the requested path and the
-error points to `captions.log` (R-REC-10). A session that hits this failure stops,
+rendering fails, the raw GUI video remains playable. It stays at the requested path
+unless framewisp cannot publish it there, and the error names its path and
+`captions.log` (R-REC-10). A session that hits this failure stops,
 even when `record-stop` triggered it.
 
 ## Share media in GitHub comments
@@ -815,7 +816,8 @@ Input logging remains enabled and follows the session retention policy. Captions
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for caption rendering to finish.
 This adds encoding time when stopping a captioned clip. If rendering fails, the
-command fails and leaves the uncaptioned MP4 at the requested path; see
+command fails and leaves the uncaptioned MP4 playable. The MP4 is at the requested
+path unless framewisp cannot publish it there. The error names its path and
 `captions.log` for details.
 
 The recorder log retains diagnostics and the first frame's timestamp used for

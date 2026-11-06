@@ -3869,7 +3869,7 @@ def test_finalizing_keeps_video_moved_onto_destination(
     assert len(recording_frames(kept)) > 1
 
 
-# R-REC-1, R-REC-18
+# R-REC-1, R-REC-10, R-REC-18
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_collision_reports_render_failure_with_kept_clip(
@@ -3895,6 +3895,47 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert "captions.log" in error
     assert (demo.directory / ".active-recording").readlink() == private_clip(tmp_path)
     assert len(recording_frames(private_clip(tmp_path))) > 1
+
+
+@pytest.fixture
+def output_directory(tmp_path: Path) -> Generator[Path, None, None]:
+    """Yield a directory a test may make read-only, restored for pytest's cleanup."""
+    directory = tmp_path / "output"
+    directory.mkdir()
+    yield directory
+    directory.chmod(0o755)
+
+
+# R-REC-10
+@pytest.mark.integration
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("command", ["record-stop", "stop"])
+def test_unpublishable_clip_reports_render_failure_with_kept_clip(
+    demo: Demo, output_directory: Path, command: str
+) -> None:
+    clip = output_directory / "clip.mp4"
+    cli(demo.directory, "record-start", str(clip))
+    cli(demo.directory, "click", "120", "100")
+    (demo.directory / "captions.log").mkdir()
+    output_directory.chmod(0o555)
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), command],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert not clip.exists()
+    kept = private_clip(output_directory)
+    error = " ".join(result.stderr.split())
+    assert f"The clip remains at {kept}" in error
+    assert f"raw video remains at {kept}" in error
+    assert "captions.log" in error
+    assert (demo.directory / ".active-recording").readlink() == kept
+    assert len(recording_frames(kept)) > 1
+    assert ring_frames(kept, 120, 100) == []
 
 
 @pytest.mark.integration

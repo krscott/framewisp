@@ -777,8 +777,9 @@ check cannot see it. `protected_path_error` names it explicitly instead (see
 The private directory is removed after publishing and after a failed or cancelled
 start. A finalized clip is published even when rendering failed (R-REC-10). A clip
 the recorder did not finalize stays private, so an incomplete file never takes
-the requested path. If a file already holds the destination, the clip also stays
-private, and the error includes any render failure (R-REC-18). Both take the
+the requested path. If publishing fails, usually because a file already holds the
+destination, the clip also stays private, and the error includes any render
+failure (R-REC-10, R-REC-18). Both take the
 ordinary finalization failure path, which ends the session. `Recordings.close`
 adds the kept clip's path to any finalization error.
 
@@ -955,7 +956,7 @@ FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the
 private clip. Caption rendering uses a bundled Fontconfig configuration
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
-remains and the command fails with the `captions.log` path. A single wrapper
+stays private until publishing, and the command fails with the `captions.log` path. A single wrapper
 around `render_recording` turns every rendering failure, including malformed logs
 and an unwritable `captions.log`, into one message naming the raw video, that log,
 and `inputs.jsonl` (R-REC-10). The rendered video
@@ -1075,7 +1076,7 @@ Mono 18 and existing input captions in the GUI area, and preserves video timing,
 screenshots, and captured display size stay unchanged (R-REC-14); the finished
 summary reports the extended video. Text cannot inject ASS formatting and is clipped
 to the panel. Rendering uses a temporary file next to the destination. A rendering
-failure preserves the raw GUI MP4 and reports `captions.log`. `console.jsonl` is
+failure preserves the raw GUI MP4 and reports its path and `captions.log`. `console.jsonl` is
 reserved against capture and recording destinations.
 
 

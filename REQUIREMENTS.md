@@ -143,8 +143,8 @@ observable behaviour, not implementation, in short sentences.
 - **R-REC-9** [test] With `--console`, a click ping keeps its GUI position. It
   never draws on the console panel.
 - **R-REC-10** [test] When recording rendering fails, a playable MP4 of the raw
-  capture remains at the requested path. The error names that path and
-  `captions.log`.
+  capture remains. It is at the requested path, unless framewisp cannot publish
+  it there (R-REC-18). The error names the MP4's path and `captions.log`.
 - **R-REC-11** [test] `--no-captions` does not change click pings.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the video. The default is right.
