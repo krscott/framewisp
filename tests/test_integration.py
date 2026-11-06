@@ -16,8 +16,6 @@ from typing import Any, cast
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.captions import capture_origin
-
 
 @dataclass(frozen=True)
 class Demo:
@@ -1594,6 +1592,17 @@ def ring_frames(path: Path, x: int, y: int) -> list[int]:
     return rings
 
 
+def clip_origin(demo: Demo) -> float:
+    """Read the recorder's first captured-frame time; this file can't import framewisp."""
+    timestamp = re.search(
+        r"\.ready\((\d+), (\d+), (\d+)\)",
+        (demo.directory / "recorder.log").read_text(),
+    )
+    assert timestamp is not None
+    high, low, nanos = map(int, timestamp.groups())
+    return (high << 32) + low + nanos / 1e9
+
+
 def logged_pings(demo: Demo) -> list[tuple[str, float, int, int]]:
     events = [
         json.loads(line)
@@ -1627,7 +1636,7 @@ GESTURE_PINGS = [
 def assert_rings_mark_gestures(demo: Demo, video: Path, *, timed: bool = True) -> None:
     pings = logged_pings(demo)[-len(GESTURE_PINGS) :]
     assert [(action, x, y) for action, _, x, y in pings] == GESTURE_PINGS
-    origin = capture_origin(demo.directory / "recorder.log")
+    origin = clip_origin(demo)
     for action, moment, x, y in pings:
         rings = ring_frames(video, x, y)
         assert len(rings) >= 8, f"no ring for {action} at ({x}, {y})"
@@ -1717,7 +1726,7 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     # The capture lands inside the 0.5 second ping that the clip shows.
     assert abs(shot.stat().st_mtime - time.time()) < 60
     rings = ring_frames(pinged, 300, 200)
-    origin = capture_origin(demo.directory / "recorder.log")
+    origin = clip_origin(demo)
     assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
     with Image.open(shot) as screenshot:
         patch = screenshot.convert("RGB").crop((250, 150, 350, 250)).tobytes()
