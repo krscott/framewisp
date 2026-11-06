@@ -1779,6 +1779,7 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
             "action": "record-start",
             "session": str(demo.directory.resolve()),
             "destination": str(tmp_path / "rejected.mp4"),
+            "captions": "keys",
             "click_pings": "no",
         }
         connection.sendall((json.dumps(request) + "\n").encode())
