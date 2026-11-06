@@ -72,13 +72,13 @@ def log_activity(session: Path) -> Generator[None, None, None]:
 
 
 def activity_events(log: Path) -> list[ActivityEvent]:
+    """Read a JSONL log, leaving a malformed complete line to raise."""
     # A recording may stop while the input worker appends a record. Ignore only
     # the unfinished trailing line; a complete start without an end stays active.
-    return [
-        json.loads(line)
-        for line in log.read_bytes().splitlines(keepends=True)
-        if line.endswith(b"\n")
-    ]
+    # Split on the one line end writers use: splitlines would also break a line
+    # at a stray carriage return and hide its first half as unfinished.
+    *complete, _unfinished = log.read_bytes().split(b"\n")
+    return [json.loads(line) for line in complete]
 
 
 def retained_frames(

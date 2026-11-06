@@ -71,8 +71,8 @@ start/end records for batch checks and capture delays to `activity.jsonl`,
 without conditions or error text. Both logs reset at session startup, and their
 paths are reserved against recording/capture destinations. A missing end record
 keeps its span through clip stop; commands crossing either clip boundary are
-clipped to the recording. Only complete JSONL lines enter cut planning so an
-in-progress append cannot discard the earlier start.
+clipped to the recording. An in-progress append cannot discard the earlier start
+because cut planning reads only complete lines through `activity_events`.
 
 Cut planning adds before/after padding to activity spans, keeps the opening
 before-padding and closing after-padding, rounds ranges outward to 30 fps frames,
@@ -738,6 +738,13 @@ read it from metadata. Recording captions use the retained parameters from the l
 so all clips and caption modes follow the same policy. No command or batch
 parameter overrides it.
 
+Captions, pings, and compaction all read these logs through `activity_events` in
+`compact.py`. A record is complete once its newline is written, so the reader
+skips only the bytes after the last newline, which an interrupted write leaves
+behind (R-LOG-7). Every line before that must parse, so a malformed one fails
+rendering (R-LOG-8, R-REC-10). The reader splits bytes on `\n` alone: retained text can hold
+characters such as U+2028 that text-mode line splitting would break on.
+
 By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
 Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit
 the key and retain only modifiers. Ctrl/Alt shortcuts and named
@@ -821,9 +828,9 @@ Scroll presses, refused presses, and the cleanup release of a cancelled action
 log no ping. `ping` events carry no typed content, and readers of start and end
 events ignore them.
 
-`pings.py` selects events in `origin <= time < stopped`, skipping an unfinished
-trailing line. It writes one ASS drawing per ping into the script that holds
-captions and console text, so all overlays share one FFmpeg pass and the existing
+`pings.py` selects events in `origin <= time < stopped`. It writes one ASS
+drawing per ping into the script that holds captions and console text, so all
+overlays share one FFmpeg pass and the existing
 filter order aligns them: `ass` draws on the original timeline, and the compact
 `select` cuts afterwards. No mode needs its own handling.
 The ring grows from radius 10 to 40 pixels with a 4-pixel stroke while fading over

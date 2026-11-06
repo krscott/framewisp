@@ -466,3 +466,63 @@ def test_malformed_log_leaves_pings_only_clip_playable(
     with pytest.raises(RuntimeError) as failure:
         render(raw_video, log, captions=captions)
     assert_raw_clip_survived(raw_video, before, str(failure.value))
+
+
+# Each entry makes exactly one reader consume the log, so each is held to the rule.
+LOG_READERS = {
+    "captions": {"captions": "all", "click_pings": False},
+    "pings": {"captions": "none"},
+    "compaction": {
+        "captions": "none",
+        "click_pings": False,
+        "compact": CompactSettings(before=0, after=0),
+    },
+}
+
+
+# R-LOG-8, R-REC-10
+@pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
+@pytest.mark.parametrize(
+    "line",
+    [b"not json\n", b"not json\r", b"1\n", b"{}\n"],
+    ids=["text", "carriage-return", "not-an-object", "no-fields"],
+)
+def test_malformed_middle_line_fails_every_reader_and_keeps_the_clip(
+    raw_video: Path, log: Path, reader: dict[str, object], line: bytes
+) -> None:
+    before = raw_video.read_bytes()
+    (log.parent / "activity.jsonl").write_text("")
+    complete = (command_lines(1, 1.1) + ping_line(1.05, 300, 200)).encode()
+    log.write_bytes(line + complete + b'{"id": "unfini')
+    with pytest.raises(RuntimeError) as failure:
+        render(raw_video, log, **reader)
+    assert_raw_clip_survived(raw_video, before, str(failure.value))
+
+
+# R-LOG-8, R-REC-10
+@pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
+def test_malformed_terminated_last_line_fails_every_reader_and_keeps_the_clip(
+    raw_video: Path, log: Path, reader: dict[str, object]
+) -> None:
+    before = raw_video.read_bytes()
+    (log.parent / "activity.jsonl").write_text("")
+    complete = (command_lines(1, 1.1) + ping_line(1.05, 300, 200)).encode()
+    log.write_bytes(complete + b'{"id": "unfini\n')
+    with pytest.raises(RuntimeError) as failure:
+        render(raw_video, log, **reader)
+    assert_raw_clip_survived(raw_video, before, str(failure.value))
+
+
+# R-LOG-7
+@pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
+def test_unfinished_last_line_renders_with_every_reader(
+    raw_video: Path, log: Path, reader: dict[str, object]
+) -> None:
+    before = raw_video.read_bytes()
+    (log.parent / "activity.jsonl").write_text("")
+    complete = (command_lines(1, 1.1) + ping_line(1.05, 300, 200)).encode()
+    # The write stopped inside a multi-byte character.
+    log.write_bytes(complete + b'{"id": "next", "text": "\xe6')
+    render(raw_video, log, **reader)
+    assert raw_video.read_bytes() != before
+    assert frames(raw_video, 0, 0)
