@@ -213,7 +213,8 @@ sessions under different temporary directories.
 Headless runtime sockets also use this temporary directory. Startup checks the
 108-byte Unix socket limit, including the terminating NUL, and asks for a shorter
 `TMPDIR` if needed. Cleanup and recovery use the runtime path in the ownership
-journal, even when `TMPDIR` changes.
+journal, even when `TMPDIR` changes. If the journal is unreadable, the manual steps
+recovery prints assume the current `TMPDIR`.
 Project scoping does not change sandbox socket permissions. `--detach` remains
 session-independent.
 
@@ -1067,8 +1068,8 @@ If a supervisor dies or cannot finish cleanup, recovery fails and lists the
 remaining supervisor records in the runtime directory. Inspect those records and
 processes manually; their PIDs are diagnostic, not safe signal targets. Resources
 and ownership metadata remain so recovery cannot claim success. Recovery also
-refuses unverifiable journals, replaced runtimes, and stale sessions created by
-older versions without an ownership journal. It does not recover desktop
+refuses replaced runtimes. It refuses missing or unverifiable journals too, removes
+nothing, and prints the steps to stop the session or clean up manually. It does not recover desktop
 attachments; use `framewisp --detach` for those. Attachment shares the session
 metadata lock and refuses directories with abandoned headless ownership.
 

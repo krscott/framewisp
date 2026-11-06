@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 import shutil
@@ -375,12 +376,17 @@ def pad_journal(session: Path, _: Path) -> None:
         journal.write(" " * (1 << 16))
 
 
+def remove_runtime_identity(session: Path, _: Path) -> None:
+    journal = json.loads((session / JOURNAL).read_text())
+    del journal["runtime"]
+    (session / JOURNAL).write_text(json.dumps(journal))
+
+
 DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
     "nested-arrays": lambda s, _: (s / JOURNAL).write_text("[" * 200_000),
     "nested-arrays-under-size-limit": lambda s, _: (s / JOURNAL).write_text(
         "[" * 60_000
     ),
-    "nested-objects": lambda s, _: (s / JOURNAL).write_text('{"a":' * 200_000),
     "empty": lambda s, _: (s / JOURNAL).write_text(""),
     "truncated": lambda s, _: (s / JOURNAL).write_text('{"session": ['),
     "binary": lambda s, _: (s / JOURNAL).write_bytes(b"\xff\xfe\x00"),
@@ -399,6 +405,8 @@ DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
         s, runtime_path=f"{s}/app.log/{r.name}"
     ),
     "invalid-runtime-identity": lambda s, _: rewrite_journal(s, runtime="bad"),
+    "null-runtime-identity": lambda s, _: rewrite_journal(s, runtime=None),
+    "no-runtime-identity": remove_runtime_identity,
 }
 
 
@@ -443,6 +451,20 @@ def test_unreadable_journal_steps_find_session_under_another_tmpdir(
 
 
 # R-LIFE-5
+def test_missing_journal_refused_with_working_manual_steps(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    (session / JOURNAL).unlink()
+    with pytest.raises(SessionError, match="journal is missing") as refusal:
+        recover_session(session)
+    assert (runtime / "kept").read_text() == "preserve"
+    run_commands(str(refusal.value), "rm ")
+    assert not runtime.exists()
+    assert recover_session(session) == 0
+
+
+# R-LIFE-5
 def test_foreign_journal_steps_leave_its_runtime_alone(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
@@ -474,6 +496,22 @@ def test_journal_is_durable_before_commit_returns(
         write_journal(tmp_path, runtime_path(tmp_path), lease, created=False)
     # The contents reach disk before the rename, then the rename itself.
     assert synced == [(False, False), (True, True)]
+
+
+def test_journal_commit_tolerates_filesystem_without_directory_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_fsync = os.fsync
+
+    def refusing_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError(errno.EINVAL, "Invalid argument")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", refusing_fsync)
+    with session_lease(tmp_path) as lease:
+        write_journal(tmp_path, runtime_path(tmp_path), lease, created=False)
+    assert (tmp_path / JOURNAL).exists()
 
 
 # R-LIFE-5

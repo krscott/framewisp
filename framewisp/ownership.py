@@ -77,10 +77,10 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     legacy = Path("/tmp") / runtime_name(session)
     value = journal.get("runtime_path", str(legacy))
     if not isinstance(value, str) or "\0" in value:
-        raise ValueError("Ownership journal runtime path must be an absolute path.")
+        raise ValueError("journal runtime path must be an absolute path")
     runtime = Path(value)
     if not runtime.is_absolute() or runtime.name != legacy.name:
-        raise ValueError(f"Invalid ownership journal runtime path: {runtime}")
+        raise ValueError(f"journal has an invalid runtime path: {value!r}")
     # Path.exists() reports a path that cannot be checked as missing, which would
     # read as a finished cleanup. Only a confirmed absence may.
     try:
@@ -154,8 +154,9 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
     """Describe manual cleanup for ownership that recovery cannot verify."""
     framewisp = shlex.join(["framewisp", str(session)])
     quoted = shlex.quote(str(runtime))
-    environment = shlex.quote(f"XDG_RUNTIME_DIR={runtime}")
-    checks = (*process_checks, f"grep -Fxzls {environment} /proc/*/environ")
+    # The directory's name is the same under any TMPDIR.
+    environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/{runtime.name}$")
+    checks = (*process_checks, f"grep -zlsE {environment} /proc/*/environ")
     metadata = ("session.json", ".session.json", JOURNAL, ".headless-owner.tmp")
     lines = [
         "Confirm the session has exited. Run these outside any sandbox, in the PID "
@@ -179,49 +180,34 @@ def stop_step(session: Path) -> str:
 
 
 def unreadable_journal(session: Path, problem: str) -> str:
-    # The journal is the only record of the TMPDIR the session started with, and it
-    # cannot be trusted here. Copying a path from it could also aim these steps at
-    # another session, so they use the path derived from this session's identity.
+    # The journal is the only trustworthy record of the session's TMPDIR, and it is
+    # unusable here. A path copied from it could also aim these steps at another
+    # session, so they use the path derived from this session's identity.
     runtime = runtime_path(session)
-    environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/{runtime.name}$")
     return (
         f"Cannot verify ownership at {session / JOURNAL}: {problem}\n"
-        "Recovery cannot prove the session has exited. Nothing was removed.\n"
+        "Cannot prove the session has exited. Nothing was removed.\n"
         + stop_step(session)
-        + "Otherwise follow these steps. They assume the current TMPDIR. A session "
-        f"started with another TMPDIR left its directory, also named {runtime.name}, "
-        "there instead, so delete that one too.\n"
-        + cleanup_steps(session, runtime, f"grep -zlsE {environment} /proc/*/environ")
+        + f"Otherwise follow these steps, which assume TMPDIR is {runtime.parent}. "
+        "If the session started with another TMPDIR, set it and run recover again "
+        "for steps with that path. session.json, if present, records the path as "
+        "runtime_directory.\n" + cleanup_steps(session, runtime)
     )
 
 
-def verify_lock(
-    session: Path, journal: dict[str, object], runtime: Path, lease: int
-) -> None:
+def verify_lock(session: Path, recorded: list[int], runtime: Path, lease: int) -> None:
     held = lease_identity(lease)
-    recorded = journal.get("lock")
     if recorded == held:
         return
-    stop = stop_step(session)
-    parts = parse_identity(recorded)
-    if parts is None:
-        raise SessionError(
-            f"Ownership journal {session / JOURNAL} has no valid session lock "
-            "identity, so recovery cannot prove the session has exited. It may "
-            "predate lock verification. Nothing was removed.\n"
-            + stop
-            + "Otherwise:\n"
-            + cleanup_steps(session, runtime)
-        )
     lock = session / LOCK
     raise SessionError(
         f"Session lock {lock} was replaced: the ownership journal records "
-        f"device:inode {parts[0]}:{parts[1]}, but found {held[0]}:{held[1]}. "
+        f"device:inode {recorded[0]}:{recorded[1]}, but found {held[0]}:{held[1]}. "
         "A live session may still hold the original lock, so nothing was removed.\n"
-        f"{stop}If you still have the original lock file, move it back to {lock} and "
-        "run recover again.\n"
+        f"{stop_step(session)}If you still have the original lock file, move it back "
+        f"to {lock} and run recover again.\n"
         "If the original lock is lost:\n"
-        + cleanup_steps(session, runtime, f"grep ':{parts[1]} ' /proc/locks")
+        + cleanup_steps(session, runtime, f"grep ':{recorded[1]} ' /proc/locks")
     )
 
 
@@ -247,13 +233,21 @@ def read_journal(session: Path, lease: int) -> Journal:
         if journal.get("session") != identity(session):
             raise ValueError("journal does not belong to this session directory")
         runtime = journal_runtime(session, journal)
-        runtime_identity = parse_identity(journal.get("runtime"))
-        if runtime_identity is None and journal.get("runtime") is not None:
+        if "runtime" not in journal:
+            raise ValueError("journal has no runtime identity")
+        runtime_identity = parse_identity(journal["runtime"])
+        if runtime_identity is None and journal["runtime"] is not None:
             raise ValueError("journal has an invalid runtime identity")
+        lock = parse_identity(journal.get("lock"))
+        if lock is None:
+            raise ValueError(
+                "journal has no valid session lock identity. It may predate lock "
+                "verification"
+            )
     # Deeply nested JSON raises RecursionError.
     except (OSError, ValueError, RecursionError) as error:
         raise SessionError(unreadable_journal(session, str(error))) from error
-    verify_lock(session, journal, runtime, lease)
+    verify_lock(session, lock, runtime, lease)
     return Journal(runtime, runtime_identity)
 
 
@@ -261,6 +255,11 @@ def sync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(descriptor)
+    except OSError as error:
+        # EINVAL means this filesystem cannot sync directories. Sessions still work
+        # there, without power-loss durability.
+        if error.errno != errno.EINVAL:
+            raise
     finally:
         os.close(descriptor)
 
@@ -302,7 +301,16 @@ def remove_runtime(session: Path, lease: int) -> None:
         if journal.runtime_identity is None:
             # Interruption between mkdir and committing its inode can only have
             # left an empty directory. Never recursively remove it without proof.
-            runtime.rmdir()
+            try:
+                runtime.rmdir()
+            except OSError as error:
+                raise SessionError(
+                    unreadable_journal(
+                        session,
+                        f"journal records no runtime identity, but {runtime} "
+                        f"cannot be removed: {error.strerror}",
+                    )
+                ) from error
         else:
             if journal.runtime_identity != identity(runtime):
                 raise SessionError(
@@ -365,9 +373,7 @@ def recover_session(session: Path) -> int:
                 or (session / ".session.json").exists()
                 or (session / ".session.json").is_symlink()
             ):
-                raise SessionError(
-                    "No verified headless ownership journal. Resources remain; recovery cannot safely clean an older or foreign session."
-                )
+                raise SessionError(unreadable_journal(session, "journal is missing"))
         else:
             remove_runtime(session, lease)
         for name in ("session.json", ".session.json", ".headless-owner.tmp", JOURNAL):
