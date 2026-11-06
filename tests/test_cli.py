@@ -306,14 +306,14 @@ def test_record_start_sends_console_only_for_a_panel(
         with socket.socket(socket.AF_UNIX) as server:
             server.bind(str(session / "control.sock"))
             server.listen()
-            thread = threading.Thread(target=runner, args=(server,))
+            thread = threading.Thread(target=runner, args=(server,), daemon=True)
             thread.start()
             result = session_command(
                 session, "record-start", session / "clip.mp4", console=panel
             )
             thread.join(timeout=5)
     assert result == 0
-    # An older runner fails on any `console` key, including null.
+    # An older runner rejects a null `console`.
     assert ("console" in received[0]) is (panel is not None)
     assert received[0].get("console") == expected
 
