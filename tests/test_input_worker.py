@@ -188,7 +188,7 @@ def test_refused_press_has_no_ping(tmp_path: Path) -> None:
     assert pings(tmp_path) == []
 
 
-# A cancelled drag's cleanup release is not a requested gesture.
+# R-REC-5
 def test_interrupted_drag_pings_its_press_only(tmp_path: Path) -> None:
     stop = Event()
     client = HoldingClient(stop)

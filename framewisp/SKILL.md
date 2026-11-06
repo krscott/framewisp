@@ -422,7 +422,7 @@ shutdown also finalizes it. `--captions` selects what each clip captions: `keys`
 (`key` and `type`, the default), `pointer` (`move`, `click`, `drag`, and `scroll`),
 `all`, or `none`. Use `--captions all` to show pointer gestures. `--no-captions`
 is shorthand for `--captions none`; combining the two is an error. A red ring also
-marks each click and both ends of each drag, whatever the caption mode;
+marks each click and both ends of each completed drag, whatever the caption mode;
 `--no-click-pings` disables it for that clip. Pings appear only in recordings, not
 in screenshots or `inspect`. Wait about 0.5 seconds after a final click before
 `record-stop`, or its ring is cut short. Every input is

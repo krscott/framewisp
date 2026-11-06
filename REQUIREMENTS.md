@@ -124,8 +124,8 @@ observable behaviour, not implementation, in short sentences.
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
 - **R-REC-4** [test] Recorded colours match screenshot colours.
 - **R-REC-5** [test] By default, a recording shows a click ping at each press
-  of a `click` and at each press and release of a `drag`. Each press of a double
-  click has its own ping. `scroll` and `move` show no click ping.
+  of a `click` and at each press and release of a completed `drag`. Each press of
+  a double click has its own ping. `scroll` and `move` show no click ping.
 - **R-REC-6** [test] A click ping is centred on the pointer position of its
   event. It starts within 0.05 seconds of that event.
 - **R-REC-7** [test] `--no-click-pings` removes click pings from that clip only.

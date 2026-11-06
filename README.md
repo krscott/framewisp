@@ -769,7 +769,8 @@ framewisp demo run --record /tmp/plain.mp4 --no-captions -- framewisp-demo
 
 Click pings mark each pointer press in a recording: a red ring grows and fades
 over half a second at the click position. Each click of a double click and the
-press and release of a drag get their own ping; scrolls and moves get none.
+press and release of a completed drag get their own ping; a cancelled drag pings
+its press but not its cleanup release. Scrolls and moves get none.
 Clips with `run --record` and `record-start` show them by default, independently
 of `--captions` and `--no-captions`. Screenshots never include them (R-LOG-3), and `inspect` and
 input coordinates are unaffected. Disable them for a clip with:
