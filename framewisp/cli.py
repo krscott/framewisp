@@ -203,6 +203,11 @@ def main() -> None:
             action="store_true",
             help="record without input captions (input logging stays enabled)",
         )
+        recording_parser.add_argument(
+            "--no-click-pings",
+            action="store_true",
+            help="record without the red ping at each click and drag end",
+        )
     commands.add_parser(
         "record-stop", help="finalize the active clip and keep the app running"
     )
@@ -471,6 +476,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             command,
             recording=args.record,
             captions=not args.no_captions,
+            click_pings=not args.no_click_pings,
             console=args.console,
             compact=args.compact_settings,
             size=(args.width, args.height),
@@ -492,6 +498,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 args.action,
                 args.path if args.action == "record-start" else None,
                 captions=not getattr(args, "no_captions", False),
+                click_pings=not getattr(args, "no_click_pings", False),
                 console=getattr(args, "console", False),
                 compact=getattr(args, "compact_settings", None),
             )

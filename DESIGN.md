@@ -26,6 +26,8 @@ acceptance application.
 - `framewisp/console.py` drains the launched app's combined stdout/stderr to raw
   `app.log` bytes and timestamped UTF-8 chunks in `console.jsonl`. It also builds
   bounded scrolling text states for optional console panels in recordings.
+- `framewisp/pings.py` selects a clip's `ping` records from `inputs.jsonl` and
+  builds the ASS drawing for each click ping.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
   changes the label to `Entered: TEXT`; clicking the button changes it to
   `Applied: TEXT`. A check button with a tooltip, a numbered slider, and a
@@ -73,8 +75,10 @@ in-progress append cannot discard the earlier start.
 Cut planning adds before/after padding to activity spans, keeps the opening
 before-padding and closing after-padding, rounds ranges outward to 30 fps frames,
 and merges touching or overlapping ranges. The first and last frames remain
-even with zero padding. Compaction requires the recorder's first-frame monotonic
-timestamp even with captions and console disabled. Finalization renders overlays
+even with zero padding. Each click ping's span also stays whole, with no added
+padding, so short padding cannot cut its animation (R-REC-8). Compaction requires
+the recorder's first-frame monotonic timestamp even with captions and console
+disabled. Finalization renders overlays
 on the original timeline. ffprobe supplies the encoded duration for closing cuts
 and endpoint frames, independent of stop/encoder latency. The renderer
 normalizes to 30 fps, selects retained frames, then
@@ -683,7 +687,7 @@ any active recorder before stopping the display (R-REC-3).
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
-and `captions` and `console` booleans. Replies carry an `error` string or null
+and `captions`, `click_pings` and `console` booleans. Replies carry an `error` string or null
 and optional `data`. The runner checks the session directory against its own
 before acting, so copied metadata cannot control another session (R-LIFE-6). Its
 monitoring loop handles recording/status/stop requests; validated input sockets
@@ -693,7 +697,7 @@ or unknown version before connecting. Input also requires `persistent_input:
 true`; a legacy recording-only runner would otherwise interpret new status or
 stop requests as recording-stop requests. Validation/startup errors are returned
 to the caller without stopping the app. Unexpected recorder exit or finalization
-failure still fails the session.
+failure still fails the session, after `record-stop` replies with the error.
 
 `record-stop` returns a summary in `data`, printed as JSON by the CLI. After
 finalization and caption rendering, ffprobe supplies duration and dimensions;
@@ -724,7 +728,7 @@ start event to `inputs.jsonl` when the action starts executing and an end event
 after cleanup, so queue time does not extend captions. Cancelled requests that
 never start do not produce captions. Attached sessions retain CLI-owned logging. Each JSONL event carries an ID,
 `event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
-`error`. Session metadata stores `retain_input_content`, default false. The
+`error`. A `ping` event also carries the display position `x` and `y`. Session metadata stores `retain_input_content`, default false. The
 `run/attach --retain-input-content` option sets it once for the session. The headless
 worker owns the policy for individual and batch actions; attached command clients
 read it from metadata. Recording captions use the retained parameters from the log,
@@ -750,7 +754,8 @@ failures, while unexpected exceptions retain their traceback. Normal
 nonzero returns are recorded as failures. Input logging is independent of
 recording. The runner truncates the log when creating a new session.
 
-For recordings with captions or console panels, only wf-recorder receives `WAYLAND_DEBUG=client`.
+For recordings with captions, click pings, console panels, or compaction, only
+wf-recorder receives `WAYLAND_DEBUG=client`.
 The first screencopy `ready` event in `recorder.log` supplies the first captured
 frame's timestamp. The pinned Sway backend uses the monotonic clock, and the
 pinned wf-recorder makes this frame time zero. This establishes each clip's
@@ -772,13 +777,45 @@ FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the
 requested output. Caption rendering uses a bundled Fontconfig configuration
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
-remains and the command fails with the `captions.log` path. The final video
+remains and the command fails with the `captions.log` path. A single wrapper
+around `render_recording` turns every failure after capture, including malformed
+logs and an unwritable `captions.log`, into one message naming the raw video and
+that log (R-REC-10). The final video
 preserves GUI dimensions, 30 fps, full-range color, and no audio. `record-stop`
-waits for rendering, as does normal session cleanup. With `--no-captions`,
-rendering and timestamp extraction are skipped unless a console panel is
-requested, but input logging remains enabled. Caption formatting cannot affect
+waits for rendering, as does normal session cleanup. With `--no-captions` and
+`--no-click-pings`, rendering and timestamp extraction are skipped unless a console
+panel or compaction is requested, but input logging remains enabled. Clips with
+nothing to draw also skip rendering. Caption formatting cannot affect
 app screenshots (R-LOG-2). Both `inputs.jsonl` and `captions.log` are reserved
 session paths.
+
+## Click pings in recordings
+
+Clips show a click ping by default (R-REC-5). `--no-click-pings` turns it off for
+one clip (R-REC-7), and `--no-captions` leaves it on (R-REC-11). Command start and
+end times can't place a ping: a press follows the pointer approach, and double
+clicks and drags press more than once. So the input worker calls `ping` from
+`log_input` right after each click's `mouseDown`, and after a drag's `mouseDown`
+and final `mouseUp` return, appending a `ping` event with the same ID as its
+command. The position is `pointer_position`, the clamped coordinates actually sent.
+Scroll presses, refused presses, and the cleanup release of a cancelled action
+log no ping. `ping` events carry no typed content, and readers of start and end
+events ignore them.
+
+`pings.py` selects events in `origin <= time < stopped`, skipping an unfinished
+trailing line. It writes one ASS drawing per ping into the script that holds
+captions and console text, so all overlays share one FFmpeg pass and the existing
+filter order aligns them: `pad` keeps GUI coordinates, `ass` draws on the original
+timeline, and the compact `select` cuts afterwards. No mode needs its own handling.
+The ring grows from radius 10 to 40 pixels with a 4-pixel stroke while fading over
+0.5 seconds, scaled by display height like captions. Its path uses only positive
+coordinates, because libass otherwise shifts a scaled drawing off its `\pos`
+(R-REC-6). A `\clip` to the GUI area keeps rings off the console panel (R-REC-9).
+Screenshots read the compositor, which never sees this overlay (R-LOG-3).
+
+The control request's `click_pings` boolean defaults to true. Session metadata
+advertises `click_pings_recording: true`. A `record-start` that wants pings
+requires it before connecting, so an older runner cannot silently omit them.
 
 ## Console output in recordings
 

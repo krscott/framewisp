@@ -9,14 +9,15 @@ import tempfile
 import time
 import unicodedata
 import uuid
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from threading import Event
-from typing import BinaryIO, Literal, cast
+from typing import BinaryIO, Literal, ParamSpec, cast
 
 from framewisp.compact import (
     ActivityEvent,
@@ -28,6 +29,7 @@ from framewisp.compact import (
 from framewisp.console import PANEL_WIDTH, ConsoleCapture, console_frames
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
+from framewisp.pings import PING_STYLE, Ping, ping_text, pings_for_clip
 
 
 def retained_parameters(
@@ -150,6 +152,7 @@ class InputEvent(ActivityEvent):
 
 @dataclass
 class InputResult:
+    ping: Callable[[int, int], None]
     returncode: int | None = None
     error: str | None = None
 
@@ -164,23 +167,25 @@ def log_input(
 ) -> Generator[InputResult, None, None]:
     """Record command start/end, including failures; these are not app acknowledgements."""
     identifier = uuid.uuid4().hex
-    result = InputResult()
     parameters = retained_parameters(
         action, parameters, retain_input_content=retain_input_content
     )
 
-    def append(event: Literal["start", "end"]) -> None:
+    def append(event: Literal["start", "ping", "end"], **point: int) -> None:
         entry = {
             "id": identifier,
             "event": event,
             "time": time.monotonic(),
             "action": action,
             "parameters": parameters,
-            **asdict(result),
+            "returncode": result.returncode,
+            "error": result.error,
+            **point,
         }
         with (session / "inputs.jsonl").open("a", encoding="utf-8") as output:
             output.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    result = InputResult(ping=lambda x, y: append("ping", x=x, y=y))
     append("start")
     try:
         yield result
@@ -287,7 +292,11 @@ def ass_time(seconds: float) -> str:
 
 
 def subtitle_script(
-    captions: list[Caption], *, size: tuple[int, int] = (1280, 720), panel: bool = False
+    captions: list[Caption],
+    *,
+    pings: Iterable[Ping] = (),
+    size: tuple[int, int] = (1280, 720),
+    panel: bool = False,
 ) -> str:
     width, height = size
     scale = height / 720
@@ -302,6 +311,7 @@ WrapStyle: 2
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
 Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{24 * width / 1280},{extra + 24 * width / 1280},{24 * scale}
 Style: Console,DejaVu Sans Mono,18,&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
+{PING_STYLE}
 
 [Events]
 Format: Layer, Start, End, Style, Text
@@ -311,9 +321,32 @@ Format: Layer, Start, End, Style, Text
         # equivalents in captions; opted-in input logs retain the original text.
         text = caption.text.translate(str.maketrans("\\{}", "＼｛｝"))
         script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{text}\n"
+    for ping in pings:
+        script += f"Dialogue: 1,{ass_time(ping.start)},{ass_time(ping.end)},Ping,{ping_text(ping, size)}\n"
     return script
 
 
+P = ParamSpec("P")
+
+
+def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
+    """Report any failure after capture with the recording it left behind."""
+
+    @wraps(render)
+    def rendered(*args: P.args, **kwargs: P.kwargs) -> None:
+        try:
+            render(*args, **kwargs)
+        except Exception as error:
+            raise RuntimeError(
+                f"Recording rendering failed; raw video remains at {args[0]} without "
+                f"captions, click pings, console panel or cuts. See {kwargs['log']}. "
+                f"Cause: {error}"
+            ) from error
+
+    return rendered
+
+
+@keeps_raw_video
 def render_recording(
     destination: Path,
     *,
@@ -322,6 +355,7 @@ def render_recording(
     stopped: float,
     log: Path,
     captions: bool = True,
+    click_pings: bool = True,
     console: ConsoleCapture | None = None,
     compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
@@ -329,14 +363,21 @@ def render_recording(
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped) if captions else []
     )
-    if not entries and console is None and compact is None:
+    pings = (
+        pings_for_clip(input_log, origin=origin, stopped=stopped) if click_pings else []
+    )
+    if not entries and not pings and console is None and compact is None:
         return
     with tempfile.TemporaryDirectory(
         prefix=".framewisp-captions-", dir=destination.parent
     ) as directory:
         work = Path(directory)
         with (work / "captions.ass").open("w", encoding="utf-8") as script:
-            script.write(subtitle_script(entries, size=size, panel=console is not None))
+            script.write(
+                subtitle_script(
+                    entries, pings=pings, size=size, panel=console is not None
+                )
+            )
             if console is not None:
                 console.snapshot(work / "console.jsonl")
                 x, height = size
@@ -375,6 +416,7 @@ def render_recording(
                         stopped=stopped,
                         duration=recording_duration(destination),
                         settings=compact,
+                        overlays=[(ping.start, ping.end) for ping in pings],
                     )
                 )
             )
@@ -414,7 +456,5 @@ def render_recording(
                 check=False,
             )
         if result.returncode:
-            raise RuntimeError(
-                f"Recording rendering failed; raw video remains at {destination}. See {log}"
-            )
+            raise RuntimeError(f"FFmpeg exited with status {result.returncode}.")
         (work / "captioned.mp4").replace(destination)

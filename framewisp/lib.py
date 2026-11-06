@@ -305,6 +305,7 @@ def start_recording(
     env: dict[str, str],
     stop: Event,
     captions: bool,
+    click_pings: bool,
     console: ConsoleCapture | None = None,
     compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
@@ -328,7 +329,7 @@ def start_recording(
         "-f",
         str(destination),
     ]
-    timed = captions or console is not None or compact is not None
+    timed = captions or click_pings or console is not None or compact is not None
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     with (
         recorder_output(log) as output,
@@ -369,6 +370,7 @@ def start_recording(
             stopped=stopped,
             log=log.parent / "captions.log",
             captions=captions,
+            click_pings=click_pings,
             console=console,
             compact=compact,
             size=size,
@@ -458,6 +460,7 @@ class Recordings:
         destination: Path,
         *,
         captions: bool = True,
+        click_pings: bool = True,
         console: bool = False,
         compact: CompactSettings | None = None,
     ) -> str | None:
@@ -476,6 +479,7 @@ class Recordings:
                     env=self.env,
                     stop=self.stop_requested,
                     captions=captions,
+                    click_pings=click_pings,
                     console=self.console_capture if console else None,
                     compact=compact,
                     size=self.size,
@@ -513,6 +517,7 @@ def session_command(
     destination: Path | None = None,
     *,
     captions: bool = True,
+    click_pings: bool = True,
     console: bool = False,
     compact: CompactSettings | None = None,
     parameters: dict[str, object] | None = None,
@@ -534,11 +539,21 @@ def session_command(
             "This runner does not support compact recordings. Restart the session "
             "with this version of framewisp."
         )
+    if (
+        action == "record-start"
+        and click_pings
+        and state.get("click_pings_recording") is not True
+    ):
+        raise SessionError(
+            "This runner does not support click pings. Restart the session with "
+            "this version of framewisp, or pass --no-click-pings."
+        )
     request = {
         "action": action,
         "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
+        "click_pings": click_pings,
         "console": console,
         "compact": compact.parameters() if compact is not None else None,
         "parameters": parameters,
@@ -662,6 +677,7 @@ def handle_session_command(
         elif action == "record-start":
             destination = command.get("destination")
             captions = command.get("captions", True)
+            click_pings = command.get("click_pings", True)
             console = command.get("console", False)
             try:
                 compact = CompactSettings.parse(command.get("compact"))
@@ -672,17 +688,25 @@ def handle_session_command(
                 error = "record-start requires a destination"
             elif not isinstance(captions, bool):
                 error = "captions must be true or false"
+            elif not isinstance(click_pings, bool):
+                error = "click_pings must be true or false"
             elif not isinstance(console, bool):
                 error = "console must be true or false"
             else:
                 error = recordings.start(
                     Path(destination),
                     captions=captions,
+                    click_pings=click_pings,
                     console=console,
                     compact=compact,
                 )
         elif action == "record-stop":
-            error = recordings.finish()
+            try:
+                error = recordings.finish()
+            except SessionError as failure:
+                # The session still fails; the caller needs the reason and raw path.
+                reply(connection, error=str(failure))
+                raise
             if error is None:
                 data = recordings.last_summary
         else:
@@ -701,6 +725,7 @@ def run_session(
     *,
     recording: Path | None = None,
     captions: bool = True,
+    click_pings: bool = True,
     console: bool = False,
     compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
@@ -730,6 +755,7 @@ def run_session(
             lease=lease,
             recording=recording,
             captions=captions,
+            click_pings=click_pings,
             console=console,
             compact=compact,
             size=size,
@@ -747,6 +773,7 @@ def _run_session(
     lease: int,
     recording: Path | None,
     captions: bool,
+    click_pings: bool,
     console: bool,
     compact: CompactSettings | None,
     size: tuple[int, int],
@@ -863,7 +890,11 @@ def _run_session(
             stack.callback(recordings.close)
             if recording is not None:
                 error = recordings.start(
-                    recording, captions=captions, console=console, compact=compact
+                    recording,
+                    captions=captions,
+                    click_pings=click_pings,
+                    console=console,
+                    compact=compact,
                 )
                 if error is not None:
                     if stop.is_set():
@@ -908,6 +939,7 @@ def _run_session(
                             "control_protocol": 1,
                             "console_recording": True,
                             "compact_recording": True,
+                            "click_pings_recording": True,
                             "persistent_input": True,
                             "retain_input_content": retain_input_content,
                             "inspection_protocol": 1,

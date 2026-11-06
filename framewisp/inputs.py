@@ -303,6 +303,11 @@ class InputWorker:
             p,
             retain_input_content=self.retain_input_content,
         ) as logged:
+
+            def ping() -> None:
+                assert self.pointer_position is not None
+                logged.ping(*self.pointer_position)
+
             try:
                 modifiers = cast(list[str], p.get("modifier", []))
                 for modifier in modifiers:
@@ -333,6 +338,7 @@ class InputWorker:
                         if index:
                             wait(0.1)
                         button(number, True)
+                        ping()
                         button(number, False)
                 elif action.action == "drag":
                     number = CLICK_BUTTONS[cast(str, p["button"])]
@@ -341,6 +347,7 @@ class InputWorker:
                     duration = cast(float, p["duration"])
                     steps = max(1, math.ceil(duration * 60))
                     button(number, True)
+                    ping()
                     for step in range(1, steps + 1):
                         wait(duration / steps)
                         move(
@@ -348,6 +355,7 @@ class InputWorker:
                             round(y1 + (y2 - y1) * step / steps),
                         )
                     button(number, False)
+                    ping()
                 elif action.action == "scroll":
                     number = SCROLL_BUTTONS[cast(str, p["direction"])]
                     for _ in range(cast(int, p["steps"])):
