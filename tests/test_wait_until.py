@@ -1,17 +1,10 @@
 import subprocess
-import sys
-from itertools import count
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 import test_integration
-from test_integration import (
-    Demo,
-    MAX_OBSERVED_CHARS,
-    wait_for_input_probe_window,
-    wait_until,
-)
+from test_integration import Demo, wait_for_input_probe_window, wait_until
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +12,7 @@ def short_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(test_integration, "WAIT_TIMEOUT_SECONDS", 0.2)
 
 
-def test_timeout_describes_multiline_lambda_and_its_observation(tmp_path: Path) -> None:
+def test_timeout_describes_multiline_lambda_and_elapsed_time(tmp_path: Path) -> None:
     log = tmp_path / "app.log"
     log.write_text("Demo ready\n")
 
@@ -31,59 +24,59 @@ def test_timeout_describes_multiline_lambda_and_its_observation(tmp_path: Path) 
         )
 
     message = str(failure.value)
-    assert "test_wait_until.py:" in message
+    assert message.startswith("Timed out after 0.2 s at test_wait_until.py:")
     assert (
         "waiting for: any((line == 'Never written' for line in "
-        "log.read_text().splitlines()))" in message
+        "log.read_text().splitlines()))\n" in message
     )
-    assert r"read_text() -> 'Demo ready\n'" in message
+    assert message.endswith("Last returned: False")
 
 
-def test_timeout_reports_only_the_last_poll() -> None:
-    polls = count(1)
-
-    def first_poll_only() -> int:
-        return 0
-
-    def latest_poll() -> int:
-        return next(polls)
-
-    seen: list[int] = []
-
-    def polled() -> bool:
-        seen.append(first_poll_only() if not seen else latest_poll())
-        return False
-
-    with pytest.raises(AssertionError) as failure:
-        wait_until(polled)
-
-    message = str(failure.value)
-    assert f"latest_poll() -> {seen[-1]}" in message
-    assert "first_poll_only()" not in message
-
-
-def test_timeout_names_a_named_predicate_and_keeps_the_observation_tail() -> None:
-    text = "old" + "x" * MAX_OBSERVED_CHARS + "new"
-
-    def latest() -> str:
-        return text
-
-    def ready() -> bool:
-        return latest() == ""
+def test_timeout_names_a_named_predicate_and_its_last_value() -> None:
+    def ready() -> list[int]:
+        return []
 
     with pytest.raises(AssertionError) as failure:
         wait_until(ready)
 
+    assert "waiting for: ready\nLast returned: []" in str(failure.value)
+
+
+def test_timeout_reports_the_last_exception_and_chains_it(tmp_path: Path) -> None:
+    missing = tmp_path / "app.log"
+
+    with pytest.raises(AssertionError) as failure:
+        wait_until(lambda: "ready" in missing.read_text())
+
     message = str(failure.value)
-    assert "waiting for: ready\n" in message
-    assert "new'" in message
-    assert "old" not in message
+    assert "Last returned: nothing\n" in message
+    assert "Last exception: FileNotFoundError(" in message
+    assert isinstance(failure.value.__cause__, FileNotFoundError)
 
 
-def test_success_does_not_leave_a_profiler_behind() -> None:
-    wait_until(lambda: True)
+def test_exception_is_retried_until_the_predicate_succeeds(tmp_path: Path) -> None:
+    log = tmp_path / "app.log"
 
-    assert sys.getprofile() is None
+    def predicate() -> bool:
+        if log.exists():
+            return True
+        log.write_text("ready\n")
+        raise ConnectionRefusedError
+
+    wait_until(predicate)
+
+
+def test_assertion_in_predicate_fails_without_waiting() -> None:
+    polls: list[int] = []
+
+    def app_alive() -> bool:
+        polls.append(1)
+        raise AssertionError("App exited")
+
+    with pytest.raises(AssertionError, match="^App exited$"):
+        wait_until(app_alive)
+
+    assert polls == [1]
 
 
 def test_input_probe_wait_keeps_its_own_timeout_message(

@@ -11,9 +11,8 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from inspect import CO_GENERATOR, FrameInfo, currentframe, stack
+from inspect import FrameInfo, stack
 from pathlib import Path
-from types import FrameType
 from typing import Any, cast
 
 import pytest
@@ -30,31 +29,7 @@ class Demo:
 
 
 WAIT_TIMEOUT_SECONDS = 10
-MAX_OBSERVED_CHARS = 1000
-
-
-def observe(predicate: Callable[[], bool], observed: dict[str, object]) -> bool:
-    """Run predicate, replacing observed with what its direct calls returned."""
-    observed.clear()
-    poller = currentframe()
-
-    def record(frame: FrameType, event: str, value: object) -> None:
-        name = frame.f_code.co_name
-        if (
-            event == "return"
-            and frame.f_back is not None
-            and frame.f_back.f_back is poller
-            and not frame.f_code.co_flags & CO_GENERATOR
-            and not name.startswith("__")
-        ):
-            observed[name] = value
-
-    previous = sys.getprofile()
-    sys.setprofile(record)
-    try:
-        return predicate()
-    finally:
-        sys.setprofile(previous)
+NEVER_RETURNED = object()
 
 
 def wait_description(caller: FrameInfo) -> str:
@@ -72,29 +47,49 @@ def wait_description(caller: FrameInfo) -> str:
     return "the condition"
 
 
-def observation(name: str, value: object) -> str:
-    text = repr(value)
-    if len(text) > MAX_OBSERVED_CHARS:
-        text = f"...{text[-MAX_OBSERVED_CHARS:]}"
-    return f"\n  {name}() -> {text}"
-
-
-def wait_timeout_message(caller: FrameInfo, observed: dict[str, object]) -> str:
-    observations = "".join(observation(*item) for item in observed.items())
-    return (
-        f"Timed out after {WAIT_TIMEOUT_SECONDS} s at "
+def wait_timeout_message(
+    caller: FrameInfo,
+    elapsed: float,
+    last_value: object,
+    last_exception: Exception | None,
+) -> str:
+    returned = "nothing" if last_value is NEVER_RETURNED else repr(last_value)
+    message = (
+        f"Timed out after {elapsed:.1f} s at "
         f"{Path(caller.filename).name}:{caller.lineno} "
         f"waiting for: {wait_description(caller)}\n"
-        f"Last observed:{observations or ' no Python calls'}"
+        f"Last returned: {returned}"
     )
+    if last_exception is not None:
+        message += f"\nLast exception: {last_exception!r}"
+    return message
 
 
-def wait_until(predicate: Callable[[], bool]) -> None:
-    deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
-    observed: dict[str, object] = {}
-    while not observe(predicate, observed):
-        if time.monotonic() >= deadline:
-            raise AssertionError(wait_timeout_message(stack()[1], observed))
+def wait_until(predicate: Callable[[], object]) -> None:
+    """Poll until predicate is truthy.
+
+    Other exceptions are retried and reported on timeout. An AssertionError
+    propagates at once, so predicates can fail fast, such as when the app died.
+    """
+    started = time.monotonic()
+    last_value = NEVER_RETURNED
+    last_exception: Exception | None = None
+    while True:
+        try:
+            last_value = predicate()
+        except AssertionError:
+            raise
+        except Exception as error:
+            last_exception = error
+        else:
+            if last_value:
+                return
+        elapsed = time.monotonic() - started
+        if elapsed >= WAIT_TIMEOUT_SECONDS:
+            message = wait_timeout_message(
+                stack()[1], elapsed, last_value, last_exception
+            )
+            raise AssertionError(message) from last_exception
         time.sleep(0.05)
 
 
