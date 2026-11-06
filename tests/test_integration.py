@@ -2284,12 +2284,14 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
         ("drag", "start"),
+        ("drag", "ping"),
         ("drag", "end"),
         ("click", "start"),
+        ("click", "ping"),
         ("click", "end"),
     ]
-    assert "cancelled" in logged[1]["error"]
-    assert logged[3]["returncode"] == 0
+    assert "cancelled" in logged[2]["error"]
+    assert logged[5]["returncode"] == 0
 
 
 @pytest.mark.integration
@@ -2685,18 +2687,23 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
         for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
-        (name, phase)
-        for name in ("click", "type", "key", "key")
-        for phase in ("start", "end")
+        ("click", "start"),
+        ("click", "ping"),
+        ("click", "end"),
+        *(
+            (name, phase)
+            for name in ("type", "key", "key")
+            for phase in ("start", "end")
+        ),
     ]
     assert all(event["returncode"] == 0 for event in logged if event["event"] == "end")
     assert all(a["time"] <= b["time"] for a, b in zip(logged, logged[1:]))
     retain = json.loads((demo.directory / "session.json").read_text())[
         "retain_input_content"
     ]
-    assert ("text" in logged[2]["parameters"]) is retain
-    assert ("chord" in logged[4]["parameters"]) is retain
-    assert logged[6]["parameters"]["chord"] == "Return"
+    assert ("text" in logged[3]["parameters"]) is retain
+    assert ("chord" in logged[5]["parameters"]) is retain
+    assert logged[7]["parameters"]["chord"] == "Return"
 
 
 # R-BATCH-1
