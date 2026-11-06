@@ -1035,7 +1035,7 @@ def _run_session(
                 size=size,
                 retain_input_content=retain_input_content,
                 capture=lambda path, cancelled: batch_screenshot(
-                    session, path, cancelled, recordings
+                    path, cancelled, recordings
                 ),
             )
             stack.callback(inputs.close)
@@ -1254,7 +1254,6 @@ def screenshot(
 
 
 def batch_screenshot(
-    session: Path,
     destination: Path,
     cancelled: Callable[[], bool],
     recordings: Recordings,
@@ -1265,6 +1264,7 @@ def batch_screenshot(
             prefix=".framewisp-capture-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "capture.png"
+            session = recordings.session
             state = json.loads((session / "session.json").read_text())
             grim(session, state, ["-o", "HEADLESS-1"], temporary, cancelled)
             if cancelled():

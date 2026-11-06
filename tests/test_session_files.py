@@ -162,7 +162,7 @@ def test_batch_capture_rechecks_a_recording_started_after_validation(
     clip = tmp_path / "clip.mp4"
     recordings.destination = clip
     with pytest.raises(SessionError, match="active recording"):
-        batch_screenshot(tmp_path, clip, lambda: False, recordings)
+        batch_screenshot(clip, lambda: False, recordings)
     assert not clip.exists()
     assert not list(tmp_path.glob(".framewisp-capture-*"))
 
