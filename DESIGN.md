@@ -726,12 +726,13 @@ publication.
 | Caller | Runs in | Also rejects existing files | Active destination from |
 |--------|---------|-----------------------------|-------------------------|
 | Recording | `recording_path_error`, in the runner | yes | not needed: a second clip is refused |
-| Batch capture | `parse_batch`, in the runner | yes | `Recordings.destination` |
+| Batch capture | `parse_batch`, and again in `batch_screenshot` before publishing | yes | `Recordings.destination` |
 | Headless `screenshot` | `screenshot`, in the CLI before grim | no | `recording` in `session.json` |
-| Attached `screenshot` | `parse_attached_request`, in the owner | no | none: attachments cannot record |
+| Attached `screenshot` | `parse_attached_request`, in the owner | no | none: an attachment has no recording of its own |
 
 A standalone screenshot replaces an ordinary file, and repeated captures to one
-path rely on that. `-` writes to stdout and skips the check.
+path rely on that. A headless `-` writes to stdout and skips the check; an attached
+`-` is a file with that name.
 
 The headless CLI runs grim itself, so it reads the destination from `session.json`
 rather than asking the runner: `record-stop` renders in the control loop, and a
@@ -743,18 +744,25 @@ protected from session files but not from the active destination.
 The check is not atomic with the write. A standalone screenshot may replace a
 file, so it cannot use `O_EXCL`, and a symlink or hard link made after the check
 goes unseen. The check guards against mistakes, not a racing process. Two windows
-remain where framewisp's own commands can still take an active destination:
+remain where framewisp's own commands can still take a session's active destination:
 
-- A screenshot sent while `record-start` is still running passes, because the
-  destination reaches `session.json` only after the clip starts.
-- A recording that starts after a batch was validated, but before its capture,
-  to the capture's path.
+- A screenshot or batch capture that passes its check while `record-start` is
+  still running, because the destination is published only after the clip starts.
+  That can take up to ten seconds.
+- A batch capture whose last check runs just before a recording to the same path
+  finishes starting. Validation is not the last check, because a batch can run for
+  minutes: `batch_screenshot` repeats it just before publishing.
 
-In both, the file takes the destination and the failure is the R-REC-18 path:
-`record-stop` keeps the clip at another path and names it.
+The check also knows only the calling session. A screenshot from another session,
+or from an attachment, can take this session's active destination. It can also
+overwrite this session's files, which are not on that session's list.
 
-Runtime directories are outside this check. They are not in the session directory,
-and their paths come only from reading `session.json`.
+In all of these, a file takes the destination and the failure is the R-REC-18 path:
+`record-stop` keeps the clip at another path, names it, and ends the session.
+
+Other paths outside this check: runtime directories, which are not in the session
+directory and which only `session.json` names; scratch files in a clip's private
+directory; and the attached `write_state` temporary file, whose name is random.
 
 ## Recording destinations
 
@@ -871,8 +879,9 @@ retain their independent emergency detach mechanism.
 
 State updates use `.session.json` followed by an atomic rename. The `processes`
 map includes `recorder` only while recording. Both metadata filenames and the
-session logs are protected paths. Recording requests reject odd display dimensions (R-REC-2), existing/reserved
-output paths (R-REC-1), a start while already active, and a stop while inactive.
+session logs are protected paths. Recording requests reject odd display dimensions
+(R-REC-2), existing or protected output paths (R-REC-1, R-SESSION-7), a start while
+already active, and a stop while inactive.
 Each start replaces `recorder.log`.
 
 ## Input logs and captions

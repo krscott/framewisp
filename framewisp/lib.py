@@ -1026,6 +1026,14 @@ def _run_session(
             listener.bind(str(runtime / "control.sock"))
             listener.listen()
             listener.settimeout(0.1)
+
+            def capture(path: Path, cancelled: Callable[[], bool]) -> int:
+                assert recordings is not None
+                current = recordings
+                return batch_screenshot(
+                    session, path, cancelled, lambda: current.destination
+                )
+
             inputs = InputWorker(
                 session,
                 input_client,
@@ -1033,9 +1041,7 @@ def _run_session(
                 x11=x11,
                 size=size,
                 retain_input_content=retain_input_content,
-                capture=lambda path, cancelled: batch_screenshot(
-                    session, path, cancelled
-                ),
+                capture=capture,
             )
             stack.callback(inputs.close)
 
@@ -1170,21 +1176,23 @@ def grim(
     )
 
 
-def screenshot_path_error(
-    session: Path, destination: Path, state: dict[str, Any]
+def active_recording(state: dict[str, Any]) -> Path | None:
+    # A runner from an older framewisp publishes no recording key.
+    recording = state.get("recording")
+    return Path(recording) if isinstance(recording, str) else None
+
+
+def capture_path_error(
+    session: Path, destination: Path, recording: Path | None
 ) -> str | None:
-    """Refuse what a screenshot must not write. A plain file may be overwritten."""
+    """Refuse what a capture must not write. A plain file may be overwritten."""
     if str(destination) == "-":
         return None
     try:
         path = resolved_request_path(destination, "path")
     except ValueError as error:
         return str(error)
-    # A runner from an older framewisp publishes no recording key.
-    recording = state.get("recording")
-    return protected_path_error(
-        session, path, Path(recording) if isinstance(recording, str) else None
-    )
+    return protected_path_error(session, path, recording)
 
 
 def screenshot(
@@ -1199,7 +1207,7 @@ def screenshot(
             "screenshot --json requires a file path; '-' writes PNG to stdout."
         )
     state = json.loads((session / "session.json").read_text())
-    error = screenshot_path_error(session, destination, state)
+    error = capture_path_error(session, destination, active_recording(state))
     if error is not None:
         raise SessionError(error)
     selector = ["-o", "HEADLESS-1"]
@@ -1251,7 +1259,10 @@ def screenshot(
 
 
 def batch_screenshot(
-    session: Path, destination: Path, cancelled: Callable[[], bool]
+    session: Path,
+    destination: Path,
+    cancelled: Callable[[], bool],
+    recording: Callable[[], Path | None],
 ) -> int:
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
@@ -1265,6 +1276,10 @@ def batch_screenshot(
                 raise InterruptedError(
                     "Capture cancelled; caller disconnected or session stopped."
                 )
+            # A recording may have started since this batch was validated.
+            error = capture_path_error(session, destination, recording())
+            if error is not None:
+                raise SessionError(error)
             destination.hardlink_to(temporary)
     except InterruptedError:
         raise

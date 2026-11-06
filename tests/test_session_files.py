@@ -1,6 +1,7 @@
 """One check keeps recordings and captures away from what a session owns."""
 
 import ast
+import re
 from pathlib import Path
 from threading import Event
 
@@ -9,12 +10,16 @@ from test_integration import Demo, cli, demo
 
 from framewisp import lib
 from framewisp.console import ConsoleCapture
+from framewisp.errors import SessionError
 from framewisp.lib import (
     Recordings,
+    active_recording,
+    batch_screenshot,
+    capture_path_error,
     parse_batch,
     recording_path_error,
-    screenshot_path_error,
 )
+from framewisp.ownership import ACTIVE_RECORDING, JOURNAL, LOCK
 from framewisp.session_files import SESSION_FILES, protected_path_error
 
 __all__ = ["demo"]
@@ -33,21 +38,60 @@ def recordings(tmp_path: Path) -> Recordings:
     return Recordings(tmp_path, {}, Event(), (1280, 720), ConsoleCapture(tmp_path))
 
 
+SESSION_ROOTS = {"session", "self.session", "capture.session", "log.parent"}
+# Session paths not spelled as a literal, and the names each one can produce.
+COMPUTED_NAMES = {
+    "LOCK": {LOCK},
+    "JOURNAL": {JOURNAL},
+    "ACTIVE_RECORDING": {ACTIVE_RECORDING},
+    "m": set[str](),  # Loop over names the source spells out, checked as literals.
+    "name": set[str](),
+    "name + '.log'": {
+        f"{name}.log"
+        for name in (
+            "dbus",
+            "accessibility",
+            "registry",
+            "sway",
+            "wayvnc",
+            "recorder",
+            "app",
+        )
+    },
+}
+LOG_NAME = re.compile(r"\.?[\w.-]+\.(log|jsonl)")
+
+
+def names_in_source(tree: ast.Module) -> set[str]:
+    named: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if LOG_NAME.fullmatch(node.value):
+                named.add(node.value)
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Div)
+            and ast.unparse(node.left) in SESSION_ROOTS
+        ):
+            if isinstance(node.right, ast.Constant):
+                named.add(str(node.right.value))
+            else:
+                expression = ast.unparse(node.right)
+                assert expression in COMPUTED_NAMES, (
+                    f"Add the names {expression} can produce to SESSION_FILES "
+                    "and COMPUTED_NAMES."
+                )
+                named |= COMPUTED_NAMES[expression]
+    return named
+
+
 # R-SESSION-7
 def test_every_session_path_in_the_source_is_listed() -> None:
-    """Catches files no test session creates, such as the attached capture log."""
+    """Covers files no test session creates, such as the attached capture log."""
     source = Path(lib.__file__).parent
     named: set[str] = set()
     for module in source.glob("*.py"):
-        for node in ast.walk(ast.parse(module.read_text())):
-            if (
-                isinstance(node, ast.BinOp)
-                and isinstance(node.op, ast.Div)
-                and isinstance(node.right, ast.Constant)
-                and ast.unparse(node.left)
-                in {"session", "self.session", "capture.session", "log.parent"}
-            ):
-                named.add(str(node.right.value))
+        named |= names_in_source(ast.parse(module.read_text()))
     assert "capture.log" in named
     assert named - set(SESSION_FILES) == set()
 
@@ -97,10 +141,48 @@ def test_screenshot_reads_the_active_destination_from_session_state(
     tmp_path: Path,
 ) -> None:
     clip = tmp_path / "clip.mp4"
-    state = {"recording": str(clip)}
-    assert "active recording" in str(screenshot_path_error(tmp_path, clip, state))
-    assert screenshot_path_error(tmp_path, tmp_path / "other.png", state) is None
-    assert screenshot_path_error(tmp_path, Path("-"), state) is None
+    active = active_recording({"recording": str(clip)})
+    assert "active recording" in str(capture_path_error(tmp_path, clip, active))
+    assert capture_path_error(tmp_path, tmp_path / "other.png", active) is None
+    assert capture_path_error(tmp_path, Path("-"), active) is None
+
+
+# R-REC-21
+def test_batch_capture_rechecks_a_recording_started_after_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_capture(*arguments: object) -> int:
+        return 0
+
+    monkeypatch.setattr(lib, "grim", no_capture)
+    (tmp_path / "session.json").write_text("{}")
+    clip = tmp_path / "clip.mp4"
+    with pytest.raises(SessionError, match="active recording"):
+        batch_screenshot(tmp_path, clip, lambda: False, lambda: clip)
+    assert not clip.exists()
+    assert not list(tmp_path.glob(".framewisp-capture-*"))
+
+
+# R-SESSION-7
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_recording_through_a_link_is_reserved(tmp_path: Path, link: str) -> None:
+    state = tmp_path / "session.json"
+    state.write_text("{}")
+    alias = tmp_path / "alias.mp4"
+    if link == "symlink":
+        alias.symlink_to(state)
+        path = alias.resolve()
+    else:
+        alias.hardlink_to(state)
+        path = alias
+    assert "reserved" in str(recording_path_error(tmp_path, path))
+
+
+# R-SESSION-7
+def test_a_looped_session_link_does_not_stop_a_screenshot(tmp_path: Path) -> None:
+    link = tmp_path / ACTIVE_RECORDING
+    link.symlink_to(link)
+    assert protected_path_error(tmp_path, tmp_path / "shot.png", None) is None
 
 
 # R-SESSION-7
@@ -108,9 +190,10 @@ def test_session_from_an_older_runner_keeps_screenshots_working(
     tmp_path: Path,
 ) -> None:
     """Without the key only the active destination goes unchecked."""
-    state: dict[str, object] = {}
-    assert screenshot_path_error(tmp_path, tmp_path / "clip.mp4", state) is None
-    error = screenshot_path_error(tmp_path, tmp_path / "session.json", state)
+    active = active_recording({})
+    assert active is None
+    assert capture_path_error(tmp_path, tmp_path / "clip.mp4", active) is None
+    error = capture_path_error(tmp_path, tmp_path / "session.json", active)
     assert "reserved" in str(error)
 
 

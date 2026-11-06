@@ -3699,7 +3699,7 @@ def test_batch_capture_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> 
     assert not list(tmp_path.glob(".framewisp-capture-*"))
 
 
-# R-REC-1
+# R-REC-1, R-REC-21
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_batch_capture_rejects_active_recording_destination(
@@ -3764,6 +3764,7 @@ def test_screenshot_rejects_session_files(demo: Demo, tmp_path: Path) -> None:
     private_clip = (session / ".active-recording").resolve()
     linked_clip = tmp_path / "linked.mp4"
     linked_clip.hardlink_to(private_clip)
+    contents = (session / "session.json").read_bytes()
     for path in (
         session / "session.json",
         alias,
@@ -3773,6 +3774,7 @@ def test_screenshot_rejects_session_files(demo: Demo, tmp_path: Path) -> None:
     ):
         assert "reserved for session files" in rejected_screenshot(demo, path)
         assert not path.read_bytes().startswith(b"\x89PNG"), path
+    assert (session / "session.json").read_bytes() == contents
     assert json.loads(cli(session, "status").stdout)["status"] == "running"
     cli(session, "record-stop")
     assert demo.recording is not None

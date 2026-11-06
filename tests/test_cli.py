@@ -11,6 +11,7 @@ import pytest
 
 from framewisp.layout import ConsolePanel
 from framewisp.lib import session_command
+from framewisp.session_files import SESSION_FILES
 
 
 def test_cli_help() -> None:
@@ -622,29 +623,8 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     assert destination.read_bytes() == b"keep this recording"
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        ".headless.lock",
-        ".headless-owner.json",
-        ".headless-owner.tmp",
-        "session.json",
-        ".session.json",
-        "app-exit.json",
-        ".app-exit.json",
-        "sway.log",
-        "wayvnc.log",
-        "recorder.log",
-        "app.log",
-        "console.jsonl",
-        "inputs.jsonl",
-        "activity.jsonl",
-        "captions.log",
-        "dbus.log",
-        "accessibility.log",
-        "registry.log",
-    ],
-)
+# R-SESSION-7
+@pytest.mark.parametrize("name", SESSION_FILES)
 def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None:
     session = tmp_path / "session"
     destination = session / name
