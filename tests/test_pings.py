@@ -249,8 +249,9 @@ def test_compaction_maps_pings_to_retained_frames(
     size = (SIZE[0] + (PANEL_WIDTH if console else 0), SIZE[1])
     shown = compacted_ring_frames(raw_video, size=size)
     first = source.index(math.ceil(4.25 * 30))
-    # The cut keeps the whole animation, not only its opening frames.
+    # The render keeps the whole animation, not only its opening frames.
     assert source[first + 14] == source[first] + 14
+    assert round(recording_duration(raw_video) * 30) == len(source)
     assert first <= min(shown) <= first + 1
     assert ring_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
         (600, 300), abs=1
