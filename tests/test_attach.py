@@ -605,38 +605,6 @@ def test_malformed_requests_leave_the_attachment_running(
     assert attach_process.poll() is None
 
 
-# R-SESSION-7
-def test_attached_screenshot_rejects_session_files(
-    tmp_path: Path, attach_process: subprocess.Popen[str]
-) -> None:
-    (tmp_path / "approve").touch()
-    assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
-    session = tmp_path / "session"
-    state = session / "session.json"
-    contents = state.read_bytes()
-    token = json.loads(contents)["attachment"]
-    dangling = tmp_path / "dangling.png"
-    dangling.symlink_to(session / "capture.log")
-    linked = tmp_path / "linked.png"
-    linked.hardlink_to(session / "inputs.jsonl")
-    for path in (state, dangling, linked):
-        request = {
-            "attachment": token,
-            "action": "screenshot",
-            "parameters": {"path": str(path)},
-        }
-        response = control_reply(session, (json.dumps(request) + "\n").encode())
-        assert response["status"] == 1
-        assert "reserved for session files" in cast(str, response["error"])
-    assert state.read_bytes() == contents
-    assert not (session / "capture.log").exists()
-    assert linked.read_bytes() == b""
-    assert request_attached(session, "key", {"chord": "a"}) == 0
-    assert attach_process.poll() is None
-
-
 # R-CONTROL-1, R-CONTROL-2
 def test_trickling_client_gets_a_reply_from_the_attachment(
     tmp_path: Path, attach_process: subprocess.Popen[str]

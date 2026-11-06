@@ -120,6 +120,17 @@ def resolved_request_path(path: Path, field: str) -> Path:
         raise ValueError(f"{field} is not a usable path: {failure}") from None
 
 
+def capture_path_error(destination: Path, recording: Path | None) -> str | None:
+    """Refuse the active recording's destination, which is no file until published."""
+    try:
+        path = resolved_request_path(destination, "path")
+    except ValueError as error:
+        return str(error)
+    if path == recording:
+        return f"{path} is the active recording's destination. Choose a new path."
+    return None
+
+
 def receive_request(
     connection: socket.socket,
     reject: Callable[[str], None],

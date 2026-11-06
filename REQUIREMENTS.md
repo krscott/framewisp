@@ -30,10 +30,6 @@ observable behaviour, not implementation, in short sentences.
 - **R-SESSION-6** [test] `run` refuses a session directory that the caller
   does not own or that group or others can write. It creates no file in that
   directory.
-- **R-SESSION-7** [test] A recording, `screenshot`, or batch capture rejects a
-  path that reaches a file framewisp owns in its own session directory, directly
-  or through a symlink or hard link. On headless and attached sessions, that file
-  stays unchanged and later commands keep working.
 
 ## Target app environment (ENV)
 

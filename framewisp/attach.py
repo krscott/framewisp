@@ -30,6 +30,7 @@ from gi.repository import GLib, Gst
 from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
+    capture_path_error,
     parse_command,
     receive_request,
     resolved_request_path,
@@ -38,7 +39,6 @@ from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
-from framewisp.session_files import protected_path_error
 from framewisp.tray import UNAVAILABLE, SharingIndicator
 
 
@@ -314,9 +314,7 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
             pipeline.set_state(Gst.State.NULL)
 
 
-def parse_attached_request(
-    line: bytes, attachment: str, session: Path
-) -> InputAction | Path:
+def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
     """Validate a request: a screenshot destination, or an input action."""
     command = parse_command(line)
     if command.get("attachment") != attachment:
@@ -340,7 +338,7 @@ def parse_attached_request(
         raise ValueError("screenshot requires an absolute path.")
     destination = resolved_request_path(Path(path), "path")
     # An attached session cannot record, so it has no active destination.
-    error = protected_path_error(session, destination, None)
+    error = capture_path_error(destination, None)
     if error is not None:
         raise ValueError(error)
     return destination
@@ -450,7 +448,7 @@ def _run_attachment(
                     pass
 
             def parse(line: bytes) -> InputAction | Path:
-                request = parse_attached_request(line, attachment, session)
+                request = parse_attached_request(line, attachment)
                 if not ready.is_set():
                     raise ValueError("Attach is waiting for desktop permission.")
                 return request

@@ -3779,33 +3779,17 @@ def test_screenshot_rejects_active_recording_destination(
     recording_frames(clip)
 
 
-# R-SESSION-7
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
-def test_screenshot_rejects_session_files(demo: Demo, tmp_path: Path) -> None:
-    session = demo.directory
-    alias = tmp_path / "state.json"
-    alias.symlink_to(session / "session.json")
-    linked_log = tmp_path / "linked.log"
-    linked_log.hardlink_to(session / "app.log")
-    private_clip = (session / ".active-recording").resolve()
-    linked_clip = tmp_path / "linked.mp4"
-    linked_clip.hardlink_to(private_clip)
-    contents = (session / "session.json").read_bytes()
-    for path in (
-        session / "session.json",
-        alias,
-        linked_log,
-        session / ".active-recording",
-        linked_clip,
-    ):
-        assert "reserved for session files" in rejected_screenshot(demo, path)
-        assert not path.read_bytes().startswith(b"\x89PNG"), path
-    assert (session / "session.json").read_bytes() == contents
-    assert json.loads(cli(session, "status").stdout)["status"] == "running"
-    cli(session, "record-stop")
-    assert demo.recording is not None
-    recording_frames(demo.recording)
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_screenshot_works_on_a_runner_without_the_recording_key(
+    demo: Demo, tmp_path: Path
+) -> None:
+    state_path = demo.directory / "session.json"
+    state = json.loads(state_path.read_text())
+    del state["recording"]
+    state_path.write_text(json.dumps(state))
+    cli(demo.directory, "screenshot", str(tmp_path / "shot.png"))
+    assert (tmp_path / "shot.png").read_bytes().startswith(b"\x89PNG")
 
 
 @pytest.mark.integration
