@@ -593,8 +593,11 @@ def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
         problem = str(error)
     if problem is not None:
         remuxed.unlink(missing_ok=True)
-        with log.open("a") as output:
-            output.write(f"Could not restore frames in {clip}: {problem}\n")
+        try:
+            with log.open("a", errors="backslashreplace") as output:
+                output.write(f"Could not restore frames in {clip}: {problem}\n")
+        except OSError:
+            pass  # The disk that failed the remux can also refuse this note.
         return False
     remuxed.replace(clip)
     return probe_clip(clip).duration is not None

@@ -117,21 +117,35 @@ def test_clip_with_no_measurable_duration_reports_null(
     assert summary["size_bytes"] == written.stat().st_size
 
 
+def fail_remux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str) -> None:
+    tools = tmp_path / "remux-tools"
+    tools.mkdir()
+    remuxer = tools / "ffmpeg"
+    remuxer.write_text(f"#!/bin/sh\n{script}\nexit 1\n")
+    remuxer.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+
+
 # R-REC-22
 def test_failed_frame_restore_is_logged_and_reports_null(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    tools = tmp_path / "remux-tools"
-    tools.mkdir()
-    remuxer = tools / "ffmpeg"
-    remuxer.write_text("#!/bin/sh\necho no space left >&2\nexit 1\n")
-    remuxer.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+    fail_remux(tmp_path, monkeypatch, "echo no space left >&2")
     summary = recorded_by_fake_recorder(tmp_path, ZERO_DURATION_CLIP)
     assert summary["duration_seconds"] is None
     assert (summary["width"], summary["height"]) == (16, 16)
     log = (tmp_path / "session" / "recorder.log").read_text()
     assert "no space left" in log
+
+
+# R-REC-22
+def test_failed_frame_restore_survives_an_unwritable_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "session" / "recorder.log"
+    fail_remux(tmp_path, monkeypatch, f"ln -sf /dev/full '{log}'")
+    summary = recorded_by_fake_recorder(tmp_path, ZERO_DURATION_CLIP)
+    assert summary["duration_seconds"] is None
 
 
 # R-REC-19
