@@ -171,3 +171,9 @@ observable behaviour, not implementation, in short sentences.
   terminal after the user types `ATTACH` exactly.
 - **R-ATTACH-2** [test] `attach` refuses a desktop runtime directory that is
   not private or not owned by the user.
+
+## Control requests (CONTROL)
+
+- **R-CONTROL-1** [test] A malformed control request gets an error reply.
+- **R-CONTROL-2** [test] A malformed control request leaves the session and its
+  app running.
