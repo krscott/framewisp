@@ -29,7 +29,6 @@ class Demo:
 
 
 WAIT_TIMEOUT_SECONDS = 10
-NEVER_RETURNED = object()
 
 
 def wait_description(caller: FrameInfo) -> str:
@@ -47,49 +46,21 @@ def wait_description(caller: FrameInfo) -> str:
     return "the condition"
 
 
-def wait_timeout_message(
-    caller: FrameInfo,
-    elapsed: float,
-    last_value: object,
-    last_exception: Exception | None,
-) -> str:
-    returned = "nothing" if last_value is NEVER_RETURNED else repr(last_value)
-    message = (
+def wait_timeout_message(caller: FrameInfo, elapsed: float, last_value: object) -> str:
+    return (
         f"Timed out after {elapsed:.1f} s at "
         f"{Path(caller.filename).name}:{caller.lineno} "
         f"waiting for: {wait_description(caller)}\n"
-        f"Last returned: {returned}"
+        f"Last returned: {last_value!r}"
     )
-    if last_exception is not None:
-        message += f"\nLast exception: {last_exception!r}"
-    return message
 
 
 def wait_until(predicate: Callable[[], object]) -> None:
-    """Poll until predicate is truthy.
-
-    Other exceptions are retried and reported on timeout. An AssertionError
-    propagates at once, so predicates can fail fast, such as when the app died.
-    """
     started = time.monotonic()
-    last_value = NEVER_RETURNED
-    last_exception: Exception | None = None
-    while True:
-        try:
-            last_value = predicate()
-        except AssertionError:
-            raise
-        except Exception as error:
-            last_exception = error
-        else:
-            if last_value:
-                return
+    while not (last_value := predicate()):
         elapsed = time.monotonic() - started
         if elapsed >= WAIT_TIMEOUT_SECONDS:
-            message = wait_timeout_message(
-                stack()[1], elapsed, last_value, last_exception
-            )
-            raise AssertionError(message) from last_exception
+            raise AssertionError(wait_timeout_message(stack()[1], elapsed, last_value))
         time.sleep(0.05)
 
 

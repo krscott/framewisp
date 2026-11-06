@@ -42,41 +42,27 @@ def test_timeout_names_a_named_predicate_and_its_last_value() -> None:
     assert "waiting for: ready\nLast returned: []" in str(failure.value)
 
 
-def test_timeout_reports_the_last_exception_and_chains_it(tmp_path: Path) -> None:
-    missing = tmp_path / "app.log"
-
-    with pytest.raises(AssertionError) as failure:
-        wait_until(lambda: "ready" in missing.read_text())
-
-    message = str(failure.value)
-    assert "Last returned: nothing\n" in message
-    assert "Last exception: FileNotFoundError(" in message
-    assert isinstance(failure.value.__cause__, FileNotFoundError)
-
-
-def test_exception_is_retried_until_the_predicate_succeeds(tmp_path: Path) -> None:
-    log = tmp_path / "app.log"
-
-    def predicate() -> bool:
-        if log.exists():
-            return True
-        log.write_text("ready\n")
-        raise ConnectionRefusedError
-
-    wait_until(predicate)
-
-
-def test_assertion_in_predicate_fails_without_waiting() -> None:
+@pytest.mark.parametrize("error", [ValueError("Bad state"), AssertionError("App died")])
+def test_predicate_exception_propagates_on_the_first_call(error: Exception) -> None:
     polls: list[int] = []
 
-    def app_alive() -> bool:
+    def raises() -> bool:
         polls.append(1)
-        raise AssertionError("App exited")
+        raise error
 
-    with pytest.raises(AssertionError, match="^App exited$"):
-        wait_until(app_alive)
+    with pytest.raises(type(error)) as failure:
+        wait_until(raises)
 
+    assert failure.value is error
     assert polls == [1]
+
+
+def test_truthy_value_ends_the_wait() -> None:
+    values = iter([[], 0, None, [1]])
+
+    wait_until(lambda: next(values))
+
+    assert list(values) == []
 
 
 def test_input_probe_wait_keeps_its_own_timeout_message(
