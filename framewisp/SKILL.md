@@ -418,7 +418,13 @@ framewisp demo record-stop
 
 Recording works only in headless sessions, requires even display dimensions,
 and produces silent MP4 video. Only one clip may be active. Normal runner
-shutdown also finalizes it. `--captions` selects what each clip captions: `keys`
+shutdown also finalizes it. The output file does not exist until the clip is
+finalized, so don't poll for it during recording. Framewisp records to a hidden
+`.framewisp-recording-*` directory beside it, so the output directory must be
+writable and support hard links. If another file takes the output path first,
+framewisp leaves that file alone, ends the session with an error, and names the
+kept clip. After a killed runner, `recover` prints the interrupted clip's path as
+`interrupted_recording`. `--captions` selects what each clip captions: `keys`
 (`key` and `type`, the default), `pointer` (`move`, `click`, `drag`, and `scroll`),
 `all`, or `none`. Use `--captions all` to show pointer gestures. `--no-captions`
 is shorthand for `--captions none`; combining the two is an error. A red ring also
