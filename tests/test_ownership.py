@@ -375,7 +375,7 @@ def pad_journal(session: Path, _: Path) -> None:
         journal.write(" " * (1 << 16))
 
 
-DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], None]] = {
+DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
     "nested-arrays": lambda s, _: (s / JOURNAL).write_text("[" * 200_000),
     "nested-arrays-under-size-limit": lambda s, _: (s / JOURNAL).write_text(
         "[" * 60_000
