@@ -103,6 +103,37 @@ def test_partial_record_does_not_end_active_span(logs: tuple[Path, Path]) -> Non
     ) == [(0, 1), (150, 300)]
 
 
+# R-LOG-7
+def test_only_text_after_the_last_newline_is_unfinished(tmp_path: Path) -> None:
+    log = tmp_path / "inputs.jsonl"
+    log.write_bytes(b'{"id": "a"}\n{"id": "b"}\n{"id": ')
+    assert [event["id"] for event in activity_events(log)] == ["a", "b"]
+    log.write_bytes(b"")
+    assert activity_events(log) == []
+
+
+# R-LOG-8
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        b'{"id": "bad"\n{"id": "a"}\n',
+        b"\n",
+        b"garbage\r\n",
+        # Not a line end in this format, so it can't hide the line as unfinished.
+        b"garbage\r" + b'{"id": "a"}\n',
+        b'{"text": "\xff"}\n',
+    ],
+)
+@pytest.mark.parametrize("unfinished", [b"", b'{"id": '])
+def test_malformed_complete_line_is_not_ignored(
+    tmp_path: Path, malformed: bytes, unfinished: bytes
+) -> None:
+    log = tmp_path / "inputs.jsonl"
+    log.write_bytes(b'{"id": "first"}\n' + malformed + unfinished)
+    with pytest.raises(ValueError):
+        activity_events(log)
+
+
 def test_activity_log_closes_cancelled_wait_without_retaining_content(
     tmp_path: Path,
 ) -> None:
