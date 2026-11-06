@@ -46,6 +46,7 @@ from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 from framewisp.ownership import (
     ACTIVE_RECORDING,
     headless_runtime,
+    interrupted_recording,
     refuse_abandoned_ownership,
     session_lease,
 )
@@ -388,11 +389,7 @@ def start_recording(
             finally:
                 stopped = time.monotonic()
         if process.returncode != 0:
-            raise log_failure(
-                f"Recorder failed to finalize {destination}. "
-                f"The incomplete clip remains at {clip}",
-                log,
-            )
+            raise log_failure(f"Recorder failed to finalize {destination}", log)
         failure = None
         if timed:
             try:
@@ -414,7 +411,7 @@ def start_recording(
     finally:
         if not capturing:
             shutil.rmtree(clip.parent, ignore_errors=True)
-        # A clip that remains stays linked for `recover`.
+        # A clip that remains stays linked until `Recordings.close` names it.
         if not clip.exists():
             active.unlink(missing_ok=True)
 
@@ -465,10 +462,9 @@ def publish_recording(clip: Path, destination: Path, failure: Exception | None) 
     try:
         destination.hardlink_to(clip)
     except OSError as error:
-        kept = f" The clip remains at {clip}." if clip.exists() else ""
         cause = f" {failure}" if failure is not None else ""
         raise RuntimeError(
-            f"Cannot save recording to {destination}: {error}.{kept}{cause}"
+            f"Cannot save recording to {destination}: {error}.{cause}"
         ) from None
     shutil.rmtree(clip.parent, ignore_errors=True)
     if failure is not None:
@@ -506,8 +502,6 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
         )
     if destination.exists():
         return f"{destination} already exists. Choose a new recording path."
-    if not destination.parent.is_dir():
-        return f"{destination} requires an existing parent directory."
     return None
 
 
@@ -609,10 +603,14 @@ class Recordings:
             if self.destination is not None:
                 self.last_summary = recording_summary(self.destination)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
-            raise SessionError(str(error)) from None
+            raise SessionError(self.with_kept_clip(str(error))) from None
         finally:
             self.process = None
             self.destination = None
+
+    def with_kept_clip(self, error: str) -> str:
+        clip = interrupted_recording(self.session)
+        return f"{error} The clip remains at {clip}." if clip is not None else error
 
 
 def session_command(
@@ -758,6 +756,10 @@ def handle_session_command(
                     for capture in (input_action.capture, input_action.failure_capture):
                         if capture is None:
                             continue
+                        if not capture.path.parent.is_dir():
+                            raise ValueError(
+                                "capture.path requires an existing parent directory."
+                            )
                         path_error = recording_path_error(
                             recordings.session, capture.path.resolve()
                         )

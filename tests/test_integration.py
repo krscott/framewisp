@@ -764,6 +764,30 @@ def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -
 
 
 @pytest.mark.integration
+def test_recording_into_new_session_directory(tmp_path: Path) -> None:
+    session = tmp_path / "session"
+    result = subprocess.run(
+        [
+            "framewisp",
+            str(session),
+            "run",
+            "--record",
+            str(session / "clip.mp4"),
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    recording_frames(session / "clip.mp4")
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("demo", [True], indirect=True)
 def test_recorder_failure_stops_session(demo: Demo) -> None:
     state = json.loads((demo.directory / "session.json").read_text())
@@ -774,6 +798,7 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
     assert demo.recording is not None
     assert not demo.recording.exists()
     assert str(private_clip(demo.recording.parent)) in " ".join(log.split())
+    assert not (demo.directory / ".active-recording").is_symlink()
     assert not demo.runtime.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -1596,7 +1621,7 @@ def test_record_multiple_clips_without_restarting_app(
         return result.stderr
 
     assert "No recording" in rejected("record-stop")
-    assert "existing parent directory" in rejected(
+    assert "Cannot record to" in rejected(
         "record-start", str(tmp_path / "missing" / "bad.mp4")
     )
     assert "reserved" in rejected("record-start", str(state_path))
@@ -3622,6 +3647,7 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {private_clip(tmp_path)}" in error
     assert "raw video remains" in error
     assert "captions.log" in error
+    assert not (demo.directory / ".active-recording").is_symlink()
     assert len(recording_frames(private_clip(tmp_path))) > 1
 
 

@@ -157,9 +157,8 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    nonblocking exclusive flock on the persistent `.headless.lock` (regular,
    single-link, private file, opened with O_NOFOLLOW). Refuse an existing
    `session.json` or ownership journal; ask the caller to recover abandoned
-   ownership first. Refuse existing recording destinations, destinations without
-   a parent directory, and paths reserved for session logs or metadata before
-   starting any children.
+   ownership first. Refuse existing recording destinations and paths reserved
+   for session logs or metadata before starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
 3. Choose `<tempdir>/framewisp-UID-DEVICEHEX-INODEHEX`, using Python's
    `tempfile.gettempdir()` (`TMPDIR` when writable, normally `/tmp` otherwise)
@@ -567,8 +566,8 @@ or protect against an app deliberately killing its supervisor.
 The runtime directory and `session.json` are removed; logs remain (R-LIFE-2).
 The recorder handles SIGTERM by flushing its encoder and MP4 trailer while Sway
 is still alive. A nonzero recorder exit during finalization names its
-destination, log, and incomplete private clip, which is not published. Socket EOF
-requests cleanup when its supervisor survives.
+destination and log. Its incomplete clip is not published. Socket EOF requests
+cleanup when its supervisor survives.
 
 `recover` acquires the same session lease without reading `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The
@@ -692,11 +691,12 @@ check cannot see it.
 
 The private directory is removed after publishing and after a failed or cancelled
 start. A finalized clip is published even when rendering failed (R-REC-10). A clip
-the recorder did not finalize stays private, and so does the directory, so an
-incomplete file never takes the requested path. If a file already holds the
-destination, the error names the private clip, includes any render failure, and
-the directory stays (R-REC-18). Both take the ordinary finalization failure path,
-which ends the session.
+the recorder did not finalize stays private, so an incomplete file never takes
+the requested path. If a file already holds the destination, the clip also stays
+private, and the error includes any render failure (R-REC-18). Both take the
+ordinary finalization failure path, which ends the session. `Recordings.close`
+adds the kept clip's path to any finalization error, so every such failure names
+it.
 
 Before starting the recorder, framewisp creates a file with the destination's
 name inside the private directory and hard-links it, so an unusable name or a
@@ -704,9 +704,10 @@ filesystem without hard links fails at clip start rather than after the capture
 (R-REC-19). There is no copy fallback, because a copy would make a partly written
 destination visible.
 
-While a private clip remains, the `.active-recording` symlink in the session
-directory points at it. A symlink is created atomically, so `recover` never reads
-a partial value. After a runner is killed, `recover` reports that path as
+During a clip, the `.active-recording` symlink in the session directory points at
+its private clip until the clip is published, discarded, or named in an error. A
+symlink is created atomically, so `recover` never reads a partial value. After a
+runner is killed, `recover` reports that path as
 `interrupted_recording` and removes the link. The directory and clip stay for the
 user to inspect or delete (R-REC-20). If no clip was written yet, `recover`
 removes the empty directory. Each private directory has a unique name, so a
@@ -834,7 +835,7 @@ command spans to clip stop. Captions show requested actions; they do not claim
 application acknowledgement. The video keeps its original idle and input timing.
 
 FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the
-requested output. Caption rendering uses a bundled Fontconfig configuration
+private clip. Caption rendering uses a bundled Fontconfig configuration
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
 remains and the command fails with the `captions.log` path. A single wrapper
