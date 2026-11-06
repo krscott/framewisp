@@ -24,9 +24,7 @@ def test_filesystem_without_hard_links_rejects_recording_at_start(
     session.mkdir()
     output = tmp_path / "output"
     output.mkdir()
-    recordings = Recordings(
-        session, {}, Event(), (1280, 720), ConsoleCapture(session)
-    )
+    recordings = Recordings(session, {}, Event(), (1280, 720), ConsoleCapture(session))
     error = recordings.start(output / "clip.mp4")
     assert error is not None
     assert "hard links" in error
