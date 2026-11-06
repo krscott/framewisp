@@ -18,6 +18,8 @@ from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
 JOURNAL = ".headless-owner.json"
+# Symlink to the private clip of the active or kept recording.
+ACTIVE_RECORDING = ".active-recording"
 # Far above any journal, whose runtime path fits in a 108-byte socket address, or
 # any session.json that recovery reads.
 MAX_METADATA_BYTES = 1 << 16
@@ -226,6 +228,13 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
         "  " + shlex.join(["rm", "-rf", "--", *(str(session / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
+    clip = kept_recording(session)
+    if clip is not None:
+        lines.insert(
+            -1,
+            f"An interrupted recording is kept at {str(clip)!r}. These steps do not "
+            f"touch it, and `{framewisp} recover` reports it afterwards.",
+        )
     return "\n".join(lines)
 
 
@@ -550,9 +559,40 @@ def recover_session(session: Path) -> int:
             remove_runtime(session, lease)
         for name in ("session.json", ".session.json", ".headless-owner.tmp", JOURNAL):
             (session / name).unlink(missing_ok=True)
-    print(
-        json.dumps(
-            {"session": str(session), "status": "recovered", "logs": "preserved"}
-        )
-    )
+        interrupted = interrupted_recording(session)
+    result: dict[str, str] = {
+        "session": str(session),
+        "status": "recovered",
+        "logs": "preserved",
+    }
+    if interrupted is not None:
+        result["interrupted_recording"] = str(interrupted)
+    print(json.dumps(result))
     return 0
+
+
+def kept_recording(session: Path) -> Path | None:
+    """Return the private clip that the active-recording link points at, if any."""
+    # Refusals call this, so a damaged link must not raise.
+    try:
+        clip = (session / ACTIVE_RECORDING).readlink()
+    except OSError:
+        return None
+    return None if path_status(clip) == "absent" else clip
+
+
+def interrupted_recording(session: Path) -> Path | None:
+    """Clear the active-recording link, returning the clip it left behind."""
+    link = session / ACTIVE_RECORDING
+    if not link.is_symlink():
+        return None
+    clip = link.readlink()
+    link.unlink()
+    if clip.exists():
+        return clip
+    # A runner killed before the first frame leaves an empty private directory.
+    try:
+        clip.parent.rmdir()
+    except OSError:
+        pass
+    return None

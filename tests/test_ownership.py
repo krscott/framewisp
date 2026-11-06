@@ -17,6 +17,7 @@ import pytest
 
 from framewisp.errors import SessionError
 from framewisp.ownership import (
+    ACTIVE_RECORDING,
     JOURNAL,
     LOCK,
     headless_runtime,
@@ -915,6 +916,95 @@ def test_unusable_tempdir_refusal_gives_working_manual_steps(
     run_commands(message, "rm ")
     assert not runtime.exists()
     assert recover_session(session) == 0
+
+
+def damage_journal(session: Path, _: Path) -> None:
+    (session / JOURNAL).write_text("{")
+
+
+def remove_journal(session: Path, _: Path) -> None:
+    (session / JOURNAL).unlink()
+
+
+def lose_lock(session: Path, _: Path) -> None:
+    replace_lock(session).unlink()
+
+
+def leave_supervisor_record(_: Path, runtime: Path) -> None:
+    (runtime / "owner-1.json").write_text("{}")
+
+
+# R-LIFE-7, R-REC-20
+@pytest.mark.parametrize(
+    "refuse",
+    [
+        damage_journal,
+        remove_journal,
+        lose_lock,
+        replace_runtime,
+        leave_supervisor_record,
+    ],
+)
+def test_refusal_reports_and_keeps_interrupted_recording(
+    abandoned: tuple[Path, Path],
+    refuse: Callable[[Path, Path], object],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session, runtime = abandoned
+    clip = tmp_path / "private clip" / "recording.mp4"
+    clip.parent.mkdir()
+    clip.write_text("frames")
+    link = session / ACTIVE_RECORDING
+    link.symlink_to(clip)
+    refuse(session, runtime)
+    with pytest.raises(
+        SessionError, match="Nothing was removed|nothing was removed"
+    ) as refusal:
+        recover_session(session)
+    message = str(refusal.value)
+    assert repr(str(clip)) in message
+    assert link.readlink() == clip
+    run_commands(message, "rm ")
+    assert link.is_symlink() and clip.read_text() == "frames"
+    capsys.readouterr()
+    assert recover_session(session) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["interrupted_recording"] == str(clip)
+    assert clip.read_text() == "frames"
+
+
+# R-LIFE-7
+def test_recording_link_cannot_add_manual_steps(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session, _ = abandoned
+    clip = tmp_path / "clip\n  rm -rf -- planted\n"
+    clip.write_text("frames")
+    (session / ACTIVE_RECORDING).symlink_to(clip)
+    (session / JOURNAL).write_text("{")
+    with pytest.raises(SessionError) as refusal:
+        recover_session(session)
+    assert "  rm -rf -- planted" not in str(refusal.value).splitlines()
+
+
+# R-LIFE-7
+@pytest.mark.parametrize("kind", ["regular-file", "directory", "dangling"])
+def test_unusable_recording_link_cannot_break_refusal(
+    abandoned: tuple[Path, Path], tmp_path: Path, kind: str
+) -> None:
+    session, _ = abandoned
+    link = session / ACTIVE_RECORDING
+    if kind == "regular-file":
+        link.write_text("not a link")
+    elif kind == "directory":
+        link.mkdir()
+    else:
+        link.symlink_to(tmp_path / "removed" / "recording.mp4")
+    (session / JOURNAL).write_text("{")
+    with pytest.raises(SessionError, match="Nothing was removed"):
+        recover_session(session)
+    assert link.exists() or link.is_symlink()
 
 
 # R-LIFE-7

@@ -44,7 +44,9 @@ from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 from framewisp.ownership import (
+    ACTIVE_RECORDING,
     headless_runtime,
+    kept_recording,
     refuse_abandoned_ownership,
     session_lease,
 )
@@ -318,7 +320,13 @@ def start_recording(
     compact: CompactSettings | None = None,
     layout: VideoLayout,
 ) -> Generator[OwnedProcess | None, None, None]:
-    """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
+    """Wait for the MP4 header before yielding; finalize while Sway is still alive.
+
+    Everything up to publishing works on a private clip, so nothing but
+    `publish_recording` can touch the destination.
+    """
+    clip = private_clip(destination)
+    active = log.parent / ACTIVE_RECORDING
     command = [
         "wf-recorder",
         "-o",
@@ -335,7 +343,7 @@ def start_recording(
         "-m",
         "mp4",
         "-f",
-        str(destination),
+        str(clip),
     ]
     timed = (
         captions != "none"
@@ -344,50 +352,123 @@ def start_recording(
         or compact is not None
     )
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
-    with (
-        recorder_output(log) as output,
-        managed_process(command, log=log, env=recorder_env, output=output) as process,
-    ):
-        deadline = time.monotonic() + 10
-        origin = 0.0
-        while not stop.is_set():
-            if process.poll() is not None:
-                raise log_failure("Recorder exited during startup", log)
-            # wf-recorder opens and writes the MP4 header after receiving a frame.
-            if destination.exists() and destination.stat().st_size > 0:
-                if not timed:
-                    break
-                try:
-                    origin = capture_origin(log)
-                    break
-                except RuntimeError:
-                    # The output reader may still be flushing the first frame event.
-                    pass
-            if time.monotonic() >= deadline:
-                raise log_failure("Waiting for recording to start timed out", log)
-            stop.wait(0.05)
-        else:
-            yield None
-            return
-        try:
-            yield process
-        finally:
-            stopped = time.monotonic()
-    if process.returncode != 0:
-        raise log_failure(f"Recorder failed to finalize {destination}", log)
-    if timed:
-        render_recording(
-            destination,
-            input_log=log.parent / "inputs.jsonl",
-            origin=origin,
-            stopped=stopped,
-            log=log.parent / "captions.log",
-            captions=captions,
-            click_pings=click_pings,
-            console=console,
-            compact=compact,
-            layout=layout,
+    capturing = False
+    try:
+        active.unlink(missing_ok=True)
+        active.symlink_to(clip)
+        with (
+            recorder_output(log) as output,
+            managed_process(
+                command, log=log, env=recorder_env, output=output
+            ) as process,
+        ):
+            deadline = time.monotonic() + 10
+            origin = 0.0
+            while not stop.is_set():
+                if process.poll() is not None:
+                    raise log_failure("Recorder exited during startup", log)
+                # wf-recorder opens and writes the MP4 header after receiving a frame.
+                if clip.exists() and clip.stat().st_size > 0:
+                    if not timed:
+                        break
+                    try:
+                        origin = capture_origin(log)
+                        break
+                    except RuntimeError:
+                        # The output reader may still be flushing the first frame event.
+                        pass
+                if time.monotonic() >= deadline:
+                    raise log_failure("Waiting for recording to start timed out", log)
+                stop.wait(0.05)
+            else:
+                yield None
+                return
+            capturing = True
+            try:
+                yield process
+            finally:
+                stopped = time.monotonic()
+        if process.returncode != 0:
+            raise log_failure(f"Recorder failed to finalize {destination}", log)
+        failure = None
+        if timed:
+            try:
+                render_recording(
+                    clip,
+                    input_log=log.parent / "inputs.jsonl",
+                    origin=origin,
+                    stopped=stopped,
+                    log=log.parent / "captions.log",
+                    captions=captions,
+                    click_pings=click_pings,
+                    console=console,
+                    compact=compact,
+                    layout=layout,
+                )
+            except RuntimeError as error:
+                failure = error
+        publish_recording(clip, destination, failure)
+    finally:
+        if not capturing:
+            shutil.rmtree(clip.parent, ignore_errors=True)
+        # A clip that remains stays linked, in case a later error hides its path.
+        if not clip.exists():
+            active.unlink(missing_ok=True)
+
+
+def private_clip(destination: Path) -> Path:
+    """Return an unused clip path that can later be linked to `destination`."""
+    try:
+        directory = Path(
+            tempfile.mkdtemp(prefix=".framewisp-recording-", dir=destination.parent)
         )
+    except OSError as error:
+        raise RuntimeError(f"Cannot record to {destination}: {error}") from None
+    try:
+        probe_destination(directory, destination)
+    except RuntimeError:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    return directory / "recording.mp4"
+
+
+def probe_destination(directory: Path, destination: Path) -> None:
+    """Fail now on anything that would otherwise stop publishing the finished clip."""
+    names = directory / "names"
+    probe = names / destination.name
+    link = directory / "link"
+    try:
+        names.mkdir()
+        probe.touch()
+        try:
+            link.hardlink_to(probe)
+        except OSError as error:
+            raise RuntimeError(
+                f"Cannot record to {destination}: its filesystem must support hard "
+                f"links, so a recording can never replace an existing file ({error}). "
+                "Choose a path on another filesystem."
+            ) from None
+        link.unlink()
+        shutil.rmtree(names)
+    except OSError as error:
+        raise RuntimeError(f"Cannot record to {destination}: {error}") from None
+
+
+def publish_recording(clip: Path, destination: Path, failure: Exception | None) -> None:
+    """Link a clip into place, which fails rather than replaces a file.
+
+    Report `failure` too, naming wherever the clip ended up.
+    """
+    try:
+        destination.hardlink_to(clip)
+    except OSError as error:
+        cause = f" {failure}" if failure is not None else ""
+        raise RuntimeError(
+            f"Cannot save recording to {destination}: {error}.{cause}"
+        ) from None
+    shutil.rmtree(clip.parent, ignore_errors=True)
+    if failure is not None:
+        raise RuntimeError(str(failure).replace(str(clip), str(destination)))
 
 
 def recording_path_error(session: Path, destination: Path) -> str | None:
@@ -397,6 +478,7 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
             ".headless.lock",
             ".headless-owner.json",
             ".headless-owner.tmp",
+            ACTIVE_RECORDING,
             "session.json",
             ".session.json",
             "app-exit.json",
@@ -521,10 +603,14 @@ class Recordings:
             if self.destination is not None:
                 self.last_summary = recording_summary(self.destination)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
-            raise SessionError(str(error)) from None
+            raise SessionError(self.with_kept_clip(str(error))) from None
         finally:
             self.process = None
             self.destination = None
+
+    def with_kept_clip(self, error: str) -> str:
+        clip = kept_recording(self.session)
+        return f"{error}\nThe clip remains at {clip}." if clip is not None else error
 
 
 def session_command(
@@ -680,6 +766,11 @@ def handle_session_command(
                         if path_error is not None:
                             raise ValueError(
                                 path_error.replace("recording path", "capture path")
+                            )
+                        if capture.path.resolve() == recordings.destination:
+                            raise ValueError(
+                                f"{capture.path} is the active recording's destination. "
+                                "Choose a new capture path."
                             )
                 else:
                     input_action = InputAction.parse(action, command.get("parameters"))

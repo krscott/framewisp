@@ -370,7 +370,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
 
 @keeps_raw_video
 def render_recording(
-    destination: Path,
+    clip: Path,
     /,
     *,
     input_log: Path,
@@ -395,7 +395,7 @@ def render_recording(
     if not entries and not pings and panel is None and compact is None:
         return
     with tempfile.TemporaryDirectory(
-        prefix=".framewisp-captions-", dir=destination.parent
+        prefix=".framewisp-captions-", dir=clip.parent
     ) as directory:
         work = Path(directory)
         with (work / "captions.ass").open("w", encoding="utf-8") as script:
@@ -434,7 +434,7 @@ def render_recording(
                         (input_log, input_log.parent / "activity.jsonl"),
                         origin=origin,
                         stopped=stopped,
-                        duration=recording_duration(destination),
+                        duration=recording_duration(clip),
                         settings=compact,
                         overlays=[(ping.start, ping.end) for ping in pings],
                     )
@@ -450,7 +450,7 @@ def render_recording(
                     "-v",
                     "warning",
                     "-i",
-                    str(destination),
+                    str(clip),
                     "-/filter:v",
                     "filters.txt",
                     "-c:v",
@@ -477,4 +477,4 @@ def render_recording(
             )
         if result.returncode:
             raise RuntimeError(f"FFmpeg exited with status {result.returncode}.")
-        (work / "captioned.mp4").replace(destination)
+        (work / "captioned.mp4").replace(clip)
