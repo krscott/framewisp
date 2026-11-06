@@ -759,6 +759,46 @@ def test_read_only_tmpdir_is_still_checked_for_runtime(
         temporary.chmod(0o700)
 
 
+# R-LIFE-7
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can write a read-only directory")
+def test_runtime_found_when_tmpdir_was_read_only_from_the_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured = tmp_path / "configured"
+    configured.mkdir(mode=0o500)
+    fallback = tmp_path / "fallback"
+    fallback.mkdir()
+    monkeypatch.setenv("TMPDIR", str(configured))
+    monkeypatch.setattr(tempfile, "tempdir", str(fallback))
+    session = tmp_path / "session"
+    session.mkdir()
+    runtime = runtime_path(session)
+    runtime.mkdir(mode=0o700)
+    (runtime / "owner-1.json").write_text("{}")
+    with pytest.raises(SessionError, match="journal is missing") as refusal:
+        recover_session(session)
+    assert f"rm -rf -- {runtime}" in str(refusal.value)
+
+
+# R-LIFE-7
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can search any directory")
+def test_inaccessible_tmpdir_still_gives_steps(
+    abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    (session / JOURNAL).write_text("{")
+    closed = tmp_path / "closed"
+    (closed / "temporary").mkdir(parents=True)
+    monkeypatch.setenv("TMPDIR", str(closed / "temporary"))
+    closed.chmod(0)
+    try:
+        with pytest.raises(SessionError, match="Nothing was removed") as refusal:
+            recover_session(session)
+        assert " stop`" in str(refusal.value) and str(runtime) in str(refusal.value)
+    finally:
+        closed.chmod(0o700)
+
+
 def refuse_tempdir() -> str:
     raise FileNotFoundError("No usable temporary directory found")
 

@@ -59,22 +59,34 @@ def runtime_path(session: Path) -> Path:
     return Path(tempfile.gettempdir()) / runtime_name(session)
 
 
-def temporary_parent() -> Path:
-    """Return where this session's runtime should be, for refusals and checks."""
-    configured = os.environ.get("TMPDIR")
+def temporary_parents() -> list[Path]:
+    """List where a session's runtime can be when no journal says which."""
+    # gettempdir() skips a directory it cannot write to, such as a full or read-only
+    # one, so a session may have started in any of these.
+    parents = [
+        Path(value).absolute() for value in (os.environ.get("TMPDIR"), "/tmp") if value
+    ]
     try:
-        usable = Path(tempfile.gettempdir())
+        parents.insert(0, Path(tempfile.gettempdir()))
     except OSError:
-        usable = None
-    # gettempdir() skips a TMPDIR it cannot write to, but a session may have started
-    # there before it became read-only.
-    if (
-        configured
-        and Path(configured).is_dir()
-        and (usable is None or not os.access(configured, os.W_OK))
-    ):
-        return Path(configured).absolute()
-    return usable or Path("/tmp")
+        pass
+    return list(dict.fromkeys(parents))
+
+
+def path_present(path: Path) -> bool:
+    """Report whether a path is there, unlike Path.exists() on a dangling symlink."""
+    try:
+        path.lstat()
+    except OSError:
+        return False
+    return True
+
+
+def likely_runtime(session: Path) -> Path:
+    """Find this session's runtime directory, for refusals and for checking leftovers."""
+    name = runtime_name(session)
+    runtimes = [parent / name for parent in temporary_parents()]
+    return next(filter(path_present, runtimes), runtimes[0])
 
 
 def check_socket_paths(runtime: Path) -> None:
@@ -232,7 +244,7 @@ def missing_session_steps(session: Path) -> str:
     # is gone. Nothing printable can identify it, and a starting session has no
     # marked process yet, so these steps must never single out a directory to delete.
     uid = os.getuid()
-    parent = shlex.quote(str(temporary_parent()))
+    parents = shlex.join(str(parent) for parent in temporary_parents())
     pattern = shlex.quote(f"framewisp-{uid}-*")
     environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/framewisp-{uid}-[0-9a-f-]+$")
     framewisp = shlex.join(["framewisp", "NEW_PATH", "recover"])
@@ -244,16 +256,16 @@ def missing_session_steps(session: Path) -> str:
         "If it was deleted, its processes and runtime directory may remain. A leftover "
         "directory only uses disk space, because a new session gets its own. Its name "
         "cannot be told from your other sessions'. To look for one, list the runtime "
-        f"directory names under {parent}, then the names running processes use, from "
+        f"directory names under {parents}, then the names running processes use, from "
         "outside any sandbox:\n"
-        f"  find {parent} -maxdepth 1 -name {pattern} -printf '%f\\n'\n"
+        f"  find {parents} -maxdepth 1 -name {pattern} -printf '%f\\n'\n"
         f"  LC_ALL=C grep -zahsoE {environment} /proc/*/environ | tr '\\0' '\\n' "
-        "| sed 's|.*/||' | sort -u\n"
-        "A name in the second list has a running process, which you can stop. A name "
-        "only in the first list does not prove the session is gone: a session that is "
-        "still starting looks the same, and owner-*.json records in it mean a session "
-        "may be live. Delete a directory only if you know it was this session's. If "
-        "unsure, leave it."
+        "| LC_ALL=C sed 's|.*/||' | sort -u\n"
+        "A name in the second list has running processes, which may be another "
+        "session's. A name only in the first list does not prove the session is gone: "
+        "a session that is still starting looks the same, and owner-*.json records in "
+        "it mean a session may be live. Stop processes or delete a directory only if "
+        "you know it was this session's. If unsure, leave it."
     )
 
 
@@ -263,7 +275,7 @@ def derived_steps(session: Path) -> str:
     # from an unverified one could also aim these steps at another session, so they
     # use the path derived from this session's identity.
     try:
-        runtime = temporary_parent() / runtime_name(session)
+        runtime = likely_runtime(session)
     except OSError:
         return missing_session_steps(session)
     return (
@@ -504,10 +516,8 @@ def recover_session(session: Path) -> int:
             # Before the first journal commit, no runtime or children may exist.
             # A partial temporary journal is disposable, but stale session JSON
             # without an ownership journal belongs to an unsupported older run.
-            runtime = temporary_parent() / runtime_name(session)
             if (
-                runtime.exists()
-                or runtime.is_symlink()
+                path_present(likely_runtime(session))
                 or (session / "session.json").exists()
                 or (session / "session.json").is_symlink()
                 or (session / ".session.json").exists()

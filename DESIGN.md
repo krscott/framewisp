@@ -598,9 +598,9 @@ failure removes nothing and prints manual cleanup steps (R-LIFE-7). A missing
 journal with resources remaining prints the same steps. Those steps use the runtime
 path derived from the session identity and the current TMPDIR, because a damaged
 journal cannot be trusted and a copied one could name another session. Running
-recover under the session's TMPDIR prints its real path. An existing `TMPDIR` that
-is no longer writable is still used, and without any usable temporary directory they
-fall back to `/tmp`. A lock that changes while the lease is acquired prints them too,
+recover under the session's TMPDIR prints its real path. `gettempdir()` skips a full
+or read-only directory, so these steps and the no-journal check look for the runtime
+in `gettempdir()`, `TMPDIR`, and `/tmp`. A lock that changes while the lease is acquired prints them too,
 and running recover again compares the new lock with the journal. A missing session
 directory has no identity to derive a name from, so those steps list runtime
 directory names and the names running processes use. They never single out a
