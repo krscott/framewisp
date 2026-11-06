@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 from types import FrameType
-from typing import Literal, cast, get_args
+from typing import Any, Literal, cast, get_args
 from xml.sax.saxutils import escape
 
 from framewisp.actions import InputAction
@@ -396,8 +396,9 @@ def start_recording(
         if process.returncode != 0:
             raise log_failure(f"Recorder failed to finalize {destination}", log)
         failure = None
-        if timed:
-            try:
+        try:
+            restore_hidden_frames(clip)
+            if timed:
                 render_recording(
                     clip,
                     input_log=log.parent / "inputs.jsonl",
@@ -410,8 +411,8 @@ def start_recording(
                     compact=compact,
                     layout=layout,
                 )
-            except RuntimeError as error:
-                failure = error
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
+            failure = error
         publish_recording(clip, destination, failure)
     finally:
         if not capturing:
@@ -510,7 +511,16 @@ def recording_path_error(session: Path, destination: Path) -> str | None:
     return None
 
 
-def recording_summary(destination: Path) -> dict[str, object]:
+@dataclass(frozen=True)
+class ClipProbe:
+    """What ffprobe measured. A clip can have no stream or container duration."""
+
+    duration: float | None
+    width: int | None
+    height: int | None
+
+
+def probe_clip(path: Path) -> ClipProbe:
     result = subprocess.run(
         [
             "ffprobe",
@@ -522,7 +532,7 @@ def recording_summary(destination: Path) -> dict[str, object]:
             "format=duration:stream=width,height",
             "-of",
             "json",
-            str(destination),
+            str(path),
         ],
         capture_output=True,
         text=True,
@@ -532,14 +542,58 @@ def recording_summary(destination: Path) -> dict[str, object]:
     )
     if result.returncode:
         raise SessionError(
-            f"Could not inspect recording {destination}: {result.stderr.strip()}"
+            f"Could not inspect recording {path}: {result.stderr.strip()}"
         )
-    data = json.loads(result.stdout)
+    data = cast(dict[str, Any], json.loads(result.stdout))
+    duration = data["format"].get("duration")
+    streams = cast(list[dict[str, Any]], data["streams"])
+    stream = streams[0] if streams else {}
+    return ClipProbe(
+        duration=float(duration) if duration is not None else None,
+        width=stream.get("width"),
+        height=stream.get("height"),
+    )
+
+
+def restore_hidden_frames(clip: Path) -> None:
+    """Remux a clip stopped so early that its edit list hides its frames (R-REC-3)."""
+    if probe_clip(clip).duration is not None:
+        return
+    remuxed = clip.with_name("remuxed.mp4")
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-ignore_editlist",
+            "1",
+            "-i",
+            str(clip),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(remuxed),
+        ],
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    if result.returncode:
+        # Nothing to restore: the clip has no frames at all (R-REC-22).
+        remuxed.unlink(missing_ok=True)
+        return
+    remuxed.replace(clip)
+
+
+def recording_summary(destination: Path) -> dict[str, object]:
+    probe = probe_clip(destination)
     return {
         "path": str(destination),
-        "duration_seconds": float(data["format"]["duration"]),
-        "width": data["streams"][0]["width"],
-        "height": data["streams"][0]["height"],
+        "duration_seconds": probe.duration,
+        "width": probe.width,
+        "height": probe.height,
         "size_bytes": destination.stat().st_size,
     }
 

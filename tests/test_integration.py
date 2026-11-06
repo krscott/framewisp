@@ -1632,12 +1632,14 @@ def test_record_multiple_clips_without_restarting_app(
     existing.write_bytes(b"keep")
     assert "already exists" in rejected("record-start", str(existing))
     assert existing.read_bytes() == b"keep"
+    # Rendering has its own tests, and its time depends on machine load.
+    unrendered = ("--no-captions", "--no-click-pings")
     for index in range(2):
         cli(demo.directory, "click", "120", "100")
         cli(demo.directory, "key", "Ctrl+a")
         cli(demo.directory, "type", f"Setup {index}")
         clip = tmp_path / f"clip {index}.mp4"
-        cli(demo.directory, "record-start", str(clip))
+        cli(demo.directory, "record-start", *unrendered, str(clip))
         assert not clip.exists()
         assert private_clip(tmp_path).stat().st_size > 0
         assert "recorder" in json.loads(state_path.read_text())["processes"]
@@ -1662,7 +1664,7 @@ def test_record_multiple_clips_without_restarting_app(
         cli(demo.directory, "screenshot", str(tmp_path / "between.png"))
 
     final_clip = tmp_path / "shutdown.mp4"
-    cli(demo.directory, "record-start", str(final_clip))
+    cli(demo.directory, "record-start", *unrendered, str(final_clip))
     demo.process.terminate()
     assert demo.process.wait(timeout=20) == 0
     recording_frames(final_clip)

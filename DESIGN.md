@@ -566,8 +566,12 @@ or protect against an app deliberately killing its supervisor.
 The runtime directory and `session.json` are removed; logs remain (R-LIFE-2).
 The recorder handles SIGTERM by flushing its encoder and MP4 trailer while Sway
 is still alive. A nonzero recorder exit during finalization names its
-destination and log. Its incomplete clip is not published. Socket EOF requests
-cleanup when its supervisor survives.
+destination and log. Its incomplete clip is not published. A clip stopped within
+moments of its first frame can get a zero-length edit list, which hides that
+frame and leaves no container duration, so finalization remuxes the private clip
+without the edit list before rendering (R-REC-3). A clip with no frames to restore
+is still published, with a null duration in its summary (R-REC-22). Socket EOF
+requests cleanup when its supervisor survives.
 
 `recover` acquires the same session lease without using `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The

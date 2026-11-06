@@ -161,6 +161,8 @@ observable behaviour, not implementation, in short sentences.
   links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports
   the path of the interrupted clip. That clip does not block later recordings.
+- **R-REC-22** [test] A finished clip with no measurable duration does not end
+  the session or fail shutdown. `record-stop` reports `duration_seconds` as `null`.
 
 ## Lifetime and recovery (LIFE)
 
