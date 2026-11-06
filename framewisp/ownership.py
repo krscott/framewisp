@@ -17,7 +17,7 @@ from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
 JOURNAL = ".headless-owner.json"
-# Symlink to the private clip of the active recording.
+# Symlink to the private clip of the active or kept recording.
 ACTIVE_RECORDING = ".active-recording"
 
 
