@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import re
@@ -10,7 +11,9 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from inspect import CO_GENERATOR, FrameInfo, currentframe, stack
 from pathlib import Path
+from types import FrameType
 from typing import Any, cast
 
 import pytest
@@ -26,10 +29,72 @@ class Demo:
     recording: Path | None
 
 
+WAIT_TIMEOUT_SECONDS = 10
+MAX_OBSERVED_CHARS = 1000
+
+
+def observe(predicate: Callable[[], bool], observed: dict[str, object]) -> bool:
+    """Run predicate, replacing observed with what its direct calls returned."""
+    observed.clear()
+    poller = currentframe()
+
+    def record(frame: FrameType, event: str, value: object) -> None:
+        name = frame.f_code.co_name
+        if (
+            event == "return"
+            and frame.f_back is not None
+            and frame.f_back.f_back is poller
+            and not frame.f_code.co_flags & CO_GENERATOR
+            and not name.startswith("__")
+        ):
+            observed[name] = value
+
+    previous = sys.getprofile()
+    sys.setprofile(record)
+    try:
+        return predicate()
+    finally:
+        sys.setprofile(previous)
+
+
+def wait_description(caller: FrameInfo) -> str:
+    for node in ast.walk(ast.parse(Path(caller.filename).read_text())):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "wait_until"
+            and node.lineno == caller.lineno
+        ):
+            argument = node.args[0]
+            return ast.unparse(
+                argument.body if isinstance(argument, ast.Lambda) else argument
+            )
+    return "the condition"
+
+
+def observation(name: str, value: object) -> str:
+    text = repr(value)
+    if len(text) > MAX_OBSERVED_CHARS:
+        text = f"...{text[-MAX_OBSERVED_CHARS:]}"
+    return f"\n  {name}() -> {text}"
+
+
+def wait_timeout_message(caller: FrameInfo, observed: dict[str, object]) -> str:
+    observations = "".join(observation(*item) for item in observed.items())
+    return (
+        f"Timed out after {WAIT_TIMEOUT_SECONDS} s at "
+        f"{Path(caller.filename).name}:{caller.lineno} "
+        f"waiting for: {wait_description(caller)}\n"
+        f"Last observed:{observations or ' no Python calls'}"
+    )
+
+
 def wait_until(predicate: Callable[[], bool]) -> None:
-    deadline = time.monotonic() + 10
-    while not predicate():
-        assert time.monotonic() < deadline, "Demo did not reach the expected state"
+    deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+    observed: dict[str, object] = {}
+    while not observe(predicate, observed):
+        if time.monotonic() >= deadline:
+            raise AssertionError(wait_timeout_message(stack()[1], observed))
         time.sleep(0.05)
 
 
