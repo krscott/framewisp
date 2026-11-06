@@ -63,9 +63,8 @@ def temporary_parents() -> list[Path]:
     """List where a session's runtime can be when no journal says which."""
     # gettempdir() skips a directory it cannot write to, such as a full or read-only
     # one, so a session may have started in any of these.
-    parents = [
-        Path(value).absolute() for value in (os.environ.get("TMPDIR"), "/tmp") if value
-    ]
+    values = (os.environ.get("TMPDIR"), "/tmp")
+    parents = [Path(value) for value in values if value and Path(value).is_absolute()]
     try:
         parents.insert(0, Path(tempfile.gettempdir()))
     except OSError:
@@ -73,20 +72,24 @@ def temporary_parents() -> list[Path]:
     return list(dict.fromkeys(parents))
 
 
-def path_present(path: Path) -> bool:
-    """Report whether a path is there, unlike Path.exists() on a dangling symlink."""
+def confirmed_absent(path: Path) -> bool:
+    # Only a confirmed absence may read as finished cleanup, so a path that cannot be
+    # checked counts as present. Path.exists() cannot tell these apart.
     try:
         path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return True
     except OSError:
         return False
-    return True
+    return False
 
 
 def likely_runtime(session: Path) -> Path:
     """Find this session's runtime directory, for refusals and for checking leftovers."""
     name = runtime_name(session)
     runtimes = [parent / name for parent in temporary_parents()]
-    return next(filter(path_present, runtimes), runtimes[0])
+    remaining = [runtime for runtime in runtimes if not confirmed_absent(runtime)]
+    return (remaining or runtimes)[0]
 
 
 def check_socket_paths(runtime: Path) -> None:
@@ -258,7 +261,7 @@ def missing_session_steps(session: Path) -> str:
         "cannot be told from your other sessions'. To look for one, list the runtime "
         f"directory names under {parents}, then the names running processes use, from "
         "outside any sandbox:\n"
-        f"  find {parents} -maxdepth 1 -name {pattern} -printf '%f\\n'\n"
+        f"  find -H {parents} -maxdepth 1 -name {pattern} -printf '%f\\n'\n"
         f"  LC_ALL=C grep -zahsoE {environment} /proc/*/environ | tr '\\0' '\\n' "
         "| LC_ALL=C sed 's|.*/||' | sort -u\n"
         "A name in the second list has running processes, which may be another "
@@ -517,7 +520,7 @@ def recover_session(session: Path) -> int:
             # A partial temporary journal is disposable, but stale session JSON
             # without an ownership journal belongs to an unsupported older run.
             if (
-                path_present(likely_runtime(session))
+                not confirmed_absent(likely_runtime(session))
                 or (session / "session.json").exists()
                 or (session / "session.json").is_symlink()
                 or (session / ".session.json").exists()

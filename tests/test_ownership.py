@@ -799,6 +799,65 @@ def test_inaccessible_tmpdir_still_gives_steps(
         closed.chmod(0o700)
 
 
+# R-LIFE-7
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can search any directory")
+def test_recovery_refuses_when_a_temporary_location_cannot_be_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / ".headless-owner.tmp").write_text("{")
+    closed = tmp_path / "closed"
+    (closed / "temporary").mkdir(parents=True)
+    monkeypatch.setenv("TMPDIR", str(closed / "temporary"))
+    closed.chmod(0)
+    try:
+        with pytest.raises(SessionError, match="journal is missing"):
+            recover_session(session)
+        assert (session / ".headless-owner.tmp").exists()
+    finally:
+        closed.chmod(0o700)
+    # Restored access confirms no runtime is there.
+    assert recover_session(session) == 0
+
+
+# R-LIFE-7
+def test_missing_session_listing_follows_symlinked_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    monkeypatch.setenv("TMPDIR", str(link))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    session = tmp_path / "session"
+    session.mkdir()
+    runtime = runtime_path(session)
+    runtime.mkdir(mode=0o700)
+    shutil.rmtree(session)
+    with pytest.raises(SessionError, match="does not exist") as refusal:
+        recover_session(session)
+    assert runtime.name in run_commands(str(refusal.value), "find ").splitlines()
+
+
+# R-LIFE-7
+def test_relative_tmpdir_with_deleted_cwd_still_gives_steps(
+    abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    (session / JOURNAL).write_text("{")
+    monkeypatch.setenv("TMPDIR", "relative")
+    monkeypatch.setattr(tempfile, "tempdir", str(runtime.parent))
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    cwd.rmdir()
+    with pytest.raises(SessionError, match="Nothing was removed") as refusal:
+        recover_session(session)
+    assert str(runtime) in str(refusal.value)
+
+
 def refuse_tempdir() -> str:
     raise FileNotFoundError("No usable temporary directory found")
 
