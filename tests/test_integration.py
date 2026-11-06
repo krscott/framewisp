@@ -21,8 +21,6 @@ from typing import Any, cast
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.session_files import SESSION_FILES
-
 # Startup clips, one session each: position, size in pixels, caption mode.
 CONSOLE_STARTS = {
     "console-left": ("left", 640, "keys"),
@@ -3779,20 +3777,6 @@ def test_screenshot_rejects_session_files(demo: Demo, tmp_path: Path) -> None:
     cli(session, "record-stop")
     assert demo.recording is not None
     recording_frames(demo.recording)
-
-
-# R-SESSION-7
-@pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
-def test_a_session_creates_only_listed_files(demo: Demo) -> None:
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "listed")
-    cli(demo.directory, "record-stop")
-    during = {path.name for path in demo.directory.iterdir() if not path.is_dir()}
-    cli(demo.directory, "stop")
-    assert demo.process.wait(timeout=20) == 0
-    after = {path.name for path in demo.directory.iterdir() if not path.is_dir()}
-    assert (during | after) - set(SESSION_FILES) == set()
 
 
 @pytest.mark.integration

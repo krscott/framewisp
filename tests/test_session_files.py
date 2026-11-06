@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Event
 
 import pytest
+from test_integration import Demo, cli, demo
 
 from framewisp import lib
 from framewisp.console import ConsoleCapture
@@ -15,6 +16,8 @@ from framewisp.lib import (
     screenshot_path_error,
 )
 from framewisp.session_files import SESSION_FILES, protected_path_error
+
+__all__ = ["demo"]
 
 ACTION = {"action": "move", "x": 0, "y": 0}
 
@@ -109,3 +112,17 @@ def test_session_from_an_older_runner_keeps_screenshots_working(
     assert screenshot_path_error(tmp_path, tmp_path / "clip.mp4", state) is None
     error = screenshot_path_error(tmp_path, tmp_path / "session.json", state)
     assert "reserved" in str(error)
+
+
+# R-SESSION-7
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_a_session_creates_only_listed_files(demo: Demo) -> None:
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "listed")
+    cli(demo.directory, "record-stop")
+    during = {path.name for path in demo.directory.iterdir() if not path.is_dir()}
+    cli(demo.directory, "stop")
+    assert demo.process.wait(timeout=20) == 0
+    after = {path.name for path in demo.directory.iterdir() if not path.is_dir()}
+    assert (during | after) - set(SESSION_FILES) == set()

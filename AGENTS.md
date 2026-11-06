@@ -61,6 +61,10 @@ affected module in `pyproject.toml`.
 which split cases across eight shards. Run `nix flake check` when changing how
 framewisp or its target apps get their environment.
 
+`tests/test_integration.py` also runs in those checks, where the test Python
+cannot import `framewisp`. Keep it black-box, and put tests that need the
+package in another file. Other test files can import its fixtures.
+
 Both type checkers must pass. Keep any necessary type-checking exceptions narrow
 and explain why they are needed.
 
