@@ -601,8 +601,9 @@ journal cannot be trusted and a copied one could name another session. Running
 recover under the session's TMPDIR prints its real path. `gettempdir()` skips a full
 or read-only directory, so these steps and the no-journal check look for the runtime
 in `gettempdir()`, `TMPDIR`, and `/tmp`. A location that cannot be checked counts as
-holding it, so recovery refuses, names it, and says to restore access or unset
-`TMPDIR`. A lock that changes while the lease is acquired prints them too,
+holding it, so recovery refuses, names it, and says to restore access. Unsetting
+`TMPDIR` only stops the check, so it is offered just for a session known not to have
+run there. A lock that changes while the lease is acquired prints them too,
 and running recover again compares the new lock with the journal. A missing session
 directory has no identity to derive a name from, so those steps list runtime
 directory names and the names running processes use. They never single out a

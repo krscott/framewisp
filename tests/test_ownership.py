@@ -815,8 +815,8 @@ def test_recovery_refuses_when_a_temporary_location_cannot_be_checked(
         with pytest.raises(SessionError, match="journal is missing") as refusal:
             recover_session(session)
         assert (session / ".headless-owner.tmp").exists()
-        assert "Restore access or unset TMPDIR" in " ".join(str(refusal.value).split())
-        # The printed fix clears the refusal without restoring access.
+        assert "Restore access, then" in " ".join(str(refusal.value).split())
+        # Nothing ran under this TMPDIR, so the printed alternative applies.
         monkeypatch.delenv("TMPDIR")
         assert recover_session(session) == 0
     finally:

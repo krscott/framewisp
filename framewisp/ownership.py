@@ -291,8 +291,9 @@ def derived_steps(session: Path) -> str:
     except OSError:
         return missing_session_steps(session)
     unchecked = (
-        f"Cannot check {runtime}, so a runtime may remain there. Restore access or "
-        "unset TMPDIR, then run recover again.\n"
+        f"Cannot check {runtime}, so a runtime may remain there. Restore access, then "
+        "run recover again. Unset TMPDIR instead only if you know this session never "
+        "ran there, because recover then stops checking it.\n"
         if path_status(runtime) == "unchecked"
         else ""
     )
