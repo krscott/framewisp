@@ -612,7 +612,8 @@ when the clip starts (R-REC-19).
 
 If another file appears at the output path during a clip, framewisp leaves that
 file alone, reports the path of the finished clip in the hidden directory, and
-ends the session like any other finalization failure (R-REC-18).
+ends the session like any other finalization failure (R-REC-18). If the recorder
+fails to finalize, the incomplete clip also stays there, and the error names it.
 
 The session runner owns the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;

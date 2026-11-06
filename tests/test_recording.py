@@ -34,7 +34,18 @@ def test_filesystem_without_hard_links_rejects_recording_at_start(
     assert not (session / "recorder.log").exists()
 
 
-def test_recover_ignores_a_link_to_a_removed_clip(tmp_path: Path) -> None:
+# R-REC-20
+def test_recover_removes_directory_of_a_clip_never_written(tmp_path: Path) -> None:
+    directory = tmp_path / ".framewisp-recording-unused"
+    directory.mkdir()
+    (tmp_path / ACTIVE_RECORDING).symlink_to(directory / "recording.mp4")
+    assert interrupted_recording(tmp_path) is None
+    assert not directory.exists()
+    assert not (tmp_path / ACTIVE_RECORDING).is_symlink()
+
+
+# R-REC-20
+def test_recover_ignores_a_link_to_a_removed_directory(tmp_path: Path) -> None:
     (tmp_path / ACTIVE_RECORDING).symlink_to(tmp_path / "removed" / "recording.mp4")
     assert interrupted_recording(tmp_path) is None
     assert not (tmp_path / ACTIVE_RECORDING).is_symlink()

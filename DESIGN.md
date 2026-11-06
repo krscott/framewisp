@@ -157,8 +157,9 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    nonblocking exclusive flock on the persistent `.headless.lock` (regular,
    single-link, private file, opened with O_NOFOLLOW). Refuse an existing
    `session.json` or ownership journal; ask the caller to recover abandoned
-   ownership first. Refuse existing recording destinations and paths reserved
-   for session logs or metadata before starting any children.
+   ownership first. Refuse existing recording destinations, destinations without
+   a parent directory, and paths reserved for session logs or metadata before
+   starting any children.
 2. Register SIGINT and SIGTERM handlers that request shutdown.
 3. Choose `<tempdir>/framewisp-UID-DEVICEHEX-INODEHEX`, using Python's
    `tempfile.gettempdir()` (`TMPDIR` when writable, normally `/tmp` otherwise)
@@ -566,9 +567,8 @@ or protect against an app deliberately killing its supervisor.
 The runtime directory and `session.json` are removed; logs remain (R-LIFE-2).
 The recorder handles SIGTERM by flushing its encoder and MP4 trailer while Sway
 is still alive. A nonzero recorder exit during finalization names its
-destination and log, and whatever it wrote is published. A killed recorder may
-leave an incomplete file. Socket EOF requests cleanup when its supervisor
-survives.
+destination, log, and incomplete private clip, which is not published. Socket EOF
+requests cleanup when its supervisor survives.
 
 `recover` acquires the same session lease without reading `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The
@@ -684,30 +684,33 @@ destination, so both share a filesystem. wf-recorder and `render_recording` work
 only on `recording.mp4` inside it. After finalization, `destination.hardlink_to`
 publishes the clip. That is the only write to the requested path, and `link(2)`
 fails rather than replaces, so no race window exists. Batch captures publish the
-same way. `recording_path_error` remains the early rejection for the common case.
+same way. `recording_path_error` is the early rejection for the common case.
 
 The destination therefore does not exist until finalization. Batch validation
 rejects the active recording's destination explicitly, because the existence
 check cannot see it.
 
 The private directory is removed after publishing and after a failed or cancelled
-start. Everything captured is published, including a raw clip after a failed
-render (R-REC-10) and a clip whose recorder failed to finalize. If a file already
-holds the destination, the error names the private clip and the directory stays
-(R-REC-18). This takes the ordinary finalization failure path, which ends the
-session.
+start. A finalized clip is published even when rendering failed (R-REC-10). A clip
+the recorder did not finalize stays private, and so does the directory, so an
+incomplete file never takes the requested path. If a file already holds the
+destination, the error names the private clip, includes any render failure, and
+the directory stays (R-REC-18). Both take the ordinary finalization failure path,
+which ends the session.
 
-Before starting the recorder, framewisp links a probe file inside the private
-directory, so a filesystem without hard links fails at clip start rather than
-after the capture (R-REC-19). There is no copy fallback, because a copy would make
-a partly written destination visible.
+Before starting the recorder, framewisp creates a file with the destination's
+name inside the private directory and hard-links it, so an unusable name or a
+filesystem without hard links fails at clip start rather than after the capture
+(R-REC-19). There is no copy fallback, because a copy would make a partly written
+destination visible.
 
-While a clip is active, the `.active-recording` symlink in the session directory
-points at its private clip. A symlink is created atomically, so `recover` never
-reads a partial value. After a runner is killed, `recover` reports that path as
+While a private clip remains, the `.active-recording` symlink in the session
+directory points at it. A symlink is created atomically, so `recover` never reads
+a partial value. After a runner is killed, `recover` reports that path as
 `interrupted_recording` and removes the link. The directory and clip stay for the
-user to inspect or delete (R-REC-20). Each private directory has a unique name,
-so a leftover never affects a later recording, even to the same destination.
+user to inspect or delete (R-REC-20). If no clip was written yet, `recover`
+removes the empty directory. Each private directory has a unique name, so a
+leftover never affects a later recording, even to the same destination.
 
 ## Capture decision
 

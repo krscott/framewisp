@@ -769,7 +769,11 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
     state = json.loads((demo.directory / "session.json").read_text())
     os.kill(state["processes"]["recorder"], signal.SIGKILL)
     assert demo.process.wait(timeout=20) != 0
-    assert "recorder.log" in (demo.directory.parent / "runner.log").read_text()
+    log = (demo.directory.parent / "runner.log").read_text()
+    assert "recorder.log" in log
+    assert demo.recording is not None
+    assert not demo.recording.exists()
+    assert str(private_clip(demo.recording.parent)) in " ".join(log.split())
     assert not demo.runtime.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -1596,6 +1600,9 @@ def test_record_multiple_clips_without_restarting_app(
         "record-start", str(tmp_path / "missing" / "bad.mp4")
     )
     assert "reserved" in rejected("record-start", str(state_path))
+    assert "File name too long" in rejected(
+        "record-start", str(tmp_path / f"{'x' * 300}.mp4")
+    )
     existing = tmp_path / "existing.mp4"
     existing.write_bytes(b"keep")
     assert "already exists" in rejected("record-start", str(existing))
@@ -2104,7 +2111,7 @@ def test_failed_ping_render_leaves_pings_only_clip_playable(
     assert str(clip) in " ".join(result.stderr.split())
     assert "captions.log" in result.stderr
     assert demo.process.wait(timeout=5) == 1
-    assert not list(clip.parent.glob(".framewisp-captions-*"))
+    assert not private_directories(clip.parent)
     assert len(recording_frames(clip)) > 1
     assert ring_frames(clip, 120, 100) == []
 
@@ -3591,6 +3598,46 @@ def test_finalizing_keeps_video_moved_onto_destination(
     assert len(recording_frames(kept)) > 1
 
 
+# R-REC-1, R-REC-18
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_collision_reports_render_failure_with_kept_clip(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    cli(demo.directory, "record-start", str(clip))
+    cli(demo.directory, "click", "120", "100")
+    clip.write_bytes(b"another client's file")
+    (demo.directory / "captions.log").mkdir()
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "stop"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert clip.read_bytes() == b"another client's file"
+    assert result.returncode == 1
+    error = " ".join(result.stderr.split())
+    assert f"The clip remains at {private_clip(tmp_path)}" in error
+    assert "raw video remains" in error
+    assert "captions.log" in error
+    assert len(recording_frames(private_clip(tmp_path))) > 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_stop_during_recording_start_removes_private_directory(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    with recorder_before_first_frame(demo, clip):
+        demo.process.terminate()
+    assert demo.process.wait(timeout=20) == 0
+    assert not private_directories(tmp_path)
+    assert not clip.exists()
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_failed_recording_start_removes_private_directory(
@@ -3620,21 +3667,22 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
     demo.process.kill()
     demo.process.wait(timeout=5)
 
-    def recovered() -> subprocess.CompletedProcess[str] | None:
-        result = subprocess.run(
-            ["framewisp", str(demo.directory), "recover"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=20,
-        )
-        return result if result.returncode == 0 else None
+    attempts: list[subprocess.CompletedProcess[str]] = []
 
-    deadline = time.monotonic() + 10
-    while (result := recovered()) is None:
-        assert time.monotonic() < deadline
-        time.sleep(0.05)
-    report = json.loads(result.stdout)
+    def recovered() -> bool:
+        attempts.append(
+            subprocess.run(
+                ["framewisp", str(demo.directory), "recover"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+        )
+        return attempts[-1].returncode == 0
+
+    wait_until(recovered)
+    report = json.loads(attempts[-1].stdout)
     assert report["status"] == "recovered"
     assert report["interrupted_recording"] == str(interrupted)
     assert interrupted.stat().st_size > 0

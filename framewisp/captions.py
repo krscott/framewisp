@@ -360,9 +360,8 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
         try:
             render(*args, **kwargs)
         except Exception as error:
-            raw_video = kwargs.get("published_as") or args[0]
             raise RuntimeError(
-                f"Recording rendering failed; raw video remains at {raw_video} without "
+                f"Recording rendering failed; raw video remains at {args[0]} without "
                 f"captions, click pings, console panel or cuts. See {kwargs['log']} and "
                 f"{kwargs['input_log']}. Cause: {error}"
             ) from error
@@ -372,7 +371,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
 
 @keeps_raw_video
 def render_recording(
-    destination: Path,
+    clip: Path,
     /,
     *,
     input_log: Path,
@@ -384,9 +383,7 @@ def render_recording(
     console: ConsoleCapture,
     compact: CompactSettings | None = None,
     layout: VideoLayout,
-    published_as: Path | None = None,
 ) -> None:
-    """Render over `destination`, or leave it raw and name `published_as`."""
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
         if captions != "none"
@@ -399,7 +396,7 @@ def render_recording(
     if not entries and not pings and panel is None and compact is None:
         return
     with tempfile.TemporaryDirectory(
-        prefix=".framewisp-captions-", dir=destination.parent
+        prefix=".framewisp-captions-", dir=clip.parent
     ) as directory:
         work = Path(directory)
         with (work / "captions.ass").open("w", encoding="utf-8") as script:
@@ -438,7 +435,7 @@ def render_recording(
                         (input_log, input_log.parent / "activity.jsonl"),
                         origin=origin,
                         stopped=stopped,
-                        duration=recording_duration(destination),
+                        duration=recording_duration(clip),
                         settings=compact,
                         overlays=[(ping.start, ping.end) for ping in pings],
                     )
@@ -454,7 +451,7 @@ def render_recording(
                     "-v",
                     "warning",
                     "-i",
-                    str(destination),
+                    str(clip),
                     "-/filter:v",
                     "filters.txt",
                     "-c:v",
@@ -481,4 +478,4 @@ def render_recording(
             )
         if result.returncode:
             raise RuntimeError(f"FFmpeg exited with status {result.returncode}.")
-        (work / "captioned.mp4").replace(destination)
+        (work / "captioned.mp4").replace(clip)

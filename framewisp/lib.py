@@ -388,28 +388,34 @@ def start_recording(
             finally:
                 stopped = time.monotonic()
         if process.returncode != 0:
-            raise log_failure(f"Recorder failed to finalize {destination}", log)
-        if timed:
-            render_recording(
-                clip,
-                input_log=log.parent / "inputs.jsonl",
-                origin=origin,
-                stopped=stopped,
-                log=log.parent / "captions.log",
-                captions=captions,
-                click_pings=click_pings,
-                console=console,
-                compact=compact,
-                layout=layout,
-                published_as=destination,
+            raise log_failure(
+                f"Recorder failed to finalize {destination}. "
+                f"The incomplete clip remains at {clip}",
+                log,
             )
+        failure = None
+        if timed:
+            try:
+                render_recording(
+                    clip,
+                    input_log=log.parent / "inputs.jsonl",
+                    origin=origin,
+                    stopped=stopped,
+                    log=log.parent / "captions.log",
+                    captions=captions,
+                    click_pings=click_pings,
+                    console=console,
+                    compact=compact,
+                    layout=layout,
+                )
+            except RuntimeError as error:
+                failure = error
+        publish_recording(clip, destination, failure)
     finally:
-        try:
-            if capturing:
-                publish_recording(clip, destination)
-            else:
-                shutil.rmtree(clip.parent, ignore_errors=True)
-        finally:
+        if not capturing:
+            shutil.rmtree(clip.parent, ignore_errors=True)
+        # A clip that remains stays linked for `recover`.
+        if not clip.exists():
             active.unlink(missing_ok=True)
 
 
@@ -421,32 +427,52 @@ def private_clip(destination: Path) -> Path:
         )
     except OSError as error:
         raise RuntimeError(f"Cannot record to {destination}: {error}") from None
-    probe = directory / "link-probe"
     try:
-        probe.touch()
-        (directory / "linked-probe").hardlink_to(probe)
-    except OSError as error:
+        probe_destination(directory, destination)
+    except RuntimeError:
         shutil.rmtree(directory, ignore_errors=True)
-        raise RuntimeError(
-            f"Cannot record to {destination}: its filesystem must support hard links, "
-            f"so a recording can never replace an existing file ({error}). Choose a "
-            "path on another filesystem."
-        ) from None
-    probe.unlink()
-    (directory / "linked-probe").unlink()
+        raise
     return directory / "recording.mp4"
 
 
-def publish_recording(clip: Path, destination: Path) -> None:
-    """Link a finished clip into place, which fails rather than replaces a file."""
+def probe_destination(directory: Path, destination: Path) -> None:
+    """Fail now on anything that would otherwise stop publishing the finished clip."""
+    names = directory / "names"
+    probe = names / destination.name
+    link = directory / "link"
+    try:
+        names.mkdir()
+        probe.touch()
+        try:
+            link.hardlink_to(probe)
+        except OSError as error:
+            raise RuntimeError(
+                f"Cannot record to {destination}: its filesystem must support hard "
+                f"links, so a recording can never replace an existing file ({error}). "
+                "Choose a path on another filesystem."
+            ) from None
+        link.unlink()
+        shutil.rmtree(names)
+    except OSError as error:
+        raise RuntimeError(f"Cannot record to {destination}: {error}") from None
+
+
+def publish_recording(clip: Path, destination: Path, failure: Exception | None) -> None:
+    """Link a clip into place, which fails rather than replaces a file.
+
+    Report `failure` too, naming wherever the clip ended up.
+    """
     try:
         destination.hardlink_to(clip)
     except OSError as error:
+        kept = f" The clip remains at {clip}." if clip.exists() else ""
+        cause = f" {failure}" if failure is not None else ""
         raise RuntimeError(
-            f"Cannot save recording to {destination}: {error}. "
-            f"The clip remains at {clip}."
+            f"Cannot save recording to {destination}: {error}.{kept}{cause}"
         ) from None
     shutil.rmtree(clip.parent, ignore_errors=True)
+    if failure is not None:
+        raise RuntimeError(str(failure).replace(str(clip), str(destination)))
 
 
 def recording_path_error(session: Path, destination: Path) -> str | None:
@@ -732,10 +758,6 @@ def handle_session_command(
                     for capture in (input_action.capture, input_action.failure_capture):
                         if capture is None:
                             continue
-                        if not capture.path.parent.is_dir():
-                            raise ValueError(
-                                "capture.path requires an existing parent directory."
-                            )
                         path_error = recording_path_error(
                             recordings.session, capture.path.resolve()
                         )

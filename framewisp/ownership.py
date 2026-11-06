@@ -327,4 +327,11 @@ def interrupted_recording(session: Path) -> Path | None:
         return None
     clip = link.readlink()
     link.unlink()
-    return clip if clip.exists() else None
+    if clip.exists():
+        return clip
+    # A runner killed before the first frame leaves an empty private directory.
+    try:
+        clip.parent.rmdir()
+    except OSError:
+        pass
+    return None
