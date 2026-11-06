@@ -218,6 +218,8 @@ def test_default_panel_keeps_its_text_capacity() -> None:
         ("right", -2, "positive even"),
         ("right", True, "positive even"),
         ("right", "640", "positive even"),
+        ("right", 16386, "at most 16384"),
+        pytest.param("top", 10**4400, "at most 16384", id="unformattable"),
         ("left", 388, "at least 390"),
         ("right", 2, "at least 390"),
         ("top", 134, "at least 136"),
@@ -301,6 +303,8 @@ def test_request_value_round_trips(raw: object, expected: ConsolePanel | None) -
         "right",
         {"position": "left"},
         {"position": "left", "size": 640, "extra": 1},
+        {"position": "left", "size": 16386},
+        pytest.param({"position": "left", "size": 10**4400}, id="unformattable"),
     ],
 )
 def test_request_value_rejects_other_shapes(raw: object) -> None:

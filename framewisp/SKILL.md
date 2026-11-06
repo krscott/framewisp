@@ -462,7 +462,7 @@ video edge. `--console-size PIXELS` sets the panel's width for left or right and
 height for top or bottom; the other dimension follows the GUI. The size must be even,
 and the panel needs at least 390 pixels of width and 136 of height, including the
 dimension that follows the GUI. Each video dimension is limited to 16384 pixels.
-A rejected `record-start` leaves the app running. If `--console` reports an older
+A rejected `record-start` leaves the app running. If `record-start` reports an older
 runner, restart the session.
 The GUI and screenshots keep their original dimensions. Panel lines show seconds
 relative to the clip; negative timestamps identify earlier output kept for context.

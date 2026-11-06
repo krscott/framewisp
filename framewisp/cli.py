@@ -203,7 +203,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--console",
             action="store_true",
-            help="append timestamped app stdout/stderr beside the recorded GUI",
+            help="add a panel of timestamped app stdout/stderr to the recorded video",
         )
         recording_parser.add_argument(
             "--console-position",

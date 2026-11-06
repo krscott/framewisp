@@ -1,7 +1,8 @@
 """Where the GUI and console panel sit in a recording's video.
 
-Only `video_layout` depends on the panel's position. Everything else reads its
-rectangles, so each overlay and FFmpeg's `pad` agree for every position.
+Only this module depends on the panel's position. Everything else reads the
+rectangles of a `VideoLayout`, so each overlay and FFmpeg's `pad` agree for every
+position.
 """
 
 from dataclasses import dataclass
@@ -44,6 +45,12 @@ class ConsolePanel:
             )
         if type(self.size) is not int or self.size <= 0:
             raise ValueError("--console-size must be a positive even integer.")
+        if self.size > MAX_VIDEO_DIMENSION:
+            # A request can hold an integer too long to format into a message.
+            raise ValueError(
+                f"--console-size must be at most {MAX_VIDEO_DIMENSION}, "
+                "the encoder's limit for a video dimension."
+            )
         if self.size % 2:
             # Yuv420p video needs even dimensions, and `pad` rounds odd offsets down.
             raise ValueError(

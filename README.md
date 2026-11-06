@@ -631,7 +631,7 @@ per clip. The size must be even, and the panel must hold at least 20 text column
 3 text rows, so at least 390 pixels wide and 136 tall, including the dimension that
 follows the GUI. The video can't exceed 16384 pixels in either dimension. A rejected
 `record-start` leaves the app running. Sessions started by an older framewisp version
-reject `--console`; restart the session to use it.
+reject `record-start`; restart the session.
 
 The GUI keeps its original size, coordinates, and screenshots. Console lines show
 seconds relative to the clip's first frame. A short tail of earlier output provides

@@ -550,10 +550,10 @@ def session_command(
             "This runner does not support caption modes. Restart the session "
             "with this version of framewisp."
         )
-    if console is not None and state.get("console_panels") is not True:
+    if action == "record-start" and state.get("console_panels") is not True:
         raise SessionError(
-            "This runner does not support console panel options. Restart the session "
-            "with this version of framewisp."
+            "This runner does not support console panel requests. Restart the "
+            "session with this version of framewisp."
         )
     if compact is not None and state.get("compact_recording") is not True:
         raise SessionError(

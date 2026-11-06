@@ -74,6 +74,10 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
         (["--console-size", "0"], "positive integer"),
         (["--console-size", "-2"], "--console-size"),
         (["--console-size", "641"], "use 642 instead of 641"),
+        (["--console-size", "16386"], "at most 16384"),
+        pytest.param(
+            ["--console-size", "9" * 4299 + "8"], "at most 16384", id="unformattable"
+        ),
         (["--console-size", "388"], "at least 390"),
         (["--console-position", "top", "--console-size", "134"], "at least 136"),
     ],
@@ -105,7 +109,7 @@ def test_recording_rejects_invalid_panels_before_any_clip(
             ["--width", "320", "--height", "240", "--console-position", "bottom"],
             ["320x240", "wider"],
         ),
-        (["--console-size", "16000"], ["16384", "smaller --console-size"]),
+        (["--console-size", "16000"], ["17280x720", "smaller --console-size"]),
     ],
 )
 def test_run_rejects_a_panel_the_display_cannot_hold(
@@ -208,7 +212,9 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
 
 def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps({"control_protocol": 1, "caption_modes": True})
+        json.dumps(
+            {"control_protocol": 1, "caption_modes": True, "console_panels": True}
+        )
     )
     result = subprocess.run(
         [
@@ -230,9 +236,10 @@ def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
     assert "Traceback" not in result.stderr
 
 
+@pytest.mark.parametrize("options", [[], ["--console"]])
 @pytest.mark.parametrize("capability", [None, False, 1])
-def test_console_rejects_unsupported_runner_before_connecting(
-    tmp_path: Path, capability: object
+def test_record_start_rejects_runner_without_console_panels_before_connecting(
+    tmp_path: Path, capability: object, options: list[str]
 ) -> None:
     state: dict[str, object] = {
         "control_protocol": 1,
@@ -250,7 +257,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
             "framewisp",
             str(tmp_path),
             "record-start",
-            "--console",
+            *options,
             str(destination),
         ],
         capture_output=True,
@@ -259,8 +266,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "does not support console panel options. Restart" in result.stderr
-    assert "Traceback" not in result.stderr
+    assert "does not support console panel requests. Restart" in result.stderr
     assert "Traceback" not in result.stderr
     assert not destination.exists()
 
@@ -272,6 +278,7 @@ def test_default_clip_rejects_runner_without_click_pings(
     state: dict[str, object] = {
         "control_protocol": 1,
         "caption_modes": True,
+        "console_panels": True,
         "runtime_directory": str(tmp_path),
     }
     if capability is not None:

@@ -1888,25 +1888,26 @@ def test_rejected_console_panel_leaves_the_app_running(
 ) -> None:
     wait_for_input_probe_window(demo)
     rejected = tmp_path / "rejected.mp4"
-    result = subprocess.run(
-        [
-            "framewisp",
-            str(demo.directory),
-            "record-start",
-            "--console",
-            "--console-size",
-            "16000",
-            str(rejected),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=20,
-    )
-    assert result.returncode != 0
-    assert "16384" in result.stderr
-    assert "--console-size" in result.stderr
-    assert not rejected.exists()
+    for size in ("16000", "9" * 4299 + "8"):
+        result = subprocess.run(
+            [
+                "framewisp",
+                str(demo.directory),
+                "record-start",
+                "--console",
+                "--console-size",
+                size,
+                str(rejected),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert result.returncode != 0
+        assert "16384" in result.stderr
+        assert "--console-size" in result.stderr
+        assert not rejected.exists()
     for value, message in (
         (True, "console must be null or an object"),
         ({"position": "left"}, "console requires only position and size"),
@@ -1914,6 +1915,7 @@ def test_rejected_console_panel_leaves_the_app_running(
         ({"position": "left", "size": 641}, "must be even"),
         ({"position": "left", "size": True}, "positive even"),
         ({"position": "left", "size": 2}, "at least 390"),
+        ({"position": "left", "size": int("9" * 4300)}, "at most 16384"),
     ):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(demo.runtime / "control.sock"))
