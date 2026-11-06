@@ -974,6 +974,42 @@ def test_refusal_reports_and_keeps_interrupted_recording(
     assert clip.read_text() == "frames"
 
 
+def corrupt_lock(session: Path) -> None:
+    (session / LOCK).unlink()
+    (session / LOCK).mkdir()
+
+
+def open_session_permissions(session: Path) -> None:
+    session.chmod(0o777)
+
+
+def record_stale_attachment(session: Path) -> None:
+    (session / JOURNAL).unlink()
+    (session / "session.json").write_text('{"kind": "attached"}')
+
+
+# R-LIFE-7, R-REC-20
+@pytest.mark.parametrize(
+    "refuse", [corrupt_lock, open_session_permissions, record_stale_attachment]
+)
+def test_early_refusals_report_interrupted_recording(
+    abandoned: tuple[Path, Path],
+    refuse: Callable[[Path], object],
+    tmp_path: Path,
+) -> None:
+    session, _ = abandoned
+    clip = tmp_path / "recording.mp4"
+    clip.write_text("frames")
+    link = session / ACTIVE_RECORDING
+    link.symlink_to(clip)
+    refuse(session)
+    with pytest.raises(SessionError) as refusal:
+        recover_session(session)
+    session.chmod(0o700)
+    assert repr(str(clip)) in str(refusal.value)
+    assert link.readlink() == clip and clip.read_text() == "frames"
+
+
 # R-LIFE-7
 def test_recording_link_cannot_add_manual_steps(
     abandoned: tuple[Path, Path], tmp_path: Path

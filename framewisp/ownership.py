@@ -135,6 +135,17 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     return runtime
 
 
+def kept_recording_note(session: Path) -> str:
+    clip = kept_recording(session)
+    if clip is None:
+        return ""
+    recover = shlex.join(["framewisp", str(session), "recover"])
+    return (
+        f"\nAn interrupted recording is kept at {str(clip)!r}. These steps do not touch "
+        f"it, and a successful `{recover}` reports it."
+    )
+
+
 def unusable_lock(lock: Path, problem: str) -> str:
     recover = shlex.join(["framewisp", str(lock.parent), "recover"])
     links = shlex.join(["find", str(lock.parent), "-samefile", str(lock)])
@@ -146,7 +157,7 @@ def unusable_lock(lock: Path, problem: str) -> str:
         "aside. "
         f"Then run `{recover}`, which checks the lock against the session's "
         "ownership journal and reports what to do next."
-    )
+    ) + kept_recording_note(lock.parent)
 
 
 @contextmanager
@@ -162,6 +173,7 @@ def session_lease(session: Path) -> Generator[int, None, None]:
     ):
         raise SessionError(
             f"Unsafe session directory: {session}. Use a directory you own without group or other write permission (chmod 700)."
+            + kept_recording_note(session)
         )
     lock = session / LOCK
     try:
@@ -228,14 +240,7 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
         "  " + shlex.join(["rm", "-rf", "--", *(str(session / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
-    clip = kept_recording(session)
-    if clip is not None:
-        lines.insert(
-            -1,
-            f"An interrupted recording is kept at {str(clip)!r}. These steps do not "
-            f"touch it, and `{framewisp} recover` reports it afterwards.",
-        )
-    return "\n".join(lines)
+    return "\n".join(lines) + kept_recording_note(session)
 
 
 def read_metadata(path: Path) -> object:
@@ -366,7 +371,7 @@ def stale_attachment(session: Path) -> str:
         "Nothing was removed.\n"
         "If the attachment is running, stop it with `framewisp --detach`.\n"
         f"Otherwise attach again, or delete its metadata:\n  {metadata}"
-    )
+    ) + kept_recording_note(session)
 
 
 def verify_lock(session: Path, recorded: list[int], runtime: Path, lease: int) -> None:
