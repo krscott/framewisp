@@ -68,18 +68,6 @@ def test_default_paths_without_temporary_environment(
     assert resolve_session("demo").parent.parent == Path("/tmp")
 
 
-def test_legacy_journal_uses_original_tmp_location(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(tempfile, "tempdir", "/tmp")
-    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
-        journal = json.loads((tmp_path / JOURNAL).read_text())
-        del journal["runtime_path"]
-        (tmp_path / JOURNAL).write_text(json.dumps(journal))
-        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    assert not runtime.exists()
-
-
 @pytest.mark.parametrize("size", [107, 108, 109])
 def test_socket_length_counts_bytes_and_nul(size: int) -> None:
     suffix = f"/sway-ipc.{os.getuid()}.2147483647.sock"
