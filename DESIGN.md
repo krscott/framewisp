@@ -788,18 +788,20 @@ and has the owner's parser turn it into a typed request. Neither changes session
 state, so every failure there gets an error reply and the session continues
 (R-CONTROL-1, R-CONTROL-2). That holds for any command, and for a request the
 owner cannot read or decode. A client has `REQUEST_SECONDS` in total to send its
-line, however slowly it sends, so it cannot hold the runner's control loop. A
-failure to log a validator bug does not end the session either. Resolving a
+line, however slowly it sends, so one connection holds the runner's control loop
+for no longer than that. A failure to log a validator bug does not end the session either. Resolving a
 requested path refuses a NUL byte and
 any lone surrogate that the filesystem encoding cannot represent. The surrogates
 that stand for undecodable filename bytes stay valid, so a non-UTF-8 destination
 records normally. `REJECTED_REQUEST` lists what validators raise for a bad request, and
 the reply carries that message. Any other exception there is a validator bug: the
-reply names its type, and the traceback goes to the runner's stderr without the
+reply names its type, and the traceback goes to the owner's stderr without the
 message, which can quote typed text. In the runner, an error during execution that
 is not returned as a reply is a runner failure and ends the session, even if it is
 a `ValueError`. An attachment's execution keeps its own rule: a `ValueError` or
-cancellation is that command's reply, and anything else closes the portal.
+cancellation is that command's reply, and anything else closes the portal. So a
+screenshot opens its destination before capture starts, and failing to open it is
+that command's error.
 
 `record-stop` returns a summary in `data`, printed as JSON by the CLI. After
 finalization and caption rendering, ffprobe supplies duration and dimensions;
@@ -1081,7 +1083,8 @@ the latter records kind, the runtime directory, an attachment token, and the PID
 for inspection. Commands carry the token, so stale session metadata cannot direct
 input to a later attachment using the same global socket.
 
-`connection.py` sends newline-delimited JSON requests over control.sock. A listener
+`connection.py` sends newline-delimited JSON requests over control.sock and shares
+the request stage with the runner (see Recording controls). A listener
 thread accepts requests; workers serialize actions with a lock. Before portal
 consent they reject input. Paced actions and queued workers check a shared stop
 Event. Unexpected worker errors stop access and print a traceback. Shutdown closes

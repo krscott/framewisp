@@ -1,7 +1,7 @@
 """Share an existing desktop without owning its app or compositor processes."""
 
 # pyright: reportMissingModuleSource=false
-# Required command fields are validated by argparse before socket dispatch.
+# `parse_attached_request` validates required command fields before `perform`.
 # pyright: reportTypedDictNotRequiredAccess=false
 
 import json
@@ -12,6 +12,7 @@ import shlex
 import signal
 import socket
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -55,7 +56,6 @@ class InputParameters(TypedDict, total=False):
     text: str
     interval: float
     chord: str
-    path: str
 
 
 # Linux evdev keycodes for the tested desktop's US layout.
@@ -110,7 +110,7 @@ class AttachedInput:
         self.buttons: set[int] = set()
 
     def wait(self, seconds: float = 0) -> None:
-        if self.stop.wait(seconds):
+        if self.stop.wait(min(seconds, threading.TIMEOUT_MAX)):
             raise InterruptedError("Attached session disconnected; input cancelled.")
 
     def key(self, code: int, pressed: bool) -> None:
@@ -226,6 +226,16 @@ class AttachedInput:
 
 
 def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+    try:
+        output = destination.open("wb")
+    except OSError as error:
+        # A bad destination fails this command, not the attachment.
+        raise ValueError(f"Cannot save screenshot to {destination}: {error}") from None
+    with output:
+        capture_to(portal, output.fileno(), stop, log)
+
+
+def capture_to(portal: DesktopPortal, output: int, stop: Event, log: Path) -> None:
     # Capture lives in the owner process: even SIGKILL closes every capture FD.
     Gst.init(None)
     descriptor = portal.capture_fd()
@@ -233,7 +243,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
     try:
         pipeline = Gst.parse_launch(
             "pipewiresrc name=source num-buffers=1 ! videoconvert ! "
-            "pngenc snapshot=true ! filesink name=sink"
+            "pngenc snapshot=true ! fdsink name=sink"
         )
         assert isinstance(pipeline, Gst.Bin)
         source = pipeline.get_by_name("source")
@@ -241,7 +251,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         assert source is not None and sink is not None
         source.set_property("fd", descriptor)
         source.set_property("path", str(portal.node))
-        sink.set_property("location", str(destination))
+        sink.set_property("fd", output)
         bus = pipeline.get_bus()
         assert bus is not None
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
@@ -278,16 +288,16 @@ def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
         raise ValueError("action must be a string.")
     if action.startswith("record-"):
         raise ValueError("Recording attached sessions is not supported yet.")
-    parameters = command.get("parameters")
+    raw = command.get("parameters")
+    if not isinstance(raw, dict):
+        raise ValueError("Input requires an action and parameters object.")
+    parameters = cast(dict[str, object], raw)
     if action != "screenshot":
-        return InputAction.parse(action, parameters)
-    path = (
-        cast(dict[str, object], parameters).get("path")
-        if isinstance(parameters, dict)
-        else None
-    )
-    if not isinstance(path, str):
-        raise ValueError("screenshot requires a path.")
+        defaults: dict[str, object] = {"modifier": []}
+        return InputAction.parse(action, defaults | parameters)
+    path = parameters.get("path")
+    if not isinstance(path, str) or not Path(path).is_absolute():
+        raise ValueError("screenshot requires an absolute path.")
     return resolved_request_path(Path(path), "path")
 
 

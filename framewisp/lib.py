@@ -33,9 +33,7 @@ from framewisp.compact import CompactSettings
 from framewisp.connection import (
     parse_command,
     receive_request,
-)
-from framewisp.connection import reply as reply
-from framewisp.connection import (
+    reply,
     resolved_request_path,
 )
 from framewisp.console import ConsoleCapture, app_output

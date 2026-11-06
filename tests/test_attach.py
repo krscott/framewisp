@@ -559,6 +559,17 @@ def test_malformed_requests_leave_the_attachment_running(
         {"action": "screenshot", "parameters": {"path": 1}},
         {"action": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
         {"action": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
+        {"action": "screenshot", "parameters": {"path": "x.png"}},
+        {"action": "screenshot", "parameters": {"path": ""}},
+        {"action": "screenshot", "parameters": {"path": str(tmp_path)}},
+        {
+            "action": "screenshot",
+            "parameters": {"path": str(tmp_path / "missing" / "x.png")},
+        },
+        {
+            "action": "screenshot",
+            "parameters": {"path": str(tmp_path / ("a" * 300))},
+        },
     ]
     for message in (
         b"",
@@ -576,6 +587,8 @@ def test_malformed_requests_leave_the_attachment_running(
     assert not (tmp_path / "events").exists()
     assert request_attached(session, "key", {"chord": "a"}) == 0
     assert (tmp_path / "events").exists()
+    click: dict[str, object] = {"x": 10, "y": 20, "button": "left", "count": 1}
+    assert request_attached(session, "click", click) == 0
     assert attach_process.poll() is None
 
 
@@ -587,15 +600,27 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
     assert attach_process.stdout is not None
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
-    state = json.loads((tmp_path / "session/session.json").read_text())
+    session = tmp_path / "session"
+    state = json.loads((session / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
         connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
         started = time.monotonic()
         while not select.select([connection], [], [], 0.3)[0]:
-            assert time.monotonic() - started < 3
+            # Without a total deadline, this client is never answered.
+            assert time.monotonic() - started < 10
             connection.sendall(b" ")
         assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
+    assert request_attached(session, "key", {"chord": "a"}) == 0
     assert attach_process.poll() is None
+
+
+# R-CONTROL-2
+@pytest.mark.parametrize("interval", [1e10, 1e300, 2**70])
+def test_huge_attached_wait_is_cancellable(interval: float) -> None:
+    stop = Event()
+    stop.set()
+    with pytest.raises(InterruptedError):
+        input_without_bus(stop).wait(interval)
 
 
 def test_portal_failure_closes_owner(

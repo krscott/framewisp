@@ -11,11 +11,17 @@ from typing import cast
 
 import pytest
 
+from framewisp import connection
 from framewisp.actions import InputAction
 from framewisp.console import ConsoleCapture
 from framewisp.errors import SessionError, display_command
 from framewisp.inputs import InputWorker
-from framewisp.lib import Recordings, handle_session_command, recording_summary
+from framewisp.lib import (
+    Recordings,
+    handle_session_command,
+    parse_batch,
+    recording_summary,
+)
 
 SECRET = "typed secret"
 
@@ -98,21 +104,29 @@ def test_validator_bug_is_reported_without_ending_the_session(
 
 
 class BrokenStderr:
+    def __init__(self, failure: Exception) -> None:
+        self.failure = failure
+
     def write(self, text: str) -> int:
-        raise BrokenPipeError("stderr closed")
+        raise self.failure
 
 
 # R-CONTROL-1, R-CONTROL-2
+@pytest.mark.parametrize(
+    "failure",
+    [BrokenPipeError("stderr closed"), ValueError("I/O operation on closed file.")],
+)
 def test_validator_bug_with_a_closed_stderr_keeps_the_session(
     listener: socket.socket,
     recordings: Recordings,
     monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
 ) -> None:
     def parse(action: object, raw: object) -> InputAction:
         raise KeyError(SECRET)
 
     monkeypatch.setattr(InputAction, "parse", parse)
-    monkeypatch.setattr(sys, "stderr", BrokenStderr())
+    monkeypatch.setattr(sys, "stderr", BrokenStderr(failure))
     response = handle(
         listener,
         recordings,
@@ -145,6 +159,29 @@ def test_error_while_reporting_status_is_a_runner_failure(
 
     with pytest.raises(ValueError, match="runner bug"):
         handle(listener, recordings, {"action": "status"}, status)
+
+
+# R-CONTROL-1
+def test_deadline_also_stops_a_client_that_keeps_sending(
+    listener: socket.socket,
+    recordings: Recordings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(connection, "REQUEST_SECONDS", 0)
+    response = handle_bytes(listener, recordings, b"{}\n")
+    assert "Timed out waiting" in cast(str, response["error"])
+
+
+@pytest.mark.parametrize("kind", ["capture", "failure_capture"])
+def test_capture_through_a_symlink_cannot_be_the_active_recording(
+    recordings: Recordings, tmp_path: Path, kind: str
+) -> None:
+    recordings.destination = tmp_path / "clip.mp4"
+    (tmp_path / "alias").symlink_to(tmp_path)
+    action = {"action": "move", "x": 0, "y": 0}
+    capture = {"path": str(tmp_path / "alias" / "clip.mp4")}
+    with pytest.raises(ValueError, match="active recording"):
+        parse_batch({"actions": [action], kind: capture}, recordings)
 
 
 # R-CONTROL-1

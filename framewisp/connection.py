@@ -82,7 +82,10 @@ def read_line(connection: socket.socket) -> bytes:
     data = bytearray()
     try:
         while b"\n" not in data and len(data) <= MAX_REQUEST_BYTES:
-            connection.settimeout(max(deadline - time.monotonic(), 0.001))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            connection.settimeout(remaining)
             chunk = connection.recv(65536)
             if not chunk:
                 break
@@ -135,12 +138,13 @@ def receive_request(
         name = type(failure).__name__
         reject(
             f"Framewisp bug: validating this request raised {name}. "
-            "See the runner's stderr."
+            "See the owner's stderr."
         )
         try:
             # The message is left out because it can quote typed text.
             print(f"Bug validating a control request: {name}", file=sys.stderr)
             traceback.print_tb(failure.__traceback__)
-        except OSError:
+        except (OSError, ValueError):
+            # A closed stderr must not turn a rejected request into a failure.
             pass
     return None
