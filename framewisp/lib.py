@@ -397,8 +397,8 @@ def start_recording(
             raise log_failure(f"Recorder failed to finalize {destination}", log)
         failure = None
         try:
-            restore_hidden_frames(clip)
-            if timed:
+            # A clip with no duration has no video to render on (R-REC-22).
+            if restore_hidden_frames(clip, log=log) and timed:
                 render_recording(
                     clip,
                     input_log=log.parent / "inputs.jsonl",
@@ -555,36 +555,49 @@ def probe_clip(path: Path) -> ClipProbe:
     )
 
 
-def restore_hidden_frames(clip: Path) -> None:
-    """Remux a clip stopped so early that its edit list hides its frames (R-REC-3)."""
-    if probe_clip(clip).duration is not None:
-        return
+def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
+    """Remux a clip whose edit list hides its frames (R-REC-3).
+
+    Return whether the clip has a duration. A failed remux is logged because the
+    clip stays usable as evidence, and its summary reports the null (R-REC-22).
+    """
+    probe = probe_clip(clip)
+    if probe.duration is not None:
+        return True
+    if probe.width is None:
+        return False
     remuxed = clip.with_name("remuxed.mp4")
-    result = subprocess.run(
-        [
-            "ffmpeg",
-            "-nostdin",
-            "-v",
-            "error",
-            "-ignore_editlist",
-            "1",
-            "-i",
-            str(clip),
-            "-c",
-            "copy",
-            "-movflags",
-            "+faststart",
-            str(remuxed),
-        ],
-        capture_output=True,
-        check=False,
-        timeout=10,
-    )
-    if result.returncode:
-        # Nothing to restore: the clip has no frames at all (R-REC-22).
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-ignore_editlist",
+                "1",
+                "-i",
+                str(clip),
+                "-c",
+                "copy",
+                str(remuxed),
+            ],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=False,
+            timeout=10,
+        )
+        problem = result.stderr.strip() if result.returncode else None
+    except subprocess.TimeoutExpired as error:
+        problem = str(error)
+    if problem is not None:
         remuxed.unlink(missing_ok=True)
-        return
+        with log.open("a") as output:
+            output.write(f"Could not restore frames in {clip}: {problem}\n")
+        return False
     remuxed.replace(clip)
+    return probe_clip(clip).duration is not None
 
 
 def recording_summary(destination: Path) -> dict[str, object]:

@@ -446,8 +446,8 @@ Review artifacts before sharing. Caption rendering adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 `duration_seconds` is `null` for a clip with no measurable duration, and `width`
-and `height` are `null` for a clip with no video stream. Treat either as a clip
-with nothing to show, and record it again.
+and `height` are `null` for a clip with no video stream. A null duration means the
+clip has nothing to show, so record it again.
 
 Use `run --record FILE --compact` or `record-start --compact FILE` to trim gaps
 between commands during finalization. `--compact-before SECONDS` and
