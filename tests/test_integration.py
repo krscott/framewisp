@@ -1852,23 +1852,28 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     assert len(logged[0]) == 4
     assert all(entries == logged[0] for entries in logged)
 
-    # Compaction treats an uncaptioned input as activity.
-    clip = tmp_path / "compact.mp4"
-    cli(
-        demo.directory,
-        "record-start",
-        "--compact",
-        "--compact-before",
-        "0.25",
-        "--compact-after",
-        "0.25",
-        str(clip),
-    )
-    time.sleep(1.5)
-    cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
-    time.sleep(1.5)
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
-    assert 1 <= summary["duration_seconds"] < 2.5
+    # Compaction treats an input as activity whether or not its clip captions it.
+    for mode in ("none", "keys", "pointer", "all"):
+        clip = tmp_path / f"compact-{mode}.mp4"
+        cli(
+            demo.directory,
+            "record-start",
+            "--console",
+            "--compact",
+            "--compact-before",
+            "0.25",
+            "--compact-after",
+            "0.25",
+            "--captions",
+            mode,
+            str(clip),
+        )
+        time.sleep(1.5)
+        cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
+        time.sleep(1.5)
+        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        assert 1 <= summary["duration_seconds"] < 2.5
+        assert summary["width"] == 1920
 
 
 @pytest.mark.integration

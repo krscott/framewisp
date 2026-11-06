@@ -198,7 +198,7 @@ def main() -> None:
             action="store_true",
             help="append timestamped app stdout/stderr beside the recorded GUI",
         )
-        # Both default to None so resolving the default stays separate from conflicts.
+        # None marks "not given", so run can require --record for either option.
         caption_options = recording_parser.add_mutually_exclusive_group()
         caption_options.add_argument(
             "--captions",

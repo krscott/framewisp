@@ -750,7 +750,8 @@ failures, while unexpected exceptions retain their traceback. Normal
 nonzero returns are recorded as failures. Input logging is independent of
 recording. The runner truncates the log when creating a new session.
 
-For recordings with captions or console panels, only wf-recorder receives `WAYLAND_DEBUG=client`.
+For recordings with a caption mode other than `none`, a console panel, or
+compaction, only wf-recorder receives `WAYLAND_DEBUG=client`.
 The first screencopy `ready` event in `recorder.log` supplies the first captured
 frame's timestamp. The pinned Sway backend uses the monotonic clock, and the
 pinned wf-recorder makes this frame time zero. This establishes each clip's
@@ -771,8 +772,8 @@ actions. The input log is written before and without reference to the mode
 (R-LOG-5), and compaction reads that unfiltered log, so an uncaptioned input
 still counts as activity. The runner rejects a `captions` request value that is
 not a mode. Session metadata advertises `caption_modes: true`, and `record-start`
-requires it before connecting, so an older runner reports a restart instead of
-misreading the value.
+requires it before connecting, so an older runner reports a restart instead of a
+confusing validation error.
 
 After recorder finalization, `captions.py` selects commands of the clip's mode
 started between that origin and the stop request. Unselected commands are
@@ -787,12 +788,13 @@ FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the
 requested output. Caption rendering uses a bundled Fontconfig configuration
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
-remains and the command fails with the `captions.log` path. The final video
-preserves GUI dimensions, 30 fps, full-range color, and no audio. `record-stop`
+remains and the command fails with the `captions.log` path. The rendered video
+preserves GUI dimensions, exactly 30 fps, full-range color, and no audio. `record-stop`
 waits for rendering, as does normal session cleanup. With `--captions none`,
 timestamp extraction is skipped unless a console panel or compaction is
 requested. A clip with no captions to show and neither of those keeps the
-recorder's MP4 without a rendering pass. Input logging remains enabled. Caption formatting cannot affect
+recorder's MP4 without a rendering pass, so its frame rate is only approximately
+30 fps and it has no faststart index. Input logging remains enabled. Caption formatting cannot affect
 app screenshots (R-LOG-2). Both `inputs.jsonl` and `captions.log` are reserved
 session paths.
 
