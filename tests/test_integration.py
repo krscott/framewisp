@@ -4182,7 +4182,7 @@ def test_replaced_lock_refused_and_live_session_still_stops(
                 line.strip(), shell=True, capture_output=True, text=True, timeout=20
             )
             for line in refused.stderr.splitlines()
-            if line.strip().startswith("grep ")
+            if line.strip().removeprefix("LC_ALL=C ").startswith("grep ")
         ]
 
     # Output decides the check. grep exits 2 for unreadable /proc entries, but a
