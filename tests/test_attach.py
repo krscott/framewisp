@@ -18,7 +18,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from framewisp.attach import KEYCODES, AttachedInput, attach_session, run_attachment
+from framewisp.attach import (
+    KEYCODES,
+    AttachedInput,
+    attach_session,
+    run_attachment,
+    write_png,
+)
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
@@ -528,6 +534,7 @@ def test_old_session_cannot_control_new_attachment(
 def control_reply(session: Path, message: bytes) -> dict[str, object]:
     state = json.loads((session / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(10)
         connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
         connection.sendall(message)
         connection.shutdown(socket.SHUT_WR)
@@ -544,6 +551,7 @@ def test_malformed_requests_leave_the_attachment_running(
         assert attach_process.poll() is None
     session = tmp_path / "session"
     token = json.loads((session / "session.json").read_text())["attachment"]
+    os.mkfifo(tmp_path / "fifo")
     requests: list[dict[str, object]] = [
         {},
         {"action": 1, "parameters": {}},
@@ -562,6 +570,8 @@ def test_malformed_requests_leave_the_attachment_running(
         {"action": "screenshot", "parameters": {"path": "x.png"}},
         {"action": "screenshot", "parameters": {"path": ""}},
         {"action": "screenshot", "parameters": {"path": str(tmp_path)}},
+        {"action": "screenshot", "parameters": {"path": str(tmp_path / "fifo")}},
+        {"action": "screenshot", "parameters": {"path": "/dev/full"}},
         {
             "action": "screenshot",
             "parameters": {"path": str(tmp_path / "missing" / "x.png")},
@@ -612,6 +622,24 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
         assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
     assert request_attached(session, "key", {"chord": "a"}) == 0
     assert attach_process.poll() is None
+
+
+def test_screenshot_reaches_a_descriptor(tmp_path: Path) -> None:
+    clip = tmp_path / "\udc80.png"
+    with clip.open("wb") as output:
+        write_png(
+            "videotestsrc num-buffers=1", output.fileno(), Event(), tmp_path / "log"
+        )
+    assert clip.read_bytes().startswith(b"\x89PNG")
+
+
+# R-CONTROL-2
+def test_screenshot_write_failure_fails_only_that_command(tmp_path: Path) -> None:
+    with open("/dev/full", "wb") as output:
+        with pytest.raises(ValueError, match="Could not write"):
+            write_png(
+                "videotestsrc num-buffers=1", output.fileno(), Event(), tmp_path / "log"
+            )
 
 
 # R-CONTROL-2

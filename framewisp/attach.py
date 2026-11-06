@@ -11,13 +11,13 @@ import select
 import shlex
 import signal
 import socket
+import stat
 import sys
-import threading
 import time
 import traceback
 import uuid
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import TIMEOUT_MAX, Event, Lock, Thread
 from types import FrameType
 from typing import TypedDict, cast
 
@@ -110,7 +110,7 @@ class AttachedInput:
         self.buttons: set[int] = set()
 
     def wait(self, seconds: float = 0) -> None:
-        if self.stop.wait(min(seconds, threading.TIMEOUT_MAX)):
+        if self.stop.wait(min(seconds, TIMEOUT_MAX)):
             raise InterruptedError("Attached session disconnected; input cancelled.")
 
     def key(self, code: int, pressed: bool) -> None:
@@ -226,31 +226,44 @@ class AttachedInput:
 
 
 def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+    """Capture to a regular file. A bad destination fails only this command."""
     try:
-        output = destination.open("wb")
+        # Without O_NONBLOCK, a FIFO would hold the input lock until it has a reader.
+        output = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_NONBLOCK, 0o666)
     except OSError as error:
-        # A bad destination fails this command, not the attachment.
         raise ValueError(f"Cannot save screenshot to {destination}: {error}") from None
-    with output:
-        capture_to(portal, output.fileno(), stop, log)
+    try:
+        if not stat.S_ISREG(os.fstat(output).st_mode):
+            raise ValueError(
+                f"Cannot save screenshot to {destination}: not a regular file."
+            )
+        os.ftruncate(output, 0)
+        # Capture lives in the owner process: even SIGKILL closes every capture FD.
+        descriptor = portal.capture_fd()
+        try:
+            write_png(
+                f"pipewiresrc fd={descriptor} path={portal.node} num-buffers=1",
+                output,
+                stop,
+                log,
+            )
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(output)
 
 
-def capture_to(portal: DesktopPortal, output: int, stop: Event, log: Path) -> None:
-    # Capture lives in the owner process: even SIGKILL closes every capture FD.
+def write_png(source: str, output: int, stop: Event, log: Path) -> None:
+    """Write one frame of a GStreamer source to a descriptor."""
     Gst.init(None)
-    descriptor = portal.capture_fd()
     pipeline: Gst.Element | None = None
     try:
         pipeline = Gst.parse_launch(
-            "pipewiresrc name=source num-buffers=1 ! videoconvert ! "
-            "pngenc snapshot=true ! fdsink name=sink"
+            f"{source} ! videoconvert ! pngenc snapshot=true ! fdsink name=sink"
         )
         assert isinstance(pipeline, Gst.Bin)
-        source = pipeline.get_by_name("source")
         sink = pipeline.get_by_name("sink")
-        assert source is not None and sink is not None
-        source.set_property("fd", descriptor)
-        source.set_property("path", str(portal.node))
+        assert sink is not None
         sink.set_property("fd", output)
         bus = pipeline.get_bus()
         assert bus is not None
@@ -265,6 +278,11 @@ def capture_to(portal: DesktopPortal, output: int, stop: Event, log: Path) -> No
                 if message.type == Gst.MessageType.ERROR:
                     error, detail = message.parse_error()
                     log.write_text(f"{error}\n{detail}\n")
+                    if message.src == sink:
+                        # A full disk fails this command, not the attachment.
+                        raise ValueError(
+                            f"Could not write the screenshot: {error.message}"
+                        )
                     raise RuntimeError(f"Desktop capture failed. See {log}")
                 return
             if time.monotonic() >= deadline:
@@ -273,7 +291,6 @@ def capture_to(portal: DesktopPortal, output: int, stop: Event, log: Path) -> No
     finally:
         if pipeline is not None:
             pipeline.set_state(Gst.State.NULL)
-        os.close(descriptor)
 
 
 def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:

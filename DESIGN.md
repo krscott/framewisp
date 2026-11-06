@@ -800,8 +800,8 @@ message, which can quote typed text. In the runner, an error during execution th
 is not returned as a reply is a runner failure and ends the session, even if it is
 a `ValueError`. An attachment's execution keeps its own rule: a `ValueError` or
 cancellation is that command's reply, and anything else closes the portal. So a
-screenshot opens its destination before capture starts, and failing to open it is
-that command's error.
+screenshot opens its destination before capture starts and accepts only a regular
+file. Failing to open it, or to write it, is that command's error.
 
 `record-stop` returns a summary in `data`, printed as JSON by the CLI. After
 finalization and caption rendering, ffprobe supplies duration and dimensions;
