@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
 from types import FrameType
-from typing import Literal, cast, get_args
+from typing import Any, Literal, cast, get_args
 from xml.sax.saxutils import escape
 
 from framewisp.actions import InputAction
@@ -57,6 +57,7 @@ from framewisp.ownership import (
 )
 from framewisp.processes import OwnedProcess, managed_process
 from framewisp.profiles import fresh_environment
+from framewisp.session_files import protected_path_error
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -477,34 +478,9 @@ def publish_recording(clip: Path, destination: Path, failure: Exception | None) 
 
 
 def recording_path_error(session: Path, destination: Path) -> str | None:
-    reserved = {
-        (session / name).resolve()
-        for name in (
-            ".headless.lock",
-            ".headless-owner.json",
-            ".headless-owner.tmp",
-            ACTIVE_RECORDING,
-            "session.json",
-            ".session.json",
-            "app-exit.json",
-            ".app-exit.json",
-            "sway.log",
-            "wayvnc.log",
-            "recorder.log",
-            "app.log",
-            "console.jsonl",
-            "inputs.jsonl",
-            "activity.jsonl",
-            "captions.log",
-            "dbus.log",
-            "accessibility.log",
-            "registry.log",
-        )
-    }
-    if destination in reserved:
-        return (
-            f"{destination} is reserved for session files. Choose a new recording path."
-        )
+    error = protected_path_error(session, destination, None)
+    if error is not None:
+        return error
     if destination.exists():
         return f"{destination} already exists. Choose a new recording path."
     return None
@@ -757,14 +733,13 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
         if not capture.path.parent.is_dir():
             raise ValueError("capture.path requires an existing parent directory.")
         resolved = resolved_request_path(capture.path, "capture.path")
-        path_error = recording_path_error(recordings.session, resolved)
-        if path_error is not None:
-            raise ValueError(path_error.replace("recording path", "capture path"))
-        if resolved == recordings.destination:
-            raise ValueError(
-                f"{capture.path} is the active recording's destination. "
-                "Choose a new capture path."
-            )
+        error = protected_path_error(
+            recordings.session, resolved, recordings.destination
+        )
+        if error is not None:
+            raise ValueError(error)
+        if resolved.exists():
+            raise ValueError(f"{resolved} already exists. Choose a new capture path.")
     return batch
 
 
@@ -1089,6 +1064,11 @@ def _run_session(
                             "width": size[0],
                             "height": size[1],
                             "x11_display": x11_display,
+                            "recording": (
+                                str(recordings.destination)
+                                if recordings.destination is not None
+                                else None
+                            ),
                             "processes": {
                                 name: process.pid for name, process in processes.items()
                             },
@@ -1170,12 +1150,41 @@ def _run_session(
                 )
 
 
-def session_environment(session: Path) -> dict[str, str]:
-    state = json.loads((session / "session.json").read_text())
-    return os.environ | {
-        "XDG_RUNTIME_DIR": state["runtime_directory"],
-        "WAYLAND_DISPLAY": state["wayland_display"],
-    }
+def grim(
+    session: Path,
+    state: dict[str, Any],
+    selector: list[str],
+    destination: Path,
+    cancelled: Callable[[], bool] | None,
+) -> int:
+    return display_command(
+        session,
+        ["grim", "-t", "png", *selector, str(destination)],
+        env=os.environ
+        | {
+            "XDG_RUNTIME_DIR": state["runtime_directory"],
+            "WAYLAND_DISPLAY": state["wayland_display"],
+        },
+        timeout=10,
+        cancelled=cancelled,
+    )
+
+
+def screenshot_path_error(
+    session: Path, destination: Path, state: dict[str, Any]
+) -> str | None:
+    """Refuse what a screenshot must not write. A plain file may be overwritten."""
+    if str(destination) == "-":
+        return None
+    try:
+        path = resolved_request_path(destination, "path")
+    except ValueError as error:
+        return str(error)
+    # A runner from an older framewisp publishes no recording key.
+    recording = state.get("recording")
+    return protected_path_error(
+        session, path, Path(recording) if isinstance(recording, str) else None
+    )
 
 
 def screenshot(
@@ -1184,18 +1193,20 @@ def screenshot(
     *,
     region: tuple[int, int, int, int] | None = None,
     metadata: bool = False,
-    cancelled: Callable[[], bool] | None = None,
 ) -> int:
     if metadata and str(destination) == "-":
         raise SessionError(
             "screenshot --json requires a file path; '-' writes PNG to stdout."
         )
+    state = json.loads((session / "session.json").read_text())
+    error = screenshot_path_error(session, destination, state)
+    if error is not None:
+        raise SessionError(error)
     selector = ["-o", "HEADLESS-1"]
     width = height = 0
     x = y = 0
     display_width = display_height = 0
     if region is not None or metadata:
-        state = json.loads((session / "session.json").read_text())
         display_width, display_height = state.get("width"), state.get("height")
         if (
             type(display_width) is not int
@@ -1220,13 +1231,7 @@ def screenshot(
         if region is not None:
             selector = ["-g", f"{x},{y} {width}x{height}"]
     started = time.monotonic()
-    result = display_command(
-        session,
-        ["grim", "-t", "png", *selector, str(destination)],
-        env=session_environment(session),
-        timeout=10,
-        cancelled=cancelled,
-    )
+    result = grim(session, state, selector, destination, None)
     if metadata and result == 0:
         print(
             json.dumps(
@@ -1254,7 +1259,8 @@ def batch_screenshot(
             prefix=".framewisp-capture-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "capture.png"
-            screenshot(session, temporary, cancelled=cancelled)
+            state = json.loads((session / "session.json").read_text())
+            grim(session, state, ["-o", "HEADLESS-1"], temporary, cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Capture cancelled; caller disconnected or session stopped."

@@ -229,7 +229,7 @@ session-independent.
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
 | `stop` | Stop the headless session and wait for cleanup and recording finalization. |
 | `recover` | Recover an abandoned headless session after its owner and supervisors exit, preserving logs. |
-| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Headless sessions support crops and JSON origin, dimensions, display size, path, and capture time. Default delay: 0. |
+| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects session files and the active recording's destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and capture time. Default delay: 0. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
 | `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
 | `scroll [--move-duration SECONDS] X Y DIRECTION [--steps N]` | Move to the pane, then send wheel steps; directions: up, down, left, right. |

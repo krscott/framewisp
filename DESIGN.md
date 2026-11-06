@@ -311,7 +311,8 @@ sandbox socket permissions.
 
 CLI calls read `session.json` to locate the display and control socket. The JSON has
 `runtime_directory`, `wayland_display`, `x11_display` (null for Wayland),
-`width`, `height`, and `processes` keys. The last is a map
+`width`, `height`, `recording`, and `processes` keys. `recording` is the active
+clip's destination or null. `processes` is a map
 of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
 environment is saved.
 
@@ -475,7 +476,7 @@ At least one action is required. There are no loops or lifecycle operations.
 Conditional checks are specified below. Capture accepts a path and optional finite nonnegative delay.
 The CLI resolves its path against its own working directory. The runner requires
 an absolute path with an existing parent directory and rejects existing
-destinations and reserved session paths.
+destinations and protected paths (see "Protected paths").
 
 The CLI sends one control request with `action: "batch"` and the normalized
 object in `parameters`. Metadata advertises `batch_input: true`; older runners
@@ -707,6 +708,54 @@ white canvas decoded as RGB 235 instead of 255. `scale=out_range=full` keeps the
 conversion consistent with that tag (R-REC-4); recording tests compare a decoded
 background patch with the screenshot to catch brightness shifts.
 
+## Protected paths
+
+`framewisp/session_files.py` holds `SESSION_FILES`, the one list of files
+framewisp owns in a session directory, and `protected_path_error`, the one check
+that every recording, screenshot, and batch capture path passes (R-SESSION-7,
+R-REC-21). `.active-recording` is on the list, so following it also protects the
+private clip of an active or kept recording.
+
+The check takes a resolved path. Resolving catches symlinks, including a dangling
+link to a file not yet created. Comparing device and inode with each session file
+catches hard links. A hard link to a metadata file that an atomic rename has since
+replaced is not protected; its inode no longer belongs to the session. A hard link
+to the active destination cannot exist, because that file does not exist until
+publication.
+
+| Caller | Runs in | Also rejects existing files | Active destination from |
+|--------|---------|-----------------------------|-------------------------|
+| Recording | `recording_path_error`, in the runner | yes | not needed: a second clip is refused |
+| Batch capture | `parse_batch`, in the runner | yes | `Recordings.destination` |
+| Headless `screenshot` | `screenshot`, in the CLI before grim | no | `recording` in `session.json` |
+| Attached `screenshot` | `parse_attached_request`, in the owner | no | none: attachments cannot record |
+
+A standalone screenshot replaces an ordinary file, and repeated captures to one
+path rely on that. `-` writes to stdout and skips the check.
+
+The headless CLI runs grim itself, so it reads the destination from `session.json`
+rather than asking the runner: `record-stop` renders in the control loop, and a
+request would wait for rendering. `session.json` is rewritten before `record-start`
+replies, so a screenshot sent after that reply sees the destination. A runner from
+an older framewisp writes no `recording` key. A screenshot there still works,
+protected from session files but not from the active destination.
+
+The check is not atomic with the write. A standalone screenshot may replace a
+file, so it cannot use `O_EXCL`, and a symlink or hard link made after the check
+goes unseen. The check guards against mistakes, not a racing process. Two windows
+remain where framewisp's own commands can still take an active destination:
+
+- A screenshot sent while `record-start` is still running passes, because the
+  destination reaches `session.json` only after the clip starts.
+- A recording that starts after a batch was validated, but before its capture,
+  to the capture's path.
+
+In both, the file takes the destination and the failure is the R-REC-18 path:
+`record-stop` keeps the clip at another path and names it.
+
+Runtime directories are outside this check. They are not in the session directory,
+and their paths come only from reading `session.json`.
+
 ## Recording destinations
 
 wf-recorder gives a destination no protection (R-REC-1). Its only guard is a
@@ -721,9 +770,9 @@ publishes the clip. That is the only write to the requested path, and `link(2)`
 fails rather than replaces, so no race window exists. Batch captures publish the
 same way. `recording_path_error` is the early rejection for the common case.
 
-The destination therefore does not exist until finalization. Batch validation
-rejects the active recording's destination explicitly, because the existence
-check cannot see it.
+The destination therefore does not exist until finalization, so an existence
+check cannot see it. `protected_path_error` names it explicitly instead (see
+"Protected paths").
 
 The private directory is removed after publishing and after a failed or cancelled
 start. A finalized clip is published even when rendering failed (R-REC-10). A clip
@@ -801,7 +850,8 @@ is not returned as a reply is a runner failure and ends the session, even if it 
 a `ValueError`. An attachment's execution keeps its own rule: a `ValueError` or
 cancellation is that command's reply, and anything else closes the portal. So a
 screenshot opens its destination before capture starts and accepts only a regular
-file. Failing to open it, or to write it, is that command's error.
+file. Failing to open it, or to write it, is that command's error. Validation
+rejects protected paths first (see "Protected paths").
 
 `record-stop` returns a summary in `data`, printed as JSON by the CLI. After
 finalization and caption rendering, ffprobe supplies duration and dimensions;
@@ -819,9 +869,8 @@ from a suspended or dead runner. These commands reject attached sessions, which
 retain their independent emergency detach mechanism.
 
 State updates use `.session.json` followed by an atomic rename. The `processes`
-map includes `recorder` only while recording. Both metadata filenames are
-reserved along with the session logs when choosing recording destinations.
-Recording requests reject odd display dimensions (R-REC-2), existing/reserved
+map includes `recorder` only while recording. Both metadata filenames and the
+session logs are protected paths. Recording requests reject odd display dimensions (R-REC-2), existing/reserved
 output paths (R-REC-1), a start while already active, and a stop while inactive.
 Each start replaces `recorder.log`.
 

@@ -21,6 +21,8 @@ from typing import Any, cast
 import pytest
 from PIL import Image, ImageChops
 
+from framewisp.session_files import SESSION_FILES
+
 # Startup clips, one session each: position, size in pixels, caption mode.
 CONSOLE_STARTS = {
     "console-left": ("left", 640, "keys"),
@@ -3719,6 +3721,96 @@ def test_batch_capture_rejects_active_recording_destination(
     assert "active recording" in response["error"]
     cli(demo.directory, "record-stop")
     recording_frames(clip)
+
+
+def rejected_screenshot(demo: Demo, path: Path) -> str:
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "screenshot", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1, result.stderr
+    return result.stderr
+
+
+# R-REC-21
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, True], indirect=True)
+def test_screenshot_rejects_active_recording_destination(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = demo.recording or tmp_path / "clip.mp4"
+    if demo.recording is None:
+        cli(demo.directory, "record-start", str(clip))
+    alias = tmp_path / "alias.mp4"
+    alias.symlink_to(clip)
+    for path in (clip, alias):
+        assert "active recording" in rejected_screenshot(demo, path)
+        assert not clip.exists()
+    cli(demo.directory, "record-stop")
+    assert demo.process.poll() is None
+    recording_frames(clip)
+
+
+# R-SESSION-7
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_screenshot_rejects_session_files(demo: Demo, tmp_path: Path) -> None:
+    session = demo.directory
+    alias = tmp_path / "state.json"
+    alias.symlink_to(session / "session.json")
+    linked_log = tmp_path / "linked.log"
+    linked_log.hardlink_to(session / "app.log")
+    private_clip = (session / ".active-recording").resolve()
+    linked_clip = tmp_path / "linked.mp4"
+    linked_clip.hardlink_to(private_clip)
+    for path in (
+        session / "session.json",
+        alias,
+        linked_log,
+        session / ".active-recording",
+        linked_clip,
+    ):
+        assert "reserved for session files" in rejected_screenshot(demo, path)
+        assert not path.read_bytes().startswith(b"\x89PNG"), path
+    assert json.loads(cli(session, "status").stdout)["status"] == "running"
+    cli(session, "record-stop")
+    assert demo.recording is not None
+    recording_frames(demo.recording)
+
+
+# R-SESSION-7
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_a_session_creates_only_listed_files(demo: Demo) -> None:
+    cli(demo.directory, "click", "120", "100")
+    cli(demo.directory, "type", "listed")
+    cli(demo.directory, "record-stop")
+    during = {path.name for path in demo.directory.iterdir() if not path.is_dir()}
+    cli(demo.directory, "stop")
+    assert demo.process.wait(timeout=20) == 0
+    after = {path.name for path in demo.directory.iterdir() if not path.is_dir()}
+    assert (during | after) - set(SESSION_FILES) == set()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_screenshot_during_a_recording_keeps_plain_outputs(
+    demo: Demo, tmp_path: Path
+) -> None:
+    existing = tmp_path / "existing.png"
+    existing.write_bytes(b"replace me")
+    cli(demo.directory, "screenshot", str(existing))
+    assert existing.read_bytes().startswith(b"\x89PNG")
+    piped = subprocess.run(
+        ["framewisp", str(demo.directory), "screenshot", "-"],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    )
+    assert piped.stdout.startswith(b"\x89PNG")
 
 
 # R-REC-1, R-REC-18

@@ -172,6 +172,7 @@ def test_deadline_also_stops_a_client_that_keeps_sending(
     assert "Timed out waiting" in cast(str, response["error"])
 
 
+# R-REC-21
 @pytest.mark.parametrize("kind", ["capture", "failure_capture"])
 def test_capture_through_a_symlink_cannot_be_the_active_recording(
     recordings: Recordings, tmp_path: Path, kind: str
