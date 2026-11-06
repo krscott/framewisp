@@ -683,7 +683,7 @@ any active recorder before stopping the display (R-REC-3).
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
-and `captions` and `console` booleans. Replies carry an `error` string or null
+a `captions` mode, and a `console` boolean. Replies carry an `error` string or null
 and optional `data`. The runner checks the session directory against its own
 before acting, so copied metadata cannot control another session (R-LIFE-6). Its
 monitoring loop handles recording/status/stop requests; validated input sockets
@@ -728,14 +728,14 @@ never start do not produce captions. Attached sessions retain CLI-owned logging.
 `run/attach --retain-input-content` option sets it once for the session. The headless
 worker owns the policy for individual and batch actions; attached command clients
 read it from metadata. Recording captions use the retained parameters from the log,
-so all clips follow the same policy even with `--no-captions`. No command or batch
+so all clips and caption modes follow the same policy. No command or batch
 parameter overrides it.
 
 By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
 Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit
 the key and retain only modifiers. Ctrl/Alt shortcuts and named
 navigation/control keys retain their chord. Captions use "Type text" and "Key"
-for omitted content. Opt-in preserves full text and chords. Text/key failures
+for omitted content, with any Shift modifier as a `Shift+` prefix. Opt-in preserves full text and chords. Text/key failures
 omit backend messages that can include literal or encoded input, while
 preserving exception types, cancellation, and exit codes. Unicode subprocess
 diagnostics omit arguments and stderr by default. Tracebacks retain stack
@@ -761,10 +761,25 @@ in `recorder.log`. A worker thread drains the pipe throughout capture and is joi
 after recorder shutdown. Startup waits for both the MP4 header and the retained
 origin before accepting captioned input. The log is replaced for each clip.
 
-After recorder finalization, `captions.py` selects commands started between that
-origin and the stop request. Commands that began before the clip are excluded,
-even if they finish during it. Each caption spans its command, or at least 0.8
-seconds for quick commands, capped at the next action or clip stop. An unfinished
+`--captions` selects input kinds for one clip, and the session's retention policy
+decides what each caption shows. `keys`, the default, selects `key` and `type`
+(R-LOG-4). `pointer` selects `move`, `click`, `drag`, and `scroll`. `all` selects
+both, and `none` selects nothing. `--no-captions` is the same value as
+`--captions none`, and the parser rejects both together (R-LOG-6). `run` requires
+`--record` with either option. One table in `captions.py` maps each mode to its
+actions. The input log is written before and without reference to the mode
+(R-LOG-5), and compaction reads that unfiltered log, so an uncaptioned input
+still counts as activity. The runner rejects a `captions` request value that is
+not a mode. Session metadata advertises `caption_modes: true`, and `record-start`
+requires it before connecting, so an older runner reports a restart instead of
+misreading the value.
+
+After recorder finalization, `captions.py` selects commands of the clip's mode
+started between that origin and the stop request. Unselected commands are
+ignored before timing is computed. Commands that began before the clip are
+excluded, even if they finish during it. Each caption spans its command, or at
+least 0.8 seconds for quick commands, capped at the next captioned command or
+clip stop. An unfinished
 command spans to clip stop. Captions show requested actions; they do not claim
 application acknowledgement. The video keeps its original idle and input timing.
 
@@ -774,9 +789,10 @@ passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
 remains and the command fails with the `captions.log` path. The final video
 preserves GUI dimensions, 30 fps, full-range color, and no audio. `record-stop`
-waits for rendering, as does normal session cleanup. With `--no-captions`,
-rendering and timestamp extraction are skipped unless a console panel is
-requested, but input logging remains enabled. Caption formatting cannot affect
+waits for rendering, as does normal session cleanup. With `--captions none`,
+timestamp extraction is skipped unless a console panel or compaction is
+requested. A clip with no captions to show and neither of those keeps the
+recorder's MP4 without a rendering pass. Input logging remains enabled. Caption formatting cannot affect
 app screenshots (R-LOG-2). Both `inputs.jsonl` and `captions.log` are reserved
 session paths.
 
@@ -795,7 +811,7 @@ applies to app output. Both files are replaced on each new session.
 into a 640-pixel console panel on the right. `run --console` without `--record` is
 invalid. The control request adds a validated boolean `console`, default false.
 Console capture uses the same first-frame monotonic origin as input captions,
-including with `--no-captions`. A lock protects sidecar snapshots during rendering.
+including with `--captions none`. A lock protects sidecar snapshots during rendering.
 Session metadata advertises `console_recording: true`. A console request requires
 this capability before connecting, so an older runner cannot silently ignore it.
 The app-output worker is checked during monitoring, joined after app cleanup and
