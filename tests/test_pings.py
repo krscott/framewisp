@@ -204,13 +204,21 @@ def test_double_click_draws_two_concurrent_rings(raw_video: Path, log: Path) -> 
 
 
 def compacted_ring_frames(video: Path, *, size: tuple[int, int]) -> dict[int, int]:
-    decoded = frames(video, 0, 200, size=size)
-    gui = [frame.crop((0, 0, SIZE[0], SIZE[1])) for frame in decoded]
-    return {
-        index: box[2] - box[0]
-        for index, frame in enumerate(gui)
-        if (box := red_box(frame)) is not None
-    }
+    """Map frames showing a ring in the GUI area to that ring's width."""
+    shown: dict[int, tuple[int, int, int, int]] = {}
+    for index, frame in enumerate(frames(video, 0, 200, size=size)):
+        box = red_box(frame.crop((0, 0, SIZE[0], SIZE[1])))
+        if box is not None:
+            shown[index] = box
+    return {index: box[2] - box[0] for index, box in shown.items()}
+
+
+def ring_centre(
+    video: Path, index: int, *, size: tuple[int, int]
+) -> tuple[float, float]:
+    box = red_box(frames(video, index, index, size=size)[0])
+    assert box is not None
+    return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
 
 
 # R-REC-8, R-REC-9
@@ -242,6 +250,9 @@ def test_compaction_maps_pings_to_retained_frames(
     shown = compacted_ring_frames(raw_video, size=size)
     first = source.index(math.ceil(4.25 * 30))
     assert first <= min(shown) <= first + 1
+    assert ring_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
+        (600, 300), abs=1
+    )
     assert source[max(shown)] / 30 > 4.25 + 0.3
 
 
