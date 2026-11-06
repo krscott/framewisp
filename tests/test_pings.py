@@ -249,11 +249,38 @@ def test_compaction_maps_pings_to_retained_frames(
     size = (SIZE[0] + (PANEL_WIDTH if console else 0), SIZE[1])
     shown = compacted_ring_frames(raw_video, size=size)
     first = source.index(math.ceil(4.25 * 30))
+    # The cut keeps the whole animation, not only its opening frames.
+    assert source[first + 14] == source[first] + 14
     assert first <= min(shown) <= first + 1
     assert ring_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
         (600, 300), abs=1
     )
     assert source[max(shown)] / 30 > 4.25 + 0.3
+
+
+# R-REC-8
+def test_zero_padding_retains_every_ping_frame(raw_video: Path, log: Path) -> None:
+    (log.parent / "activity.jsonl").write_text("")
+    log.write_text(command_lines(3, 3.01))
+    ranges = retained_frames(
+        (log, log.parent / "activity.jsonl"),
+        origin=ORIGIN,
+        stopped=STOPPED,
+        duration=recording_duration(raw_video),
+        settings=CompactSettings(before=0, after=0),
+        overlays=[(3.005, 3.005 + PING_SECONDS)],
+    )
+    kept = {frame for first, last in ranges for frame in range(first, last)}
+    assert set(range(90, 106)) <= kept
+
+
+# R-REC-8
+def test_clip_end_cuts_a_late_ping_short(raw_video: Path, log: Path) -> None:
+    (log.parent / "activity.jsonl").write_text("")
+    log.write_text(command_lines(5.7, 5.71) + ping_line(5.8, 300, 200))
+    render(raw_video, log, captions=False, compact=CompactSettings(before=0, after=0))
+    assert len(compacted_ring_frames(raw_video, size=SIZE)) < 15
+    assert round(recording_duration(raw_video) * 30) < 180
 
 
 # R-REC-8
@@ -323,15 +350,14 @@ def test_script_has_one_dialogue_per_ping() -> None:
     assert script.count("\\pos(2,3)") == 1
 
 
-def assert_raw_clip_survived(
-    video: Path, before: bytes, error: str, log: Path, frame_count: int = 180
-) -> None:
+def assert_raw_clip_survived(video: Path, before: bytes, error: str) -> None:
     assert video.read_bytes() == before
     assert str(video) in error
     assert "captions.log" in error
+    assert "inputs.jsonl" in error
     assert "raw video remains" in error
     assert not list(video.parent.glob(".framewisp-captions-*"))
-    assert len(frames(video, 0, frame_count)) == frame_count
+    assert len(frames(video, 0, 179)) == 180
 
 
 # R-REC-10
@@ -350,7 +376,7 @@ def test_failed_encoder_leaves_uncaptioned_clip_playable(
         with pytest.raises(RuntimeError) as failure:
             render(raw_video, log, captions=False)
     assert "status 3" in str(failure.value)
-    assert_raw_clip_survived(raw_video, before, str(failure.value), log)
+    assert_raw_clip_survived(raw_video, before, str(failure.value))
 
 
 # R-REC-10
@@ -361,4 +387,4 @@ def test_malformed_log_leaves_uncaptioned_clip_playable(
     log.write_text("not json\n")
     with pytest.raises(RuntimeError) as failure:
         render(raw_video, log, captions=False)
-    assert_raw_clip_survived(raw_video, before, str(failure.value), log)
+    assert_raw_clip_survived(raw_video, before, str(failure.value))

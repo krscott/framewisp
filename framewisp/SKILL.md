@@ -422,7 +422,8 @@ shutdown also finalizes it. Input captions are embedded by default;
 `--no-captions` disables them for that clip. A red ring also marks each click and
 both ends of each drag; `--no-click-pings` disables it for that clip, and
 `--no-captions` does not. Pings appear only in recordings, not in screenshots or
-`inspect`. Every input is still logged to
+`inspect`. Wait about 0.5 seconds after a final click before `record-stop`, or
+its ring is cut short. Every input is still logged to
 `SESSION/inputs.jsonl`. Logs and captions omit typed text (including Unicode) and
 literal key events by default. Letter/digit/punctuation/Space keys with Shift alone are omitted;
 Ctrl/Alt shortcuts and named keys such as Return and arrows remain visible.

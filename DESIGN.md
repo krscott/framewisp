@@ -728,7 +728,8 @@ start event to `inputs.jsonl` when the action starts executing and an end event
 after cleanup, so queue time does not extend captions. Cancelled requests that
 never start do not produce captions. Attached sessions retain CLI-owned logging. Each JSONL event carries an ID,
 `event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
-`error`. A `ping` event also carries the display position `x` and `y`. Session metadata stores `retain_input_content`, default false. The
+`error`. A `ping` event also carries the display position `x` and `y`. Session
+metadata stores `retain_input_content`, default false. The
 `run/attach --retain-input-content` option sets it once for the session. The headless
 worker owns the policy for individual and batch actions; attached command clients
 read it from metadata. Recording captions use the retained parameters from the log,
@@ -778,9 +779,9 @@ requested output. Caption rendering uses a bundled Fontconfig configuration
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
 remains and the command fails with the `captions.log` path. A single wrapper
-around `render_recording` turns every failure after capture, including malformed
-logs and an unwritable `captions.log`, into one message naming the raw video and
-that log (R-REC-10). The final video
+around `render_recording` turns every rendering failure, including malformed logs
+and an unwritable `captions.log`, into one message naming the raw video, that log,
+and `inputs.jsonl` (R-REC-10). The final video
 preserves GUI dimensions, 30 fps, full-range color, and no audio. `record-stop`
 waits for rendering, as does normal session cleanup. With `--no-captions` and
 `--no-click-pings`, rendering and timestamp extraction are skipped unless a console

@@ -165,7 +165,7 @@ def log_input(
     *,
     retain_input_content: bool = False,
 ) -> Generator[InputResult, None, None]:
-    """Record command start/end, including failures; these are not app acknowledgements."""
+    """Record command start/end and pointer pings; these are not app acknowledgements."""
     identifier = uuid.uuid4().hex
     parameters = retained_parameters(
         action, parameters, retain_input_content=retain_input_content
@@ -339,8 +339,8 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
         except Exception as error:
             raise RuntimeError(
                 f"Recording rendering failed; raw video remains at {args[0]} without "
-                f"captions, click pings, console panel or cuts. See {kwargs['log']}. "
-                f"Cause: {error}"
+                f"captions, click pings, console panel or cuts. See {kwargs['log']} and "
+                f"{kwargs['input_log']}. Cause: {error}"
             ) from error
 
     return rendered
@@ -349,6 +349,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
 @keeps_raw_video
 def render_recording(
     destination: Path,
+    /,
     *,
     input_log: Path,
     origin: float,

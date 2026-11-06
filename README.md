@@ -717,8 +717,9 @@ for Markdown placement and supported commands.
 ## Input logs and recording captions
 
 Every accepted input command appends start and end records to `SESSION/inputs.jsonl`,
-even without a recording. Each click press and each drag press and release adds a
-`ping` record with the time and display position `x` and `y`. Records include an action ID, monotonic timestamp in
+even without a recording. In headless sessions, each click press and each drag
+press and release adds a `ping` record with the time and display position `x` and
+`y`. Records include an action ID, monotonic timestamp in
 seconds, the command and retained parameters, and its return code or exception type. They
 record what framewisp attempted and whether the input command completed, not
 whether the app responded as intended. A start without an end indicates an
@@ -754,8 +755,8 @@ Click pings mark each pointer press in a recording: a red ring grows and fades
 over half a second at the click position. Each click of a double click and the
 press and release of a drag get their own ping; scrolls and moves get none.
 Clips with `run --record` and `record-start` show them by default, independently
-of `--no-captions`. Screenshots, `inspect`, and input coordinates never include
-them (R-LOG-3). Disable them for a clip with:
+of `--no-captions`. Screenshots never include them (R-LOG-3), and `inspect` and
+input coordinates are unaffected. Disable them for a clip with:
 
 ```sh
 framewisp demo record-start --no-click-pings /tmp/plain.mp4
@@ -764,9 +765,9 @@ framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
 ```
 
 A clip with `--no-captions` that contains a click is encoded again to draw its
-pings. Add `--no-click-pings` to keep the recorder's output unprocessed. A runner
-started by an older framewisp rejects `record-start` until you restart the session
-or pass `--no-click-pings`.
+pings. Add `--no-click-pings` to keep the recorder's output unprocessed. With a
+runner started by an older framewisp, `record-start` fails until you restart the
+session or pass `--no-click-pings`.
 
 Input logging remains enabled and follows the session retention policy. Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.

@@ -92,7 +92,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     recording = (
         tmp_path / "session.mp4"
         if mode is True
-        or mode in {"large", "uncaptioned", "console", "record-probe", "compact"}
+        or mode
+        in {"large", "uncaptioned", "no-pings", "console", "record-probe", "compact"}
         else None
     )
     command = ["framewisp", str(directory), "run"]
@@ -106,6 +107,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             command.append("--console")
         if mode == "uncaptioned":
             command.append("--no-captions")
+        if mode == "no-pings":
+            command.append("--no-click-pings")
         if mode == "compact":
             command.extend(
                 ["--compact", "--compact-before", "0.25", "--compact-after", "0.25"]
@@ -1723,8 +1726,7 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     moment = logged_pings(demo)[-1][1]
     time.sleep(0.8)
     cli(demo.directory, "record-stop")
-    # The capture lands inside the 0.5 second ping that the clip shows.
-    assert abs(shot.stat().st_mtime - time.time()) < 60
+    # The batch captures 0.05 seconds after its press, inside the ping the clip shows.
     rings = ring_frames(pinged, 300, 200)
     origin = clip_origin(demo)
     assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
@@ -1733,9 +1735,35 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     assert not any(
         patch[offset] - patch[offset + 1] > 40 for offset in range(0, len(patch), 3)
     )
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(demo.runtime / "control.sock"))
+        request = {
+            "action": "record-start",
+            "session": str(demo.directory.resolve()),
+            "destination": str(tmp_path / "rejected.mp4"),
+            "click_pings": "no",
+        }
+        connection.sendall((json.dumps(request) + "\n").encode())
+        with connection.makefile("r") as response:
+            assert json.loads(response.readline())["error"] == (
+                "click_pings must be true or false"
+            )
 
 
-# R-REC-10, R-REC-11
+# R-REC-7
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["no-pings"], indirect=True)
+def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) -> None:
+    assert demo.recording is not None
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    cli(demo.directory, "click", "300", "200")
+    time.sleep(0.8)
+    assert logged_pings(demo)
+    cli(demo.directory, "stop")
+    assert ring_frames(demo.recording, 300, 200) == []
+
+
+# R-REC-10
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 @pytest.mark.parametrize("failure", ["unwritable-log", "malformed-input-log"])
