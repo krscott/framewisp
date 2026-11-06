@@ -9,6 +9,7 @@ from framewisp.captions import CAPTION_MODES, CaptionMode, render_recording
 from framewisp.console import ConsoleCapture, console_frames
 from framewisp.layout import (
     CONSOLE_POSITIONS,
+    MAX_FRAME_CELLS,
     MAX_VIDEO_DIMENSION,
     ConsolePanel,
     ConsolePosition,
@@ -281,6 +282,72 @@ def test_layout_keeps_the_video_within_the_encoder_limit(
     assert isinstance(error, str)
     assert str(MAX_VIDEO_DIMENSION) in error
     assert "--console-size" in error
+
+
+# R-REC-16
+@pytest.mark.parametrize(
+    ("display", "position", "fitting"),
+    [
+        ((16384, 8192), "top", 7936),
+        ((16384, 8192), "bottom", 7936),
+        ((8192, 16384), "left", 7936),
+        ((8192, 16384), "right", 7936),
+    ],
+)
+def test_layout_keeps_the_video_within_the_frame_size_limit(
+    display: tuple[int, int], position: ConsolePosition, fitting: int
+) -> None:
+    assert isinstance(
+        video_layout(display, ConsolePanel(position, fitting)), VideoLayout
+    )
+    error = video_layout(display, ConsolePanel(position, fitting + 2))
+    assert isinstance(error, str)
+    assert "frame size limit" in error
+    assert "--console-size" in error
+
+
+# R-REC-16
+@pytest.mark.parametrize(
+    ("width", "height", "encodes"),
+    [
+        (16384, 16128, True),
+        (16384, 16130, False),
+        (16258, 16254, True),
+        (16256, 16256, False),
+    ],
+)
+def test_frame_size_limit_matches_ffmpeg(
+    tmp_path: Path, width: int, height: int, encodes: bool
+) -> None:
+    assert ((width + 128) * (height + 128) < MAX_FRAME_CELLS) is encodes
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:r=30",
+            "-vf",
+            f"pad={width}:{height}:0:0",
+            "-frames:v",
+            "1",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-pix_fmt",
+            "yuv420p",
+            str(tmp_path / "frame.mp4"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert (result.returncode == 0) is encodes, result.stderr
 
 
 @pytest.mark.parametrize(

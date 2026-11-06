@@ -461,7 +461,7 @@ scrolling panel of the launched app's combined stdout/stderr, on the right and
 video edge. `--console-size PIXELS` sets the panel's width for left or right and its
 height for top or bottom; the other dimension follows the GUI. The size must be even,
 and the panel needs at least 390 pixels of width and 136 of height, including the
-dimension that follows the GUI. Each video dimension is limited to 16384 pixels.
+dimension that follows the GUI. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
 A rejected `record-start` leaves the app running. If `--console` reports an older
 runner, restart the session.
 The GUI and screenshots keep their original dimensions. Panel lines show seconds

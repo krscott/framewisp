@@ -13,8 +13,10 @@ CONSOLE_POSITIONS: tuple[ConsolePosition, ...] = get_args(ConsolePosition)
 DEFAULT_CONSOLE_POSITION: ConsolePosition = "right"
 DEFAULT_CONSOLE_SIZE = 640
 
-# libx264 refuses anything larger, which would otherwise surface only after capture.
+# libx264 and FFmpeg refuse anything larger, which would otherwise surface only
+# after capture. FFmpeg requires (width + 128) * (height + 128) below MAX_FRAME_CELLS.
 MAX_VIDEO_DIMENSION = 16384
+MAX_FRAME_CELLS = 2**28
 MIN_TEXT_COLUMNS = 20
 MIN_TEXT_ROWS = 3
 MIN_PANEL_WIDTH = 390
@@ -152,6 +154,12 @@ def video_layout(
             f"A {console.size}-pixel {console.position} console panel makes the video "
             f"{video_width}x{video_height}, over the {MAX_VIDEO_DIMENSION}-pixel limit "
             f"of the encoder. Use a smaller --console-size."
+        )
+    if (video_width + 128) * (video_height + 128) >= MAX_FRAME_CELLS:
+        return (
+            f"A {console.size}-pixel {console.position} console panel makes the video "
+            f"{video_width}x{video_height}, over FFmpeg's frame size limit. "
+            "Use a smaller --console-size."
         )
     return VideoLayout(
         video_width,

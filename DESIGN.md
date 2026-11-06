@@ -894,8 +894,11 @@ A panel must be encodable and readable (R-REC-16):
 - The panel has at least 20 text columns and 3 text rows, so at least 390 pixels wide
   and 136 tall. This includes the dimension that follows the GUI, so a default panel
   on a display under 136 pixels tall is rejected, naming the display size.
-- Neither video dimension exceeds 16384 pixels, the libx264 limit. Without this
-  check the failure would appear only after capture. `ConsolePanel` also rejects a
+- Neither video dimension exceeds 16384 pixels, the libx264 limit, and
+  `(width + 128) * (height + 128)` stays below 2^28, FFmpeg's frame size limit.
+  Measured with the pinned FFmpeg, 16384x16128 and 16258x16254 encode, while
+  16384x16130 and 16256x16256 fail, so pixel area alone doesn't describe the limit.
+  Without these checks the failure would appear only after capture. `ConsolePanel` also rejects a
   larger size by itself, without formatting it, because Python can't format an
   integer of more than 4300 digits.
 

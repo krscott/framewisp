@@ -629,7 +629,7 @@ sets the panel's width for `left` and `right` and its height for `top` and `bott
 the other dimension follows the GUI. Both options require `--console` and can differ
 per clip. The size must be even, and the panel must hold at least 20 text columns and
 3 text rows, so at least 390 pixels wide and 136 tall, including the dimension that
-follows the GUI. The video can't exceed 16384 pixels in either dimension. A rejected
+follows the GUI. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
 `record-start` leaves the app running. Sessions started by an older framewisp version
 reject `--console`; restart the session to use it.
 
