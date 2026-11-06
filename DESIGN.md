@@ -746,19 +746,23 @@ file, so it cannot use `O_EXCL`, and a symlink or hard link made after the check
 goes unseen. The check guards against mistakes, not a racing process. Two windows
 remain where framewisp's own commands can still take a session's active destination:
 
-- A screenshot or batch capture that passes its check while `record-start` is
-  still running, because the destination is published only after the clip starts.
-  That can take up to ten seconds.
-- A batch capture whose last check runs just before a recording to the same path
-  finishes starting. Validation is not the last check, because a batch can run for
-  minutes: `batch_screenshot` repeats it just before publishing.
+- A screenshot sent while `record-start` is still running passes, because the
+  destination is published only after the clip starts. That can take up to ten
+  seconds.
+- A batch capture publishes while a recording to the same path is still starting.
+  Validation is not the batch's last check, because a batch can run for minutes:
+  `batch_screenshot` repeats it just before publishing, so only a recording that
+  has not finished starting by then gets past it.
 
-The check also knows only the calling session. A screenshot from another session,
-or from an attachment, can take this session's active destination. It can also
-overwrite this session's files, which are not on that session's list.
+The check also knows only the calling session. A screenshot or batch capture from
+another session, or a screenshot from an attachment, can take this session's active
+destination. A screenshot from there can also overwrite this session's files. That
+second case is the failure R-SESSION-7 prevents within a session: the session stays
+up, and later commands can fail until it restarts.
 
-In all of these, a file takes the destination and the failure is the R-REC-18 path:
-`record-stop` keeps the clip at another path, names it, and ends the session.
+When a file takes an active destination, in either window or from another session,
+the failure is the R-REC-18 path: `record-stop` keeps the clip at another path, names
+it, and ends the session.
 
 Other paths outside this check: runtime directories, which are not in the session
 directory and which only `session.json` names; scratch files in a clip's private

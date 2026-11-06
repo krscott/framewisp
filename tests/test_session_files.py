@@ -2,6 +2,8 @@
 
 import ast
 import re
+import subprocess
+import sys
 from pathlib import Path
 from threading import Event
 
@@ -20,7 +22,11 @@ from framewisp.lib import (
     recording_path_error,
 )
 from framewisp.ownership import ACTIVE_RECORDING, JOURNAL, LOCK
-from framewisp.session_files import SESSION_FILES, protected_path_error
+from framewisp.session_files import (
+    SESSION_FILES,
+    protected_path_error,
+    resolved_or_unchanged,
+)
 
 __all__ = ["demo"]
 
@@ -44,7 +50,8 @@ COMPUTED_NAMES = {
     "LOCK": {LOCK},
     "JOURNAL": {JOURNAL},
     "ACTIVE_RECORDING": {ACTIVE_RECORDING},
-    "m": set[str](),  # Loop over names the source spells out, checked as literals.
+    # Loops over fixed tuples, left to the test that lists a real session.
+    "m": set[str](),
     "name": set[str](),
     "name + '.log'": {
         f"{name}.log"
@@ -149,7 +156,7 @@ def test_screenshot_reads_the_active_destination_from_session_state(
 
 # R-REC-21
 def test_batch_capture_rechecks_a_recording_started_after_validation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    recordings: Recordings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def no_capture(*arguments: object) -> int:
         return 0
@@ -157,32 +164,61 @@ def test_batch_capture_rechecks_a_recording_started_after_validation(
     monkeypatch.setattr(lib, "grim", no_capture)
     (tmp_path / "session.json").write_text("{}")
     clip = tmp_path / "clip.mp4"
+    recordings.destination = clip
     with pytest.raises(SessionError, match="active recording"):
-        batch_screenshot(tmp_path, clip, lambda: False, lambda: clip)
+        batch_screenshot(tmp_path, clip, lambda: False, recordings)
     assert not clip.exists()
     assert not list(tmp_path.glob(".framewisp-capture-*"))
 
 
 # R-SESSION-7
-@pytest.mark.parametrize("link", ["symlink", "hardlink"])
-def test_recording_through_a_link_is_reserved(tmp_path: Path, link: str) -> None:
-    state = tmp_path / "session.json"
-    state.write_text("{}")
+def test_recording_through_a_hard_link_is_reserved(tmp_path: Path) -> None:
+    (tmp_path / "session.json").write_text("{}")
     alias = tmp_path / "alias.mp4"
-    if link == "symlink":
-        alias.symlink_to(state)
-        path = alias.resolve()
-    else:
-        alias.hardlink_to(state)
-        path = alias
-    assert "reserved" in str(recording_path_error(tmp_path, path))
+    alias.hardlink_to(tmp_path / "session.json")
+    assert "reserved" in str(recording_path_error(tmp_path, alias))
 
 
 # R-SESSION-7
-def test_a_looped_session_link_does_not_stop_a_screenshot(tmp_path: Path) -> None:
+def test_recording_through_a_symlink_is_reserved(tmp_path: Path) -> None:
+    session = tmp_path / "session"
+    alias = tmp_path / "alias.mp4"
+    alias.symlink_to(session / "session.json")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(session),
+            "run",
+            "--record",
+            str(alias),
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode != 0
+    assert "reserved for session files" in result.stderr
+    assert not session.exists()
+
+
+def test_a_looped_link_resolves_to_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Before Python 3.13, `resolve` raises on a loop."""
+
+    def looped(self: Path) -> Path:
+        raise RuntimeError("Symlink loop")
+
+    monkeypatch.setattr(Path, "resolve", looped)
     link = tmp_path / ACTIVE_RECORDING
-    link.symlink_to(link)
-    assert protected_path_error(tmp_path, tmp_path / "shot.png", None) is None
+    assert resolved_or_unchanged(link) == link
 
 
 # R-SESSION-7

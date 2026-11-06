@@ -1027,13 +1027,6 @@ def _run_session(
             listener.listen()
             listener.settimeout(0.1)
 
-            def capture(path: Path, cancelled: Callable[[], bool]) -> int:
-                assert recordings is not None
-                current = recordings
-                return batch_screenshot(
-                    session, path, cancelled, lambda: current.destination
-                )
-
             inputs = InputWorker(
                 session,
                 input_client,
@@ -1041,7 +1034,9 @@ def _run_session(
                 x11=x11,
                 size=size,
                 retain_input_content=retain_input_content,
-                capture=capture,
+                capture=lambda path, cancelled: batch_screenshot(
+                    session, path, cancelled, recordings
+                ),
             )
             stack.callback(inputs.close)
 
@@ -1185,7 +1180,7 @@ def active_recording(state: dict[str, Any]) -> Path | None:
 def capture_path_error(
     session: Path, destination: Path, recording: Path | None
 ) -> str | None:
-    """Refuse what a capture must not write. A plain file may be overwritten."""
+    """Refuse a protected path, allowing `-`, which names no file."""
     if str(destination) == "-":
         return None
     try:
@@ -1262,7 +1257,7 @@ def batch_screenshot(
     session: Path,
     destination: Path,
     cancelled: Callable[[], bool],
-    recording: Callable[[], Path | None],
+    recordings: Recordings,
 ) -> int:
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
@@ -1277,7 +1272,7 @@ def batch_screenshot(
                     "Capture cancelled; caller disconnected or session stopped."
                 )
             # A recording may have started since this batch was validated.
-            error = capture_path_error(session, destination, recording())
+            error = capture_path_error(session, destination, recordings.destination)
             if error is not None:
                 raise SessionError(error)
             destination.hardlink_to(temporary)

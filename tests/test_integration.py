@@ -3735,6 +3735,33 @@ def rejected_screenshot(demo: Demo, path: Path) -> str:
 
 # R-REC-21
 @pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_capture_yields_to_a_recording_started_during_the_batch(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [{"action": "type", "text": "", "interval": 0}],
+            # Far longer than record-start, which must finish first.
+            "capture": {"path": str(clip), "delay": 6},
+        },
+    ) as connection:
+        connection.settimeout(20)
+        cli(demo.directory, "record-start", str(clip))
+        response = json.loads(connection.makefile().readline())
+    assert response["data"]["failed_phase"] == "capture"
+    assert "active recording" in response["error"]
+    assert not clip.exists()
+    cli(demo.directory, "record-stop")
+    assert demo.process.poll() is None
+    recording_frames(clip)
+
+
+# R-REC-21
+@pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, True], indirect=True)
 def test_screenshot_rejects_active_recording_destination(
     demo: Demo, tmp_path: Path
