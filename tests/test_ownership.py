@@ -163,6 +163,7 @@ def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
     assert (copied / "session.json").exists()
 
 
+# R-LIFE-7
 def test_incomplete_cleanup_preserves_resources_and_diagnostics(tmp_path: Path) -> None:
     runtime = runtime_path(tmp_path)
     with pytest.raises(SessionError, match="Cleanup is incomplete"):
@@ -172,8 +173,9 @@ def test_incomplete_cleanup_preserves_resources_and_diagnostics(tmp_path: Path) 
         ):
             (runtime / "owner-123.json").write_text('{"error": "signal denied"}')
             (tmp_path / "app.log").write_text("diagnostic")
-    with pytest.raises(SessionError, match="owner-123.json"):
+    with pytest.raises(SessionError, match="owner-123.json") as refusal:
         recover_session(tmp_path)
+    assert "rm -rf" in str(refusal.value)
     assert (tmp_path / "app.log").read_text() == "diagnostic"
     assert runtime.is_dir()
     (runtime / "owner-123.json").unlink()
@@ -558,6 +560,27 @@ def test_stale_attachment_gets_attachment_steps(tmp_path: Path) -> None:
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0
+
+
+# R-LIFE-7
+@pytest.mark.parametrize("kind", ["fifo", "device-link"])
+def test_unreadable_session_metadata_cannot_hang_recovery(
+    tmp_path: Path, kind: str
+) -> None:
+    metadata = tmp_path / "session.json"
+    if kind == "fifo":
+        os.mkfifo(metadata, 0o600)
+    else:
+        metadata.symlink_to("/dev/zero")
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "recover"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "journal is missing" in result.stderr and "rm -rf" in result.stderr
 
 
 # R-LIFE-7

@@ -18,8 +18,9 @@ from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
 JOURNAL = ".headless-owner.json"
-# Far above any journal, whose runtime path fits in a 108-byte socket address.
-MAX_JOURNAL_BYTES = 1 << 16
+# Far above any journal, whose runtime path fits in a 108-byte socket address, or
+# any session.json that recovery reads.
+MAX_METADATA_BYTES = 1 << 16
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,23 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
     return "\n".join(lines)
 
 
+def read_metadata(path: Path) -> object:
+    """Parse a session metadata file that may be damaged or tampered with."""
+    # Deeply nested JSON raises RecursionError, which callers must also handle.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor) as source:
+        info = os.fstat(source.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+        ):
+            raise ValueError(f"{path.name} must be an owned regular file with one link")
+        if info.st_size > MAX_METADATA_BYTES:
+            raise ValueError(f"{path.name} is over {MAX_METADATA_BYTES} bytes")
+        return json.load(source)
+
+
 def stop_step(session: Path) -> str:
     framewisp = shlex.join(["framewisp", str(session)])
     return f"If the session is running, stop it with `{framewisp} stop`.\n"
@@ -206,7 +224,7 @@ def unverified_runtime(session: Path, runtime: Path, problem: str) -> str:
 
 def records_attachment(session: Path) -> bool:
     try:
-        state: object = json.loads((session / "session.json").read_text())
+        state = read_metadata(session / "session.json")
     except (OSError, ValueError, RecursionError):
         return False
     return (
@@ -245,18 +263,7 @@ def read_journal(session: Path, lease: int) -> Journal:
     """Return the verified journal, or refuse with manual cleanup steps."""
     path = session / JOURNAL
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(descriptor) as source:
-            info = os.fstat(source.fileno())
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid()
-                or info.st_nlink != 1
-            ):
-                raise ValueError("journal must be an owned regular file with one link")
-            if info.st_size > MAX_JOURNAL_BYTES:
-                raise ValueError(f"journal is over {MAX_JOURNAL_BYTES} bytes")
-            value: object = json.load(source)
+        value = read_metadata(path)
         if not isinstance(value, dict):
             raise ValueError("journal must be an object")
         journal = cast(dict[str, object], value)
@@ -274,7 +281,6 @@ def read_journal(session: Path, lease: int) -> Journal:
                 "journal has no valid session lock identity. It may predate lock "
                 "verification"
             )
-    # Deeply nested JSON raises RecursionError.
     except (OSError, ValueError, RecursionError) as error:
         raise SessionError(unreadable_journal(session, str(error))) from error
     verify_lock(session, lock, runtime, lease)
@@ -362,8 +368,13 @@ def remove_runtime(session: Path, lease: int) -> None:
             pending = list(runtime.glob("owner-*.json"))
             if pending:
                 raise SessionError(
-                    f"Cleanup is incomplete; resources remain at {runtime}. "
-                    f"Inspect supervisor records: {', '.join(str(path) for path in pending)}"
+                    unverified_runtime(
+                        session,
+                        runtime,
+                        f"Cleanup is incomplete; resources remain at {runtime}. "
+                        "Inspect supervisor records: "
+                        f"{', '.join(str(path) for path in pending)}",
+                    )
                 )
             shutil.rmtree(runtime)
 

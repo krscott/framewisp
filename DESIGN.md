@@ -566,13 +566,14 @@ is still alive. A nonzero recorder exit during finalization names its
 destination and log. A killed recorder may leave an incomplete file. Socket EOF
 requests cleanup when its supervisor survives.
 
-`recover` acquires the same session lease without reading `session.json`. Each
+`recover` acquires the same session lease without using `session.json`. Each
 supervisor inherits the lease descriptor, while its application does not. The
 runner closes the descriptor without LOCK_UN; recovery remains excluded until all
 supervisors exit. Before launching children, each supervisor writes an
 `owner-PID.json` record in the private runtime. Only successful descendant cleanup
 removes that record. Failure retains diagnostic information. A killed supervisor
-leaves its record and recovery refuses to remove the runtime.
+leaves its record and recovery refuses to remove the runtime, printing manual
+cleanup steps.
 
 Recovery verifies the journal's session identity and reads its absolute runtime
 path. It refuses a path whose basename does not match the UID and session
@@ -603,7 +604,8 @@ a runtime that cannot be removed, prints steps using the journal's path
 (R-LIFE-7). Every set of manual steps looks for live processes by the runtime
 directory's name, which is the same under any TMPDIR. Stale attachment metadata
 without a journal gets attachment steps instead, because `run`, `status`, and `stop`
-do not apply to it (R-LIFE-7).
+do not apply to it (R-LIFE-7). That is the only use of `session.json`, and it only
+selects the message; recovery reads it as untrusted input, like the journal.
 
 Once ownership is verified and no supervisor records remain,
 recovery removes the runtime, `session.json`, its temporary file, and the
