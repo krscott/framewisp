@@ -280,8 +280,9 @@ def test_clip_end_cuts_a_late_ping_short(raw_video: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(5.7, 5.71) + ping_line(5.8, 300, 200))
     render(raw_video, log, captions=False, compact=CompactSettings(before=0, after=0))
-    assert len(compacted_ring_frames(raw_video, size=SIZE)) < 15
-    assert round(recording_duration(raw_video) * 30) < 180
+    shown = compacted_ring_frames(raw_video, size=SIZE)
+    assert 4 <= len(shown) < 15
+    assert max(shown) == round(recording_duration(raw_video) * 30) - 1
 
 
 # R-REC-8

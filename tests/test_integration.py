@@ -1735,6 +1735,11 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     assert not any(
         patch[offset] - patch[offset + 1] > 40 for offset in range(0, len(patch), 3)
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> None:
     with socket.socket(socket.AF_UNIX) as connection:
         connection.connect(str(demo.runtime / "control.sock"))
         request = {
