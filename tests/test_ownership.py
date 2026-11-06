@@ -1,11 +1,12 @@
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -352,6 +353,127 @@ def test_lost_lock_manual_cleanup_commands_work(abandoned: tuple[Path, Path]) ->
     assert not runtime.exists()
     assert (session / "app.log").read_text() == "diagnostic"
     assert recover_session(session) == 0
+
+
+def rewrite_journal(session: Path, /, **fields: object) -> None:
+    journal = json.loads((session / JOURNAL).read_text())
+    (session / JOURNAL).write_text(json.dumps(journal | fields))
+
+
+def replace_journal_with_directory(session: Path, _: Path) -> None:
+    (session / JOURNAL).unlink()
+    (session / JOURNAL).mkdir()
+
+
+def replace_journal_with_symlink(session: Path, _: Path) -> None:
+    (session / JOURNAL).unlink()
+    (session / JOURNAL).symlink_to(session / "app.log")
+
+
+def pad_journal(session: Path, _: Path) -> None:
+    with (session / JOURNAL).open("a") as journal:
+        journal.write(" " * (1 << 16))
+
+
+DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], None]] = {
+    "nested-arrays": lambda s, _: (s / JOURNAL).write_text("[" * 200_000),
+    "nested-arrays-under-size-limit": lambda s, _: (s / JOURNAL).write_text(
+        "[" * 60_000
+    ),
+    "nested-objects": lambda s, _: (s / JOURNAL).write_text('{"a":' * 200_000),
+    "empty": lambda s, _: (s / JOURNAL).write_text(""),
+    "truncated": lambda s, _: (s / JOURNAL).write_text('{"session": ['),
+    "binary": lambda s, _: (s / JOURNAL).write_bytes(b"\xff\xfe\x00"),
+    "not-an-object": lambda s, _: (s / JOURNAL).write_text("[]"),
+    "oversized": pad_journal,
+    "directory": replace_journal_with_directory,
+    "symlink": replace_journal_with_symlink,
+    "foreign-session": lambda s, _: rewrite_journal(s, session=[0, 0]),
+    "unencodable-runtime": lambda s, r: rewrite_journal(
+        s, runtime_path=f"/tmp/\ud800/{r.name}"
+    ),
+    "overlong-runtime": lambda s, r: rewrite_journal(
+        s, runtime_path=f"/{'a' * 5000}/{r.name}"
+    ),
+    "runtime-under-file": lambda s, r: rewrite_journal(
+        s, runtime_path=f"{s}/app.log/{r.name}"
+    ),
+    "invalid-runtime-identity": lambda s, _: rewrite_journal(s, runtime="bad"),
+}
+
+
+# R-LIFE-5
+@pytest.mark.parametrize("kind", DAMAGED_JOURNALS)
+def test_unreadable_journal_refused_with_working_manual_steps(
+    abandoned: tuple[Path, Path], kind: str
+) -> None:
+    session, runtime = abandoned
+    DAMAGED_JOURNALS[kind](session, runtime)
+    with pytest.raises(SessionError, match="Cannot verify ownership") as refusal:
+        recover_session(session)
+    message = str(refusal.value)
+    assert "Nothing was removed" in message and " stop`" in message
+    assert (runtime / "kept").read_text() == "preserve"
+    assert (session / "session.json").exists()
+    assert (session / JOURNAL).exists() or (session / JOURNAL).is_symlink()
+    assert run_commands(message, "grep ") == ""
+    run_commands(message, "rm ")
+    assert not runtime.exists()
+    assert (session / "app.log").read_text() == "diagnostic"
+    assert recover_session(session) == 0
+
+
+# R-LIFE-5
+def test_unreadable_journal_steps_find_session_under_another_tmpdir(
+    abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    (session / JOURNAL).write_text("{")
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    with pytest.raises(SessionError, match="TMPDIR") as refusal:
+        recover_session(session)
+    environment = os.environ | {"XDG_RUNTIME_DIR": str(runtime)}
+    with subprocess.Popen(["sleep", "60"], env=environment) as survivor:
+        try:
+            found = run_commands(str(refusal.value), "grep ")
+        finally:
+            survivor.kill()
+    assert f"/proc/{survivor.pid}/environ" in found
+
+
+# R-LIFE-5
+def test_foreign_journal_steps_leave_its_runtime_alone(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session, runtime = abandoned
+    copied = tmp_path / "copy"
+    copied.mkdir()
+    shutil.copy(session / JOURNAL, copied / JOURNAL)
+    with pytest.raises(SessionError, match="does not belong") as refusal:
+        recover_session(copied)
+    run_commands(str(refusal.value), "rm ")
+    assert (runtime / "kept").read_text() == "preserve"
+    assert recover_session(copied) == 0
+    assert (runtime / "kept").read_text() == "preserve"
+
+
+def test_journal_is_durable_before_commit_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    synced: list[tuple[bool, bool]] = []
+    real_fsync = os.fsync
+
+    def recording_fsync(descriptor: int) -> None:
+        is_directory = stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        synced.append((is_directory, (tmp_path / JOURNAL).exists()))
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    with session_lease(tmp_path) as lease:
+        write_journal(tmp_path, runtime_path(tmp_path), lease, created=False)
+    # The contents reach disk before the rename, then the rename itself.
+    assert synced == [(False, False), (True, True)]
 
 
 # R-LIFE-5

@@ -10,6 +10,7 @@ import stat
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -17,11 +18,28 @@ from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
 JOURNAL = ".headless-owner.json"
+# Far above any journal, whose runtime path fits in a 108-byte socket address.
+MAX_JOURNAL_BYTES = 1 << 16
+
+
+@dataclass(frozen=True)
+class Journal:
+    """A verified ownership journal. A null identity means mkdir may be uncommitted."""
+
+    runtime: Path
+    runtime_identity: list[int] | None
 
 
 def identity(path: Path) -> list[int]:
     info = path.lstat()
     return [info.st_dev, info.st_ino]
+
+
+def parse_identity(value: object) -> list[int] | None:
+    parts = cast(list[object], value) if isinstance(value, list) else []
+    if len(parts) != 2 or not all(type(part) is int for part in parts):
+        return None
+    return cast(list[int], parts)
 
 
 def lease_identity(lease: int) -> list[int]:
@@ -54,14 +72,21 @@ def check_socket_paths(runtime: Path) -> None:
 
 
 def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
+    """Return the journal's runtime path, or raise ValueError or OSError."""
     # Journals without a path predate TMPDIR support and always used /tmp.
     legacy = Path("/tmp") / runtime_name(session)
     value = journal.get("runtime_path", str(legacy))
     if not isinstance(value, str) or "\0" in value:
-        raise SessionError("Ownership journal runtime path must be an absolute path.")
+        raise ValueError("Ownership journal runtime path must be an absolute path.")
     runtime = Path(value)
     if not runtime.is_absolute() or runtime.name != legacy.name:
-        raise SessionError(f"Invalid ownership journal runtime path: {runtime}")
+        raise ValueError(f"Invalid ownership journal runtime path: {runtime}")
+    # Path.exists() reports a path that cannot be checked as missing, which would
+    # read as a finished cleanup. Only a confirmed absence may.
+    try:
+        runtime.lstat()
+    except FileNotFoundError:
+        pass
     return runtime
 
 
@@ -142,22 +167,44 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
         f"  cat {quoted}/owner-*.json",
         "Then delete its runtime directory and metadata, keeping logs:",
         f"  rm -rf -- {quoted}",
-        "  " + shlex.join(["rm", "-f", "--", *(str(session / m) for m in metadata)]),
+        "  " + shlex.join(["rm", "-rf", "--", *(str(session / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
     return "\n".join(lines)
 
 
-def verify_lock(session: Path, journal: dict[str, object], lease: int) -> None:
+def stop_step(session: Path) -> str:
+    framewisp = shlex.join(["framewisp", str(session)])
+    return f"If the session is running, stop it with `{framewisp} stop`.\n"
+
+
+def unreadable_journal(session: Path, problem: str) -> str:
+    # The journal is the only record of the TMPDIR the session started with, and it
+    # cannot be trusted here. Copying a path from it could also aim these steps at
+    # another session, so they use the path derived from this session's identity.
+    runtime = runtime_path(session)
+    environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/{runtime.name}$")
+    return (
+        f"Cannot verify ownership at {session / JOURNAL}: {problem}\n"
+        "Recovery cannot prove the session has exited. Nothing was removed.\n"
+        + stop_step(session)
+        + "Otherwise follow these steps. They assume the current TMPDIR. A session "
+        f"started with another TMPDIR left its directory, also named {runtime.name}, "
+        "there instead, so delete that one too.\n"
+        + cleanup_steps(session, runtime, f"grep -zlsE {environment} /proc/*/environ")
+    )
+
+
+def verify_lock(
+    session: Path, journal: dict[str, object], runtime: Path, lease: int
+) -> None:
     held = lease_identity(lease)
     recorded = journal.get("lock")
     if recorded == held:
         return
-    runtime = journal_runtime(session, journal)
-    framewisp = shlex.join(["framewisp", str(session)])
-    stop = f"If the session is running, stop it with `{framewisp} stop`.\n"
-    parts = cast(list[object], recorded) if isinstance(recorded, list) else []
-    if len(parts) != 2 or not all(type(part) is int for part in parts):
+    stop = stop_step(session)
+    parts = parse_identity(recorded)
+    if parts is None:
         raise SessionError(
             f"Ownership journal {session / JOURNAL} has no valid session lock "
             "identity, so recovery cannot prove the session has exited. It may "
@@ -178,7 +225,8 @@ def verify_lock(session: Path, journal: dict[str, object], lease: int) -> None:
     )
 
 
-def read_journal(session: Path, lease: int) -> dict[str, object]:
+def read_journal(session: Path, lease: int) -> Journal:
+    """Return the verified journal, or refuse with manual cleanup steps."""
     path = session / JOURNAL
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -190,16 +238,31 @@ def read_journal(session: Path, lease: int) -> dict[str, object]:
                 or info.st_nlink != 1
             ):
                 raise ValueError("journal must be an owned regular file with one link")
+            if info.st_size > MAX_JOURNAL_BYTES:
+                raise ValueError(f"journal is over {MAX_JOURNAL_BYTES} bytes")
             value: object = json.load(source)
         if not isinstance(value, dict):
             raise ValueError("journal must be an object")
         journal = cast(dict[str, object], value)
         if journal.get("session") != identity(session):
             raise ValueError("journal does not belong to this session directory")
-    except (OSError, ValueError) as error:
-        raise SessionError(f"Cannot verify ownership at {path}: {error}") from error
-    verify_lock(session, journal, lease)
-    return journal
+        runtime = journal_runtime(session, journal)
+        runtime_identity = parse_identity(journal.get("runtime"))
+        if runtime_identity is None and journal.get("runtime") is not None:
+            raise ValueError("journal has an invalid runtime identity")
+    # Deeply nested JSON raises RecursionError.
+    except (OSError, ValueError, RecursionError) as error:
+        raise SessionError(unreadable_journal(session, str(error))) from error
+    verify_lock(session, journal, runtime, lease)
+    return Journal(runtime, runtime_identity)
+
+
+def sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) -> None:
@@ -217,12 +280,15 @@ def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) ->
             },
             output,
         )
+        output.flush()
+        os.fsync(output.fileno())
     temporary.replace(session / JOURNAL)
+    sync_directory(session)
 
 
 def remove_runtime(session: Path, lease: int) -> None:
     journal = read_journal(session, lease)
-    runtime = journal_runtime(session, journal)
+    runtime = journal.runtime
     if runtime.is_symlink():
         raise SessionError(f"Refusing symlink runtime: {runtime}")
     if runtime.exists():
@@ -233,12 +299,12 @@ def remove_runtime(session: Path, lease: int) -> None:
             or info.st_mode & 0o077
         ):
             raise SessionError(f"Runtime ownership or permissions changed: {runtime}")
-        if journal.get("runtime") is None:
+        if journal.runtime_identity is None:
             # Interruption between mkdir and committing its inode can only have
             # left an empty directory. Never recursively remove it without proof.
             runtime.rmdir()
         else:
-            if journal.get("runtime") != identity(runtime):
+            if journal.runtime_identity != identity(runtime):
                 raise SessionError(
                     f"Runtime identity changed; resources remain at {runtime}"
                 )

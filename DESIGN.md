@@ -576,8 +576,8 @@ leaves its record and recovery refuses to remove the runtime.
 
 Recovery verifies the journal's session identity and reads its absolute runtime
 path. It refuses a path whose basename does not match the UID and session
-identity (R-LIFE-5). Journals without a path use the original fixed `/tmp`
-location. Recovery checks the runtime's inode, owner, permissions, and directory
+identity, or whose status cannot be checked (R-LIFE-5). Journals without a path use
+the original fixed `/tmp` location. Recovery checks the runtime's inode, owner, permissions, and directory
 type regardless of the current `TMPDIR`. Normal cleanup reads the same journal
 path. Recovery never signals stored PIDs or uses `session.json` to authorize
 cleanup. A null runtime identity permits only rmdir of an empty directory,
@@ -588,13 +588,26 @@ journals, symlink ownership files, and replaced runtimes fail verification
 (R-LIFE-5). Reading the journal also compares its lock identity with the
 descriptor the caller holds. A replaced or deleted lock leaves recovery holding a
 different inode from any live owner, so it refuses with manual cleanup steps
-(R-LIFE-5). Journals without a valid lock identity are refused the same way. A
-live owner compares its own descriptor, so its cleanup succeeds even if the lock
+(R-LIFE-5). Journals without a valid lock identity are refused the same way.
+`read_journal` is the one check for every other unreadable journal: an open,
+ownership, size, parse, session, runtime-path, or runtime-identity failure removes
+nothing and prints manual cleanup steps (R-LIFE-5). Those steps use the runtime
+path derived from the session identity and the current TMPDIR, because a damaged
+journal cannot be trusted and a copied one could name another session. They look
+for live processes by the runtime directory's name, which is the same under any
+TMPDIR. A live owner compares its own descriptor, so its cleanup succeeds even if the lock
 path was replaced. Once ownership is verified and no supervisor records remain,
 recovery removes the runtime, `session.json`, its temporary file, and the
 ownership journal (R-LIFE-4). Logs, app-exit diagnostics, inputs, and recordings
 remain. It reports success as JSON or a nonzero error identifying resources that
 remain. Running again replaces logs.
+
+Each journal commit syncs the temporary file, renames it, then syncs the session
+directory, so it survives power loss before the resource it describes is created.
+Without those syncs a filesystem may persist the rename without the contents, or
+lose the rename, leaving a session that needs manual cleanup. Removal is not
+synced: replaying it after power loss leaves a journal with a missing runtime,
+which recovery accepts, or resources without a journal, which recovery refuses.
 
 The lock file persists across runs and must not be unlinked or replaced. Acquiring
 the lease refuses session directories that the caller does not own or that
