@@ -3553,9 +3553,9 @@ def test_recording_keeps_file_created_before_recorder_opens(
         check=False,
         timeout=20,
     )
+    assert clip.read_bytes() == b"another client's file"
     assert result.returncode == 1
     assert demo.process.wait(timeout=20) == 1
-    assert clip.read_bytes() == b"another client's file"
     kept = private_clip(tmp_path)
     assert str(kept) in " ".join(result.stderr.split())
     assert len(recording_frames(kept)) > 1
@@ -3583,8 +3583,8 @@ def test_finalizing_keeps_video_moved_onto_destination(
         check=False,
         timeout=20,
     )
-    assert result.returncode == 1
     assert clip.read_bytes() == other
+    assert result.returncode == 1
     kept = private_clip(tmp_path)
     assert str(kept) in " ".join(result.stderr.split())
     assert kept.read_bytes() != other
