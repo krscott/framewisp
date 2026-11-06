@@ -10,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import traceback
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -31,7 +30,14 @@ from framewisp.captions import (
     render_recording,
 )
 from framewisp.compact import CompactSettings
+from framewisp.connection import (
+    parse_command,
+    receive_request,
+)
 from framewisp.connection import reply as reply
+from framewisp.connection import (
+    resolved_request_path,
+)
 from framewisp.console import ConsoleCapture, app_output
 from framewisp.environment import caller_environment, unix_bus_address
 from framewisp.errors import (
@@ -707,16 +713,6 @@ def session_command(
     return 0
 
 
-def resolved_request_path(path: Path, field: str) -> Path:
-    """Resolve a requested path, refusing what the filesystem API cannot encode."""
-    try:
-        return path.resolve()
-    except (ValueError, RuntimeError) as failure:
-        # NUL and most lone surrogates raise ValueError. Before Python 3.13, so
-        # does a symlink loop, as RuntimeError.
-        raise ValueError(f"{field} is not a usable path: {failure}") from None
-
-
 @dataclass(frozen=True)
 class RecordStart:
     destination: Path
@@ -753,8 +749,6 @@ class RecordStart:
 SessionAction = Literal["stop", "status", "record-stop"]
 SESSION_ACTIONS: tuple[SessionAction, ...] = get_args(SessionAction)
 ControlRequest = SessionAction | RecordStart | InputAction | Batch
-# What validators raise for a bad request. Anything else is a validator bug.
-REJECTED_REQUEST = (ValueError, TypeError, OverflowError, OSError)
 
 
 def parse_batch(raw: object, recordings: Recordings) -> Batch:
@@ -778,13 +772,7 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
 
 def parse_request(line: bytes, recordings: Recordings) -> ControlRequest:
     """Validate one request line, changing no session state."""
-    try:
-        raw: object = json.loads(line)
-    except (ValueError, RecursionError) as failure:
-        raise ValueError(f"Session request is not valid JSON: {failure}") from None
-    if not isinstance(raw, dict):
-        raise ValueError("Expected a session command object.")
-    command = cast(dict[str, object], raw)
+    command = parse_command(line)
     if command.get("session") != str(recordings.session):
         raise ValueError(
             "Session metadata points to a different session. Use the original session directory."
@@ -803,17 +791,6 @@ def parse_request(line: bytes, recordings: Recordings) -> ControlRequest:
     raise ValueError("Unsupported headless session command.")
 
 
-def read_request(connection: socket.socket, recordings: Recordings) -> ControlRequest:
-    try:
-        with connection.makefile("rb") as request:
-            line = request.readline(MAX_REQUEST_BYTES + 1)
-    except TimeoutError:
-        raise ValueError("Timed out waiting for a complete session request.") from None
-    if len(line) > MAX_REQUEST_BYTES:
-        raise ValueError("Session request exceeds the 1 MiB limit.")
-    return parse_request(line, recordings)
-
-
 def handle_session_command(
     listener: socket.socket,
     recordings: Recordings,
@@ -823,9 +800,8 @@ def handle_session_command(
 ) -> socket.socket | None:
     """Return a stop caller's connection for the runner to reply after cleanup.
 
-    Reading a request changes no state, so every failure there is rejected and
-    the session continues. Execution is not guarded: an unexpected error in it is
-    a runner failure and ends the session.
+    Execution is not guarded: an unexpected error in it is a runner failure and
+    ends the session.
     """
     try:
         connection, _ = listener.accept()
@@ -833,22 +809,12 @@ def handle_session_command(
         return None
     stopping = False
     try:
-        connection.settimeout(2)
-        try:
-            request = read_request(connection, recordings)
-        except REJECTED_REQUEST as failure:
-            reply(connection, error=str(failure))
-            return None
-        except Exception as failure:
-            name = type(failure).__name__
-            reply(
-                connection,
-                error=f"Framewisp bug: validating this request raised {name}. "
-                "See the runner's stderr.",
-            )
-            # The message is left out because it can quote typed text.
-            print(f"Bug validating a control request: {name}", file=sys.stderr)
-            traceback.print_tb(failure.__traceback__)
+        request: ControlRequest | None = receive_request(
+            connection,
+            lambda failure: reply(connection, error=failure),
+            lambda line: parse_request(line, recordings),
+        )
+        if request is None:
             return None
         if request == "stop":
             stopping = True

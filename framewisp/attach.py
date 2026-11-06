@@ -18,14 +18,20 @@ import uuid
 from pathlib import Path
 from threading import Event, Lock, Thread
 from types import FrameType
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import gi
 
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from framewisp.actions import InputAction
 from framewisp.captions import input_error
+from framewisp.connection import (
+    parse_command,
+    receive_request,
+    resolved_request_path,
+)
 from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
@@ -260,6 +266,31 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         os.close(descriptor)
 
 
+def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
+    """Validate a request: a screenshot destination, or an input action."""
+    command = parse_command(line)
+    if command.get("attachment") != attachment:
+        raise ValueError(
+            "Attached session is disconnected. Ask the user to attach again."
+        )
+    action = command.get("action")
+    if not isinstance(action, str):
+        raise ValueError("action must be a string.")
+    if action.startswith("record-"):
+        raise ValueError("Recording attached sessions is not supported yet.")
+    parameters = command.get("parameters")
+    if action != "screenshot":
+        return InputAction.parse(action, parameters)
+    path = (
+        cast(dict[str, object], parameters).get("path")
+        if isinstance(parameters, dict)
+        else None
+    )
+    if not isinstance(path, str):
+        raise ValueError("screenshot requires a path.")
+    return resolved_request_path(Path(path), "path")
+
+
 def foreground_terminal(descriptor: int) -> bool:
     try:
         return os.isatty(descriptor) and os.tcgetpgrp(descriptor) == os.getpgrp()
@@ -354,40 +385,39 @@ def _run_attachment(
     def handle(connection: socket.socket) -> None:
         assert portal is not None and inputs is not None
         with connection:
-            status, error = 0, None
-            action: str = ""
-            try:
-                connection.settimeout(2)
-                with connection.makefile("r") as source:
-                    line = source.readline(1024 * 1024 + 1)
-                if len(line) > 1024 * 1024:
-                    raise ValueError("Input request is too large.")
-                request = json.loads(line)
-                if request.get("attachment") != attachment:
-                    raise ValueError(
-                        "Attached session is disconnected. Ask the user to attach again."
+
+            def answer(status: int, error: str | None) -> None:
+                try:
+                    connection.sendall(
+                        (json.dumps({"status": status, "error": error}) + "\n").encode()
                     )
-                action = request["action"]
-                parameters: InputParameters = request["parameters"]
+                except OSError:
+                    pass
+
+            def parse(line: bytes) -> InputAction | Path:
+                request = parse_attached_request(line, attachment)
                 if not ready.is_set():
                     raise ValueError("Attach is waiting for desktop permission.")
+                return request
+
+            request = receive_request(
+                connection, lambda failure: answer(1, failure), parse
+            )
+            if request is None:
+                return
+            status, error = 0, None
+            action = "screenshot" if isinstance(request, Path) else request.action
+            try:
                 while not lock.acquire(timeout=0.05):
                     inputs.wait()
                 try:
                     inputs.wait()
-                    if action == "screenshot":
-                        capture(
-                            portal,
-                            Path(parameters["path"]),
-                            stop,
-                            session / "capture.log",
-                        )
-                    elif action.startswith("record-"):
-                        raise ValueError(
-                            "Recording attached sessions is not supported yet."
-                        )
+                    if isinstance(request, Path):
+                        capture(portal, request, stop, session / "capture.log")
                     else:
-                        inputs.perform(action, parameters)
+                        inputs.perform(
+                            action, cast(InputParameters, request.parameters)
+                        )
                 finally:
                     lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
@@ -404,12 +434,7 @@ def _run_attachment(
                 traceback.print_exception(
                     RuntimeError(error).with_traceback(failure.__traceback__)
                 )
-            try:
-                connection.sendall(
-                    (json.dumps({"status": status, "error": error}) + "\n").encode()
-                )
-            except OSError:
-                pass
+            answer(status, error)
 
     def serve(listener: socket.socket, emergency: socket.socket) -> None:
         try:

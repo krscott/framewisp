@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import socket
@@ -2156,6 +2157,25 @@ def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> N
     cli(demo.directory, "record-stop")
     assert_session_running(demo)
     assert clip.stat().st_size > 0
+
+
+# R-CONTROL-1, R-CONTROL-2
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_trickling_client_cannot_hold_the_control_loop(demo: Demo) -> None:
+    wait_for_input_probe_window(demo)
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(demo.runtime / "control.sock"))
+        started = time.monotonic()
+        while not select.select([connection], [], [], 0.3)[0]:
+            assert time.monotonic() - started < 3
+            connection.sendall(b" ")
+        elapsed = time.monotonic() - started
+        assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
+    assert elapsed < 3
+    assert_session_running(demo)
+    assert json.loads(cli(demo.directory, "stop").stdout)["status"] == "stopped"
+    assert demo.process.wait(timeout=10) == 0
 
 
 # R-CONTROL-1, R-CONTROL-2

@@ -744,18 +744,24 @@ stop requests as recording-stop requests. Validation/startup errors are returned
 to the caller without stopping the app. Unexpected recorder exit or finalization
 failure still fails the session, after `record-stop` replies with the error.
 
-The runner handles each request in two stages, and the stage decides what a
-failure means. `read_request` turns the request line into a typed request. It changes no session
+The runner and an attachment handle each request in two stages, and the stage
+decides what a failure means. `receive_request` in `connection.py` reads the line
+and has the owner's parser turn it into a typed request. Neither changes session
 state, so every failure there gets an error reply and the session continues
 (R-CONTROL-1, R-CONTROL-2). That holds for any command, and for a request the
-runner cannot read or decode. Resolving a requested path refuses a NUL byte and
+owner cannot read or decode. A client has `REQUEST_SECONDS` in total to send its
+line, however slowly it sends, so it cannot hold the runner's control loop. A
+failure to log a validator bug does not end the session either. Resolving a
+requested path refuses a NUL byte and
 any lone surrogate that the filesystem encoding cannot represent. The surrogates
 that stand for undecodable filename bytes stay valid, so a non-UTF-8 destination
 records normally. `REJECTED_REQUEST` lists what validators raise for a bad request, and
 the reply carries that message. Any other exception there is a validator bug: the
 reply names its type, and the traceback goes to the runner's stderr without the
-message, which can quote typed text. An error during execution that is not returned
-as a reply is a runner failure and ends the session, even if it is a `ValueError`.
+message, which can quote typed text. In the runner, an error during execution that
+is not returned as a reply is a runner failure and ends the session, even if it is
+a `ValueError`. An attachment's execution keeps its own rule: a `ValueError` or
+cancellation is that command's reply, and anything else closes the portal.
 
 `record-stop` returns a summary in `data`, printed as JSON by the CLI. After
 finalization and caption rendering, ffprobe supplies duration and dimensions;

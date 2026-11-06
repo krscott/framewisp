@@ -5,6 +5,7 @@ import os
 import pty
 import select
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -520,6 +522,79 @@ def test_old_session_cannot_control_new_attachment(
     (old / "session.json").write_text(json.dumps(state))
     assert request_attached(old, "key", {"chord": "a"}) == 1
     assert not (tmp_path / "events").exists()
+    assert attach_process.poll() is None
+
+
+def control_reply(session: Path, message: bytes) -> dict[str, object]:
+    state = json.loads((session / "session.json").read_text())
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        connection.sendall(message)
+        connection.shutdown(socket.SHUT_WR)
+        return cast(dict[str, object], json.loads(connection.makefile().readline()))
+
+
+# R-CONTROL-1, R-CONTROL-2
+def test_malformed_requests_leave_the_attachment_running(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    session = tmp_path / "session"
+    token = json.loads((session / "session.json").read_text())["attachment"]
+    requests: list[dict[str, object]] = [
+        {},
+        {"action": 1, "parameters": {}},
+        {"action": "key"},
+        {"action": "key", "parameters": []},
+        {"action": "key", "parameters": {}},
+        {"action": "key", "parameters": {"chord": []}},
+        {"action": "key", "parameters": {"chord": "\ud800"}},
+        {"action": "unknown", "parameters": {}},
+        {"action": "record-start", "parameters": {}},
+        {"action": "click", "parameters": {"x": "a", "y": 0}},
+        {"action": "screenshot"},
+        {"action": "screenshot", "parameters": {"path": 1}},
+        {"action": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
+        {"action": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
+    ]
+    for message in (
+        b"",
+        b"\n",
+        b"not json\n",
+        b"\xff\n",
+        b"[]\n",
+        b"[" * 100000 + b"\n",
+        *((json.dumps({"attachment": token} | r) + "\n").encode() for r in requests),
+    ):
+        response = control_reply(session, message)
+        assert response["status"] == 1
+        assert isinstance(response["error"], str) and response["error"]
+        assert attach_process.poll() is None
+    assert not (tmp_path / "events").exists()
+    assert request_attached(session, "key", {"chord": "a"}) == 0
+    assert (tmp_path / "events").exists()
+    assert attach_process.poll() is None
+
+
+# R-CONTROL-1, R-CONTROL-2
+def test_trickling_client_gets_a_reply_from_the_attachment(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    state = json.loads((tmp_path / "session/session.json").read_text())
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        started = time.monotonic()
+        while not select.select([connection], [], [], 0.3)[0]:
+            assert time.monotonic() - started < 3
+            connection.sendall(b" ")
+        assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
     assert attach_process.poll() is None
 
 

@@ -3,6 +3,7 @@
 import errno
 import json
 import socket
+import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Event
@@ -94,6 +95,30 @@ def test_validator_bug_is_reported_without_ending_the_session(
     stderr = capfd.readouterr().err
     assert "KeyError" in stderr and "in parse" in stderr
     assert SECRET not in stderr
+
+
+class BrokenStderr:
+    def write(self, text: str) -> int:
+        raise BrokenPipeError("stderr closed")
+
+
+# R-CONTROL-1, R-CONTROL-2
+def test_validator_bug_with_a_closed_stderr_keeps_the_session(
+    listener: socket.socket,
+    recordings: Recordings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def parse(action: object, raw: object) -> InputAction:
+        raise KeyError(SECRET)
+
+    monkeypatch.setattr(InputAction, "parse", parse)
+    monkeypatch.setattr(sys, "stderr", BrokenStderr())
+    response = handle(
+        listener,
+        recordings,
+        {"action": "type", "parameters": {"text": SECRET, "interval": 0}},
+    )
+    assert "Framewisp bug" in cast(str, response["error"])
 
 
 @pytest.mark.parametrize("failure", [ValueError, TypeError, OSError, KeyError])
