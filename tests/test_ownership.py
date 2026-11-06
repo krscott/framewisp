@@ -627,13 +627,19 @@ def test_lock_changed_while_acquiring_refused_with_working_manual_steps(
 
 
 def run_missing_session_commands(message: str, runtime: Path) -> None:
-    assert str(runtime) in run_commands(message, "ls ")
+    # The lists are compared by name, so each must print the bare name.
+    assert runtime.name in run_commands(message, "find ").splitlines()
+    assert runtime.name not in run_commands(message, "grep ").splitlines()
     environment = os.environ | {"XDG_RUNTIME_DIR": str(runtime)}
     with subprocess.Popen(["sleep", "60"], env=environment) as survivor:
         try:
-            assert str(runtime) in run_commands(message, "grep ")
+            used = run_commands(message, "grep ")
         finally:
             survivor.kill()
+    assert runtime.name in used.splitlines()
+    # A starting session has no marked process, so the lists cannot authorize rm.
+    assert "If unsure, leave it" in " ".join(message.split())
+    assert not [line for line in message.splitlines() if line.strip().startswith("rm ")]
 
 
 # R-LIFE-7
@@ -681,6 +687,76 @@ def test_session_deleted_during_shutdown_keeps_runtime_and_gives_steps(
         run_missing_session_commands(str(refusal.value), runtime)
     finally:
         shutil.rmtree(runtime, ignore_errors=True)
+
+
+# R-LIFE-7
+def test_session_vanishing_during_lease_gets_steps(
+    abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    real_open = os.open
+
+    def remove_session_then_open(path: Path, flags: int, mode: int = 0o777) -> int:
+        session.rename(session.with_name("moved"))
+        return real_open(path, flags, mode)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", remove_session_then_open)
+        with pytest.raises(SessionError, match="does not exist") as refusal:
+            recover_session(session)
+    run_missing_session_commands(str(refusal.value), runtime)
+
+
+# R-LIFE-7
+def test_lock_changed_with_stale_attachment_gets_attachment_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "session.json").write_text('{"kind": "attached"}')
+    real_flock = fcntl.flock
+
+    def delete_lock_then_flock(descriptor: int, operation: int) -> None:
+        real_flock(descriptor, operation)
+        (tmp_path / LOCK).unlink()
+
+    monkeypatch.setattr(fcntl, "flock", delete_lock_then_flock)
+    with pytest.raises(SessionError, match="changed while acquiring") as refusal:
+        recover_session(tmp_path)
+    message = str(refusal.value)
+    assert "--detach" in message and " run -- APP" not in message
+    assert (tmp_path / "session.json").exists()
+
+
+# R-LIFE-7
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can write a read-only directory")
+@pytest.mark.parametrize("journal", ["unreadable", "missing"])
+def test_read_only_tmpdir_is_still_checked_for_runtime(
+    tmp_path: Path, journal: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
+    monkeypatch.setenv("TMPDIR", str(temporary))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    session = tmp_path / "session"
+    session.mkdir()
+    runtime = runtime_path(session)
+    with session_lease(session) as lease:
+        write_journal(session, runtime, lease, created=False)
+        runtime.mkdir(mode=0o700)
+        write_journal(session, runtime, lease, created=True)
+    (runtime / "owner-1.json").write_text("{}")
+    if journal == "missing":
+        (session / JOURNAL).unlink()
+    else:
+        (session / JOURNAL).write_text("{")
+    temporary.chmod(0o500)
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    try:
+        with pytest.raises(SessionError, match="Nothing was removed") as refusal:
+            recover_session(session)
+        assert f"rm -rf -- {runtime}" in str(refusal.value)
+        assert (runtime / "owner-1.json").exists()
+    finally:
+        temporary.chmod(0o700)
 
 
 def refuse_tempdir() -> str:

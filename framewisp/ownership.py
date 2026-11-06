@@ -60,13 +60,21 @@ def runtime_path(session: Path) -> Path:
 
 
 def temporary_parent() -> Path:
-    """Return where this session's runtime should be, for refusals to name."""
+    """Return where this session's runtime should be, for refusals and checks."""
+    configured = os.environ.get("TMPDIR")
     try:
-        return Path(tempfile.gettempdir())
+        usable = Path(tempfile.gettempdir())
     except OSError:
-        # Refusals must still work when no temporary directory is writable. Its
-        # runtime can be in a directory that has since become read-only.
-        return Path(os.environ.get("TMPDIR") or "/tmp").absolute()
+        usable = None
+    # gettempdir() skips a TMPDIR it cannot write to, but a session may have started
+    # there before it became read-only.
+    if (
+        configured
+        and Path(configured).is_dir()
+        and (usable is None or not os.access(configured, os.W_OK))
+    ):
+        return Path(configured).absolute()
+    return usable or Path("/tmp")
 
 
 def check_socket_paths(runtime: Path) -> None:
@@ -117,7 +125,10 @@ def unusable_lock(lock: Path, problem: str) -> str:
 
 @contextmanager
 def session_lease(session: Path) -> Generator[int, None, None]:
-    directory = session.lstat()
+    try:
+        directory = session.lstat()
+    except OSError as error:
+        raise SessionError(unreadable_journal(session, str(error.strerror))) from error
     if (
         not stat.S_ISDIR(directory.st_mode)
         or directory.st_uid != os.getuid()
@@ -130,6 +141,10 @@ def session_lease(session: Path) -> Generator[int, None, None]:
     try:
         descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     except OSError as error:
+        if error.errno == errno.ENOENT:
+            raise SessionError(
+                unreadable_journal(session, str(error.strerror))
+            ) from error
         # Other errors, such as an unwritable directory, say nothing about the lock.
         if error.errno in (errno.ELOOP, errno.EISDIR, errno.ENXIO) or (
             error.errno == errno.EACCES and lock.exists()
@@ -214,23 +229,31 @@ def stop_step(session: Path) -> str:
 
 def missing_session_steps(session: Path) -> str:
     # The runtime directory's name comes from the session directory's identity, which
-    # is gone. Listing every session's runtime is the most that can be checked.
+    # is gone. Nothing printable can identify it, and a starting session has no
+    # marked process yet, so these steps must never single out a directory to delete.
     uid = os.getuid()
     parent = shlex.quote(str(temporary_parent()))
+    pattern = shlex.quote(f"framewisp-{uid}-*")
     environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/framewisp-{uid}-[0-9a-f-]+$")
     framewisp = shlex.join(["framewisp", "NEW_PATH", "recover"])
     return (
-        f"Session directory {session} does not exist, or cannot be read.\n"
-        f"If it moved, run `{framewisp}`: its ownership files moved with it.\n"
-        "If it was deleted, its runtime directory and processes may remain, but "
-        "cannot be told from your other sessions' by name. List every session's "
-        f"runtime directory under {parent}:\n"
-        f"  ls -d -- {parent}/framewisp-{uid}-*\n"
-        "List the ones that running processes use, from outside any sandbox:\n"
+        f"Session directory {session} does not exist, or cannot be read. Check the "
+        "path.\n"
+        f"If it moved within its filesystem, run `{framewisp}`: its ownership files "
+        "moved with it.\n"
+        "If it was deleted, its processes and runtime directory may remain. A leftover "
+        "directory only uses disk space, because a new session gets its own. Its name "
+        "cannot be told from your other sessions'. To look for one, list the runtime "
+        f"directory names under {parent}, then the names running processes use, from "
+        "outside any sandbox:\n"
+        f"  find {parent} -maxdepth 1 -name {pattern} -printf '%f\\n'\n"
         f"  LC_ALL=C grep -zahsoE {environment} /proc/*/environ | tr '\\0' '\\n' "
-        "| sort -u\n"
-        "A directory in the first list but not the second has no running process. "
-        "Read any owner-*.json records in it, then delete it with `rm -rf --`."
+        "| sed 's|.*/||' | sort -u\n"
+        "A name in the second list has a running process, which you can stop. A name "
+        "only in the first list does not prove the session is gone: a session that is "
+        "still starting looks the same, and owner-*.json records in it mean a session "
+        "may be live. Delete a directory only if you know it was this session's. If "
+        "unsure, leave it."
     )
 
 
@@ -266,7 +289,12 @@ def lock_changed(session: Path) -> str:
         f"Session lock {lock} changed while acquiring ownership, so ownership "
         "cannot be verified. Nothing was removed.\n"
         f"Stop anything else changing it, then run `{recover}`, which checks the "
-        "lock against the session's ownership journal.\n" + derived_steps(session)
+        "lock against any ownership journal.\n"
+        + (
+            stale_attachment(session)
+            if records_attachment(session)
+            else derived_steps(session)
+        )
     )
 
 
@@ -471,10 +499,6 @@ def headless_runtime(session: Path, lease: int) -> Generator[Path, None, None]:
 
 
 def recover_session(session: Path) -> int:
-    try:
-        session.lstat()
-    except OSError as error:
-        raise SessionError(unreadable_journal(session, str(error.strerror))) from error
     with session_lease(session) as lease:
         if not (session / JOURNAL).exists() and not (session / JOURNAL).is_symlink():
             # Before the first journal commit, no runtime or children may exist.
