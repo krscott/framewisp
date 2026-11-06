@@ -12,7 +12,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from threading import Event
+from threading import Event, Timer
 from typing import cast
 from unittest.mock import Mock
 
@@ -618,7 +618,7 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
 @pytest.mark.parametrize("interval", [1e10, 1e300, 2**70])
 def test_huge_attached_wait_is_cancellable(interval: float) -> None:
     stop = Event()
-    stop.set()
+    Timer(0.05, stop.set).start()
     with pytest.raises(InterruptedError):
         input_without_bus(stop).wait(interval)
 
