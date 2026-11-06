@@ -384,7 +384,7 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     "unfinished",
     [
         b'{"id": "next", "event": "st',
-        # The write stopped inside the second byte of a retained "é".
+        # The write stopped after the first byte of a retained "é".
         b'{"id": "next", "event": "start", "parameters": {"text": "caf\xc3',
         # Only the newline is missing, so the record is still unfinished.
         b'{"id": "next", "event": "start", "time": 2.0}',

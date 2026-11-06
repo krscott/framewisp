@@ -738,12 +738,14 @@ read it from metadata. Recording captions use the retained parameters from the l
 so all clips and caption modes follow the same policy. No command or batch
 parameter overrides it.
 
-Captions, pings, and compaction all read these logs through `activity_events` in
-`compact.py`. A record is complete once its newline is written, so the reader
-skips only the bytes after the last newline, which an interrupted write leaves
-behind (R-LOG-7). Every line before that must parse, so a malformed one fails
-rendering (R-LOG-8, R-REC-10). The reader splits bytes on `\n` alone: retained text can hold
-characters such as U+2028 that text-mode line splitting would break on.
+Captions, pings, and compaction read `inputs.jsonl`, and compaction also reads
+`activity.jsonl`, all through `activity_events` in `compact.py`. A record is
+complete once its newline is written, so the reader skips only the bytes after
+the last newline, which an interrupted write leaves behind (R-LOG-7). Every line
+before that must parse, so a malformed one fails rendering (R-LOG-8, R-REC-10)
+whenever the clip needs one of those readers. The reader splits bytes on `\n`
+alone: retained text can hold characters such as U+2028 that text-mode line
+splitting would break on.
 
 By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
 Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit
@@ -830,9 +832,9 @@ events ignore them.
 
 `pings.py` selects events in `origin <= time < stopped`. It writes one ASS
 drawing per ping into the script that holds captions and console text, so all
-overlays share one FFmpeg pass and the existing
-filter order aligns them: `ass` draws on the original timeline, and the compact
-`select` cuts afterwards. No mode needs its own handling.
+overlays share one FFmpeg pass and the existing filter order aligns them: `ass`
+draws on the original timeline, and the compact `select` cuts afterwards. No
+mode needs its own handling.
 The ring grows from radius 10 to 40 pixels with a 4-pixel stroke while fading over
 0.5 seconds, scaled by display height like captions. Its path uses only positive
 coordinates, because libass otherwise shifts a scaled drawing off its `\pos`
