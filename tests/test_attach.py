@@ -656,17 +656,29 @@ class CapturePortal:
 def test_truncate_failure_fails_only_that_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    closed: list[int] = []
+    close = os.close
+
     def refuse(descriptor: int, length: int) -> None:
         raise OSError(errno.EIO, "Input/output error")
 
+    def refuse_close(descriptor: int) -> None:
+        close(descriptor)
+        closed.append(descriptor)
+        raise OSError(errno.EIO, "Input/output error")
+
     monkeypatch.setattr(os, "ftruncate", refuse)
+    monkeypatch.setattr(os, "close", refuse_close)
     with pytest.raises(ValueError, match="Cannot save screenshot"):
         open_destination(tmp_path / "x.png")
+    monkeypatch.undo()
+    assert len(closed) == 1
 
 
 # R-CONTROL-2
+@pytest.mark.parametrize("failure", [None, RuntimeError("capture failed")])
 def test_failure_closing_the_destination_fails_only_that_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception | None
 ) -> None:
     written: list[int] = []
     close = os.close
@@ -680,11 +692,15 @@ def test_failure_closing_the_destination_fails_only_that_command(
 
     def write(source: str, output: int, stop: Event, log: Path) -> None:
         written.append(output)
+        if failure is not None:
+            raise failure
 
     monkeypatch.setattr(attach, "write_png", write)
     monkeypatch.setattr(os, "close", fail_on_output)
     portal = cast(DesktopPortal, CapturePortal())
-    with pytest.raises(ValueError, match="Could not write"):
+    # A fatal capture failure stays fatal, whatever closing the file does.
+    expected = RuntimeError if failure is not None else ValueError
+    with pytest.raises(expected):
         attach.capture(portal, tmp_path / "x.png", Event(), tmp_path / "log")
 
 

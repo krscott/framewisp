@@ -16,6 +16,7 @@ import sys
 import time
 import traceback
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from threading import TIMEOUT_MAX, Event, Lock, Thread
 from types import FrameType
@@ -240,7 +241,8 @@ def open_destination(destination: Path) -> int:
         reason = "not a regular file."
     except OSError as error:
         reason = str(error)
-    os.close(output)
+    with suppress(OSError):
+        os.close(output)
     raise ValueError(f"{failure}: {reason}")
 
 
@@ -258,12 +260,16 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
             )
         finally:
             os.close(descriptor)
-    finally:
-        try:
+    except BaseException:
+        # A close failure must not hide why the capture failed.
+        with suppress(OSError):
             os.close(output)
-        except OSError as error:
-            # Network filesystems can report a failed write only here.
-            raise ValueError(f"Could not write the screenshot: {error}") from None
+        raise
+    try:
+        os.close(output)
+    except OSError as error:
+        # Network filesystems can report a failed write only here.
+        raise ValueError(f"Could not write the screenshot: {error}") from None
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
