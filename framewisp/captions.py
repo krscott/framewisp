@@ -26,9 +26,10 @@ from framewisp.compact import (
     recording_duration,
     retained_frames,
 )
-from framewisp.console import PANEL_WIDTH, ConsoleCapture, console_frames
+from framewisp.console import ConsoleCapture, console_frames
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
+from framewisp.layout import VideoLayout
 from framewisp.pings import PING_STYLE, Ping, ping_text, pings_for_clip
 
 CaptionMode = Literal["none", "keys", "pointer", "all"]
@@ -313,21 +314,24 @@ def subtitle_script(
     captions: list[Caption],
     *,
     pings: Iterable[Ping] = (),
-    size: tuple[int, int] = (1280, 720),
-    panel: bool = False,
+    layout: VideoLayout,
 ) -> str:
-    width, height = size
-    scale = height / 720
-    extra = PANEL_WIDTH if panel else 0
+    gui = layout.gui
+    # Overlays follow the GUI, so a top or bottom panel doesn't resize them.
+    scale = gui.height / 720
+    side_margin = 24 * gui.width / 1280
+    margin_left = gui.x + side_margin
+    margin_right = layout.width - gui.right + side_margin
+    margin_bottom = layout.height - gui.bottom + 24 * scale
     script = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: {width + extra}
-PlayResY: {height}
+PlayResX: {layout.width}
+PlayResY: {layout.height}
 WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
-Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{24 * width / 1280},{extra + 24 * width / 1280},{24 * scale}
+Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{margin_left},{margin_right},{margin_bottom}
 Style: Console,DejaVu Sans Mono,18,&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
 {PING_STYLE}
 
@@ -338,9 +342,10 @@ Format: Layer, Start, End, Style, Text
         # ASS interprets braces and backslashes as formatting. Use visible fullwidth
         # equivalents in captions; opted-in input logs retain the original text.
         text = caption.text.translate(str.maketrans("\\{}", "＼｛｝"))
-        script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{text}\n"
+        # A caption is one line, which can be wider than a narrow GUI.
+        script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{{{gui.clip}}}{text}\n"
     for ping in pings:
-        script += f"Dialogue: 1,{ass_time(ping.start)},{ass_time(ping.end)},Ping,{ping_text(ping, size)}\n"
+        script += f"Dialogue: 1,{ass_time(ping.start)},{ass_time(ping.end)},Ping,{ping_text(ping, layout)}\n"
     return script
 
 
@@ -375,9 +380,9 @@ def render_recording(
     log: Path,
     captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
-    console: ConsoleCapture | None = None,
+    console: ConsoleCapture,
     compact: CompactSettings | None = None,
-    size: tuple[int, int] = (1280, 720),
+    layout: VideoLayout,
 ) -> None:
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
@@ -387,36 +392,28 @@ def render_recording(
     pings = (
         pings_for_clip(input_log, origin=origin, stopped=stopped) if click_pings else []
     )
-    if not entries and not pings and console is None and compact is None:
+    panel = layout.panel
+    if not entries and not pings and panel is None and compact is None:
         return
     with tempfile.TemporaryDirectory(
         prefix=".framewisp-captions-", dir=destination.parent
     ) as directory:
         work = Path(directory)
         with (work / "captions.ass").open("w", encoding="utf-8") as script:
-            script.write(
-                subtitle_script(
-                    entries, pings=pings, size=size, panel=console is not None
-                )
-            )
-            if console is not None:
+            script.write(subtitle_script(entries, pings=pings, layout=layout))
+            if panel is not None:
                 console.snapshot(work / "console.jsonl")
-                x, height = size
-                position = (
-                    f"{{\\pos({x + 16},16)\\clip({x},0,{x + PANEL_WIDTH},{height})}}"
-                )
+                position = f"{{\\pos({panel.x + 16},{panel.y + 16}){panel.clip}}}"
                 script.write(
                     f"Dialogue: 0,0:00:00.00,{ass_time(stopped - origin)},Console,"
                     f"{position}Console (stdout + stderr)\n"
                 )
-                position = (
-                    f"{{\\pos({x + 16},48)\\clip({x},0,{x + PANEL_WIDTH},{height})}}"
-                )
+                position = f"{{\\pos({panel.x + 16},{panel.y + 48}){panel.clip}}}"
                 for frame in console_frames(
                     work / "console.jsonl",
                     origin=origin,
                     stopped=stopped,
-                    height=height,
+                    panel=panel,
                 ):
                     text = frame.text.translate(
                         str.maketrans("\\{}", "＼｛｝")
@@ -425,8 +422,11 @@ def render_recording(
                         f"Dialogue: 0,{ass_time(frame.start)},{ass_time(frame.end)},Console,{position}{text}\n"
                     )
         filters: list[str] = []
-        if console is not None:
-            filters.append(f"pad=iw+{PANEL_WIDTH}:ih:0:0:color=0x161b22")
+        if panel is not None:
+            filters.append(
+                f"pad={layout.width}:{layout.height}:{layout.gui.x}:{layout.gui.y}"
+                ":color=0x161b22"
+            )
         filters.extend(["ass=captions.ass", "scale=out_range=full"])
         if compact is not None:
             filters.append(

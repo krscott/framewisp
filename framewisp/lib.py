@@ -42,6 +42,7 @@ from framewisp.errors import (
 )
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
+from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 from framewisp.ownership import (
     headless_runtime,
     refuse_abandoned_ownership,
@@ -313,9 +314,9 @@ def start_recording(
     stop: Event,
     captions: CaptionMode,
     click_pings: bool,
-    console: ConsoleCapture | None = None,
+    console: ConsoleCapture,
     compact: CompactSettings | None = None,
-    size: tuple[int, int] = (1280, 720),
+    layout: VideoLayout,
 ) -> Generator[OwnedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive."""
     command = [
@@ -337,7 +338,10 @@ def start_recording(
         str(destination),
     ]
     timed = (
-        captions != "none" or click_pings or console is not None or compact is not None
+        captions != "none"
+        or click_pings
+        or layout.panel is not None
+        or compact is not None
     )
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     with (
@@ -382,7 +386,7 @@ def start_recording(
             click_pings=click_pings,
             console=console,
             compact=compact,
-            size=size,
+            layout=layout,
         )
 
 
@@ -470,13 +474,16 @@ class Recordings:
         *,
         captions: CaptionMode = DEFAULT_CAPTIONS,
         click_pings: bool = True,
-        console: bool = False,
+        console: ConsolePanel | None = None,
         compact: CompactSettings | None = None,
     ) -> str | None:
         if self.process is not None:
             return "A recording is already active. Use record-stop first."
         if any(dimension % 2 for dimension in self.size):
             return "Recording requires even display width and height."
+        layout = video_layout(self.size, console)
+        if isinstance(layout, str):
+            return layout
         error = recording_path_error(self.session, destination)
         if error is not None:
             return error
@@ -489,9 +496,9 @@ class Recordings:
                     stop=self.stop_requested,
                     captions=captions,
                     click_pings=click_pings,
-                    console=self.console_capture if console else None,
+                    console=self.console_capture,
                     compact=compact,
-                    size=self.size,
+                    layout=layout,
                 )
             )
         except (RuntimeError, OSError) as error:
@@ -527,7 +534,7 @@ def session_command(
     *,
     captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
-    console: bool = False,
+    console: ConsolePanel | None = None,
     compact: CompactSettings | None = None,
     parameters: dict[str, object] | None = None,
 ) -> int:
@@ -543,9 +550,9 @@ def session_command(
             "This runner does not support caption modes. Restart the session "
             "with this version of framewisp."
         )
-    if console and state.get("console_recording") is not True:
+    if console is not None and state.get("console_panels") is not True:
         raise SessionError(
-            "This runner does not support console recordings. Restart the session "
+            "This runner does not support console panel options. Restart the session "
             "with this version of framewisp."
         )
     if compact is not None and state.get("compact_recording") is not True:
@@ -568,7 +575,7 @@ def session_command(
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
         "click_pings": click_pings,
-        "console": console,
+        "console": console.parameters() if console is not None else None,
         "compact": compact.parameters() if compact is not None else None,
         "parameters": parameters,
     }
@@ -692,9 +699,9 @@ def handle_session_command(
             destination = command.get("destination")
             captions = command.get("captions")
             click_pings = command.get("click_pings", True)
-            console = command.get("console", False)
             try:
                 compact = CompactSettings.parse(command.get("compact"))
+                console = ConsolePanel.parse(command.get("console"))
             except ValueError as failure:
                 reply(connection, error=str(failure))
                 return None
@@ -704,8 +711,6 @@ def handle_session_command(
                 error = f"captions must be one of {', '.join(CAPTION_MODES)}"
             elif not isinstance(click_pings, bool):
                 error = "click_pings must be true or false"
-            elif not isinstance(console, bool):
-                error = "console must be true or false"
             else:
                 error = recordings.start(
                     Path(destination),
@@ -740,7 +745,7 @@ def run_session(
     recording: Path | None = None,
     captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
-    console: bool = False,
+    console: ConsolePanel | None = None,
     compact: CompactSettings | None = None,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
@@ -788,7 +793,7 @@ def _run_session(
     recording: Path | None,
     captions: CaptionMode,
     click_pings: bool,
-    console: bool,
+    console: ConsolePanel | None,
     compact: CompactSettings | None,
     size: tuple[int, int],
     x11: bool,
@@ -951,7 +956,7 @@ def _run_session(
                     json.dumps(
                         {
                             "control_protocol": 1,
-                            "console_recording": True,
+                            "console_panels": True,
                             "compact_recording": True,
                             "click_pings_recording": True,
                             "caption_modes": True,

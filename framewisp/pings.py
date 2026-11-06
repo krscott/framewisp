@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from framewisp.compact import ActivityEvent, activity_events
+from framewisp.layout import VideoLayout
 
 PING_SECONDS = 0.5
 PING_STYLE = "Style: Ping,Noto Sans,20,&HFF000000,&H00000000,1,0,0,5,0,0,0"
@@ -52,13 +53,13 @@ def pings_for_clip(log: Path, *, origin: float, stopped: float) -> list[Ping]:
     ]
 
 
-def ping_text(ping: Ping, size: tuple[int, int]) -> str:
+def ping_text(ping: Ping, layout: VideoLayout) -> str:
     """Draw a growing, fading ring that the clip keeps inside the GUI area."""
-    width, height = size
-    scale = height / 720
+    gui = layout.gui
+    scale = gui.height / 720
     first, last = RING_START_RADIUS * scale, RING_END_RADIUS * scale
     return (
-        f"{{\\pos({ping.x},{ping.y})\\clip(0,0,{width},{height})\\p1"
+        f"{{\\pos({gui.x + ping.x},{gui.y + ping.y}){gui.clip}\\p1"
         f"\\bord{RING_STROKE * scale}\\3c&H0000FF&\\3a&H00&\\1a&HFF&"
         f"\\fscx{first}\\fscy{first}\\t(\\fscx{last}\\fscy{last}\\3a&HFF&)}}"
         f"{ring_path()}{{\\p0}}"

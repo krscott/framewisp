@@ -21,6 +21,114 @@ def test_cli_help() -> None:
     assert "--agent-skill" in result.stdout
 
 
+def framewisp(session: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session), *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["run", "--record", "clip.mp4", "--console-position", "left"],
+        ["run", "--record", "clip.mp4", "--console-size", "640"],
+        ["run", "--console-position", "top"],
+        ["record-start", "--console-position", "left", "clip.mp4"],
+        ["record-start", "--console-size", "640", "clip.mp4"],
+    ],
+)
+def test_console_options_require_console(tmp_path: Path, command: list[str]) -> None:
+    session = tmp_path / "session"
+    tail = ["--", "framewisp-demo"] if command[0] == "run" else []
+    result = framewisp(
+        session,
+        *[str(tmp_path / part) if part == "clip.mp4" else part for part in command],
+        *tail,
+    )
+    assert result.returncode == 2
+    assert "--console-position and --console-size require --console" in result.stderr
+    assert not session.exists()
+    assert not (tmp_path / "clip.mp4").exists()
+
+
+def test_console_options_with_console_still_require_recording(tmp_path: Path) -> None:
+    session = tmp_path / "session"
+    result = framewisp(
+        session, "run", "--console", "--console-position", "left", "--", "app"
+    )
+    assert result.returncode == 2
+    assert "--console requires --record" in result.stderr
+    assert not session.exists()
+
+
+# R-REC-16
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (["--console-position", "middle"], "invalid choice"),
+        (["--console-size", "many"], "--console-size"),
+        (["--console-size", "0"], "positive integer"),
+        (["--console-size", "-2"], "--console-size"),
+        (["--console-size", "641"], "use 642 instead of 641"),
+        (["--console-size", "388"], "at least 390"),
+        (["--console-position", "top", "--console-size", "134"], "at least 136"),
+    ],
+)
+@pytest.mark.parametrize("action", ["run", "record-start"])
+def test_recording_rejects_invalid_panels_before_any_clip(
+    tmp_path: Path, action: str, options: list[str], message: str
+) -> None:
+    session = tmp_path / "session"
+    clip = tmp_path / "clip.mp4"
+    command = (
+        ["run", "--record", str(clip), "--console", *options, "--", "framewisp-demo"]
+        if action == "run"
+        else ["record-start", "--console", *options, str(clip)]
+    )
+    result = framewisp(session, *command)
+    assert result.returncode == 2
+    assert message in result.stderr
+    assert not session.exists()
+    assert not clip.exists()
+
+
+# R-REC-16
+@pytest.mark.parametrize(
+    ("options", "named"),
+    [
+        (["--height", "100"], ["1280x100", "taller"]),
+        (
+            ["--width", "320", "--height", "240", "--console-position", "bottom"],
+            ["320x240", "wider"],
+        ),
+        (["--console-size", "16000"], ["16384", "smaller --console-size"]),
+    ],
+)
+def test_run_rejects_a_panel_the_display_cannot_hold(
+    tmp_path: Path, options: list[str], named: list[str]
+) -> None:
+    session = tmp_path / "session"
+    clip = tmp_path / "clip.mp4"
+    result = framewisp(
+        session,
+        "run",
+        "--record",
+        str(clip),
+        "--console",
+        *options,
+        "--",
+        "framewisp-demo",
+    )
+    assert result.returncode == 2
+    assert all(text in result.stderr for text in named), result.stderr
+    assert not session.exists()
+    assert not clip.exists()
+
+
 def test_console_requires_recording(tmp_path: Path) -> None:
     result = subprocess.run(
         [
@@ -126,9 +234,13 @@ def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
 def test_console_rejects_unsupported_runner_before_connecting(
     tmp_path: Path, capability: object
 ) -> None:
-    state: dict[str, object] = {"control_protocol": 1, "caption_modes": True}
+    state: dict[str, object] = {
+        "control_protocol": 1,
+        "caption_modes": True,
+        "console_recording": True,
+    }
     if capability is not None:
-        state["console_recording"] = capability
+        state["console_panels"] = capability
     (tmp_path / "session.json").write_text(json.dumps(state))
     destination = tmp_path / "clip.mp4"
     result = subprocess.run(
@@ -147,7 +259,8 @@ def test_console_rejects_unsupported_runner_before_connecting(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "does not support console recordings. Restart" in result.stderr
+    assert "does not support console panel options. Restart" in result.stderr
+    assert "Traceback" not in result.stderr
     assert "Traceback" not in result.stderr
     assert not destination.exists()
 

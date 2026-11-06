@@ -26,6 +26,8 @@ acceptance application.
 - `framewisp/console.py` drains the launched app's combined stdout/stderr to raw
   `app.log` bytes and timestamped UTF-8 chunks in `console.jsonl`. It also builds
   bounded scrolling text states for optional console panels in recordings.
+- `framewisp/layout.py` is the one calculation of a clip's video size, GUI
+  rectangle, and console panel rectangle. It also validates panel requests.
 - `framewisp/pings.py` selects a clip's `ping` records from `inputs.jsonl` and
   builds the ASS drawing for each click ping.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
@@ -822,12 +824,13 @@ events ignore them.
 `pings.py` selects events in `origin <= time < stopped`, skipping an unfinished
 trailing line. It writes one ASS drawing per ping into the script that holds
 captions and console text, so all overlays share one FFmpeg pass and the existing
-filter order aligns them: `pad` keeps GUI coordinates, `ass` draws on the original
+filter order aligns them: `ass` draws on the original
 timeline, and the compact `select` cuts afterwards. No mode needs its own handling.
 The ring grows from radius 10 to 40 pixels with a 4-pixel stroke while fading over
 0.5 seconds, scaled by display height like captions. Its path uses only positive
 coordinates, because libass otherwise shifts a scaled drawing off its `\pos`
-(R-REC-6). A `\clip` to the GUI area keeps rings off the console panel (R-REC-9).
+(R-REC-6). The ring's `\pos` adds the GUI offset from the clip's `VideoLayout`, and
+a `\clip` to the GUI rectangle keeps it off the console panel on every edge (R-REC-9).
 Screenshots read the compositor, which never sees this overlay (R-LOG-3).
 
 The control request's `click_pings` boolean defaults to true. Session metadata
@@ -846,27 +849,64 @@ capture; independently activated services do not. No input-content redaction
 applies to app output. Both files are replaced on each new session.
 
 `run --record FILE --console` and `record-start --console FILE` opt individual clips
-into a 640-pixel console panel on the right. `run --console` without `--record` is
-invalid. The control request adds a validated boolean `console`, default false.
+into a console panel. `--console-position` picks the video edge, default `right`
+(R-REC-12). `--console-size` sets the panel's width for `left` and `right` and its
+height for `top` and `bottom`, default 640 pixels (R-REC-13). The other panel
+dimension equals the matching GUI dimension. `run --console` without `--record` is
+invalid. The parser rejects either placement option without `--console`, on both
+commands, before it starts a session or clip. The control request's `console`
+value is null or an object with exactly `position` and `size`, so a position can't
+exist without a panel.
 Console capture uses the same first-frame monotonic origin as input captions,
 including with `--captions none`. A lock protects sidecar snapshots during rendering.
-Session metadata advertises `console_recording: true`. A console request requires
-this capability before connecting, so an older runner cannot silently ignore it.
+Session metadata advertises `console_panels: true`. Every `--console` request,
+including the default placement, requires this capability before connecting, because
+an older runner can't read the object. The error tells the user to restart the
+session.
 The app-output worker is checked during monitoring, joined after app cleanup and
 before final recording rendering, and bounded on shutdown if a pipe writer remains.
 
 The renderer streams the snapshot into bounded text state, strips split ANSI CSI
 and OSC sequences, replaces lines after carriage returns, and handles backspaces,
-tabs, wide characters, wrapping, and a limited scrollback. Line timestamps are
+tabs, wide characters, wrapping, and a limited scrollback. The panel's width sets
+the wrap column and its height sets the rows kept: `(height - 64) // 24` rows and
+`(width - 32) * 10 // 119 - 10` columns, which is 41 columns in a 640-pixel panel.
+Line timestamps are
 seconds relative to clip origin; negative values identify pre-clip context. Output
 received at or after the stop request is excluded. Updates coalesce to at most one
 per 30 fps frame. This is plain text rendering, without terminal emulation.
 
+`video_layout` turns the display size and panel request into a `VideoLayout`: video
+size, GUI rectangle, and panel rectangle. It is the only code that branches on the
+position. `pad`, the ASS play resolution, click pings, captions, and console text all
+read those rectangles, and a clip without a panel has a GUI rectangle that fills the
+video. Caption and ping scale follows GUI height, not video height, so a top or
+bottom panel doesn't resize them. Caption margins come from the distance between the
+GUI and each video edge, and a `\clip` to the GUI rectangle stops a caption wider
+than a narrow GUI from reaching the panel (R-REC-15).
+
+A panel must be encodable and readable (R-REC-16):
+
+- `--console-size` is even. Yuv420p needs an even video, and `pad` rounds an odd
+  offset down, which would shift the GUI off its overlays.
+- The panel has at least 20 text columns and 3 text rows, so at least 390 pixels wide
+  and 136 tall. This includes the dimension that follows the GUI, so a default panel
+  on a display under 136 pixels tall is rejected, naming the display size.
+- Neither video dimension exceeds 16384 pixels, the libx264 limit. Without this
+  check the failure would appear only after capture.
+
+`ConsolePanel` checks what its own values decide, and `video_layout` checks what also
+depends on the display. `run` knows its display size, so the parser runs both before
+a session starts. For `record-start`, the parser checks the panel and the runner
+calls `video_layout` before it starts the recorder, so a rejected panel leaves the app
+running and creates no file (R-REC-17). The runner also validates the request's
+values, because the control socket is an input of its own.
+
 One FFmpeg pass pads the original video, renders console text with DejaVu Sans
 Mono 18 and existing input captions in the GUI area, and preserves video timing,
-30 fps, full-range color, and silent H.264 MP4 output. GUI coordinates, screenshots,
-and captured display size stay unchanged; the finished summary reports the wider
-video. Text cannot inject ASS formatting and is clipped to the panel. Rendering
+30 fps, full-range color, and silent H.264 MP4 output. GUI pixels, coordinates,
+screenshots, and captured display size stay unchanged (R-REC-14); the finished summary
+reports the extended video. Text cannot inject ASS formatting and is clipped to the panel. Rendering
 uses a temporary file next to the destination. A rendering failure preserves the
 raw GUI MP4 and reports `captions.log`. `console.jsonl` is reserved against capture
 and recording destinations.

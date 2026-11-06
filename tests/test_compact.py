@@ -14,6 +14,13 @@ from framewisp.compact import (
     retained_frames,
 )
 from framewisp.console import ConsoleCapture
+from framewisp.layout import ConsolePanel, VideoLayout, video_layout
+
+
+def clip_layout(panel: bool) -> VideoLayout:
+    layout = video_layout((320, 240), ConsolePanel() if panel else None)
+    assert isinstance(layout, VideoLayout)
+    return layout
 
 
 @pytest.fixture
@@ -215,9 +222,9 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         stopped=109,
         log=tmp_path / "render.log",
         captions="keys" if overlays else "none",
-        console=ConsoleCapture(tmp_path) if overlays else None,
+        console=ConsoleCapture(tmp_path),
         compact=CompactSettings(before=0.5, after=0.5),
-        size=(320, 240),
+        layout=clip_layout(overlays),
     )
     summary = json.loads(
         subprocess.run(
@@ -305,9 +312,9 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         stopped=109,
         log=tmp_path / "render.log",
         captions=captions,
-        console=ConsoleCapture(tmp_path) if console else None,
+        console=ConsoleCapture(tmp_path),
         compact=CompactSettings(before=0.5, after=0.5),
-        size=(320, 240),
+        layout=clip_layout(console),
     )
 
     def shown(second: float) -> bool:
@@ -331,8 +338,9 @@ def test_zero_padding_keeps_encoded_end_despite_stop_latency(
         stopped=110,
         log=tmp_path / "render.log",
         captions="none",
+        console=ConsoleCapture(tmp_path),
         compact=CompactSettings(before=0, after=0),
-        size=(320, 240),
+        layout=clip_layout(False),
     )
     duration = subprocess.run(
         [

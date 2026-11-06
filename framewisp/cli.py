@@ -13,6 +13,13 @@ from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError, recorded_app_exit
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
+from framewisp.layout import (
+    CONSOLE_POSITIONS,
+    DEFAULT_CONSOLE_POSITION,
+    DEFAULT_CONSOLE_SIZE,
+    ConsolePanel,
+    video_layout,
+)
 from framewisp.lib import (
     key_commands,
     run_session,
@@ -197,6 +204,17 @@ def main() -> None:
             "--console",
             action="store_true",
             help="append timestamped app stdout/stderr beside the recorded GUI",
+        )
+        recording_parser.add_argument(
+            "--console-position",
+            choices=CONSOLE_POSITIONS,
+            help=f"video edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
+        )
+        recording_parser.add_argument(
+            "--console-size",
+            type=positive_integer,
+            metavar="PIXELS",
+            help=f"even panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
         )
         # None marks "not given", so run can require --record for either option.
         caption_options = recording_parser.add_mutually_exclusive_group()
@@ -422,6 +440,18 @@ def main() -> None:
                 "--captions and --no-captions require --record; use record-start for later clips"
             )
         args.captions = args.captions or DEFAULT_CAPTIONS
+        placed = args.console_position is not None or args.console_size is not None
+        if placed and not args.console:
+            parser.error("--console-position and --console-size require --console")
+        args.console_panel = None
+        if args.console:
+            try:
+                args.console_panel = ConsolePanel(
+                    args.console_position or DEFAULT_CONSOLE_POSITION,
+                    args.console_size or DEFAULT_CONSOLE_SIZE,
+                )
+            except ValueError as error:
+                parser.error(str(error))
         if args.action == "run" and args.no_click_pings and args.record is None:
             parser.error(
                 "--no-click-pings requires --record; use record-start --no-click-pings for later clips"
@@ -441,6 +471,9 @@ def main() -> None:
             parser.error("run requires an application command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
+        layout = video_layout((args.width, args.height), args.console_panel)
+        if isinstance(layout, str):
+            parser.error(layout)
     state_path = session / "session.json"
     if args.action not in {"run", "attach", "recover"}:
         exit_message = recorded_app_exit(session)
@@ -495,7 +528,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             recording=args.record,
             captions=args.captions,
             click_pings=not args.no_click_pings,
-            console=args.console,
+            console=args.console_panel,
             compact=args.compact_settings,
             size=(args.width, args.height),
             x11=args.x11,
@@ -517,7 +550,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 args.path if args.action == "record-start" else None,
                 captions=getattr(args, "captions", DEFAULT_CAPTIONS),
                 click_pings=not getattr(args, "no_click_pings", False),
-                console=getattr(args, "console", False),
+                console=getattr(args, "console_panel", None),
                 compact=getattr(args, "compact_settings", None),
             )
         )
