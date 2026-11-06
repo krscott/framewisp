@@ -320,6 +320,15 @@ def recover_session(session: Path) -> int:
     return 0
 
 
+def kept_recording(session: Path) -> Path | None:
+    """Return the private clip that the active-recording link points at, if any."""
+    link = session / ACTIVE_RECORDING
+    if not link.is_symlink():
+        return None
+    clip = link.readlink()
+    return clip if clip.exists() else None
+
+
 def interrupted_recording(session: Path) -> Path | None:
     """Clear the active-recording link, returning the clip it left behind."""
     link = session / ACTIVE_RECORDING

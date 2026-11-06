@@ -1076,7 +1076,7 @@ cleanup on runner loss. Recovery refuses while the runner or any supervisor
 holds the kernel ownership lock; wait a few seconds and retry. It removes the
 owned runtime and stale session metadata, preserves logs and recordings, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
-run replaces its logs. If a clip was being recorded, the JSON also has
+run replaces its logs. If a private clip remains, the JSON also has
 `interrupted_recording`, the path of that clip in a hidden
 `.framewisp-recording-*` directory beside the destination. The clip may be
 incomplete. Recovery leaves it in place, and it does not block later recordings.

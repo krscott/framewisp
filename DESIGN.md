@@ -695,8 +695,7 @@ the recorder did not finalize stays private, so an incomplete file never takes
 the requested path. If a file already holds the destination, the clip also stays
 private, and the error includes any render failure (R-REC-18). Both take the
 ordinary finalization failure path, which ends the session. `Recordings.close`
-adds the kept clip's path to any finalization error, so every such failure names
-it.
+adds the kept clip's path to any finalization error.
 
 Before starting the recorder, framewisp creates a file with the destination's
 name inside the private directory and hard-links it, so an unusable name or a
@@ -705,9 +704,10 @@ filesystem without hard links fails at clip start rather than after the capture
 destination visible.
 
 During a clip, the `.active-recording` symlink in the session directory points at
-its private clip until the clip is published, discarded, or named in an error. A
-symlink is created atomically, so `recover` never reads a partial value. After a
-runner is killed, `recover` reports that path as
+its private clip. The link goes when the clip is published or discarded. A kept
+clip stays linked, because a later teardown failure can replace the error that
+named it, until `recover` or the next clip clears the link. A symlink is created
+atomically, so `recover` never reads a partial value. `recover` reports that path as
 `interrupted_recording` and removes the link. The directory and clip stay for the
 user to inspect or delete (R-REC-20). If no clip was written yet, `recover`
 removes the empty directory. Each private directory has a unique name, so a

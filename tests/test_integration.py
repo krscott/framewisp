@@ -797,8 +797,9 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
     assert "recorder.log" in log
     assert demo.recording is not None
     assert not demo.recording.exists()
-    assert str(private_clip(demo.recording.parent)) in " ".join(log.split())
-    assert not (demo.directory / ".active-recording").is_symlink()
+    kept = private_clip(demo.recording.parent)
+    assert str(kept) in " ".join(log.split())
+    assert (demo.directory / ".active-recording").readlink() == kept
     assert not demo.runtime.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -809,15 +810,13 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
 def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
     session = tmp_path / "session"
     marker = tmp_path / "app-started"
-    read_only = tmp_path / "read only"
-    read_only.mkdir(mode=0o500)
     result = subprocess.run(
         [
             "framewisp",
             str(session),
             "run",
             "--record",
-            str(read_only / "capture.mp4"),
+            str(tmp_path / "missing" / "capture.mp4"),
             "--",
             sys.executable,
             "-c",
@@ -3647,7 +3646,7 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {private_clip(tmp_path)}" in error
     assert "raw video remains" in error
     assert "captions.log" in error
-    assert not (demo.directory / ".active-recording").is_symlink()
+    assert (demo.directory / ".active-recording").readlink() == private_clip(tmp_path)
     assert len(recording_frames(private_clip(tmp_path))) > 1
 
 

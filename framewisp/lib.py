@@ -46,7 +46,7 @@ from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 from framewisp.ownership import (
     ACTIVE_RECORDING,
     headless_runtime,
-    interrupted_recording,
+    kept_recording,
     refuse_abandoned_ownership,
     session_lease,
 )
@@ -411,7 +411,7 @@ def start_recording(
     finally:
         if not capturing:
             shutil.rmtree(clip.parent, ignore_errors=True)
-        # A clip that remains stays linked until `Recordings.close` names it.
+        # A clip that remains stays linked, in case a later error hides its path.
         if not clip.exists():
             active.unlink(missing_ok=True)
 
@@ -609,8 +609,8 @@ class Recordings:
             self.destination = None
 
     def with_kept_clip(self, error: str) -> str:
-        clip = interrupted_recording(self.session)
-        return f"{error} The clip remains at {clip}." if clip is not None else error
+        clip = kept_recording(self.session)
+        return f"{error}\nThe clip remains at {clip}." if clip is not None else error
 
 
 def session_command(
