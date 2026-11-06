@@ -219,10 +219,10 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--width W] [--height H] [--record FILE] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--captions MODE \| --no-captions] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--no-captions] FILE` | Start a clip in the running session. |
+| `record-start [--captions MODE \| --no-captions] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -733,15 +733,31 @@ opt-in applies to every individual input, batch action, and clip for that sessio
 It cannot be changed by a batch file or `record-start`. Attached sessions log input
 but do not support recordings.
 
-Recordings show input captions by default, including shortcuts and pointer gestures. Captions stay visible during paced input and briefly after quick
-commands, until the next action. Opted-in text is abbreviated in the video; the log
+Recordings caption keyboard input by default. Choose what a clip captions with
+`--captions` on `run --record` or `record-start`:
+
+| Value | Captioned inputs |
+| --- | --- |
+| `keys` (default) | `key` and `type`. |
+| `pointer` | `move`, `click`, `drag`, and `scroll`. |
+| `all` | Keyboard and pointer inputs. |
+| `none` | Nothing. `--no-captions` is shorthand for this. |
+
+Under the default, a clip with no keyboard input has no captions. Every value
+follows the input-content policy above, so a default `key` or `type` caption shows
+only what the log retained. Combining `--captions` and `--no-captions` is an
+error, as is using either with `run` without `--record`.
+
+Captions stay visible during paced input and briefly after quick commands, until
+the next captioned input. Opted-in text is abbreviated in the video; the log
 keeps the full text. Inputs between clips are excluded from the next clip.
 Captions appear only in recordings, never in app screenshots (R-LOG-2).
 
-Disable captions for a clip with:
+For example:
 
 ```sh
-framewisp demo record-start --no-captions /tmp/plain.mp4
+# Show pointer gestures too:
+framewisp demo record-start --captions all /tmp/gestures.mp4
 # Or start the session with an uncaptioned recording:
 framewisp demo run --record /tmp/plain.mp4 --no-captions -- framewisp-demo
 ```

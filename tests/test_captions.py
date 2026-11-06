@@ -7,8 +7,15 @@ from pathlib import Path
 
 import pytest
 
+from framewisp.actions import ACTION_FIELDS
 from framewisp.captions import (
+    CAPTION_MODES,
+    CAPTIONED_ACTIONS,
+    DEFAULT_CAPTIONS,
+    KEY_ACTIONS,
+    POINTER_ACTIONS,
     Caption,
+    CaptionMode,
     InputEvent,
     caption_text,
     captions_for_clip,
@@ -21,6 +28,7 @@ from framewisp.captions import (
     subtitle_script,
 )
 from framewisp.errors import SessionError
+from framewisp.keys import KEYS, parse_chord
 
 
 def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
@@ -93,6 +101,7 @@ def test_input_error_keeps_structured_exit_code_only() -> None:
 
 # R-LOG-1
 @pytest.mark.parametrize("retain", [False, True])
+@pytest.mark.parametrize("mode", ["keys", "all"])
 @pytest.mark.parametrize(
     "failure",
     [
@@ -103,7 +112,7 @@ def test_input_error_keeps_structured_exit_code_only() -> None:
     ],
 )
 def test_content_retention_and_captions(
-    tmp_path: Path, retain: bool, failure: BaseException | None
+    tmp_path: Path, retain: bool, mode: CaptionMode, failure: BaseException | None
 ) -> None:
     text = "café 日本語 😀"
 
@@ -131,6 +140,7 @@ def test_content_retention_and_captions(
         tmp_path / "inputs.jsonl",
         origin=events[0]["time"] - 0.1,
         stopped=events[-1]["time"] + 1,
+        captions=mode,
     )
     assert (text in captions[0].text) is retain
     assert ("(failed)" in captions[0].text) is (failure is not None)
@@ -185,6 +195,156 @@ def test_literal_key_retention(chord: str, visible: bool, retain: bool) -> None:
     )
 
 
+# Named keys that do not type a character, so `key` may log them as shortcuts.
+CONTROL_KEYS = {
+    "enter",
+    "tab",
+    "bsp",
+    "esc",
+    "delete",
+    "left",
+    "right",
+    "up",
+    "down",
+    "home",
+    "end",
+    "pgup",
+    "pgdn",
+    *(f"f{number}" for number in range(1, 13)),
+}
+
+
+# R-LOG-1
+@pytest.mark.parametrize("mode", [DEFAULT_CAPTIONS, "all"])
+def test_no_literal_character_reaches_a_default_caption(
+    tmp_path: Path, mode: CaptionMode
+) -> None:
+    names = [name for name, symbol in KEYS.items() if symbol not in CONTROL_KEYS]
+    assert {"a", "7", "space", "comma", ",", "plus", "+"} <= set(names)
+    chords = [
+        chord
+        for name in names
+        for chord in (name, name.upper(), f"Shift+{name}", f"shift+{name.upper()}")
+    ]
+    for chord in chords:
+        assert parse_chord(chord) is not None
+        with log_input(tmp_path, "key", {"chord": chord}) as result:
+            result.returncode = 0
+    text = "pass word 7, ünï"
+    with log_input(tmp_path, "type", {"text": text, "interval": 0}) as result:
+        result.returncode = 0
+
+    log = tmp_path / "inputs.jsonl"
+    assert text not in log.read_text()
+    assert '"chord"' not in log.read_text()
+    captions = captions_for_clip(
+        log, origin=0, stopped=time.monotonic() + 1, captions=mode
+    )
+    expected = [
+        "Shift+Key" if chord.lower().startswith("shift+") else "Key" for chord in chords
+    ]
+    assert [caption.text for caption in captions] == [*expected, "Type text"]
+
+
+def input_log(path: Path, *entries: tuple[str, dict[str, object], float]) -> Path:
+    """Write finished input spans, each given as action, parameters, and start."""
+    log = path / "inputs.jsonl"
+    log.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "id": index,
+                    "action": action,
+                    "parameters": parameters,
+                    "event": event,
+                    "time": timestamp,
+                    "returncode": 0,
+                    "error": None,
+                }
+            )
+            + "\n"
+            for index, (action, parameters, start) in enumerate(entries)
+            for event, timestamp in (("start", start), ("end", start + 0.1))
+        )
+    )
+    return log
+
+
+# R-LOG-4
+@pytest.mark.parametrize(
+    "mode,expected",
+    [
+        ("none", []),
+        ("keys", ["Type text", "Return"]),
+        (
+            "pointer",
+            [
+                "Move (1, 2)",
+                "left click (3, 4)",
+                "left drag (5, 6) to (7, 8)",
+                "Scroll up 1 at (9, 10)",
+            ],
+        ),
+        (
+            "all",
+            [
+                "Move (1, 2)",
+                "Type text",
+                "left click (3, 4)",
+                "left drag (5, 6) to (7, 8)",
+                "Return",
+                "Scroll up 1 at (9, 10)",
+            ],
+        ),
+    ],
+)
+def test_caption_mode_selects_input_kinds(
+    tmp_path: Path, mode: CaptionMode, expected: list[str]
+) -> None:
+    log = input_log(
+        tmp_path,
+        ("move", {"x": 1, "y": 2}, 1),
+        ("type", {"interval": 0}, 2),
+        ("click", {"x": 3, "y": 4, "button": "left", "count": 1}, 3),
+        (
+            "drag",
+            {"x1": 5, "y1": 6, "x2": 7, "y2": 8, "button": "left"},
+            4,
+        ),
+        ("key", {"chord": "Return"}, 5),
+        ("scroll", {"x": 9, "y": 10, "direction": "up", "steps": 1}, 6),
+    )
+    captions = captions_for_clip(log, origin=0, stopped=9, captions=mode)
+    assert [caption.text for caption in captions] == expected
+
+
+# R-LOG-4
+def test_default_captions_are_keyboard_inputs_only() -> None:
+    assert DEFAULT_CAPTIONS == "keys"
+    assert CAPTIONED_ACTIONS[DEFAULT_CAPTIONS] == {"key", "type"}
+
+
+def test_every_input_action_has_exactly_one_caption_kind() -> None:
+    assert KEY_ACTIONS | POINTER_ACTIONS == set(ACTION_FIELDS)
+    assert not KEY_ACTIONS & POINTER_ACTIONS
+    assert CAPTIONED_ACTIONS["all"] == set(ACTION_FIELDS)
+    assert set(CAPTIONED_ACTIONS) == set(CAPTION_MODES)
+
+
+def test_caption_ends_at_next_captioned_input_only(tmp_path: Path) -> None:
+    log = input_log(
+        tmp_path,
+        ("key", {"chord": "Return"}, 1),
+        ("move", {"x": 1, "y": 2}, 1.1),
+        ("key", {"chord": "Tab"}, 1.5),
+        ("click", {"x": 1, "y": 2, "button": "left", "count": 1}, 1.6),
+    )
+    first, second = captions_for_clip(log, origin=0, stopped=9, captions="keys")
+    assert first.end == pytest.approx(1.5)
+    assert second.end == pytest.approx(2.3)
+    assert captions_for_clip(log, origin=0, stopped=9, captions="all")[0].end == 1.1
+
+
 def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     tmp_path: Path,
 ) -> None:
@@ -207,7 +367,7 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
             events.append(entry | {"event": "end", "time": end, "returncode": 0})
     log = tmp_path / "inputs.jsonl"
     log.write_text("\n".join(json.dumps(event) for event in events))
-    captions = captions_for_clip(log, origin=10.0, stopped=14.0)
+    captions = captions_for_clip(log, origin=10.0, stopped=14.0, captions="keys")
     assert len(captions) == 2
     assert captions[0].start == pytest.approx(0.2)
     assert captions[0].end == pytest.approx(2.2)
@@ -215,7 +375,7 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     assert captions[1].start == pytest.approx(3.8)
     assert captions[1].end == 4.0
     assert captions[1].text == "Type: still typing"
-    assert captions_for_clip(log, origin=17.0, stopped=20.0) == []
+    assert captions_for_clip(log, origin=17.0, stopped=20.0, captions="keys") == []
 
 
 def test_caption_text_cannot_inject_ass_formatting() -> None:

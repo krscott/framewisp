@@ -107,6 +107,12 @@ observable behaviour, not implementation, in short sentences.
 - **R-LOG-1** [test] By default, `inputs.jsonl` and captions omit typed text
   and literal key characters.
 - **R-LOG-2** [test] Captions appear only in recordings, never in screenshots.
+- **R-LOG-4** [test] By default, a recording captions only `key` and `type`
+  inputs.
+- **R-LOG-5** [test] The `--captions` and `--no-captions` options do not change
+  `inputs.jsonl`.
+- **R-LOG-6** [test] Framewisp rejects `--captions` combined with `--no-captions`
+  before it starts a session or a clip.
 
 ## Recording (REC)
 

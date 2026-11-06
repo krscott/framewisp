@@ -99,7 +99,9 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
 
 
 def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text(json.dumps({"control_protocol": 1}))
+    (tmp_path / "session.json").write_text(
+        json.dumps({"control_protocol": 1, "caption_modes": True})
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -124,7 +126,7 @@ def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
 def test_console_rejects_unsupported_runner_before_connecting(
     tmp_path: Path, capability: object
 ) -> None:
-    state: dict[str, object] = {"control_protocol": 1}
+    state: dict[str, object] = {"control_protocol": 1, "caption_modes": True}
     if capability is not None:
         state["console_recording"] = capability
     (tmp_path / "session.json").write_text(json.dumps(state))
@@ -148,6 +150,125 @@ def test_console_rejects_unsupported_runner_before_connecting(
     assert "does not support console recordings. Restart" in result.stderr
     assert "Traceback" not in result.stderr
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("capability", [None, False, 1])
+def test_caption_modes_reject_unsupported_runner_before_connecting(
+    tmp_path: Path, capability: object
+) -> None:
+    state: dict[str, object] = {"control_protocol": 1}
+    if capability is not None:
+        state["caption_modes"] = capability
+    (tmp_path / "session.json").write_text(json.dumps(state))
+    destination = tmp_path / "clip.mp4"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path),
+            "record-start",
+            str(destination),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "does not support caption modes. Restart the session" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("option", [["--captions", "all"], ["--no-captions"]])
+def test_run_caption_options_require_record(tmp_path: Path, option: list[str]) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "run",
+            *option,
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "--captions and --no-captions require --record" in result.stderr
+    assert not (tmp_path / "session").exists()
+
+
+# R-LOG-6
+@pytest.mark.parametrize("action", ["run", "record-start"])
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--captions", "keys", "--no-captions"],
+        ["--no-captions", "--captions", "keys"],
+        ["--no-captions", "--captions", "none"],
+    ],
+)
+def test_caption_options_conflict(
+    tmp_path: Path, action: str, options: list[str]
+) -> None:
+    destination = tmp_path / "clip.mp4"
+    arguments = (
+        ["--record", str(destination), *options, "--", "framewisp-demo"]
+        if action == "run"
+        else [*options, str(destination)]
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            action,
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "not allowed with argument" in result.stderr
+    assert "--captions" in result.stderr and "--no-captions" in result.stderr
+    assert not (tmp_path / "session").exists()
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("action", ["run", "record-start"])
+def test_captions_rejects_unknown_mode(tmp_path: Path, action: str) -> None:
+    destination = tmp_path / "clip.mp4"
+    arguments = (
+        ["--record", str(destination), "--captions", "mouse", "--", "framewisp-demo"]
+        if action == "run"
+        else ["--captions", "mouse", str(destination)]
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            action,
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr and "pointer" in result.stderr
+    assert not (tmp_path / "session").exists()
 
 
 def test_agent_skill_without_runtime_dependencies(tmp_path: Path) -> None:

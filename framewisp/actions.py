@@ -7,6 +7,24 @@ from typing import cast
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS, key_commands
 from framewisp.pointer import DEFAULT_MOVE_DURATION
 
+ACTION_FIELDS = {
+    "move": ("x", "y", "move_duration"),
+    "click": ("x", "y", "button", "count", "modifier", "move_duration"),
+    "drag": (
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "duration",
+        "button",
+        "modifier",
+        "move_duration",
+    ),
+    "scroll": ("x", "y", "direction", "steps", "move_duration"),
+    "type": ("text", "interval"),
+    "key": ("chord",),
+}
+
 
 @dataclass(frozen=True)
 class InputAction:
@@ -20,26 +38,11 @@ class InputAction:
         p = cast(dict[str, object], raw)
         if action in {"move", "click", "drag", "scroll"}:
             p = {"move_duration": DEFAULT_MOVE_DURATION} | p
-        fields = {
-            "move": ("x", "y", "move_duration"),
-            "click": ("x", "y", "button", "count", "modifier", "move_duration"),
-            "drag": (
-                "x1",
-                "y1",
-                "x2",
-                "y2",
-                "duration",
-                "button",
-                "modifier",
-                "move_duration",
-            ),
-            "scroll": ("x", "y", "direction", "steps", "move_duration"),
-            "type": ("text", "interval"),
-            "key": ("chord",),
-        }
-        if action not in fields or any(name not in p for name in fields[action]):
+        if action not in ACTION_FIELDS or any(
+            name not in p for name in ACTION_FIELDS[action]
+        ):
             raise ValueError("Unsupported or incomplete input action.")
-        p = {name: p[name] for name in fields[action]}
+        p = {name: p[name] for name in ACTION_FIELDS[action]}
         for name, value in p.items():
             if name in {"x", "y", "x1", "y1", "x2", "y2", "count", "steps"}:
                 if type(value) is not int:
