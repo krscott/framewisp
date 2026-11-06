@@ -92,7 +92,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     recording = (
         tmp_path / "session.mp4"
         if mode is True
-        or mode in {"large", "uncaptioned", "console", "record-probe", "compact"}
+        or mode
+        in {"large", "uncaptioned", "no-pings", "console", "record-probe", "compact"}
         or (isinstance(mode, str) and mode.startswith("captions-"))
         else None
     )
@@ -107,6 +108,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             command.append("--console")
         if mode == "uncaptioned":
             command.append("--no-captions")
+        if mode == "no-pings":
+            command.append("--no-click-pings")
         if mode == "record-probe":
             # The pointer tests also cover rendering every pointer caption.
             command.extend(["--captions", "all"])
@@ -1577,6 +1580,264 @@ def caption_patches(path: Path) -> list[bytes]:
     return [data[offset : offset + size] for offset in range(0, len(data), size)]
 
 
+RING_CROP = 100
+
+
+def ring_frames(path: Path, x: int, y: int) -> list[int]:
+    """List 30 fps frames with a centred red ring around a display position."""
+    crop = f"crop={RING_CROP}:{RING_CROP}:{x - RING_CROP // 2}:{y - RING_CROP // 2}"
+    data = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-vf",
+            f"fps=30,{crop}",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    size = RING_CROP * RING_CROP * 3
+    rings: list[int] = []
+    for index in range(len(data) // size):
+        frame = data[index * size : (index + 1) * size]
+        points = [
+            (offset % RING_CROP, offset // RING_CROP)
+            for offset in range(RING_CROP * RING_CROP)
+            if frame[offset * 3] - frame[offset * 3 + 1] > 40
+            and frame[offset * 3] - frame[offset * 3 + 2] > 40
+        ]
+        if len(points) < 20:
+            continue
+        xs, ys = [point[0] for point in points], [point[1] for point in points]
+        if (
+            abs((min(xs) + max(xs)) / 2 - RING_CROP / 2) <= 2
+            and abs((min(ys) + max(ys)) / 2 - RING_CROP / 2) <= 2
+        ):
+            rings.append(index)
+    return rings
+
+
+def clip_origin(demo: Demo) -> float:
+    """Read the recorder's first captured-frame time; this file can't import framewisp."""
+    timestamp = re.search(
+        r"\.ready\((\d+), (\d+), (\d+)\)",
+        (demo.directory / "recorder.log").read_text(),
+    )
+    assert timestamp is not None
+    high, low, nanos = map(int, timestamp.groups())
+    return (high << 32) + low + nanos / 1e9
+
+
+def logged_pings(demo: Demo) -> list[tuple[str, float, int, int]]:
+    events = [
+        json.loads(line)
+        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+    ]
+    return [
+        (event["action"], event["time"], event["x"], event["y"])
+        for event in events
+        if event["event"] == "ping"
+    ]
+
+
+def perform_gestures(demo: Demo) -> None:
+    cli(demo.directory, "click", "200", "150")
+    cli(demo.directory, "click", "--count", "2", "500", "150")
+    cli(demo.directory, "click", "--button", "right", "800", "150")
+    cli(demo.directory, "drag", "200", "450", "700", "450")
+    time.sleep(0.8)
+
+
+GESTURE_PINGS = [
+    ("click", 200, 150),
+    ("click", 500, 150),
+    ("click", 500, 150),
+    ("click", 800, 150),
+    ("drag", 200, 450),
+    ("drag", 700, 450),
+]
+
+
+def assert_rings_mark_gestures(demo: Demo, video: Path, *, timed: bool = True) -> None:
+    pings = logged_pings(demo)[-len(GESTURE_PINGS) :]
+    assert [(action, x, y) for action, _, x, y in pings] == GESTURE_PINGS
+    origin = clip_origin(demo)
+    for action, moment, x, y in pings:
+        rings = ring_frames(video, x, y)
+        assert len(rings) >= 8, f"no ring for {action} at ({x}, {y})"
+        if timed:
+            first = min(when for _, when, px, py in pings if (px, py) == (x, y))
+            assert abs(rings[0] / 30 - (first - origin)) <= 0.05
+            assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
+
+
+# R-REC-5, R-REC-6
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["record-probe", "x11-record-probe"], indirect=True)
+def test_startup_recording_pings_gestures(demo: Demo) -> None:
+    assert demo.recording is not None
+    wait_for_input_probe_window(demo)
+    perform_gestures(demo)
+    cli(demo.directory, "stop")
+    assert_rings_mark_gestures(demo, demo.recording)
+
+
+# R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize(
+    ("options", "timed"),
+    [
+        ([], True),
+        (["--no-captions"], True),
+        (["--captions", "pointer"], True),
+        (["--captions", "all"], True),
+        (["--console"], True),
+        (["--compact", "--compact-before", "0.1", "--compact-after", "0"], False),
+        (
+            ["--console", "--compact", "--compact-before", "0", "--compact-after", "0"],
+            False,
+        ),
+    ],
+)
+def test_mid_session_clip_pings_gestures(
+    demo: Demo, tmp_path: Path, options: list[str], timed: bool
+) -> None:
+    wait_for_input_probe_window(demo)
+    clip = tmp_path / "clip.mp4"
+    cli(demo.directory, "record-start", *options, str(clip))
+    time.sleep(1.5)
+    perform_gestures(demo)
+    time.sleep(1.5)
+    cli(demo.directory, "record-stop")
+    assert_rings_mark_gestures(demo, clip, timed=timed)
+
+
+# R-REC-7, R-LOG-3
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_pings_are_per_clip_and_absent_from_screenshots(
+    demo: Demo, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(demo)
+    plain = tmp_path / "plain.mp4"
+    cli(demo.directory, "record-start", "--no-click-pings", str(plain))
+    cli(demo.directory, "click", "300", "200")
+    time.sleep(0.8)
+    cli(demo.directory, "record-stop")
+    assert ring_frames(plain, 300, 200) == []
+
+    pinged = tmp_path / "pinged.mp4"
+    cli(demo.directory, "record-start", str(pinged))
+    shot = tmp_path / "shot.png"
+    plan = tmp_path / "click.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "actions": [
+                    {"action": "click", "x": 300, "y": 200, "move_duration": 0}
+                ],
+                "capture": {"path": str(shot), "delay": 0.05},
+            }
+        )
+    )
+    subprocess.run(
+        ["framewisp", str(demo.directory), "batch", "--file", str(plan)],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    moment = logged_pings(demo)[-1][1]
+    time.sleep(0.8)
+    cli(demo.directory, "record-stop")
+    # The batch captures 0.05 seconds after its press, inside the ping the clip shows.
+    rings = ring_frames(pinged, 300, 200)
+    origin = clip_origin(demo)
+    assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
+    with Image.open(shot) as screenshot:
+        patch = screenshot.convert("RGB").crop((250, 150, 350, 250)).tobytes()
+    assert not any(
+        patch[offset] - patch[offset + 1] > 40 for offset in range(0, len(patch), 3)
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> None:
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(demo.runtime / "control.sock"))
+        request = {
+            "action": "record-start",
+            "session": str(demo.directory.resolve()),
+            "destination": str(tmp_path / "rejected.mp4"),
+            "captions": "keys",
+            "click_pings": "no",
+        }
+        connection.sendall((json.dumps(request) + "\n").encode())
+        with connection.makefile("r") as response:
+            assert json.loads(response.readline())["error"] == (
+                "click_pings must be true or false"
+            )
+
+
+# R-REC-7
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", ["no-pings"], indirect=True)
+def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) -> None:
+    assert demo.recording is not None
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    cli(demo.directory, "click", "300", "200")
+    time.sleep(0.8)
+    assert logged_pings(demo)
+    cli(demo.directory, "stop")
+    assert ring_frames(demo.recording, 300, 200) == []
+
+
+# R-REC-10
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("failure", ["unwritable-log", "malformed-input-log"])
+@pytest.mark.parametrize("command", ["record-stop", "stop"])
+@pytest.mark.parametrize("options", [["--no-captions"], []])
+def test_failed_ping_render_leaves_pings_only_clip_playable(
+    demo: Demo, tmp_path: Path, failure: str, command: str, options: list[str]
+) -> None:
+    wait_for_demo_frame(demo, tmp_path / "before.png")
+    clip = tmp_path / "pings only.mp4"
+    cli(demo.directory, "record-start", *options, str(clip))
+    cli(demo.directory, "click", "120", "100")
+    time.sleep(0.3)
+    if failure == "unwritable-log":
+        (demo.directory / "captions.log").mkdir()
+    else:
+        with (demo.directory / "inputs.jsonl").open("a") as log:
+            log.write("not json\n")
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), command],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1
+    assert "raw video remains" in result.stderr
+    assert str(clip) in " ".join(result.stderr.split())
+    assert "captions.log" in result.stderr
+    assert demo.process.wait(timeout=5) == 1
+    assert not list(clip.parent.glob(".framewisp-captions-*"))
+    assert len(recording_frames(clip)) > 1
+    assert ring_frames(clip, 120, 100) == []
+
+
 def console_panel(path: Path, second: float) -> bytes:
     return subprocess.run(
         [
@@ -2252,12 +2513,14 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
         ("drag", "start"),
+        ("drag", "ping"),
         ("drag", "end"),
         ("click", "start"),
+        ("click", "ping"),
         ("click", "end"),
     ]
-    assert "cancelled" in logged[1]["error"]
-    assert logged[3]["returncode"] == 0
+    assert "cancelled" in logged[2]["error"]
+    assert logged[5]["returncode"] == 0
 
 
 @pytest.mark.integration
@@ -2653,18 +2916,23 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
         for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
-        (name, phase)
-        for name in ("click", "type", "key", "key")
-        for phase in ("start", "end")
+        ("click", "start"),
+        ("click", "ping"),
+        ("click", "end"),
+        *(
+            (name, phase)
+            for name in ("type", "key", "key")
+            for phase in ("start", "end")
+        ),
     ]
     assert all(event["returncode"] == 0 for event in logged if event["event"] == "end")
     assert all(a["time"] <= b["time"] for a, b in zip(logged, logged[1:]))
     retain = json.loads((demo.directory / "session.json").read_text())[
         "retain_input_content"
     ]
-    assert ("text" in logged[2]["parameters"]) is retain
-    assert ("chord" in logged[4]["parameters"]) is retain
-    assert logged[6]["parameters"]["chord"] == "Return"
+    assert ("text" in logged[3]["parameters"]) is retain
+    assert ("chord" in logged[5]["parameters"]) is retain
+    assert logged[7]["parameters"]["chord"] == "Return"
 
 
 # R-BATCH-1

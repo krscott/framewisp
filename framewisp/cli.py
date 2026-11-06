@@ -212,6 +212,11 @@ def main() -> None:
             const="none",
             help="shorthand for --captions none",
         )
+        recording_parser.add_argument(
+            "--no-click-pings",
+            action="store_true",
+            help="record without the red ping at each click and drag end",
+        )
     commands.add_parser(
         "record-stop", help="finalize the active clip and keep the app running"
     )
@@ -417,6 +422,10 @@ def main() -> None:
                 "--captions and --no-captions require --record; use record-start for later clips"
             )
         args.captions = args.captions or DEFAULT_CAPTIONS
+        if args.action == "run" and args.no_click_pings and args.record is None:
+            parser.error(
+                "--no-click-pings requires --record; use record-start --no-click-pings for later clips"
+            )
     if args.action == "run":
         if args.compact and args.record is None:
             parser.error(
@@ -485,6 +494,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             command,
             recording=args.record,
             captions=args.captions,
+            click_pings=not args.no_click_pings,
             console=args.console,
             compact=args.compact_settings,
             size=(args.width, args.height),
@@ -506,6 +516,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 args.action,
                 args.path if args.action == "record-start" else None,
                 captions=getattr(args, "captions", DEFAULT_CAPTIONS),
+                click_pings=not getattr(args, "no_click_pings", False),
                 console=getattr(args, "console", False),
                 compact=getattr(args, "compact_settings", None),
             )

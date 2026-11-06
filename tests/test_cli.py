@@ -153,6 +153,48 @@ def test_console_rejects_unsupported_runner_before_connecting(
 
 
 @pytest.mark.parametrize("capability", [None, False, 1])
+def test_default_clip_rejects_runner_without_click_pings(
+    tmp_path: Path, capability: object
+) -> None:
+    state: dict[str, object] = {
+        "control_protocol": 1,
+        "caption_modes": True,
+        "runtime_directory": str(tmp_path),
+    }
+    if capability is not None:
+        state["click_pings_recording"] = capability
+    (tmp_path / "session.json").write_text(json.dumps(state))
+    destination = tmp_path / "clip.mp4"
+
+    def record(*options: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "framewisp",
+                str(tmp_path),
+                "record-start",
+                *options,
+                str(destination),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+    rejected = record()
+    assert rejected.returncode == 1
+    assert "does not support click pings" in rejected.stderr
+    assert "Restart the session" in rejected.stderr
+    assert "--no-click-pings" in rejected.stderr
+    assert "Traceback" not in rejected.stderr
+    # The opt-out reaches the runner's socket, which this directory lacks.
+    assert "click pings" not in record("--no-click-pings").stderr
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("capability", [None, False, 1])
 def test_caption_modes_reject_unsupported_runner_before_connecting(
     tmp_path: Path, capability: object
 ) -> None:
@@ -179,6 +221,28 @@ def test_caption_modes_reject_unsupported_runner_before_connecting(
     assert "does not support caption modes. Restart the session" in result.stderr
     assert "Traceback" not in result.stderr
     assert not destination.exists()
+
+
+def test_run_no_click_pings_requires_record(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "run",
+            "--no-click-pings",
+            "--",
+            "framewisp-demo",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "--no-click-pings requires --record" in result.stderr
+    assert not (tmp_path / "session").exists()
 
 
 @pytest.mark.parametrize("option", [["--captions", "all"], ["--no-captions"]])

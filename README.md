@@ -219,10 +219,10 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--captions MODE \| --no-captions] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--captions MODE \| --no-captions] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--captions MODE \| --no-captions] FILE` | Start a clip in the running session. |
+| `record-start [--captions MODE \| --no-captions] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -662,14 +662,17 @@ Cuts use command timestamps, not pixel changes. Blinking cursors do not prevent
 trimming. Animations, app output, and delayed responses in removed gaps can be
 omitted. Use larger padding or a batch wait when an app needs time to respond;
 leave compaction off when the entire timeline matters. External sleeps between
-commands are gaps and can be removed. Captions and console text stay aligned
-with the retained GUI frames; console timestamps still show original clip time.
+commands are gaps and can be removed. Captions, click pings, and console text
+stay aligned with the retained GUI frames; console timestamps still show original
+clip time. Each click ping keeps its full half second even when padding is shorter.
 The reported duration measures the compacted MP4. Session logs keep their original
 timestamps and content.
 
-Compaction, console rendering, and input captions share one FFmpeg pass after capture stops.
-`record-stop` and normal shutdown wait for it. If rendering fails, the raw GUI
-video remains and the error points to `captions.log`.
+Compaction, console rendering, input captions, and click pings share one FFmpeg
+pass after capture stops. `record-stop` and normal shutdown wait for it. If
+rendering fails, the raw GUI video remains playable at the requested path and the
+error points to `captions.log` (R-REC-10). A session that hits this failure stops,
+even when `record-stop` triggered it.
 
 ## Share media in GitHub comments
 
@@ -714,7 +717,9 @@ for Markdown placement and supported commands.
 ## Input logs and recording captions
 
 Every accepted input command appends start and end records to `SESSION/inputs.jsonl`,
-even without a recording. Records include an action ID, monotonic timestamp in
+even without a recording. In headless sessions, each click press and each drag
+press and release adds a `ping` record with the time and display position `x` and
+`y`. Records include an action ID, monotonic timestamp in
 seconds, the command and retained parameters, and its return code or exception type. They
 record what framewisp attempted and whether the input command completed, not
 whether the app responded as intended. A start without an end indicates an
@@ -761,6 +766,26 @@ framewisp demo record-start --captions all /tmp/gestures.mp4
 # Or start the session with an uncaptioned recording:
 framewisp demo run --record /tmp/plain.mp4 --no-captions -- framewisp-demo
 ```
+
+Click pings mark each pointer press in a recording: a red ring grows and fades
+over half a second at the click position. Each click of a double click and the
+press and release of a completed drag get their own ping; a cancelled drag pings
+its press but not its cleanup release. Scrolls and moves get none.
+Clips with `run --record` and `record-start` show them by default, independently
+of `--captions` and `--no-captions`. Screenshots never include them (R-LOG-3), and `inspect` and
+input coordinates are unaffected. Disable them for a clip with:
+
+```sh
+framewisp demo record-start --no-click-pings /tmp/plain.mp4
+# Or start the session with a ping-free recording:
+framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
+```
+
+A clip with a click is encoded again to draw its pings, even with `--no-captions`
+or no keyboard input. Add `--no-click-pings` to keep the recorder's output
+unprocessed when nothing else needs rendering. With a
+runner started by an older framewisp, `record-start` fails until you restart the
+session or pass `--no-click-pings`. `run --no-click-pings` requires `--record`.
 
 Input logging remains enabled and follows the session retention policy. Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.

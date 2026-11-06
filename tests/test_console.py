@@ -183,6 +183,7 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
         stopped=12,
         log=tmp_path / "captions.log",
         captions="none",
+        click_pings=False,
         console=ConsoleCapture(tmp_path),
         size=(320, 240),
     )
@@ -258,6 +259,7 @@ def test_console_render_failure_preserves_raw_video(tmp_path: Path) -> None:
             stopped=12,
             log=tmp_path / "captions.log",
             captions="none",
+            click_pings=False,
             console=ConsoleCapture(tmp_path),
         )
     assert video.read_bytes() == b"raw file contents"

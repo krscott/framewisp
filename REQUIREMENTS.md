@@ -107,6 +107,7 @@ observable behaviour, not implementation, in short sentences.
 - **R-LOG-1** [test] By default, `inputs.jsonl` and captions omit typed text
   and literal key characters.
 - **R-LOG-2** [test] Captions appear only in recordings, never in screenshots.
+- **R-LOG-3** [test] Click pings appear only in recordings, never in screenshots.
 - **R-LOG-4** [test] By default, a recording captions only `key` and `type`
   inputs.
 - **R-LOG-5** [test] The `--captions` and `--no-captions` options do not change
@@ -122,6 +123,20 @@ observable behaviour, not implementation, in short sentences.
 - **R-REC-3** [test] An active recording is finalized as a playable MP4 when
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
 - **R-REC-4** [test] Recorded colours match screenshot colours.
+- **R-REC-5** [test] By default, a recording shows a click ping at each press
+  of a `click` and at each press and release of a completed `drag`. Each press of
+  a double click has its own ping. `scroll` and `move` show no click ping.
+- **R-REC-6** [test] A click ping is centred on the pointer position of its
+  event. It starts within 0.05 seconds of that event.
+- **R-REC-7** [test] `--no-click-pings` removes click pings from that clip only.
+- **R-REC-8** [test] In a compacted clip, a click ping stays at the retained
+  position of its event. It keeps its full duration unless the clip ends first.
+- **R-REC-9** [test] With `--console`, a click ping keeps its GUI position. It
+  never draws on the console panel.
+- **R-REC-10** [test] When recording rendering fails, a playable MP4 of the raw
+  capture remains at the requested path. The error names that path and
+  `captions.log`.
+- **R-REC-11** [test] `--no-captions` does not change click pings.
 
 ## Lifetime and recovery (LIFE)
 

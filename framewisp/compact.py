@@ -5,7 +5,7 @@ import math
 import subprocess
 import time
 import uuid
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,8 +88,12 @@ def retained_frames(
     stopped: float,
     duration: float,
     settings: CompactSettings,
+    overlays: Iterable[tuple[float, float]] = (),
 ) -> list[tuple[int, int]]:
-    """Return merged half-open frame ranges, rounding cuts outward at 30 fps."""
+    """Return merged half-open frame ranges, rounding cuts outward at 30 fps.
+
+    Overlays are spans in clip seconds that stay whole regardless of padding.
+    """
     frame_count = max(1, round(duration * 30))
     ranges = [(0, 1), (frame_count - 1, frame_count)]
 
@@ -101,6 +105,8 @@ def retained_frames(
 
     retain(0, min(duration, settings.before))
     retain(max(0.0, duration - settings.after), duration)
+    for start, end in overlays:
+        retain(start, end)
     for log in logs:
         events = activity_events(log)
         ends = {
