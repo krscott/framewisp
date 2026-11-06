@@ -1,4 +1,5 @@
 import errno
+import fcntl
 import json
 import os
 import shlex
@@ -592,6 +593,120 @@ def test_unreadable_session_metadata_cannot_hang_recovery(
     )
     assert result.returncode == 1
     assert "journal is missing" in result.stderr and "rm -rf" in result.stderr
+
+
+# R-LIFE-7
+@pytest.mark.parametrize("change", ["replaced", "deleted"])
+def test_lock_changed_while_acquiring_refused_with_working_manual_steps(
+    abandoned: tuple[Path, Path], change: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    lock = session / LOCK
+    real_flock = fcntl.flock
+
+    def change_lock_then_flock(descriptor: int, operation: int) -> None:
+        real_flock(descriptor, operation)
+        lock.unlink()
+        if change == "replaced":
+            lock.touch(mode=0o600)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(fcntl, "flock", change_lock_then_flock)
+        with pytest.raises(SessionError, match="changed while acquiring") as refusal:
+            recover_session(session)
+    message = str(refusal.value)
+    assert "Nothing was removed" in message and " recover`" in message
+    assert (session / JOURNAL).exists() and (runtime / "kept").exists()
+    # Running recover again compares the lock with the journal.
+    with pytest.raises(SessionError, match="was replaced"):
+        recover_session(session)
+    assert run_commands(message, "grep ") == ""
+    run_commands(message, "rm ")
+    assert not runtime.exists()
+    assert recover_session(session) == 0
+
+
+def run_missing_session_commands(message: str, runtime: Path) -> None:
+    assert str(runtime) in run_commands(message, "ls ")
+    environment = os.environ | {"XDG_RUNTIME_DIR": str(runtime)}
+    with subprocess.Popen(["sleep", "60"], env=environment) as survivor:
+        try:
+            assert str(runtime) in run_commands(message, "grep ")
+        finally:
+            survivor.kill()
+
+
+# R-LIFE-7
+def test_deleted_session_refusal_says_what_is_left_to_check(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    shutil.rmtree(session)
+    with pytest.raises(SessionError, match="does not exist") as refusal:
+        recover_session(session)
+    assert (runtime / "kept").read_text() == "preserve"
+    run_missing_session_commands(str(refusal.value), runtime)
+
+
+# R-LIFE-7
+def test_moved_session_recovers_at_its_new_path(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session, runtime = abandoned
+    moved = tmp_path / "moved"
+    session.rename(moved)
+    with pytest.raises(SessionError, match="does not exist") as refusal:
+        recover_session(session)
+    assert "moved" in str(refusal.value)
+    assert recover_session(moved) == 0
+    assert not runtime.exists()
+
+
+# R-LIFE-7
+def test_session_deleted_during_shutdown_keeps_runtime_and_gives_steps(
+    tmp_path: Path,
+) -> None:
+    session = tmp_path / "session"
+    session.mkdir()
+    runtime = runtime_path(session)
+    try:
+        with pytest.raises(SessionError, match="does not exist") as refusal:
+            with (
+                session_lease(session) as lease,
+                headless_runtime(session, lease),
+            ):
+                (runtime / "kept").write_text("preserve")
+                shutil.rmtree(session)
+        assert (runtime / "kept").read_text() == "preserve"
+        run_missing_session_commands(str(refusal.value), runtime)
+    finally:
+        shutil.rmtree(runtime, ignore_errors=True)
+
+
+def refuse_tempdir() -> str:
+    raise FileNotFoundError("No usable temporary directory found")
+
+
+# R-LIFE-7
+@pytest.mark.parametrize("journal", ["unreadable", "missing"])
+def test_unusable_tempdir_refusal_gives_working_manual_steps(
+    abandoned: tuple[Path, Path], journal: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    if journal == "missing":
+        (session / JOURNAL).unlink()
+    else:
+        (session / JOURNAL).write_text("{")
+    monkeypatch.setenv("TMPDIR", str(runtime.parent))
+    monkeypatch.setattr(tempfile, "gettempdir", refuse_tempdir)
+    with pytest.raises(SessionError, match="Nothing was removed") as refusal:
+        recover_session(session)
+    message = str(refusal.value)
+    assert (runtime / "kept").read_text() == "preserve"
+    assert run_commands(message, "grep ") == ""
+    run_commands(message, "rm ")
+    assert not runtime.exists()
+    assert recover_session(session) == 0
 
 
 # R-LIFE-7

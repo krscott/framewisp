@@ -59,6 +59,16 @@ def runtime_path(session: Path) -> Path:
     return Path(tempfile.gettempdir()) / runtime_name(session)
 
 
+def temporary_parent() -> Path:
+    """Return where this session's runtime should be, for refusals to name."""
+    try:
+        return Path(tempfile.gettempdir())
+    except OSError:
+        # Refusals must still work when no temporary directory is writable. Its
+        # runtime can be in a directory that has since become read-only.
+        return Path(os.environ.get("TMPDIR") or "/tmp").absolute()
+
+
 def check_socket_paths(runtime: Path) -> None:
     # Sway names its IPC socket with a UID and signed 32-bit PID. Budget for
     # every possible PID before starting any children, plus the terminating NUL.
@@ -142,8 +152,12 @@ def session_lease(session: Path) -> Generator[int, None, None]:
             raise SessionError(
                 "Session owner or descendant cleanup is still live. Wait for cleanup and retry."
             ) from None
-        if identity(session / LOCK) != lease_identity(descriptor):
-            raise SessionError("Headless lock changed while acquiring ownership.")
+        try:
+            changed = identity(lock) != lease_identity(descriptor)
+        except FileNotFoundError:
+            changed = True
+        if changed:
+            raise SessionError(lock_changed(session))
         yield descriptor
     finally:
         # Supervisors share this open file description. Closing, rather than
@@ -198,18 +212,61 @@ def stop_step(session: Path) -> str:
     return f"If the session is running, stop it with `{framewisp} stop`.\n"
 
 
-def unreadable_journal(session: Path, problem: str) -> str:
-    # The journal is the only trustworthy record of the session's TMPDIR, and it is
-    # unusable here. A path copied from it could also aim these steps at another
-    # session, so they use the path derived from this session's identity.
-    runtime = runtime_path(session)
+def missing_session_steps(session: Path) -> str:
+    # The runtime directory's name comes from the session directory's identity, which
+    # is gone. Listing every session's runtime is the most that can be checked.
+    uid = os.getuid()
+    parent = shlex.quote(str(temporary_parent()))
+    environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/framewisp-{uid}-[0-9a-f-]+$")
+    framewisp = shlex.join(["framewisp", "NEW_PATH", "recover"])
     return (
-        f"Cannot verify ownership at {session / JOURNAL}: {problem}\n"
-        "Cannot prove the session has exited. Nothing was removed.\n"
-        + stop_step(session)
+        f"Session directory {session} does not exist, or cannot be read.\n"
+        f"If it moved, run `{framewisp}`: its ownership files moved with it.\n"
+        "If it was deleted, its runtime directory and processes may remain, but "
+        "cannot be told from your other sessions' by name. List every session's "
+        f"runtime directory under {parent}:\n"
+        f"  ls -d -- {parent}/framewisp-{uid}-*\n"
+        "List the ones that running processes use, from outside any sandbox:\n"
+        f"  LC_ALL=C grep -zahsoE {environment} /proc/*/environ | tr '\\0' '\\n' "
+        "| sort -u\n"
+        "A directory in the first list but not the second has no running process. "
+        "Read any owner-*.json records in it, then delete it with `rm -rf --`."
+    )
+
+
+def derived_steps(session: Path) -> str:
+    """Describe manual cleanup when no journal can be trusted to name the runtime."""
+    # A journal is the only trustworthy record of the session's TMPDIR. A path copied
+    # from an unverified one could also aim these steps at another session, so they
+    # use the path derived from this session's identity.
+    try:
+        runtime = temporary_parent() / runtime_name(session)
+    except OSError:
+        return missing_session_steps(session)
+    return (
+        stop_step(session)
         + f"Otherwise follow these steps, which assume TMPDIR is {runtime.parent}. "
         "If the session started with another TMPDIR, set it and run recover again "
         "for steps with that path.\n" + cleanup_steps(session, runtime)
+    )
+
+
+def unreadable_journal(session: Path, problem: str) -> str:
+    return (
+        f"Cannot verify ownership at {session / JOURNAL}: {problem}\n"
+        "Cannot prove the session has exited. Nothing was removed.\n"
+        + derived_steps(session)
+    )
+
+
+def lock_changed(session: Path) -> str:
+    lock = session / LOCK
+    recover = shlex.join(["framewisp", str(session), "recover"])
+    return (
+        f"Session lock {lock} changed while acquiring ownership, so ownership "
+        "cannot be verified. Nothing was removed.\n"
+        f"Stop anything else changing it, then run `{recover}`, which checks the "
+        "lock against the session's ownership journal.\n" + derived_steps(session)
     )
 
 
@@ -414,14 +471,19 @@ def headless_runtime(session: Path, lease: int) -> Generator[Path, None, None]:
 
 
 def recover_session(session: Path) -> int:
+    try:
+        session.lstat()
+    except OSError as error:
+        raise SessionError(unreadable_journal(session, str(error.strerror))) from error
     with session_lease(session) as lease:
         if not (session / JOURNAL).exists() and not (session / JOURNAL).is_symlink():
             # Before the first journal commit, no runtime or children may exist.
             # A partial temporary journal is disposable, but stale session JSON
             # without an ownership journal belongs to an unsupported older run.
+            runtime = temporary_parent() / runtime_name(session)
             if (
-                runtime_path(session).exists()
-                or runtime_path(session).is_symlink()
+                runtime.exists()
+                or runtime.is_symlink()
                 or (session / "session.json").exists()
                 or (session / "session.json").is_symlink()
                 or (session / ".session.json").exists()
