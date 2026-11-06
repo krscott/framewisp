@@ -234,15 +234,14 @@ def open_destination(destination: Path) -> int:
     except OSError as error:
         raise ValueError(f"{failure}: {error}") from None
     try:
-        if not stat.S_ISREG(os.fstat(output).st_mode):
-            raise ValueError(f"{failure}: not a regular file.")
-        os.ftruncate(output, 0)
-    except (OSError, ValueError) as error:
-        os.close(output)
-        raise ValueError(
-            str(error) if isinstance(error, ValueError) else f"{failure}: {error}"
-        ) from None
-    return output
+        if stat.S_ISREG(os.fstat(output).st_mode):
+            os.ftruncate(output, 0)
+            return output
+        reason = "not a regular file."
+    except OSError as error:
+        reason = str(error)
+    os.close(output)
+    raise ValueError(f"{failure}: {reason}")
 
 
 def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
