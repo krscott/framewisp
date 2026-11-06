@@ -3745,8 +3745,8 @@ def test_batch_capture_yields_to_a_recording_started_during_the_batch(
         "batch",
         {
             "actions": [{"action": "type", "text": "", "interval": 0}],
-            # Far longer than record-start, which must finish first.
-            "capture": {"path": str(clip), "delay": 6},
+            # Longer than record-start's ten-second limit, so it finishes first.
+            "capture": {"path": str(clip), "delay": 11},
         },
     ) as connection:
         connection.settimeout(20)

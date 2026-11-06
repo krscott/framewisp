@@ -22,11 +22,7 @@ from framewisp.lib import (
     recording_path_error,
 )
 from framewisp.ownership import ACTIVE_RECORDING, JOURNAL, LOCK
-from framewisp.session_files import (
-    SESSION_FILES,
-    protected_path_error,
-    resolved_or_unchanged,
-)
+from framewisp.session_files import SESSION_FILES, protected_path_error
 
 __all__ = ["demo"]
 
@@ -208,7 +204,7 @@ def test_recording_through_a_symlink_is_reserved(tmp_path: Path) -> None:
     assert not session.exists()
 
 
-def test_a_looped_link_resolves_to_itself(
+def test_a_looped_session_link_does_not_stop_a_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Before Python 3.13, `resolve` raises on a loop."""
@@ -217,8 +213,7 @@ def test_a_looped_link_resolves_to_itself(
         raise RuntimeError("Symlink loop")
 
     monkeypatch.setattr(Path, "resolve", looped)
-    link = tmp_path / ACTIVE_RECORDING
-    assert resolved_or_unchanged(link) == link
+    assert protected_path_error(tmp_path, tmp_path / "shot.png", None) is None
 
 
 # R-SESSION-7

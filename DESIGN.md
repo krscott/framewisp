@@ -754,11 +754,12 @@ remain where framewisp's own commands can still take a session's active destinat
   `batch_screenshot` repeats it just before publishing, so only a recording that
   has not finished starting by then gets past it.
 
-The check also knows only the calling session. A screenshot or batch capture from
-another session, or a screenshot from an attachment, can take this session's active
-destination. A screenshot from there can also overwrite this session's files. That
-second case is the failure R-SESSION-7 prevents within a session: the session stays
-up, and later commands can fail until it restarts.
+The check also knows only the calling session; R-SESSION-7 and R-REC-21 cover a
+session's own paths. A screenshot or batch capture from another session, or a
+screenshot from an attachment, can take this session's active destination. A
+screenshot from there can also overwrite this session's files: the session stays
+up, and later commands can fail until it restarts. Cross-session protection is
+tracked in #158.
 
 When a file takes an active destination, in either window or from another session,
 the failure is the R-REC-18 path: `record-stop` keeps the clip at another path, names
