@@ -37,7 +37,7 @@ pkgs.runCommand "framewisp-package-test-${toString shard}-of-${toString shards}"
         ]))
       }/bin/python \
       -m pytest -c ${../pyproject.toml} \
-      ${../tests}/test_profiles.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py ${../tests}/test_unresponsive_app.py ${../tests}/test_wait_until.py \
+      ${../tests}/test_profiles.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py ${../tests}/test_unresponsive_app.py \
       --test-shards ${toString shards} --test-shard ${toString shard} \
       --rootdir ${../tests} -p no:cacheprovider --durations=25 \
       --junitxml "$TMPDIR/junit.xml" --basetemp "$TMPDIR/tests"

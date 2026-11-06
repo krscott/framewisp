@@ -11,8 +11,9 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from inspect import FrameInfo, stack
+from inspect import FrameInfo, getsource, stack
 from pathlib import Path
+from textwrap import dedent
 from typing import Any, cast
 
 import pytest
@@ -31,7 +32,7 @@ class Demo:
 WAIT_TIMEOUT_SECONDS = 10
 
 
-def wait_description(caller: FrameInfo) -> str:
+def wait_description(caller: FrameInfo, predicate: Callable[[], object]) -> str:
     for node in ast.walk(ast.parse(Path(caller.filename).read_text())):
         if (
             isinstance(node, ast.Call)
@@ -40,27 +41,36 @@ def wait_description(caller: FrameInfo) -> str:
             and node.lineno == caller.lineno
         ):
             argument = node.args[0]
+            if isinstance(argument, ast.Name):
+                return dedent(getsource(predicate)).strip()
             return ast.unparse(
                 argument.body if isinstance(argument, ast.Lambda) else argument
             )
     return "the condition"
 
 
-def wait_timeout_message(caller: FrameInfo, elapsed: float, last_value: object) -> str:
+def wait_timeout_message(
+    caller: FrameInfo,
+    predicate: Callable[[], object],
+    elapsed: float,
+    last_value: object,
+) -> str:
     return (
         f"Timed out after {elapsed:.1f} s at "
         f"{Path(caller.filename).name}:{caller.lineno} "
-        f"waiting for: {wait_description(caller)}\n"
+        f"waiting for: {wait_description(caller, predicate)}\n"
         f"Last returned: {last_value!r}"
     )
 
 
-def wait_until(predicate: Callable[[], object]) -> None:
+def wait_until(predicate: Callable[[], object], /) -> None:
     started = time.monotonic()
     while not (last_value := predicate()):
         elapsed = time.monotonic() - started
         if elapsed >= WAIT_TIMEOUT_SECONDS:
-            raise AssertionError(wait_timeout_message(stack()[1], elapsed, last_value))
+            raise AssertionError(
+                wait_timeout_message(stack()[1], predicate, elapsed, last_value)
+            )
         time.sleep(0.05)
 
 
