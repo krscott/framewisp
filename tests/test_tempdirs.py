@@ -45,7 +45,7 @@ def test_paths_follow_tmpdir(
     named = resolve_session("demo")
     assert named.parent.parent == first
     assert resolve_session("./demo") == tmp_path / "demo"
-    with session_lease(tmp_path), headless_runtime(tmp_path) as runtime:
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         assert runtime.parent == first
         assert json.loads((tmp_path / JOURNAL).read_text())["runtime_path"] == str(
             runtime
@@ -72,7 +72,7 @@ def test_legacy_journal_uses_original_tmp_location(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tempfile, "tempdir", "/tmp")
-    with session_lease(tmp_path), headless_runtime(tmp_path) as runtime:
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         journal = json.loads((tmp_path / JOURNAL).read_text())
         del journal["runtime_path"]
         (tmp_path / JOURNAL).write_text(json.dumps(journal))
@@ -96,9 +96,9 @@ def test_long_tmpdir_fails_without_runtime_or_journal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / ("long" * 30)))
-    with session_lease(tmp_path):
+    with session_lease(tmp_path) as lease:
         with pytest.raises(SessionError, match="Set TMPDIR to a shorter directory"):
-            with headless_runtime(tmp_path):
+            with headless_runtime(tmp_path, lease):
                 pytest.fail("Long runtime path was accepted")
     assert not (tmp_path / JOURNAL).exists()
     assert not runtime_path(tmp_path).exists()
@@ -108,7 +108,7 @@ def test_long_tmpdir_fails_without_runtime_or_journal(
 @pytest.mark.parametrize("path", [None, 123, "relative", "/", "/tmp/bad\0path"])
 def test_invalid_journal_runtime_path_refused(tmp_path: Path, path: object) -> None:
     with pytest.raises(SessionError, match="runtime path"):
-        with session_lease(tmp_path), headless_runtime(tmp_path):
+        with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease):
             journal = json.loads((tmp_path / JOURNAL).read_text())
             journal["runtime_path"] = path
             (tmp_path / JOURNAL).write_text(json.dumps(journal))

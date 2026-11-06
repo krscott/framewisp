@@ -655,10 +655,10 @@ def test_attachment_refuses_headless_ownership(
 ) -> None:
     session = tmp_path / "session"
     session.mkdir()
-    with session_lease(session):
+    with session_lease(session) as lease:
         assert run_attachment(session, None) == 1
         assert "still live" in capsys.readouterr().err
-    write_journal(session, runtime_path(session), created=False)
+        write_journal(session, runtime_path(session), lease, created=False)
     assert run_attachment(session, None) == 1
     assert "recover first" in capsys.readouterr().err
     assert not (session / "session.json").exists()

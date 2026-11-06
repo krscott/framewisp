@@ -777,7 +777,7 @@ def _run_session(
     }
     try:
         with (
-            headless_runtime(session) as runtime,
+            headless_runtime(session, lease) as runtime,
             ExitStack() as stack,
         ):
             directory = str(runtime)
