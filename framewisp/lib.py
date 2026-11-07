@@ -28,7 +28,6 @@ from framewisp.captions import (
     recorder_output,
     render_recording,
 )
-from framewisp.compact import CompactSettings
 from framewisp.connection import (
     capture_path_error,
     parse_command,
@@ -314,7 +313,7 @@ def start_recording(
     captions: CaptionMode,
     click_pings: bool,
     console: ConsoleCapture,
-    compact: CompactSettings | None = None,
+    compact: bool = False,
     layout: VideoLayout,
 ) -> Generator[OwnedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive.
@@ -342,12 +341,7 @@ def start_recording(
         "-f",
         str(clip),
     ]
-    timed = (
-        captions != "none"
-        or click_pings
-        or layout.panel is not None
-        or compact is not None
-    )
+    timed = captions != "none" or click_pings or layout.panel is not None or compact
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     capturing = False
     try:
@@ -625,7 +619,7 @@ class Recordings:
         captions: CaptionMode = DEFAULT_CAPTIONS,
         click_pings: bool = True,
         console: ConsolePanel | None = None,
-        compact: CompactSettings | None = None,
+        compact: bool = False,
     ) -> str | None:
         if self.process is not None:
             return "A recording is already active. Use record-stop first."
@@ -689,7 +683,7 @@ def session_command(
     captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
     console: ConsolePanel | None = None,
-    compact: CompactSettings | None = None,
+    compact: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> int:
     state = json.loads((session / "session.json").read_text())
@@ -709,7 +703,7 @@ def session_command(
             "This runner does not support console panel options. Restart the session "
             "with this version of framewisp."
         )
-    if compact is not None and state.get("compact_recording") is not True:
+    if compact and state.get("compact_recording") is not True:
         raise SessionError(
             "This runner does not support compact recordings. Restart the session "
             "with this version of framewisp."
@@ -729,7 +723,7 @@ def session_command(
         "destination": str(destination.resolve()) if destination else None,
         "captions": captions,
         "click_pings": click_pings,
-        "compact": compact.parameters() if compact is not None else None,
+        "compact": compact,
         "parameters": parameters,
     }
     # An older runner rejects this key even when it is null.
@@ -779,21 +773,23 @@ class RecordStart:
     captions: CaptionMode
     click_pings: bool
     console: ConsolePanel | None
-    compact: CompactSettings | None
+    compact: bool
 
     @staticmethod
     def parse(command: dict[str, object]) -> "RecordStart":
-        compact = CompactSettings.parse(command.get("compact"))
         console = ConsolePanel.parse(command.get("console"))
         destination = command.get("destination")
         captions = command.get("captions")
         click_pings = command.get("click_pings", True)
+        compact = command.get("compact", False)
         if not isinstance(destination, str):
             raise ValueError("record-start requires a destination")
         if captions not in CAPTION_MODES:
             raise ValueError(f"captions must be one of {', '.join(CAPTION_MODES)}")
         if not isinstance(click_pings, bool):
             raise ValueError("click_pings must be true or false")
+        if not isinstance(compact, bool):
+            raise ValueError("compact must be true or false")
         path = Path(destination)
         if not path.is_absolute():
             raise ValueError("destination must be absolute in runner requests.")
@@ -924,7 +920,7 @@ def run_session(
     captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
     console: ConsolePanel | None = None,
-    compact: CompactSettings | None = None,
+    compact: bool = False,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
     retain_input_content: bool = False,
@@ -971,7 +967,7 @@ def _run_session(
     captions: CaptionMode,
     click_pings: bool,
     console: ConsolePanel | None,
-    compact: CompactSettings | None,
+    compact: bool,
     size: tuple[int, int],
     x11: bool,
     retain_input_content: bool,

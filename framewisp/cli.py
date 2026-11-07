@@ -8,7 +8,7 @@ from pathlib import Path
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import CAPTION_MODES, DEFAULT_CAPTIONS, log_input
-from framewisp.compact import CompactSettings
+from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError, recorded_app_exit
@@ -173,19 +173,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--compact",
             action="store_true",
-            help="trim gaps between inputs, preserving batch waits and capture delays",
-        )
-        recording_parser.add_argument(
-            "--compact-before",
-            type=seconds,
-            metavar="SECONDS",
-            help="padding before inputs and at clip start (default: 1; requires --compact)",
-        )
-        recording_parser.add_argument(
-            "--compact-after",
-            type=seconds,
-            metavar="SECONDS",
-            help="padding after inputs and at clip end (default: 2; requires --compact)",
+            help=f"trim gaps between inputs, keeping {PADDING_BEFORE:g} s before and {PADDING_AFTER:g} s after, preserving batch waits and capture delays",
         )
         recording_parser.add_argument(
             "--console",
@@ -203,19 +191,11 @@ def main() -> None:
             metavar="PIXELS",
             help=f"even panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
         )
-        # None marks "not given", so run can require --record for either option.
-        caption_options = recording_parser.add_mutually_exclusive_group()
-        caption_options.add_argument(
+        # None marks "not given", so run can require --record for it.
+        recording_parser.add_argument(
             "--captions",
             choices=CAPTION_MODES,
             help=f"inputs to caption: keys (key, type), pointer (move, click, drag, scroll), all, or none (default: {DEFAULT_CAPTIONS}; input logging stays enabled)",
-        )
-        caption_options.add_argument(
-            "--no-captions",
-            dest="captions",
-            action="store_const",
-            const="none",
-            help="shorthand for --captions none",
         )
         recording_parser.add_argument(
             "--no-click-pings",
@@ -410,21 +390,9 @@ def main() -> None:
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
     if args.action in {"run", "record-start"}:
-        if not args.compact and (
-            args.compact_before is not None or args.compact_after is not None
-        ):
-            parser.error("--compact-before and --compact-after require --compact")
-        args.compact_settings = (
-            CompactSettings(
-                before=args.compact_before if args.compact_before is not None else 1.0,
-                after=args.compact_after if args.compact_after is not None else 2.0,
-            )
-            if args.compact
-            else None
-        )
         if args.action == "run" and args.captions and args.record is None:
             parser.error(
-                "--captions and --no-captions require --record; use record-start for later clips"
+                "--captions requires --record; use record-start for later clips"
             )
         args.captions = args.captions or DEFAULT_CAPTIONS
         placed = args.console_position is not None or args.console_size is not None
@@ -514,7 +482,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             captions=args.captions,
             click_pings=not args.no_click_pings,
             console=args.console_panel,
-            compact=args.compact_settings,
+            compact=args.compact,
             size=(args.width, args.height),
             x11=args.x11,
             retain_input_content=args.retain_input_content,
@@ -534,7 +502,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 captions=getattr(args, "captions", DEFAULT_CAPTIONS),
                 click_pings=not getattr(args, "no_click_pings", False),
                 console=getattr(args, "console_panel", None),
-                compact=getattr(args, "compact_settings", None),
+                compact=getattr(args, "compact", False),
             )
         )
     elif args.action == "screenshot":

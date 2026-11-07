@@ -21,7 +21,6 @@ from typing import BinaryIO, Literal, ParamSpec, cast, get_args
 
 from framewisp.compact import (
     ActivityEvent,
-    CompactSettings,
     activity_events,
     compact_filter,
     recording_duration,
@@ -381,7 +380,7 @@ def render_recording(
     captions: CaptionMode = DEFAULT_CAPTIONS,
     click_pings: bool = True,
     console: ConsoleCapture,
-    compact: CompactSettings | None = None,
+    compact: bool = False,
     layout: VideoLayout,
 ) -> None:
     entries = (
@@ -393,7 +392,7 @@ def render_recording(
         pings_for_clip(input_log, origin=origin, stopped=stopped) if click_pings else []
     )
     panel = layout.panel
-    if not entries and not pings and panel is None and compact is None:
+    if not entries and not pings and panel is None and not compact:
         return
     with tempfile.TemporaryDirectory(
         prefix=".framewisp-captions-", dir=clip.parent
@@ -428,7 +427,7 @@ def render_recording(
                 ":color=0x161b22"
             )
         filters.extend(["ass=captions.ass", "scale=out_range=full"])
-        if compact is not None:
+        if compact:
             filters.append(
                 compact_filter(
                     retained_frames(
@@ -436,8 +435,6 @@ def render_recording(
                         origin=origin,
                         stopped=stopped,
                         duration=recording_duration(clip),
-                        settings=compact,
-                        overlays=[(ping.start, ping.end) for ping in pings],
                     )
                 )
             )

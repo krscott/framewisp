@@ -7,7 +7,6 @@ import pytest
 
 from framewisp.captions import CaptionMode, render_recording
 from framewisp.compact import (
-    CompactSettings,
     activity_events,
     compact_filter,
     log_activity,
@@ -46,9 +45,11 @@ def test_cuts_merge_padding_and_round_outward(logs: tuple[Path, Path]) -> None:
     span(logs[0], "second", 112, 113)
     span(logs[0], "before-clip", 98, 99)
     span(logs[0], "after-clip", 131, 132)
-    assert retained_frames(
-        logs, origin=100, stopped=130, duration=30, settings=CompactSettings()
-    ) == [(0, 30), (270, 450), (840, 900)]
+    assert retained_frames(logs, origin=100, stopped=130, duration=30) == [
+        (0, 30),
+        (270, 450),
+        (840, 900),
+    ]
 
 
 def test_full_wait_and_inflight_input_survive_clip_boundaries(
@@ -57,50 +58,47 @@ def test_full_wait_and_inflight_input_survive_clip_boundaries(
     span(logs[1], "ongoing-at-start", 98, 105)
     span(logs[1], "full-wait", 107, 113)
     span(logs[0], "unfinished", 125, None)
-    assert retained_frames(
-        logs,
-        origin=100,
-        stopped=130,
-        duration=30,
-        settings=CompactSettings(before=0, after=0),
-    ) == [(0, 150), (210, 390), (750, 900)]
+    assert retained_frames(logs, origin=100, stopped=130, duration=30) == [
+        (0, 450),
+        (720, 900),
+    ]
 
 
 @pytest.mark.parametrize(
-    "duration,settings,expected",
+    "duration,expected",
     [
-        (30, CompactSettings(), [(0, 30), (840, 900)]),
-        (30, CompactSettings(before=0, after=0), [(0, 1), (899, 900)]),
-        (0.1, CompactSettings(), [(0, 3)]),
-        (0, CompactSettings(), [(0, 1)]),
-        (30, CompactSettings(before=1e308, after=1e308), [(0, 900)]),
+        (30, [(0, 30), (840, 900)]),
+        (2.5, [(0, 75)]),
+        (0.1, [(0, 3)]),
+        (0.01, [(0, 1)]),
     ],
 )
 def test_idle_and_short_clips(
     logs: tuple[Path, Path],
     duration: float,
-    settings: CompactSettings,
     expected: list[tuple[int, int]],
 ) -> None:
     assert (
-        retained_frames(
-            logs, origin=0, stopped=duration, duration=duration, settings=settings
-        )
-        == expected
+        retained_frames(logs, origin=0, stopped=duration, duration=duration) == expected
     )
+
+
+def test_closing_padding_follows_the_encoded_end(logs: tuple[Path, Path]) -> None:
+    # The recorder can stop later than its last encoded frame.
+    assert retained_frames(logs, origin=100, stopped=110, duration=5) == [
+        (0, 30),
+        (90, 150),
+    ]
 
 
 def test_partial_record_does_not_end_active_span(logs: tuple[Path, Path]) -> None:
     span(logs[0], "ongoing", 105, None)
     with logs[0].open("ab") as output:
         output.write(b'{"event":"end","text":"\xe6')
-    assert retained_frames(
-        logs,
-        origin=100,
-        stopped=110,
-        duration=10,
-        settings=CompactSettings(before=0, after=0),
-    ) == [(0, 1), (150, 300)]
+    assert retained_frames(logs, origin=100, stopped=110, duration=10) == [
+        (0, 30),
+        (120, 300),
+    ]
 
 
 # R-LOG-7
@@ -146,26 +144,6 @@ def test_activity_log_closes_cancelled_wait_without_retaining_content(
     assert events[0]["id"] == events[1]["id"]
     assert started <= events[0]["time"] <= events[1]["time"] <= time.monotonic()
     assert all(set(event) == {"id", "event", "time"} for event in events)
-
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        True,
-        {},
-        {"before": 1},
-        {"before": 1, "after": 2, "extra": 0},
-        {"before": True, "after": 2},
-        {"before": "1", "after": 2},
-        {"before": 10**400, "after": 2},
-        {"before": -1, "after": 2},
-        {"before": 1, "after": float("inf")},
-        {"before": float("nan"), "after": 2},
-    ],
-)
-def test_invalid_wire_settings(raw: object) -> None:
-    with pytest.raises(ValueError, match="compact"):
-        CompactSettings.parse(raw)
 
 
 def frame(path: Path, second: float, region: str) -> bytes:
@@ -254,7 +232,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         log=tmp_path / "render.log",
         captions="keys" if overlays else "none",
         console=ConsoleCapture(tmp_path),
-        compact=CompactSettings(before=0.5, after=0.5),
+        compact=True,
         layout=clip_layout(overlays),
     )
     summary = json.loads(
@@ -275,23 +253,23 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
             timeout=5,
         ).stdout
     )
-    assert float(summary["format"]["duration"]) == pytest.approx(2.5, abs=1 / 30)
+    assert float(summary["format"]["duration"]) == pytest.approx(6.5, abs=1 / 30)
     assert summary["streams"][0]["width"] == (960 if overlays else 320)
     before = frame(video, 0.2, "320:140:0:100")
-    after = frame(video, 1.3, "320:140:0:100")
+    after = frame(video, 2.3, "320:140:0:100")
     assert before != after
-    final = frame(video, 2.2, "320:140:0:100")
+    final = frame(video, 5.5, "320:140:0:100")
     # H.264 can change individual pixels between otherwise identical frames.
     assert sum(after[::3]) / len(after[::3]) > 240
     assert sum(final[::3]) / len(final[::3]) > 240
     if overlays:
         assert len(set(frame(video, 0.2, "320:50:0:190"))) < 8
-        assert len(set(frame(video, 1.3, "320:50:0:190"))) > 30
-        assert len(set(frame(video, 2.2, "320:50:0:190"))) < 8
+        assert len(set(frame(video, 2.3, "320:50:0:190"))) > 30
+        assert len(set(frame(video, 5.5, "320:50:0:190"))) < 8
         early_console = frame(video, 0.2, "640:150:320:48")
         assert len(set(early_console)) < 8
-        assert len(set(frame(video, 1.3, "640:150:320:48"))) > 30
-        assert len(set(frame(video, 2.2, "640:150:320:48"))) > 30
+        assert len(set(frame(video, 2.3, "640:150:320:48"))) > 30
+        assert len(set(frame(video, 5.5, "640:150:320:48"))) > 30
 
 
 # R-LOG-4
@@ -344,55 +322,17 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         log=tmp_path / "render.log",
         captions=captions,
         console=ConsoleCapture(tmp_path),
-        compact=CompactSettings(before=0.5, after=0.5),
+        compact=True,
         layout=clip_layout(console),
     )
 
     def shown(second: float) -> bool:
         return len(set(frame(raw_video, second, "320:50:0:190"))) > 30
 
-    # Compaction keeps 0-0.5, 1.5-3, and 5.5-7 in every mode. That moves the
-    # pointer input from 2s to 1s and the key input from 6s to 2.5s.
-    assert shown(1.3) is pointer_shown
-    assert shown(2.8) is key_shown
-
-
-def test_zero_padding_keeps_encoded_end_despite_stop_latency(
-    logs: tuple[Path, Path],
-    tmp_path: Path,
-    raw_video: Path,
-) -> None:
-    render_recording(
-        raw_video,
-        input_log=logs[0],
-        origin=100,
-        stopped=110,
-        log=tmp_path / "render.log",
-        captions="none",
-        console=ConsoleCapture(tmp_path),
-        compact=CompactSettings(before=0, after=0),
-        layout=clip_layout(False),
-    )
-    duration = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(raw_video),
-        ],
-        capture_output=True,
-        check=True,
-        text=True,
-        timeout=5,
-    ).stdout
-    assert float(duration) == pytest.approx(2 / 30, abs=0.001)
-    assert sum(frame(raw_video, 0, "320:140:0:100")) == 0
-    final = frame(raw_video, 0.025, "320:140:0:100")
-    assert sum(final[::3]) / len(final[::3]) > 240
+    # Compaction keeps 0-4.5 and 5-9 in every mode. That leaves the pointer
+    # input at 2s and moves the key input from 6s to 5.5s.
+    assert shown(2.3) is pointer_shown
+    assert shown(5.8) is key_shown
 
 
 @pytest.mark.parametrize("range_count", [135, 1000])
