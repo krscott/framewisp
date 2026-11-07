@@ -818,7 +818,9 @@ def test_read_only_tmpdir_is_still_checked_for_runtime(
     try:
         with pytest.raises(SessionError, match="Nothing was removed") as refusal:
             recover_session(session)
-        assert f"chmod -R u+rwx -- {runtime}\n" in str(refusal.value)
+        assert f"find {runtime} -type d -exec chmod u+rwx {{}} +\n" in str(
+            refusal.value
+        )
         assert f"rm -rf -- {runtime}" in str(refusal.value)
         assert (runtime / "owner-1.json").exists()
     finally:

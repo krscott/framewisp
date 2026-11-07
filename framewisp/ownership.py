@@ -218,7 +218,8 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
         "Inspect any supervisor records, which can report incomplete cleanup:",
         f"  cat {quoted}/owner-*.json",
         "Then delete its runtime directory and metadata, keeping logs:",
-        f"  chmod -R u+rwx -- {quoted}",
+        # find does not follow a symlinked start; rm needs only directory access.
+        f"  find {quoted} -type d -exec chmod u+rwx {{}} +",
         f"  rm -rf -- {quoted}",
         "  " + shlex.join(["rm", "-rf", "--", *(str(session / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
