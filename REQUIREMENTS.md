@@ -1,12 +1,19 @@
 # framewisp requirements
 
-Each requirement is an observable behaviour or invariant that framewisp must
-keep. `DESIGN.md` describes how the requirements are met.
+Each requirement captures valuable behaviour or an invariant users rely on,
+including latent durability, privacy, compatibility, and recoverability
+guarantees. `DESIGN.md` describes how the requirements are met.
 
 ## Format
 
 Write one requirement per bullet, as `- **R-AREA-N** [tag] Statement.` State
 observable behaviour, not implementation, in short sentences.
+
+Follow new or substantively changed requirements with a brief, indented
+`Rationale:` paragraph. Explain why the guarantee matters, not how to implement
+it; name non-obvious constraints when useful. Backfill existing rationales only
+when relevant to the task, without a project-wide sweep. If the reason is unknown,
+investigate or ask; never invent a rationale.
 
 - The ID is stable. Never renumber or reuse an ID. To drop a requirement, keep
   its bullet and change its tag to `[retired]`.
