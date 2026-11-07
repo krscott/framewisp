@@ -1005,6 +1005,8 @@ def _run_session(
             env = fixed_fonts(
                 session_environment_for_run(runtime, dict(os.environ)), fonts=fonts
             )
+            # An empty path selects the compositor's built-in cursor, not the caller's.
+            env["XCURSOR_PATH"] = ""
             app_env = sanitized_environment(
                 runtime,
                 session_environment_for_run(runtime, caller_environment()),

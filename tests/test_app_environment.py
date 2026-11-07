@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -256,20 +257,28 @@ def stable_screenshot(session: Path, path: Path) -> Image.Image:
         return mapped and same
 
     wait_until(settled)
-    cli(session, "move", "1279", "719")
+    # The compositor draws its own cursor on the bare desktop beside the window.
+    cli(session, "move", "100", "100")
     cli(session, "screenshot", "--delay", "1", str(path))
     with Image.open(path) as image:
         return image.convert("RGB")
 
 
 def qt_probe_capture(
-    tmp_path: Path, name: str, caller: dict[str, str], *, x11: bool = False
+    tmp_path: Path,
+    name: str,
+    caller: dict[str, str],
+    *,
+    x11: bool = False,
+    record: bool = False,
 ) -> Image.Image:
     session = tmp_path / f"session-{name}"
     log = tmp_path / f"runner-{name}.log"
     command = ["framewisp", str(session), "run"]
     if x11:
         command.append("--x11")
+    if record:
+        command.extend(["--record", str(tmp_path / f"{name}.mp4")])
     probe = Path(__file__).with_name("environment_probe.qml")
     command.extend(["--", "qml", str(probe)])
     with log.open("w") as output:
@@ -285,6 +294,19 @@ def qt_probe_capture(
     finally:
         process.terminate()
         process.wait(timeout=30)
+
+
+def write_cursor_theme(directory: Path) -> None:
+    """Write a solid red 32x32 Xcursor image for the names compositors look up."""
+    size = 32
+    header = struct.pack("<4sIII", b"Xcur", 16, 0x10000, 1)
+    table = struct.pack("<III", 0xFFFD0002, size, 28)
+    image = struct.pack(
+        "<IIIIIIIII", 36, 0xFFFD0002, size, 1, size, size, 0, 0, 0
+    ) + struct.pack("<I", 0xFFFF0000) * (size * size)
+    directory.mkdir(parents=True)
+    for name in ("default", "left_ptr"):
+        (directory / name).write_bytes(header + table + image)
 
 
 def empty_fontconfig(tmp_path: Path) -> dict[str, str]:
@@ -330,6 +352,27 @@ def test_qt_app_ignores_caller_difference(
 ) -> None:
     base = qt_probe_capture(tmp_path, "base", {"TZ": "America/New_York"})
     other = qt_probe_capture(tmp_path, "other", {"TZ": "America/New_York"} | caller)
+    assert ImageChops.difference(base, other).getbbox() is None
+
+
+# R-ENV-4
+@pytest.mark.integration
+@pytest.mark.parametrize("source", ["home", "search-path"])
+def test_caller_cursors_stay_out_of_captures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    # A caller search path would hide the home directory's cursors.
+    monkeypatch.delenv("XCURSOR_PATH", raising=False)
+    host = tmp_path / "host"
+    write_cursor_theme(host / ".icons" / "default" / "cursors")
+    caller = (
+        {"HOME": str(host), "XDG_CONFIG_HOME": str(host / ".config")}
+        if source == "home"
+        else {"XCURSOR_PATH": str(host / ".icons"), "XCURSOR_THEME": "default"}
+    )
+    # Captures show the compositor's cursor only while a recording is active.
+    base = qt_probe_capture(tmp_path, "base", {}, record=True)
+    other = qt_probe_capture(tmp_path, "other", caller, record=True)
     assert ImageChops.difference(base, other).getbbox() is None
 
 
@@ -496,8 +539,8 @@ print(json.dumps(paths))
 
 
 CAPTION_REGION = (0, 0, 1280, 720)
-# Skip each console line's timestamp, which depends on app startup time.
-CONSOLE_TEXT_REGION = (1400, 0, 1920, 720)
+# Skip the panel title and each line's timestamp, which depends on app startup.
+CONSOLE_TEXT_REGION = (1400, 48, 1920, 720)
 
 
 def has_text(frame: Image.Image, region: tuple[int, int, int, int]) -> bool:

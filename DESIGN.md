@@ -129,7 +129,8 @@ with the app environment. The registry, compositor,
 VNC server, and capture tools keep the runtime environment. Sanitizing applies
 to the app and its buses. The runner gives its own tools the same font file
 through `environment.fixed_fonts`, so compositor title bars and captions cannot
-use the caller's fonts (R-ENV-4, R-REC-23). The process supervisor also reads its original exec environment
+use the caller's fonts (R-ENV-4, R-REC-23). An empty `XCURSOR_PATH` keeps the
+compositor on its built-in cursor (R-ENV-4). The process supervisor also reads its original exec environment
 and passes it explicitly to each managed child, so its Python startup cannot
 add locale variables to the child's environment.
 The supervisor runs with the current interpreter binary from `/proc/self/exe`,
