@@ -311,7 +311,8 @@ sandbox socket permissions.
 
 CLI calls read `session.json` to locate the display and control socket. The JSON has
 `runtime_directory`, `wayland_display`, `x11_display` (null for Wayland),
-`width`, `height`, and `processes` keys. The last is a map
+`width`, `height`, `recording`, and `processes` keys. `recording` is the active
+clip's destination or null. `processes` is a map
 of `sway`, `wayvnc`, `app`, and optionally `recorder` to their PIDs; no inherited
 environment is saved.
 
@@ -727,9 +728,29 @@ publishes the clip. That is the only write to the requested path, and `link(2)`
 fails rather than replaces, so no race window exists. Batch captures publish the
 same way. `recording_path_error` is the early rejection for the common case.
 
-The destination therefore does not exist until finalization. Batch validation
-rejects the active recording's destination explicitly, because the existence
-check cannot see it.
+The destination therefore does not exist until finalization, so an existence
+check cannot see it. `capture_path_error` rejects it explicitly for batch capture
+and headless `screenshot`, comparing resolved paths so a symlink to it is caught
+(R-REC-21). An attached session cannot record, so its screenshots have no such
+check. Batch validation calls it, and `batch_screenshot` calls it again just
+before publishing, because a batch can run for minutes. The headless CLI runs grim
+itself, so it reads the destination from `recording` in `session.json` rather than
+asking the runner: `record-stop` renders in the control loop, and a request would
+wait for rendering. `session.json` is rewritten before `record-start` replies. A
+runner from an older framewisp writes no `recording` key, so a screenshot there
+still works, without this check.
+
+The check is not atomic with the write. A standalone screenshot may replace an
+ordinary file, so it cannot use `O_EXCL`. Two windows remain:
+
+- A screenshot sent while `record-start` is still running passes, because the
+  destination is published only after the clip starts. That can take up to ten
+  seconds.
+- A batch capture publishes while a recording to the same path is still starting.
+
+The check also knows only the calling session, so another session can take this
+session's destination. In all of these, the failure is the R-REC-18 path:
+`record-stop` keeps the clip at another path, names it, and ends the session.
 
 The private directory is removed after publishing and after a failed or cancelled
 start. A finalized clip is published even when rendering failed (R-REC-10). A clip
