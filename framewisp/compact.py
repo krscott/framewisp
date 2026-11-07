@@ -63,7 +63,7 @@ def retained_frames(
     ranges: list[tuple[int, int]] = []
 
     def retain(start: float, end: float) -> None:
-        first = max(0, math.floor(max(0.0, start) * 30))
+        first = math.floor(max(0.0, start) * 30)
         last = min(frame_count, math.ceil(min(duration, end) * 30))
         if first < last:
             ranges.append((first, last))

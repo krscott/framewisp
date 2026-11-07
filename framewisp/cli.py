@@ -8,6 +8,7 @@ from pathlib import Path
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import CAPTION_MODES, DEFAULT_CAPTIONS, log_input
+from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError, recorded_app_exit
@@ -185,7 +186,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--compact",
             action="store_true",
-            help="trim gaps between inputs, preserving batch waits and capture delays",
+            help=f"trim gaps between inputs, keeping {PADDING_BEFORE:g} s before and {PADDING_AFTER:g} s after, preserving batch waits and capture delays",
         )
         recording_parser.add_argument(
             "--console",

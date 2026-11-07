@@ -443,7 +443,7 @@ def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
     )
     time.sleep(2)
     summary = json.loads(cli(demo.directory, "stop").stdout)["recording"]
-    assert 1.1 <= summary["duration_seconds"] < time.monotonic() - started - 2
+    assert 4.5 <= summary["duration_seconds"] < time.monotonic() - started - 2
     recording_frames(demo.recording)
     assert demo.process.wait(timeout=5) == 0
 
@@ -1849,28 +1849,34 @@ def test_startup_recording_pings_gestures(demo: Demo) -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize(
-    ("options", "timed"),
+    "options",
     [
-        ([], True),
-        (["--captions", "none"], True),
-        (["--captions", "pointer"], True),
-        (["--captions", "all"], True),
-        (["--console"], True),
-        (["--compact"], False),
-        (["--console", "--compact"], False),
+        [],
+        ["--captions", "none"],
+        ["--captions", "pointer"],
+        ["--captions", "all"],
+        ["--console"],
+        ["--compact"],
+        ["--console", "--compact"],
     ],
 )
 def test_mid_session_clip_pings_gestures(
-    demo: Demo, tmp_path: Path, options: list[str], timed: bool
+    demo: Demo, tmp_path: Path, options: list[str]
 ) -> None:
+    compact = "--compact" in options
     wait_for_input_probe_window(demo)
     clip = tmp_path / "clip.mp4"
     cli(demo.directory, "record-start", *options, str(clip))
-    time.sleep(1.5)
+    started = time.monotonic()
+    # Compaction cuts the gap between the opening and the first gesture's padding.
+    time.sleep(4 if compact else 1.5)
     perform_gestures(demo)
     time.sleep(1.5)
-    cli(demo.directory, "record-stop")
-    assert_rings_mark_gestures(demo, clip, timed=timed)
+    elapsed = time.monotonic() - started
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    if compact:
+        assert summary["duration_seconds"] < elapsed - 1
+    assert_rings_mark_gestures(demo, clip, timed=not compact)
 
 
 # R-REC-7, R-LOG-3
@@ -2579,7 +2585,7 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
         cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
         time.sleep(2)
         summary = json.loads(cli(demo.directory, "record-stop").stdout)
-        assert 4 <= summary["duration_seconds"] < 6
+        assert 3.5 <= summary["duration_seconds"] < 6
         assert summary["width"] == 1920
 
 

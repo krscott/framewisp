@@ -220,10 +220,10 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--no-click-pings] FILE` | Start a clip in the running session. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -686,12 +686,10 @@ Each clip chooses compaction independently; the default keeps the full recording
 
 Cuts use command timestamps, not pixel changes. Blinking cursors do not prevent
 trimming. Animations, app output, and delayed responses in removed gaps can be
-omitted. Use a batch wait when an app needs time to respond;
-leave compaction off when the entire timeline matters. External sleeps between
-commands are gaps and can be removed. Captions, click pings, and console text
-stay aligned with the retained GUI frames; console timestamps still show original
-clip time.
-The reported duration measures the compacted MP4. Session logs keep their original
+omitted. Use a batch wait when an app needs time to respond; leave compaction off
+when the entire timeline matters. External sleeps between commands are gaps and
+can be removed. Captions, click pings, and console text stay aligned with the
+retained GUI frames; console timestamps still show original clip time. The reported duration measures the compacted MP4. Session logs keep their original
 timestamps and content.
 
 Compaction, console rendering, input captions, and click pings share one FFmpeg

@@ -70,6 +70,7 @@ def test_full_wait_and_inflight_input_survive_clip_boundaries(
         (30, [(0, 30), (840, 900)]),
         (2.5, [(0, 75)]),
         (0.1, [(0, 3)]),
+        (0.01, [(0, 1)]),
     ],
 )
 def test_idle_and_short_clips(

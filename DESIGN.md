@@ -63,8 +63,9 @@ The foreground `run` command is the lifetime owner.
 
 `compact.py` defines the fixed padding and command-based cut planning for
 `run --record --compact` and `record-start --compact`. Each clip chooses
-compaction with a `compact` boolean. The `compact_recording` metadata capability prevents newer clients from silently
-requesting compaction from an older runner. Input start/end records in
+compaction with a `compact` boolean. The `compact_recording` metadata capability
+prevents newer clients from silently requesting compaction from an older runner.
+Input start/end records in
 `inputs.jsonl` supply full input spans; `inputs.py` also writes timestamp-only
 start/end records for batch checks and capture delays to `activity.jsonl`,
 without conditions or error text. Both logs reset at session startup, and their
@@ -77,11 +78,10 @@ Cut planning adds 1 second of padding before and 2 seconds after activity spans,
 keeps the opening 1 second and closing 2 seconds, rounds ranges outward to 30 fps
 frames, and merges touching or overlapping ranges. Each click ping starts inside
 its input's span and is shorter than the after-padding, so the padding keeps its
-whole animation (R-REC-8). Compaction requires
-the recorder's first-frame monotonic timestamp even with captions and console
-disabled. Finalization renders overlays
-on the original timeline. ffprobe supplies the encoded duration for closing cuts
-and endpoint frames, independent of stop/encoder latency. The renderer
+whole animation (R-REC-8). Compaction requires the recorder's first-frame
+monotonic timestamp even with captions and console disabled. Finalization renders
+overlays on the original timeline. ffprobe supplies the encoded duration for
+closing cuts, independent of stop/encoder latency. The renderer
 normalizes to 30 fps, selects retained frames, then
 assigns contiguous 30 fps timestamps. A filter script file avoids exec argument
 limits for many cut ranges. Rendering uses one FFmpeg pass and replaces the raw
@@ -911,8 +911,7 @@ origin before accepting captioned input. The log is replaced for each clip.
 decides what each caption shows. `keys`, the default, selects `key` and `type`
 (R-LOG-4). `pointer` selects `move`, `click`, `drag`, and `scroll`. `all` selects
 both, and `none` selects nothing. `run` requires `--record` with `--captions`.
-One table in `captions.py` maps each mode to its
-actions. The input log is written before and without reference to the mode
+One table in `captions.py` maps each mode to its actions. The input log is written before and without reference to the mode
 (R-LOG-5), and compaction reads that unfiltered log, so an uncaptioned input
 still counts as activity. The runner rejects a `captions` request value that is
 not a mode. Session metadata advertises `caption_modes: true`, and `record-start`

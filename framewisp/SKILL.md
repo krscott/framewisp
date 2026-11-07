@@ -78,7 +78,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console` and the caption options require `--record`; the `--console-*` options require `--console`. |
+| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, `--captions`, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -88,7 +88,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
-| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
@@ -451,12 +451,11 @@ clip has nothing to show, so record it again.
 Use `run --record FILE --compact` or `record-start --compact FILE` to trim gaps
 between commands during finalization. Each input keeps its full duration plus
 1 second before and 2 seconds after; overlapping sections merge. The opening
-1 second and closing 2 seconds also remain.
-Batch checks and capture delays remain in full, including failed/cancelled steps.
+1 second and closing 2 seconds also remain. Batch checks and capture delays remain in full, including failed/cancelled steps.
 External sleeps can be cut. Delayed app responses, animations, and output in
-removed gaps can be omitted; use a batch wait or leave compaction off when those matter. Captions, click pings, and console output stay
-aligned with retained GUI frames; console timestamps keep original clip time. Compaction
-is per clip, works with `--captions` and `--console`, and leaves logs unchanged.
+removed gaps can be omitted; use a batch wait or leave compaction off when those
+matter. Captions, click pings, and console output stay aligned with retained GUI
+frames; console timestamps keep original clip time. Compaction is per clip, works with `--captions` and `--console`, and leaves logs unchanged.
 Timestamp-only check/capture spans live in `SESSION/activity.jsonl` without
 conditions or error text. The summary reports the compacted video's duration.
 
