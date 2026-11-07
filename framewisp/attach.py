@@ -30,7 +30,6 @@ from gi.repository import GLib, Gst
 from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
-    capture_path_error,
     parse_command,
     receive_request,
     resolved_request_path,
@@ -336,12 +335,7 @@ def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
     path = parameters.get("path")
     if not isinstance(path, str) or not Path(path).is_absolute():
         raise ValueError("screenshot requires an absolute path.")
-    destination = resolved_request_path(Path(path), "path")
-    # An attached session cannot record, so it has no active destination.
-    error = capture_path_error(destination, None)
-    if error is not None:
-        raise ValueError(error)
-    return destination
+    return resolved_request_path(Path(path), "path")
 
 
 def foreground_terminal(descriptor: int) -> bool:

@@ -724,8 +724,9 @@ same way. `recording_path_error` is the early rejection for the common case.
 
 The destination therefore does not exist until finalization, so an existence
 check cannot see it. `capture_path_error` rejects it explicitly for batch capture
-and `screenshot`, comparing resolved paths so a symlink to it is caught
-(R-REC-21). Batch validation calls it, and `batch_screenshot` calls it again just
+and headless `screenshot`, comparing resolved paths so a symlink to it is caught
+(R-REC-21). An attached session cannot record, so its screenshots have no such
+check. Batch validation calls it, and `batch_screenshot` calls it again just
 before publishing, because a batch can run for minutes. The headless CLI runs grim
 itself, so it reads the destination from `recording` in `session.json` rather than
 asking the runner: `record-stop` renders in the control loop, and a request would
