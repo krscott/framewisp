@@ -96,7 +96,7 @@ The Nix package adds `-I` to the `framewisp` and `framewisp-demo` entry-point
 shebangs before Python fixup writes the dependency paths into each script.
 Python ignores inherited import settings and user site-packages, then the script
 adds the packaged dependency paths (R-ENV-2). The environment variables remain
-available to target apps, including fresh-profile runs and activated services.
+available to target apps and their activated services.
 The internal process supervisor and X11 display probe also use `-I`; both need
 only the standard library. Editable installs use the development interpreter
 without this entry-point isolation. The standalone package check tests foreign
@@ -111,8 +111,8 @@ anonymous `memfd`, then executes the wrapped runtime. Only the descriptor number
 an extra exec argument/environment string. `__main__.main` consumes and closes
 the descriptor through `environment.initialize_environment` before dispatch.
 The runtime keeps Nix's environment for its imports and tools. Target apps use
-the captured caller environment, with the private session settings applied
-(R-ENV-1, R-ENV-3).
+the captured caller environment, sanitized and with the private session settings
+applied (R-ENV-1, R-ENV-3).
 This boundary covers every wrapper variable without tracking which variables
 Nix adds, prefixes, or defaults, and preserves unset and empty values. Reading
 the initial exec environment also excludes Python's startup locale coercion.
@@ -124,11 +124,13 @@ other commands and explicit executable paths receive no fallback.
 
 The two private D-Bus daemons also start with the app environment, so activated
 services cannot inherit wrapper defaults for variables absent in the caller.
-The runtime resolves the daemon and activation-update executables through its
-own PATH before running them with the app environment. The registry, compositor,
-VNC server, and capture tools keep the runtime environment. Fresh profiles apply
-to the app and its services; the runtime supplies the bundled profile font file
-explicitly. The process supervisor also reads its original exec environment
+The runtime resolves the daemon executable through its own PATH before running it
+with the app environment. The registry, compositor,
+VNC server, and capture tools keep the runtime environment. Sanitizing applies
+to the app and its buses. The runner gives its own tools the same font file
+through `environment.fixed_fonts`, so compositor title bars and captions cannot
+use the caller's fonts (R-ENV-4, R-REC-23). An empty `XCURSOR_PATH` keeps the
+compositor on its built-in cursor (R-ENV-4). The process supervisor also reads its original exec environment
 and passes it explicitly to each managed child, so its Python startup cannot
 add locale variables to the child's environment.
 The supervisor runs with the current interpreter binary from `/proc/self/exe`,
@@ -176,14 +178,21 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
    and `GSK_RENDERER=cairo`. Private D-Bus addresses percent-escape runtime
    filesystem bytes so temporary paths with spaces or address delimiters work.
-   With `--profile fresh`, `profiles.fresh_environment` creates disposable
-   HOME/config/cache/data/state/tmp directories under this runtime and clears
-   inherited toolkit and locale settings. It writes GTK 3/4 settings.ini with
-   Adwaita, DejaVu Sans 11, light theme and 96 DPI, selects GSettings keyfile
-   storage, Qt Fusion/software rendering at 96 DPI, and C.UTF-8. A separate
-   Nix Fontconfig file excludes host rules and impure font directories. These
-   directories share runtime ownership, shutdown and recovery; no profile data
-   survives successful cleanup. See README for compatibility limits.
+   `environment.sanitized_environment` is the one step that sanitizes the app
+   environment (R-ENV-1, R-ENV-4). It creates private HOME/config/cache/data/
+   state/tmp directories under this runtime (R-ENV-6), removes inherited locale,
+   toolkit, font and desktop identity settings, and fixes `C.UTF-8`, `TZ=UTC` and
+   the font file. That one Nix-built Fontconfig file lists only store font
+   directories and Fontconfig's stock aliases, leaving out the stock user and
+   local rules and the XDG font directories, which would all load host fonts.
+   It writes GTK 3/4 settings.ini with Adwaita, DejaVu Sans 11,
+   light theme and 96 DPI, and selects GSettings keyfile storage and Qt
+   Fusion/software rendering at 96 DPI. It is a denylist: lookup paths and
+   app-specific variables pass through, because no fixed list can name them
+   (R-ENV-3). Callers change the result with `env` on the app command, which
+   runs after this step (R-ENV-5). These directories
+   share runtime ownership, shutdown and recovery; nothing in them survives
+   successful cleanup, including read-only directories an app leaves behind. See README for compatibility limits.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at the requested width and height (default 1280x720) and
    60 Hz, a fallback seat, US keyboard layout,
@@ -935,7 +944,7 @@ command spans to clip stop. Captions show requested actions; they do not claim
 application acknowledgement. The video keeps its original idle and input timing.
 
 FFmpeg/libass renders an ASS script into a temporary H.264 MP4 beside the
-private clip. Caption rendering uses a bundled Fontconfig configuration
+private clip. Caption rendering uses the same Fontconfig file as apps (R-REC-23),
 passed only to FFmpeg, including Noto Sans, CJK, and monochrome emoji. On
 success, the rendered file replaces the raw recording; on failure, the raw MP4
 stays private until publishing, and the command fails with the `captions.log` path. A single wrapper
@@ -1176,7 +1185,7 @@ it is not a security boundary against other processes with the same UID.
 `session_environment_for_run` also defaults `ACCESSIBILITY_ENABLED` to `1`
 with `setdefault`, enabling Chromium's AT-SPI bridge on headless hosts while
 preserving caller values such as `0`. Both runtime and app environments receive
-this default, and fresh profiles preserve it. An `env ACCESSIBILITY_ENABLED=0`
+this default, and sanitizing preserves it. An `env ACCESSIBILITY_ENABLED=0`
 prefix on the target command can override it for that app. Chromium launch
 guidance retains `--force-renderer-accessibility`; the variable alone has not
 been verified without that flag.
@@ -1188,13 +1197,11 @@ bus, or inspects attached sessions. Gio, already a dependency, connects directly
 to this address and calls read-only AT-SPI methods. No additional Python package
 is needed.
 
-For fresh profiles, repeated `--dbus-service-dir` paths become XML-escaped
-`servicedir` entries in a separate app-bus config. The accessibility config
-still has no service directories. After discovering the Wayland or X11 display,
-the runner calls `dbus-update-activation-environment --all` against the private
-app bus with the final app environment. It does not request systemd activation.
-The bus supervisor owns services and reaps them before runtime deletion.
-Metadata records `app_profile` as `"fresh"` or null.
+Neither private bus activates services. An app that needs activation runs under
+`dbus-run-session --config-file=...`, which keeps activation out of framewisp:
+the nested bus starts after `env` on the app command, so services inherit injected
+variables, and it stays in the app's process tree for shutdown. Accessibility is
+unaffected because apps reach it through `AT_SPI_BUS_ADDRESS`.
 
 The CLI owns each query connection independently of the input/control socket.
 A Gio cancellable with a deadline timer bounds connection setup and requests;

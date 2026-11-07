@@ -157,6 +157,28 @@ Apps started with `run` run as the invoking user, with the file and account acce
 allowed by the surrounding environment. The private display does not restrict
 that access.
 
+`run` sanitizes the app's environment so images and videos match across agents.
+The app gets a disposable `HOME`, XDG directories and `TMPDIR`, which are deleted
+when the session stops, plus fixed fonts, theme, scale, `C.UTF-8` locale and
+`TZ=UTC`. Save anything worth keeping to the working directory or another explicit
+path. `PATH`, lookup paths and app-specific variables stay.
+
+To change a setting, put `env` on the app command; it always wins. Only do this
+when the task needs it, because the output may then differ between hosts:
+
+```sh
+framewisp app run -- env GTK_THEME=Adwaita:dark your-app
+framewisp app run -- env -u TZ your-app
+framewisp app run -- env HOME="$HOME" XDG_CONFIG_HOME="$HOME/.config" your-app
+```
+
+The last form restores the user's home and config, such as a logged-in profile.
+Prefer an app's own option when it has one, such as Chromium's
+`--user-data-dir=PATH`. Tools that keep state under `HOME`, such as `cargo`, `uv`
+and `nix`, may fail or start cold under `run`, so build first and `run` the built
+program, or use a virtual environment. Without Nix,
+`run` fails until `FRAMEWISP_FONTCONFIG_FILE` names a Fontconfig file.
+
 Start a demo on a private display in a terminal or background tool session.
 Use a distinct session name and a fresh working directory, wait for
 `Session ready:`, and keep the runner alive. The app may still be drawing its

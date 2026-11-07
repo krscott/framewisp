@@ -41,13 +41,49 @@ investigate or ask; never invent a rationale.
 ## Target app environment (ENV)
 
 - **R-ENV-1** [test] The target app receives the caller's environment with the
-  private session settings applied. Variables from framewisp's Nix wrapper do
-  not reach the app.
+  sanitized settings (R-ENV-4, R-ENV-6) and the private session settings
+  applied. Variables from framewisp's Nix wrapper do not reach the app.
+
+  Rationale: Agents in different environments should produce the same images
+  and videos by default, so the caller's environment is sanitized first and
+  calling agents inject changes as needed. Lookup paths and app-specific
+  variables stay because apps need them to start and configure themselves.
+
 - **R-ENV-2** [test] The caller's Python settings, such as `PYTHONPATH`,
   `PYTHONHOME`, and `sitecustomize`, do not change how the installed Nix package
   starts.
 - **R-ENV-3** [test] The target app receives the caller's `PYTHONPATH`
   unchanged.
+- **R-ENV-4** [test] Two `run` sessions of the same framewisp and native app
+  builds, at the same display size and backend and with the same app state, show
+  the same pixels when their callers differ in locale, time zone, fonts, toolkit
+  theme, scale, desktop identity, or home directory.
+
+  Rationale: Agents in different environments should produce the same images and
+  videos by default, without knowing about an option.
+
+- **R-ENV-5** [test] A variable set or removed on the app command, as in
+  `run -- env NAME=value app` or `run -- env -u NAME app`, takes effect in the
+  app, even when framewisp sanitizes that variable.
+
+  Rationale: Sanitizing is the default, and calling agents inject changes into
+  the environment as needed, so that path must always work.
+
+- **R-ENV-6** [test] Each `run` session gives the app private home, XDG config,
+  cache, data, and state directories and a private `TMPDIR`. They hold no caller
+  data, app writes to them do not reach the caller's home, and they are removed
+  with the session's runtime directory.
+
+  Rationale: The caller's home holds settings and fonts that change app output,
+  so fixing variables alone would not give matching output. A caller that needs
+  real state injects it (R-ENV-5).
+
+- **R-ENV-7** [test] `run` fails before it starts a session when
+  `FRAMEWISP_FONTCONFIG_FILE` does not name a file. The error names the variable
+  and how to set it.
+
+  Rationale: Host fonts would silently break R-ENV-4, so a missing font file must
+  be a clear result, not a surprise.
 
 ## Display (DISPLAY)
 
@@ -172,6 +208,12 @@ investigate or ask; never invent a rationale.
   continues, and `record-stop` publishes it at that destination.
 - **R-REC-22** [test] A finished clip with no measurable duration does not end
   the session or fail shutdown. `record-stop` reports `duration_seconds` as `null`.
+- **R-REC-23** [test] Captions and console panels render with the configured
+  font file. The caller's home directory and user font configuration do not
+  change them.
+
+  Rationale: Agents in different environments should produce the same videos by
+  default, including the text framewisp draws on them.
 
 ## Lifetime and recovery (LIFE)
 

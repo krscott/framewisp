@@ -373,7 +373,6 @@ def test_pings_ignore_the_caption_mode(
     assert red_box(frames(raw_video, 36, 36)[0]) is not None
 
 
-# R-REC-11
 def test_default_mode_pings_a_clip_without_keyboard_input(
     raw_video: Path, log: Path
 ) -> None:

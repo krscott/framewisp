@@ -26,7 +26,7 @@ pkgs.runCommand "framewisp-package-test-${toString shard}-of-${toString shards}"
     ${pkgs.diffutils}/bin/diff ${../framewisp/SKILL.md} agent-skill.md
     ${pkgs.coreutils}/bin/env -i \
       HOME="$HOME" \
-      PATH="${framewisp}/bin:${pkgs.ffmpeg}/bin:${pkgs.qt6.qtdeclarative}/bin:${pkgs.git}/bin:${pkgs.gnugrep}/bin" \
+      PATH="${framewisp}/bin:${pkgs.ffmpeg}/bin:${pkgs.qt6.qtdeclarative}/bin:${pkgs.git}/bin:${pkgs.gnugrep}/bin:${pkgs.fontconfig.bin}/bin:${pkgs.coreutils}/bin:${pkgs.dbus}/bin" \
       QML_IMPORT_PATH="${pkgs.qt6.qtdeclarative}/lib/qt-6/qml" \
       QT_PLUGIN_PATH="${pkgs.qt6.qtbase}/lib/qt-6/plugins" \
       GI_TYPELIB_PATH="$GI_TYPELIB_PATH" \
@@ -43,7 +43,7 @@ pkgs.runCommand "framewisp-package-test-${toString shard}-of-${toString shards}"
         ]))
       }/bin/python \
       -m pytest -c ${../pyproject.toml} \
-      ${../tests}/test_profiles.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py ${../tests}/test_unresponsive_app.py \
+      ${../tests}/test_app_environment.py ${../tests}/test_integration.py ${../tests}/test_python_environment.py ${../tests}/test_unresponsive_app.py \
       --test-shards ${toString shards} --test-shard ${toString shard} \
       --rootdir ${../tests} -p no:cacheprovider --durations=25 \
       --junitxml "$TMPDIR/junit.xml" --basetemp "$TMPDIR/tests"

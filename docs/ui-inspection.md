@@ -262,8 +262,8 @@ only to that case's artifact directory in addition to its installed permissions.
 These tests are tied to the listed English UI layouts; inspect the retained
 screenshots before adjusting coordinates for another version or locale.
 
-Equivalent foreground launch commands, with an existing private artifact
-directory `/tmp/fw-real-app`:
+Equivalent foreground launch commands for system-wide Flatpaks, with an existing
+private artifact directory `/tmp/fw-real-app`:
 
 ```sh
 framewisp /tmp/fw-writer run -- flatpak run \

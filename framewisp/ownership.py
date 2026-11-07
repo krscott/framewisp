@@ -218,6 +218,8 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
         "Inspect any supervisor records, which can report incomplete cleanup:",
         f"  cat {quoted}/owner-*.json",
         "Then delete its runtime directory and metadata, keeping logs:",
+        # find does not follow a symlinked start; rm needs only directory access.
+        f"  find {quoted} -type d -exec chmod u+rwx {{}} +",
         f"  rm -rf -- {quoted}",
         "  " + shlex.join(["rm", "-rf", "--", *(str(session / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
@@ -412,6 +414,15 @@ def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) ->
     sync_directory(session)
 
 
+def make_directories_removable(root: Path) -> None:
+    """Apps own this tree and can leave read-only directories in it."""
+    for parent, directories, _ in os.walk(root):
+        for name in directories:
+            path = Path(parent, name)
+            if not path.is_symlink():
+                path.chmod(0o700)
+
+
 def remove_runtime(session: Path, lease: int) -> None:
     journal = read_journal(session, lease)
     runtime = journal.runtime
@@ -463,6 +474,7 @@ def remove_runtime(session: Path, lease: int) -> None:
                         f"{', '.join(repr(str(path)) for path in pending)}",
                     )
                 )
+            make_directories_removable(runtime)
             shutil.rmtree(runtime)
 
 

@@ -134,7 +134,11 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
     )
     (tmp_path / "flatpak-info.txt").write_text(info.stdout)
     session = tmp_path / "session"
+    # Keep user installs visible; the app's private data directory hides them.
+    data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))
     target = [
+        "env",
+        f"XDG_DATA_HOME={data}",
         "flatpak",
         "run",
         f"--filesystem={tmp_path}",

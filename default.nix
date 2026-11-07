@@ -26,31 +26,38 @@
   ffmpeg,
   gst_all_1,
   pipewire,
-  makeFontsConf,
+  fontconfig,
+  runCommand,
+  writeText,
   dejavu_fonts,
   noto-fonts,
   noto-fonts-cjk-sans,
   noto-fonts-monochrome-emoji,
 }:
 let
-  captionFonts = makeFontsConf {
-    fontDirectories = [
-      dejavu_fonts
-      noto-fonts
-      noto-fonts-cjk-sans
-      noto-fonts-monochrome-emoji
-    ];
-  };
-  profileFonts = makeFontsConf {
-    fontDirectories = [
-      dejavu_fonts
-      noto-fonts
-      noto-fonts-cjk-sans
-      noto-fonts-monochrome-emoji
-    ];
-    impureFontDirectories = [ ];
-    includes = [ ];
-  };
+  # Fontconfig's stock rules supply the generic family aliases. Its user and
+  # local rules load host configuration, so they are left out.
+  fontRules = runCommand "framewisp-font-rules" { } ''
+    mkdir "$out"
+    for rule in ${fontconfig.out}/etc/fonts/conf.d/*.conf; do
+      case "$(basename "$rule")" in
+        50-user.conf | 51-local.conf) ;;
+        *) ln -s "$rule" "$out/" ;;
+      esac
+    done
+  '';
+  fontsConf = writeText "framewisp-fonts.conf" ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+    <fontconfig>
+      <dir>${dejavu_fonts}</dir>
+      <dir>${noto-fonts}</dir>
+      <dir>${noto-fonts-cjk-sans}</dir>
+      <dir>${noto-fonts-monochrome-emoji}</dir>
+      <cachedir prefix="xdg">fontconfig</cachedir>
+      <include>${fontRules}</include>
+    </fontconfig>
+  '';
   capturePlugins = lib.makeSearchPath "lib/gstreamer-1.0" [
     (lib.getLib gst_all_1.gstreamer)
     pipewire
@@ -82,8 +89,7 @@ buildPythonPackage {
   preFixup = ''
     makeWrapperArgs+=(
       "''${gappsWrapperArgs[@]}"
-      --set FRAMEWISP_FONTCONFIG_FILE "${captionFonts}"
-      --set FRAMEWISP_PROFILE_FONTCONFIG_FILE "${profileFonts}"
+      --set FRAMEWISP_FONTCONFIG_FILE "${fontsConf}"
       --set FRAMEWISP_ATSPI_REGISTRY "${at-spi2-core}/libexec/at-spi2-registryd"
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${capturePlugins}"
       --prefix PATH : "$out/bin:${
@@ -122,7 +128,7 @@ buildPythonPackage {
   '';
 
   passthru = {
-    inherit captionFonts profileFonts capturePlugins;
+    inherit fontsConf capturePlugins;
     # The dev shell must run the same patched compositor as the package.
     sway = sway-unwrapped;
     atspiRegistry = "${at-spi2-core}/libexec/at-spi2-registryd";
@@ -144,7 +150,7 @@ buildPythonPackage {
 
   preCheck = ''
     export FRAMEWISP_ATSPI_REGISTRY="${at-spi2-core}/libexec/at-spi2-registryd"
-    export FRAMEWISP_FONTCONFIG_FILE="${captionFonts}"
+    export FRAMEWISP_FONTCONFIG_FILE="${fontsConf}"
     export GST_PLUGIN_SYSTEM_PATH_1_0="${capturePlugins}"
   '';
 

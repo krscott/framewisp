@@ -38,7 +38,7 @@ if sys.argv[1:] == ["--dconf-write"]:
 
 bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 # Exercise an app settings write that requires dconf activation, with an
-# explicit backend override. Ordinary profiles use keyfile storage instead.
+# explicit backend override. Apps use keyfile storage by default.
 service_env = os.environ | {
     "GSETTINGS_BACKEND": "dconf",
     "GIO_EXTRA_MODULES": os.environ["FRAMEWISP_TEST_DCONF_MODULES"],

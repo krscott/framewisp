@@ -55,13 +55,13 @@ The first invocation builds or downloads the package and its dependencies.
 The packaged `framewisp` and `framewisp-demo` commands use Python's isolated
 mode. They ignore inherited `PYTHONPATH`, `PYTHONHOME`, and user site-packages
 when loading their own modules, so a development shell's PyGObject cannot
-replace the packaged version. Apps launched by `run` still inherit the caller's
-environment, including `PATH`, `PYTHONPATH`, `PYTHONHOME`, `GI_TYPELIB_PATH`,
-`XDG_DATA_DIRS`, and plugin lookup paths. Framewisp's packaged dependencies
+replace the packaged version. Apps launched by `run` still receive the caller's
+lookup paths, including `PATH`, `PYTHONPATH`, `PYTHONHOME`, `GI_TYPELIB_PATH`,
+`XDG_DATA_DIRS`, and plugin paths. Framewisp's packaged dependencies
 affect its own tools only. A command such as `run -- python -m myapp` resolves
 `python` through the caller's PATH, including an activated virtual environment.
-The private display, accessibility settings, and optional fresh profile still
-override the corresponding app settings.
+The private display, accessibility settings, and
+[sanitized app environment](#app-environment) override the corresponding settings.
 If `framewisp-demo` is absent from the caller's PATH, `run` resolves that bundled
 demo through framewisp's runtime PATH. This keeps the `nix run` example working
 without adding framewisp's dependencies to an external app's PATH.
@@ -824,8 +824,8 @@ caption alignment. Framewisp filters the remaining Wayland protocol trace as it
 arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
-and monochrome emoji. Apps inherit font configuration unless you select a
-[fresh profile](#fresh-app-profiles). Caption text uses fullwidth equivalents
+and monochrome emoji. Captions, console panels and apps use the same
+[font file](#app-environment). Caption text uses fullwidth equivalents
 for braces and backslashes to prevent subtitle formatting;
 opted-in input logs preserve the original characters. Screenshots and recordings
 can still show secrets displayed by apps. Omitting input content does not redact
@@ -833,73 +833,108 @@ screen content or provide a general app-log redaction guarantee. Shell history,
 batch files, application logs, and runtime input state are outside this policy.
 Review artifacts before sharing.
 
-## Fresh app profiles
+## App environment
 
-Opt in when you want repeatable initial app preferences:
+`run` sanitizes the app's environment, so the same app build shows the same
+pixels whichever environment started it.
+
+Each session gives the app private HOME, XDG config/cache/data/state directories
+and TMPDIR under its owned runtime directory. `XDG_CONFIG_DIRS` points at the
+private config directory too. Successful shutdown deletes them after stopping the
+app and its services. **Anything the app writes there is lost.** Save wanted data
+to the working directory or another explicit path. After a failed cleanup, use
+`recover` as usual; it preserves logs and removes the abandoned runtime.
+
+The app gets `LANG` and `LC_ALL` set to `C.UTF-8`, `TZ=UTC`, and the configured
+Fontconfig file. The Nix package's file loads DejaVu and Noto fonts and no host
+rules or font directories. GTK 3/4 use Adwaita, DejaVu Sans 11, a light theme, 96 DPI and scale
+1, with animations and overlay scrollbars disabled. GSettings use the keyfile
+backend instead of the user's dconf database. Qt uses Fusion, 96 DPI, scale 1 and
+software Qt Quick rendering. Inherited `LC_*`, `QT_*`, `GTK_*`, `GDK_*` and `XKB_*`
+settings, Fontconfig overrides, X resources and desktop identity such as
+`XDG_CURRENT_DESKTOP` are removed, except Qt plugin lookup paths and GdkPixbuf
+loader settings. The display uses scale 1 and
+the US keyboard layout. Input methods and non-US shortcuts are unsupported.
+
+Everything else stays, including `PATH`, library and plugin paths, XDG data search
+directories, the working directory and app-specific variables.
+
+### Change the environment
+
+Put `env` on the app command to set or remove any variable. It runs after
+framewisp has sanitized the environment, so it always wins:
 
 ```sh
-framewisp browser run --profile fresh -- your-app
-framewisp browser run --profile fresh --x11 -- your-x11-app
+# Different appearance.
+framewisp app run -- env GTK_THEME=Adwaita:dark your-app
+framewisp app run -- env -u TZ your-app
+
+# The user's home and config, such as a logged-in profile or Git identity.
+framewisp app run -- env HOME="$HOME" XDG_CONFIG_HOME="$HOME/.config" your-app
+
+# User-installed Flatpaks.
+framewisp app run -- env XDG_DATA_HOME="$HOME/.local/share" flatpak run your.app
+
+# Host fonts.
+framewisp app run -- env FONTCONFIG_FILE=/etc/fonts/fonts.conf your-app
 ```
 
-Each run creates private HOME, XDG config/cache/data/state directories and TMPDIR
-under its owned runtime directory. It starts with empty app preferences.
-`XDG_CONFIG_DIRS` points at the private config directory too. Normal runs still
-inherit the caller's app settings.
+Prefer an app's own option when it has one, such as Chromium's
+`--user-data-dir=PATH`. Restoring HOME does not restore the look: the theme, scale
+and locale stay fixed unless you change those too. Tool caches under HOME, such as
+those of `cargo`, `uv` and `npm`, start cold in each session unless you point them
+somewhere else, and tools managed under HOME, such as `rustup` toolchains, are
+missing. Build first and `run` the built program, or use a virtual environment.
+`env` hides a bare `framewisp-demo` from the bundled demo fallback,
+so use its full path if it is not on your PATH.
 
-The profile sets `LANG` and `LC_ALL` to `C.UTF-8`, removes inherited locale
-overrides, and uses a separate bundled Fontconfig configuration with DejaVu and
-Noto fonts. It loads no host Fontconfig rules or system font directories. GTK 3/4
-use Adwaita, DejaVu Sans 11, a light theme, 96 DPI and scale 1, with animations
-and overlay scrollbars disabled. Qt uses Fusion,
-96 DPI, scale 1 and software Qt Quick rendering. Inherited GTK/GDK/Qt settings
-are cleared except Qt plugin lookup paths and GdkPixbuf loader settings needed
-to load installed binaries.
-GTK settings use the keyfile backend inside the profile instead of the user's
-dconf database. The display uses scale 1 and the existing US keyboard layout.
-Input methods and non-US shortcuts are outside this profile's supported scope.
+### D-Bus services
 
-The existing private session and accessibility buses remain in use. Neither
-loads the desktop's default service activation directories. If an app requires
-activation, supply a directory containing only its required `.service` files:
+The private session and accessibility buses load no desktop service activation
+directories. If an app requires activation, give it its own bus with a directory
+containing only the `.service` files it needs. `dbus-run-session` must be on your
+PATH:
 
 ```sh
-framewisp app run --profile fresh --dbus-service-dir ./app-services -- your-app
+cat > app-bus.conf <<'EOF'
+<busconfig>
+  <type>session</type>
+  <auth>EXTERNAL</auth>
+  <listen>unix:tmpdir=/tmp</listen>
+  <policy context="default">
+    <allow send_destination="*"/>
+    <allow receive_sender="*"/>
+    <allow own="*"/>
+  </policy>
+  <servicedir>/path/to/app-services</servicedir>
+</busconfig>
+EOF
+framewisp app run -- dbus-run-session --config-file=app-bus.conf -- your-app
 ```
 
-Repeat `--dbus-service-dir` for additional directories. Only the private app bus
-loads these directories; the accessibility bus stays unchanged. Activated
-services receive the final app environment, including the discovered display.
-Use direct `Exec` entries for these services. User systemd activation and desktop
-portals are not configured. Every service in a supplied directory can activate,
-so avoid supplying a whole desktop service directory. Framewisp owns activated
-services through the existing bus process supervisor and stops them on cleanup.
+Activated services receive the environment of `dbus-run-session`, including the
+display and any `env` settings placed before it. `inspect` keeps working, and
+stopping the session stops the services. User systemd activation and desktop
+portals are not configured.
 
-Successful shutdown deletes all profile directories after stopping the app and
-services. There is no profile reuse or persistence option. Copy wanted app data
-to an explicit path before stopping. Screenshots, recordings and session logs
-retain their normal lifecycle. After a failed cleanup, use `recover` as usual;
-it preserves logs and removes the abandoned runtime and profile.
+### Limits
 
-This is a preferences profile, not a security sandbox. The app can still access
-the host filesystem, network and system bus. Existing session/artifact path
-protections apply; save artifacts outside the disposable runtime. The profile
-preserves PATH, working directory, XDG data search directories, library/plugin
-paths and app-specific environment variables. App versions, installed schemas,
-icons, toolkit overrides, rendering differences, time-dependent content and
-remote data remain outside its control. Explicit app arguments or an `env`
-wrapper can override the defaults. Apps with hard-coded settings paths, separate
-daemons, or their own font engines need app-specific configuration. Flatpak can
-remap HOME, XDG directories and fonts inside its sandbox, so these guarantees
-apply to native apps that honor the profile environment, not arbitrary Flatpaks.
+Matching output needs the same framewisp and app builds, display size, backend and
+app state. These stay outside framewisp's control: system-wide app configuration
+such as `/etc/chromium/policies`, installed schemas and icons, time-dependent and
+remote content, and timing such as a blinking caret. Apps with hard-coded settings
+paths, separate daemons or their own font engines need app-specific configuration.
+Flatpak can remap HOME, XDG directories and fonts inside its sandbox, so these
+guarantees apply to native apps, not arbitrary Flatpaks.
 
-`tests/test_profiles.py` runs GTK's shipped demo application on Wayland and X11,
-including an explicit dconf backend override and private service activation.
-It checks fresh preferences,
-font/theme/DPI settings, matching content pixels across conflicting host scale
-settings, private preference writes, unchanged host config, and cleanup. The
-bundled framewisp demo keeps DejaVu Sans 11 and selects the profile's Fontconfig
-file during fresh runs, even when its installed wrapper sets caption fonts.
+This is not a security sandbox. The app can still access the host filesystem,
+network and system bus. Existing session and artifact path protections apply; save
+artifacts outside the disposable runtime.
+
+Without Nix, `run` needs a font file. It fails before starting a session when
+`FRAMEWISP_FONTCONFIG_FILE` does not name one. Set it to a Fontconfig file that
+selects a fixed set of fonts. Pointing it at `/etc/fonts/fonts.conf` works, but
+output can then differ between hosts.
 
 ## Flatpak game
 
@@ -907,7 +942,7 @@ The [real-app compatibility runs](docs/ui-inspection.md#real-app-compatibility-r
 cover a GTK 3 Writer Flatpak and Blender on private Wayland and Xwayland, with
 versions, launch commands, input outcomes, accessibility limits, and opt-in tests.
 
-With the `org.gnome.SwellFoop` Flatpak installed, run:
+With the `org.gnome.SwellFoop` Flatpak installed system-wide, run:
 
 ```sh
 framewisp swell run -- \
@@ -928,7 +963,7 @@ This is not a general animation-completion guarantee.
 
 ## Drawing with a drag
 
-With the `org.kde.kolourpaint` Flatpak installed, run:
+With the `org.kde.kolourpaint` Flatpak installed system-wide, run:
 
 ```sh
 framewisp paint run -- \
@@ -1025,7 +1060,7 @@ A command that would exceed the limit fails before sending any input. These
 mappings use upper keycodes reserved by framewisp; ordinary US keys
 and the supported shortcuts retain their mappings.
 
-LibreOffice Writer was tested as a Flatpak with a private D-Bus session:
+LibreOffice Writer was tested as a system-wide Flatpak with a private D-Bus session:
 
 ```sh
 framewisp writer run -- \
@@ -1163,12 +1198,10 @@ Noto fonts used by the Nix package. Configure these paths for your installation:
 | `FRAMEWISP_TEST_GTK_SCHEMAS` | Directory containing the demo's compiled GSettings schemas. |
 | `FRAMEWISP_TEST_DCONF_SERVICE` | Absolute path to `ca.desrt.dconf.service`. |
 | `FRAMEWISP_TEST_DCONF_MODULES` | GIO module directory containing the dconf backend. |
-| `FRAMEWISP_FONTCONFIG_FILE` | Fontconfig configuration file for captions and the demo. |
-| `FRAMEWISP_PROFILE_FONTCONFIG_FILE` | Fontconfig configuration file for fresh profiles. |
+| `FRAMEWISP_FONTCONFIG_FILE` | Fontconfig file for apps, captions and console panels. Required by every `run`. |
 | `FRAMEWISP_ATSPI_REGISTRY` | Path to `at-spi2-registryd`, if it is absent from PATH. |
 
-The font configurations must load the installed fonts without depending on user
-settings. GStreamer needs its base, good, and PipeWire plugins. Qt must find its
+The font file must load the installed fonts without depending on user settings. GStreamer needs its base, good, and PipeWire plugins. Qt must find its
 QML modules and platform plugins; set `QML_IMPORT_PATH` and `QT_PLUGIN_PATH` if
 your installation requires them. The Nix shell sets these paths automatically.
 
@@ -1204,7 +1237,7 @@ Private `run` sessions default `ACCESSIBILITY_ENABLED` to `1` so Chromium can
 connect to the private AT-SPI bus on headless hosts. Caller-provided values are
 preserved, including `ACCESSIBILITY_ENABLED=0` to disable this bridge. Set it
 before invoking framewisp, or pass `env ACCESSIBILITY_ENABLED=0` before the app
-command. This also applies to `--profile fresh` sessions.
+command.
 
 Keep Chromium's `--force-renderer-accessibility` flag when launching it:
 
