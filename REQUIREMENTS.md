@@ -1,7 +1,8 @@
 # framewisp requirements
 
-Each requirement is an observable behaviour or invariant that framewisp must
-keep. `DESIGN.md` describes how the requirements are met.
+Each requirement captures valuable behaviour or an invariant users rely on,
+including latent durability, privacy, compatibility, and recoverability
+guarantees. `DESIGN.md` describes how the requirements are met.
 
 ## Format
 
