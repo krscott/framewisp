@@ -220,7 +220,7 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
@@ -835,8 +835,9 @@ Review artifacts before sharing.
 
 ## App environment
 
-`run` sanitizes the app's environment, so the same app build shows the same
-pixels whichever environment started it.
+By default, `run` sanitizes the app's environment, so the same app build shows
+the same pixels whichever environment started it. `--real-env` turns this off
+for one run (see [Use the real environment](#use-the-real-environment)).
 
 Each session gives the app private HOME, XDG config/cache/data/state directories
 and TMPDIR under its owned runtime directory. `XDG_CONFIG_DIRS` points at the
@@ -887,6 +888,26 @@ somewhere else, and tools managed under HOME, such as `rustup` toolchains, are
 missing. Build first and `run` the built program, or use a virtual environment.
 `env` hides a bare `framewisp-demo` from the bundled demo fallback,
 so use its full path if it is not on your PATH.
+
+### Use the real environment
+
+To debug a problem caused by the user's own environment, add `--real-env`:
+
+```sh
+framewisp app run --real-env -- your-app
+```
+
+The app then gets the environment framewisp was started with, including its
+HOME, XDG directories, TMPDIR, fonts, theme, locale, time zone and desktop
+identity. Only the private session settings still apply: the display and its
+backend selection (`GDK_BACKEND`, `QT_QPA_PLATFORM`), the D-Bus and
+accessibility buses, `XDG_RUNTIME_DIR` and `GSK_RENDERER=cairo`. Settings that
+apps read over D-Bus, such as the desktop portal's color scheme, are not
+available. The app uses the user's real profile, so anything it writes stays
+after the session. A copy of the app the user already has open may take over the
+launch or make it refuse to start; ask the user to close it, or point the app at
+a separate profile. Captions, console panels, title bars and the cursor that
+framewisp draws stay fixed. App output can differ between hosts.
 
 ### D-Bus services
 

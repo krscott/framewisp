@@ -86,12 +86,14 @@ def test_session_environment_keeps_source_separate(tmp_path: Path) -> None:
         "DISPLAY": ":123",
         "DBUS_SESSION_BUS_ADDRESS": "host-bus",
         "AT_SPI_BUS_ADDRESS": "host-accessibility-bus",
+        "QT_QPA_PLATFORM": "xcb",
     }
     env = session_environment_for_run(tmp_path, source)
     assert env["PATH"] == "/caller/bin"
     assert env["GI_TYPELIB_PATH"] == ""
     assert env["XDG_RUNTIME_DIR"] == str(tmp_path)
     assert env["GDK_BACKEND"] == "wayland"
+    assert env["QT_QPA_PLATFORM"] == "wayland"
     assert "DISPLAY" not in env
     assert "DBUS_SESSION_BUS_ADDRESS" not in env
     assert "AT_SPI_BUS_ADDRESS" not in env

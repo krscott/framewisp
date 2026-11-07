@@ -124,6 +124,7 @@ def session_environment_for_run(
         WLR_RENDERER="pixman",
         WLR_LIBINPUT_NO_DEVICES="1",
         GDK_BACKEND="wayland",
+        QT_QPA_PLATFORM="wayland",
         GSK_RENDERER="cairo",
     )
     env.setdefault("ACCESSIBILITY_ENABLED", "1")
@@ -926,6 +927,7 @@ def run_session(
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
     retain_input_content: bool = False,
+    real_env: bool = False,
 ) -> int:
     fonts = configured_fonts(os.environ)
     if fonts is None:
@@ -957,6 +959,7 @@ def run_session(
             x11=x11,
             retain_input_content=retain_input_content,
             fonts=fonts,
+            real_env=real_env,
         )
 
 
@@ -974,6 +977,7 @@ def _run_session(
     x11: bool,
     retain_input_content: bool,
     fonts: str,
+    real_env: bool,
 ) -> int:
     state = session / "session.json"
     if state.exists():
@@ -1007,11 +1011,10 @@ def _run_session(
             )
             # An empty path selects the compositor's built-in cursor, not the caller's.
             env["XCURSOR_PATH"] = ""
-            app_env = sanitized_environment(
-                runtime,
-                session_environment_for_run(runtime, caller_environment()),
-                fonts=fonts,
-            )
+            app_env = caller_environment()
+            if not real_env:
+                app_env = sanitized_environment(runtime, app_env, fonts=fonts)
+            app_env = session_environment_for_run(runtime, app_env)
             for process_env in (env, app_env):
                 process_env["FRAMEWISP_OWNER_FD"] = str(lease)
                 process_env["FRAMEWISP_OWNER_RUNTIME"] = directory
