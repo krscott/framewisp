@@ -164,6 +164,8 @@ observable behaviour, not implementation, in short sentences.
 - **R-REC-21** [test] `screenshot` and batch capture reject their own session's
   active recording destination, directly or through a symlink. The recording
   continues, and `record-stop` publishes it at that destination.
+- **R-REC-22** [test] A finished clip with no measurable duration does not end
+  the session or fail shutdown. `record-stop` reports `duration_seconds` as `null`.
 
 ## Lifetime and recovery (LIFE)
 

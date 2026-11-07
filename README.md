@@ -601,6 +601,10 @@ starting another or stopping when none is active reports an error.
 On success, `record-stop` prints JSON with the output `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`. Framewisp uses ffprobe and the completed file
 to measure these values after caption rendering; duration is not a wall-clock estimate.
+`duration_seconds` is `null` for a clip with no measurable duration, such as one
+stopped before it encoded a frame. Such a clip skips captions, click pings, console
+panels, and compaction. `width` and `height` are also `null` when the clip has no
+video stream.
 
 Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
 plus the console panel when `--console` is enabled, 640 pixels of width by default.
