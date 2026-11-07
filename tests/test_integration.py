@@ -209,6 +209,9 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     )
     if mode in {"qt", "qt-tree", "qt-coordinates"}:
         app = [
+            "env",
+            "QT_LOGGING_RULES=qml.debug=true",
+            "QT_LOGGING_TO_CONSOLE=1",
             "qml",
             str(
                 Path(__file__).with_name(
@@ -231,17 +234,6 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         process = subprocess.Popen(
             command,
             env=os.environ
-            | (
-                {
-                    "QT_QUICK_BACKEND": "software",
-                    "QT_QPA_PLATFORMTHEME": "",
-                    "QT_IM_MODULE": "",
-                    "QT_LOGGING_RULES": "qml.debug=true",
-                    "QT_LOGGING_TO_CONSOLE": "1",
-                }
-                if mode in {"qt", "qt-tree", "qt-coordinates"}
-                else {}
-            )
             | ({"WAYLAND_DEBUG": "client"} if mode == "clipboard" else {})
             | (
                 {

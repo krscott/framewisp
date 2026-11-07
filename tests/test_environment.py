@@ -3,11 +3,12 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from framewisp.environment import caller_environment
+from framewisp.environment import caller_environment, sanitized_environment
 from framewisp.lib import app_command, session_environment_for_run
 
 
@@ -124,3 +125,62 @@ def test_bundled_demo_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert app_command(absolute, {"PATH": ""}) == absolute
     monkeypatch.chdir(caller)
     assert app_command(command, {"PATH": ""}) == command
+
+
+def test_sanitizing_keeps_lookup_paths_and_app_settings(tmp_path: Path) -> None:
+    kept = {
+        "PATH": "/caller/bin",
+        "PYTHONPATH": "/caller/python",
+        "XDG_DATA_DIRS": "/caller/share",
+        "GDK_PIXBUF_MODULE_FILE": "/caller/loaders.cache",
+        "GDK_PIXBUF_MODULEDIR": "/caller/loaders",
+        "QT_PLUGIN_PATH": "/caller/plugins",
+        "QML_IMPORT_PATH": "/caller/qml",
+        "MY_APP_SETTING": "value",
+    }
+    env = sanitized_environment(tmp_path, kept | {"GDK_SCALE": "3"}, fonts="fonts.conf")
+    assert kept.items() <= env.items()
+    assert env["GDK_SCALE"] == "1"
+
+
+# R-ENV-1, R-ENV-4
+@pytest.mark.parametrize(
+    "name",
+    [
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+        "GNOME_DESKTOP_SESSION_ID",
+        "KDE_FULL_SESSION",
+        "KDE_SESSION_VERSION",
+    ],
+)
+def test_sanitizing_removes_desktop_identity(tmp_path: Path, name: str) -> None:
+    assert name not in sanitized_environment(tmp_path, {name: "x"}, fonts="fonts.conf")
+
+
+# R-ENV-1, R-ENV-4
+def test_sanitizing_fixes_time_zone(tmp_path: Path) -> None:
+    env = sanitized_environment(tmp_path, {"TZ": "Asia/Tokyo"}, fonts="fonts.conf")
+    assert env["TZ"] == "UTC"
+
+
+# R-ENV-7
+@pytest.mark.parametrize("value", [None, "", "missing.conf"])
+def test_run_refuses_a_missing_font_file(tmp_path: Path, value: str | None) -> None:
+    env = os.environ.copy()
+    env.pop("FRAMEWISP_FONTCONFIG_FILE", None)
+    if value is not None:
+        env["FRAMEWISP_FONTCONFIG_FILE"] = value and str(tmp_path / value)
+    session = tmp_path / "session"
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session), "run", "--", "unused-app"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "FRAMEWISP_FONTCONFIG_FILE" in result.stderr
+    assert "set it to" in result.stderr
+    assert not session.exists()
