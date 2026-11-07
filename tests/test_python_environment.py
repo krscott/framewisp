@@ -248,7 +248,8 @@ def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     observed = json.loads((session / "app.log").read_text())
-    for key in ("PATH", "LC_CTYPE", "LANG", "GI_TYPELIB_PATH", "XDG_DATA_DIRS"):
+    for key in ("PATH", "LC_CTYPE", "GI_TYPELIB_PATH", "XDG_DATA_DIRS"):
         assert key not in observed
     assert not any(key.startswith("FRAMEWISP_") for key in observed)
     assert observed["GDK_BACKEND"] == "wayland"
+    assert observed["LANG"] == "C.UTF-8"
