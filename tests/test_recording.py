@@ -8,7 +8,6 @@ from threading import Event
 
 import pytest
 
-from framewisp.compact import CompactSettings
 from framewisp.console import ConsoleCapture
 from framewisp.layout import ConsolePanel
 from framewisp.lib import Recordings
@@ -36,7 +35,7 @@ def recorded_by_fake_recorder(
     tmp_path: Path,
     written: Path,
     *,
-    compact: CompactSettings | None = None,
+    compact: bool = False,
     console: ConsolePanel | None = None,
 ) -> dict[str, object]:
     """Finish a clip whose recorder writes `written`, and return the summary."""
@@ -81,11 +80,11 @@ def test_clip_with_a_hidden_frame_is_finalized_as_playable(tmp_path: Path) -> No
 # R-REC-22
 @pytest.mark.parametrize(
     ("compact", "console"),
-    [(None, None), (CompactSettings(), None), (None, ConsolePanel())],
+    [(False, None), (True, None), (False, ConsolePanel())],
     ids=["plain", "compact", "console"],
 )
 def test_clip_with_no_measurable_duration_reports_null(
-    tmp_path: Path, compact: CompactSettings | None, console: ConsolePanel | None
+    tmp_path: Path, compact: bool, console: ConsolePanel | None
 ) -> None:
     written = tmp_path / "no-frames.mp4"
     subprocess.run(

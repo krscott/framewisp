@@ -173,7 +173,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode in CONSOLE_STARTS:
             command.extend(console_options(*CONSOLE_STARTS[mode]))
         if mode == "uncaptioned":
-            command.append("--no-captions")
+            command.extend(["--captions", "none"])
         if mode == "no-pings":
             command.append("--no-click-pings")
         if mode == "record-probe":
@@ -182,9 +182,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if isinstance(mode, str) and mode.startswith("captions-"):
             command.extend(["--captions", mode.removeprefix("captions-")])
         if mode == "compact":
-            command.extend(
-                ["--compact", "--compact-before", "0.25", "--compact-after", "0.25"]
-            )
+            command.append("--compact")
     if mode in {"large", "odd"}:
         width, height = (1600, 900) if mode == "large" else (1601, 901)
         command.extend(["--width", str(width), "--height", str(height)])
@@ -437,7 +435,7 @@ def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
     assert demo.recording is not None
     wait_for_demo_frame(demo, tmp_path / "before.png")
     started = time.monotonic()
-    time.sleep(2)
+    time.sleep(5)
     cli(demo.directory, "type", "Compact demo", "--interval", "0.1")
     cli(demo.directory, "key", "Return")
     wait_until(
@@ -461,15 +459,12 @@ def test_compact_clip_preserves_failed_wait_and_capture_delay(
         demo.directory,
         "record-start",
         "--compact",
-        "--compact-before",
-        "0.1",
-        "--compact-after",
-        "0.1",
         "--console",
-        "--no-captions",
+        "--captions",
+        "none",
         str(video),
     )
-    time.sleep(2)
+    time.sleep(5)
     failure = tmp_path / "failure.png"
     batch = {
         "actions": [
@@ -500,7 +495,7 @@ def test_compact_clip_preserves_failed_wait_and_capture_delay(
     assert failure.exists()
     time.sleep(2)
     summary = json.loads(cli(demo.directory, "record-stop").stdout)
-    assert 3 <= summary["duration_seconds"] < 4.5
+    assert 6.5 <= summary["duration_seconds"] < 8.5
     assert summary["width"] == 1920
     activity = (demo.directory / "activity.jsonl").read_text()
     assert "secret condition" not in activity
@@ -510,7 +505,7 @@ def test_compact_clip_preserves_failed_wait_and_capture_delay(
 
     # A later ordinary clip must not inherit compaction from the previous clip.
     ordinary = tmp_path / "ordinary.mp4"
-    cli(demo.directory, "record-start", "--no-captions", str(ordinary))
+    cli(demo.directory, "record-start", "--captions", "none", str(ordinary))
     time.sleep(1)
     assert (
         json.loads(cli(demo.directory, "record-stop").stdout)["duration_seconds"] >= 1
@@ -1217,7 +1212,7 @@ def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
         )
     )
     clip = demo.directory.parent / "continuous.mp4"
-    cli(demo.directory, "record-start", "--no-captions", str(clip))
+    cli(demo.directory, "record-start", "--captions", "none", str(clip))
     start = (100, 100)
     for end in ((500, 300), (200, 250), (550, 100)):
         before = len(input_events(demo))
@@ -1633,7 +1628,7 @@ def test_record_multiple_clips_without_restarting_app(
     assert "already exists" in rejected("record-start", str(existing))
     assert existing.read_bytes() == b"keep"
     # Rendering has its own tests, and its time depends on machine load.
-    unrendered = ("--no-captions", "--no-click-pings")
+    unrendered = ("--captions", "none", "--no-click-pings")
     for index in range(2):
         cli(demo.directory, "click", "120", "100")
         cli(demo.directory, "key", "Ctrl+a")
@@ -1857,15 +1852,12 @@ def test_startup_recording_pings_gestures(demo: Demo) -> None:
     ("options", "timed"),
     [
         ([], True),
-        (["--no-captions"], True),
+        (["--captions", "none"], True),
         (["--captions", "pointer"], True),
         (["--captions", "all"], True),
         (["--console"], True),
-        (["--compact", "--compact-before", "0.1", "--compact-after", "0"], False),
-        (
-            ["--console", "--compact", "--compact-before", "0", "--compact-after", "0"],
-            False,
-        ),
+        (["--compact"], False),
+        (["--console", "--compact"], False),
     ],
 )
 def test_mid_session_clip_pings_gestures(
@@ -2214,7 +2206,7 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
             "action": "record-start",
             "destination": "/tmp/x.mp4",
             "captions": "keys",
-            "compact": {"before": 10**400, "after": 0},
+            "compact": "yes",
         },
         {"action": "move"},
         {"action": "click"},
@@ -2266,7 +2258,7 @@ def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) ->
 @pytest.mark.parametrize("demo", [None], indirect=True)
 @pytest.mark.parametrize("failure", ["unwritable-log", "malformed-input-log"])
 @pytest.mark.parametrize("command", ["record-stop", "stop"])
-@pytest.mark.parametrize("options", [["--no-captions"], []])
+@pytest.mark.parametrize("options", [["--captions", "none"], []])
 def test_failed_ping_render_leaves_pings_only_clip_playable(
     demo: Demo, tmp_path: Path, failure: str, command: str, options: list[str]
 ) -> None:
@@ -2339,7 +2331,7 @@ def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> No
             demo.directory,
             "record-start",
             "--console",
-            *([] if captions else ["--no-captions"]),
+            *([] if captions else ["--captions", "none"]),
             str(clip),
         )
         time.sleep(0.4)
@@ -2362,7 +2354,7 @@ def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> No
         cli(demo.directory, "key", "Ctrl+a")
         cli(demo.directory, "key", "BackSpace")
     plain = tmp_path / "plain.mp4"
-    cli(demo.directory, "record-start", "--no-captions", str(plain))
+    cli(demo.directory, "record-start", "--captions", "none", str(plain))
     time.sleep(0.2)
     summary = json.loads(cli(demo.directory, "record-stop").stdout)
     assert (summary["width"], summary["height"]) == (1280, 720)
@@ -2394,7 +2386,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             demo.directory,
             "record-start",
             str(clip),
-            *([] if captions else ["--no-captions"]),
+            *([] if captions else ["--captions", "none"]),
         )
         cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "idle.png"))
         cli(demo.directory, "type", "--interval", "0.12", "café 日本語 😀")
@@ -2552,7 +2544,6 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     logged: list[list[tuple[object, ...]]] = []
     cases: list[tuple[list[str], bool, bool]] = [
         ([], False, True),
-        (["--no-captions"], False, False),
         (["--captions", "none"], False, False),
         (["--captions", "keys"], False, True),
         (["--captions", "pointer"], True, False),
@@ -2580,19 +2571,15 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
             "record-start",
             "--console",
             "--compact",
-            "--compact-before",
-            "0.25",
-            "--compact-after",
-            "0.25",
             "--captions",
             mode,
             str(clip),
         )
-        time.sleep(1.5)
+        time.sleep(4)
         cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
-        time.sleep(1.5)
+        time.sleep(2)
         summary = json.loads(cli(demo.directory, "record-stop").stdout)
-        assert 1 <= summary["duration_seconds"] < 2.5
+        assert 4 <= summary["duration_seconds"] < 6
         assert summary["width"] == 1920
 
 

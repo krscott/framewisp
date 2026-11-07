@@ -61,10 +61,9 @@ There is no separate controller daemon or framebuffer cache.
 The runner accepts input, recording, status, and stop commands over a private Unix socket.
 The foreground `run` command is the lifetime owner.
 
-`compact.py` defines per-clip `CompactSettings` and command-based cut planning
-for `run --record --compact` and `record-start --compact`. The CLI and runner
-validate finite nonnegative before/after padding (defaults 1 and 2 seconds).
-The `compact_recording` metadata capability prevents newer clients from silently
+`compact.py` defines the fixed padding and command-based cut planning for
+`run --record --compact` and `record-start --compact`. Each clip chooses
+compaction with a `compact` boolean. The `compact_recording` metadata capability prevents newer clients from silently
 requesting compaction from an older runner. Input start/end records in
 `inputs.jsonl` supply full input spans; `inputs.py` also writes timestamp-only
 start/end records for batch checks and capture delays to `activity.jsonl`,
@@ -74,11 +73,11 @@ keeps its span through clip stop; commands crossing either clip boundary are
 clipped to the recording. An in-progress append cannot discard the earlier start
 because cut planning reads only complete lines through `activity_events`.
 
-Cut planning adds before/after padding to activity spans, keeps the opening
-before-padding and closing after-padding, rounds ranges outward to 30 fps frames,
-and merges touching or overlapping ranges. The first and last frames remain
-even with zero padding. Each click ping's span also stays whole, with no added
-padding, so short padding cannot cut its animation (R-REC-8). Compaction requires
+Cut planning adds 1 second of padding before and 2 seconds after activity spans,
+keeps the opening 1 second and closing 2 seconds, rounds ranges outward to 30 fps
+frames, and merges touching or overlapping ranges. Each click ping starts inside
+its input's span and is shorter than the after-padding, so the padding keeps its
+whole animation (R-REC-8). Compaction requires
 the recorder's first-frame monotonic timestamp even with captions and console
 disabled. Finalization renders overlays
 on the original timeline. ffprobe supplies the encoded duration for closing cuts
@@ -661,8 +660,8 @@ with `meta.mainProgram` selecting the CLI for `nix run`. NixOS and Home Manager
 can install the same package onto PATH. No system service is required.
 
 The development shell additionally supplies FFmpeg for test decoding and the
-Python development tools. `checks.x86_64-linux.package` runs the integration
-tests against the built package with an empty environment and only the package
+Python development tools. The `package-1` through `package-8` checks run the
+integration tests against the built package with an empty environment and only the package
 FFmpeg, and the Qt QML regression runner on PATH. Python dependencies are also declared
 in `pyproject.toml` and `default.nix`. The demo uses a plain GTK window and GLib
 loop and runs without a D-Bus session.
@@ -798,7 +797,7 @@ any active recorder before stopping the display (R-REC-3).
 The runner listens on `control.sock` in its private runtime directory. Each
 control CLI call sends one newline-terminated JSON request with `action`, the
 absolute `session` directory, a `destination` (absolute recording path or null),
-a `captions` mode, a `click_pings` boolean, and optional `console` and `compact` objects. Replies carry an `error` string or null
+a `captions` mode, `click_pings` and `compact` booleans, and an optional `console` object. Replies carry an `error` string or null
 and optional `data`. The runner checks the session directory against its own
 before acting, so copied metadata cannot control another session (R-LIFE-6). Its
 monitoring loop handles recording/status/stop requests; validated input sockets
@@ -911,9 +910,8 @@ origin before accepting captioned input. The log is replaced for each clip.
 `--captions` selects input kinds for one clip, and the session's retention policy
 decides what each caption shows. `keys`, the default, selects `key` and `type`
 (R-LOG-4). `pointer` selects `move`, `click`, `drag`, and `scroll`. `all` selects
-both, and `none` selects nothing. `--no-captions` is the same value as
-`--captions none`, and the parser rejects both together (R-LOG-6). `run` requires
-`--record` with either option. One table in `captions.py` maps each mode to its
+both, and `none` selects nothing. `run` requires `--record` with `--captions`.
+One table in `captions.py` maps each mode to its
 actions. The input log is written before and without reference to the mode
 (R-LOG-5), and compaction reads that unfiltered log, so an uncaptioned input
 still counts as activity. The runner rejects a `captions` request value that is
