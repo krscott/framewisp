@@ -142,7 +142,7 @@ with session_lease(session) as lease:
 
 
 # R-LIFE-5
-def test_live_owner_and_copied_or_tampered_metadata(tmp_path: Path) -> None:
+def test_live_owner_and_copied_or_damaged_metadata(tmp_path: Path) -> None:
     session = tmp_path / "session"
     session.mkdir()
     copied = tmp_path / "copy"
@@ -285,8 +285,39 @@ def test_replaced_lock_refused_while_session_live(tmp_path: Path) -> None:
     assert not (tmp_path / JOURNAL).exists()
 
 
+# R-LIFE-5
+@pytest.mark.parametrize("kind", ["0644", "fifo"])
+def test_openable_replacement_lock_refused_while_session_live(
+    tmp_path: Path, kind: str
+) -> None:
+    lock = tmp_path / LOCK
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
+        lock.rename(tmp_path / "original.lock")
+        if kind == "0644":
+            lock.touch(mode=0o644)
+        else:
+            os.mkfifo(lock, 0o600)
+        with pytest.raises(SessionError, match="was replaced"):
+            recover_session(tmp_path)
+        assert runtime.is_dir()
+    assert not runtime.exists()
+
+
+# R-LIFE-5
+def test_hard_linked_lock_is_the_same_lock_while_session_live(tmp_path: Path) -> None:
+    lock = tmp_path / LOCK
+    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
+        original = tmp_path / "original.lock"
+        lock.rename(original)
+        os.link(original, lock)
+        with pytest.raises(SessionError, match="still live"):
+            recover_session(tmp_path)
+        assert runtime.is_dir()
+    assert not runtime.exists()
+
+
 # R-LIFE-5, R-LIFE-7
-@pytest.mark.parametrize("kind", ["0644", "hard-link", "fifo", "symlink", "directory"])
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_unusable_replacement_lock_refused_while_session_live(
     tmp_path: Path, kind: str
 ) -> None:
@@ -294,13 +325,7 @@ def test_unusable_replacement_lock_refused_while_session_live(
     with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         original = tmp_path / "original.lock"
         lock.rename(original)
-        if kind == "0644":
-            lock.touch(mode=0o644)
-        elif kind == "hard-link":
-            os.link(original, lock)
-        elif kind == "fifo":
-            os.mkfifo(lock, 0o600)
-        elif kind == "symlink":
+        if kind == "symlink":
             lock.symlink_to(original)
         else:
             lock.mkdir()
@@ -314,6 +339,60 @@ def test_unusable_replacement_lock_refused_while_session_live(
             recover_session(tmp_path)
         assert runtime.is_dir()
     assert not runtime.exists()
+
+
+# R-LIFE-4
+def test_permissive_chmod_does_not_block_recovery(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    subprocess.run(["chmod", "-R", "go+rX", session], check=True)
+    assert stat.S_IMODE((session / LOCK).stat().st_mode) & 0o044
+    assert recover_session(session) == 0
+    assert not runtime.exists()
+
+
+# R-LIFE-4, R-LIFE-5
+def test_hard_linked_copy_refused_and_original_recovers(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session, runtime = abandoned
+    copied = tmp_path / "copy"
+    subprocess.run(["cp", "-al", session, copied], check=True)
+    assert (session / LOCK).stat().st_nlink == 2
+    assert (copied / JOURNAL).stat().st_ino == (session / JOURNAL).stat().st_ino
+    with pytest.raises(SessionError, match="does not belong"):
+        recover_session(copied)
+    assert (runtime / "kept").read_text() == "preserve"
+    assert recover_session(session) == 0
+    assert not runtime.exists()
+    with pytest.raises(SessionError, match="does not belong"):
+        recover_session(copied)
+
+
+# R-LIFE-5
+def test_replaced_lock_refused_after_permissive_chmod(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    replace_lock(session)
+    subprocess.run(["chmod", "-R", "go+rX", session], check=True)
+    with pytest.raises(SessionError, match="was replaced"):
+        recover_session(session)
+    assert (runtime / "kept").read_text() == "preserve"
+
+
+# R-LIFE-5, R-LIFE-7
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can open any file")
+def test_lock_the_owner_cannot_open_gives_steps(abandoned: tuple[Path, Path]) -> None:
+    session, runtime = abandoned
+    (session / LOCK).chmod(0)
+    with pytest.raises(SessionError, match="is unusable") as refusal:
+        recover_session(session)
+    assert "chmod 600" in str(refusal.value)
+    assert (runtime / "kept").read_text() == "preserve"
+    (session / LOCK).chmod(0o600)
+    assert recover_session(session) == 0
 
 
 def test_unwritable_session_is_not_blamed_on_lock(tmp_path: Path) -> None:
@@ -436,6 +515,22 @@ def test_unreadable_journal_refused_with_working_manual_steps(
     assert not runtime.exists()
     assert (session / "app.log").read_text() == "diagnostic"
     assert recover_session(session) == 0
+
+
+# R-LIFE-5, R-LIFE-7
+def test_fifo_journal_with_a_writer_refused_with_steps(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session, runtime = abandoned
+    (session / JOURNAL).unlink()
+    os.mkfifo(session / JOURNAL, 0o600)
+    writer = os.open(session / JOURNAL, os.O_RDWR)
+    try:
+        with pytest.raises(SessionError, match="must be a regular file"):
+            recover_session(session)
+    finally:
+        os.close(writer)
+    assert (runtime / "kept").read_text() == "preserve"
 
 
 # R-LIFE-5, R-LIFE-7
@@ -596,43 +691,23 @@ def test_unreadable_session_metadata_cannot_hang_recovery(
     assert "journal is missing" in result.stderr and "rm -rf" in result.stderr
 
 
-# R-LIFE-7
-@pytest.mark.parametrize("change", ["replaced", "deleted"])
-def test_lock_changed_while_acquiring_refused_with_working_manual_steps(
-    abandoned: tuple[Path, Path], change: str, monkeypatch: pytest.MonkeyPatch
+# R-LIFE-4
+def test_lock_path_changed_after_flock_recovers_the_held_lock(
+    abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session, runtime = abandoned
     lock = session / LOCK
     real_flock = fcntl.flock
-    # A live owner's descriptor pins the original inode. Without one, a filesystem
-    # may give a new lock the same inode, which correctly proves no owner remains.
-    owner = os.open(lock, os.O_RDONLY)
 
     def change_lock_then_flock(descriptor: int, operation: int) -> None:
         real_flock(descriptor, operation)
         lock.unlink()
-        if change == "replaced":
-            lock.touch(mode=0o600)
+        lock.touch(mode=0o600)
 
-    try:
-        with monkeypatch.context() as patch:
-            patch.setattr(fcntl, "flock", change_lock_then_flock)
-            with pytest.raises(
-                SessionError, match="changed while acquiring"
-            ) as refusal:
-                recover_session(session)
-        message = str(refusal.value)
-        assert "Nothing was removed" in message and " recover`" in message
-        assert (session / JOURNAL).exists() and (runtime / "kept").exists()
-        # Running recover again compares the lock with the journal.
-        with pytest.raises(SessionError, match="was replaced"):
-            recover_session(session)
-    finally:
-        os.close(owner)
-    assert run_commands(message, "grep ") == ""
-    run_commands(message, "rm ")
-    assert not runtime.exists()
+    # flock excluded every holder of the journal's lock, so no owner can remain.
+    monkeypatch.setattr(fcntl, "flock", change_lock_then_flock)
     assert recover_session(session) == 0
+    assert not runtime.exists()
 
 
 def run_missing_session_commands(message: str, runtime: Path) -> None:
@@ -714,25 +789,6 @@ def test_session_vanishing_during_lease_gets_steps(
         with pytest.raises(SessionError, match="does not exist") as refusal:
             recover_session(session)
     run_missing_session_commands(str(refusal.value), runtime)
-
-
-# R-LIFE-7
-def test_lock_changed_with_stale_attachment_gets_attachment_steps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    (tmp_path / "session.json").write_text('{"kind": "attached"}')
-    real_flock = fcntl.flock
-
-    def delete_lock_then_flock(descriptor: int, operation: int) -> None:
-        real_flock(descriptor, operation)
-        (tmp_path / LOCK).unlink()
-
-    monkeypatch.setattr(fcntl, "flock", delete_lock_then_flock)
-    with pytest.raises(SessionError, match="changed while acquiring") as refusal:
-        recover_session(tmp_path)
-    message = str(refusal.value)
-    assert "--detach" in message and " run -- APP" not in message
-    assert (tmp_path / "session.json").exists()
 
 
 # R-LIFE-7
@@ -1137,6 +1193,53 @@ def test_journal_without_valid_lock_identity_refused(
     run_commands(message, "rm ")
     assert not runtime.exists()
     assert recover_session(session) == 0
+
+
+# R-LIFE-5
+def test_runtime_of_another_user_refused(
+    abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, runtime = abandoned
+    real_lstat = Path.lstat
+
+    def foreign_lstat(path: Path) -> os.stat_result:
+        info = real_lstat(path)
+        if path != runtime:
+            return info
+        fields = list(info)
+        fields[stat.ST_UID] = os.getuid() + 1
+        return os.stat_result(fields)
+
+    # A real foreign directory needs a second user. Identity still matches, so only
+    # the owner check can refuse.
+    monkeypatch.setattr(Path, "lstat", foreign_lstat)
+    with pytest.raises(SessionError, match="ownership or permissions changed"):
+        recover_session(session)
+    assert (runtime / "kept").read_text() == "preserve"
+
+
+# R-LIFE-5
+@pytest.mark.parametrize("name", [JOURNAL, ".headless-owner.tmp", "runtime"])
+def test_dangling_symlink_blocks_new_session(tmp_path: Path, name: str) -> None:
+    link = runtime_path(tmp_path) if name == "runtime" else tmp_path / name
+    link.symlink_to(tmp_path / "missing")
+    try:
+        with pytest.raises(SessionError, match="Abandoned headless ownership"):
+            with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease):
+                pytest.fail("A dangling symlink was treated as absent")
+        assert link.is_symlink()
+    finally:
+        link.unlink()
+
+
+# R-LIFE-5
+@pytest.mark.parametrize("name", [JOURNAL, "session.json", ".session.json"])
+def test_dangling_symlink_blocks_recovery(tmp_path: Path, name: str) -> None:
+    link = tmp_path / name
+    link.symlink_to(tmp_path / "missing")
+    with pytest.raises(SessionError, match="Cannot verify ownership"):
+        recover_session(tmp_path)
+    assert link.is_symlink()
 
 
 # R-LIFE-5
