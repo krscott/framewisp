@@ -1060,7 +1060,7 @@ reserved against capture and recording destinations.
 `attach.py` owns a foreground connection to the user's existing desktop. It does
 not launch or own that desktop's app or compositor. The CLI requires a
 controlling terminal with this process group in the foreground, prints
-stop-binding and access instructions, and requires the exact typed confirmation
+stop-binding and access instructions (R-ATTACH-5), and requires the exact typed confirmation
 ATTACH before creating any portal connection (R-ATTACH-1). Agents receiving a
 rejection must ask the user to run the command in another terminal. There is no
 noninteractive override. This prevents accidental startup, not deliberate bypass
@@ -1077,8 +1077,9 @@ ownership or the portal's Closed signal also stops access.
 `tray.py` exports org.kde.StatusNotifierItem at /StatusNotifierItem and a static
 com.canonical.dbusmenu at /Menu on the owner's private portal bus connection,
 after portal approval and input setup. It supplies a 32x32 ARGB monitor icon,
-active-sharing title and tooltip, and one enabled "Stop sharing" menu item.
-The menu sets the same stop Event used by signals and portal revocation. Pending
+active-sharing title and tooltip (R-ATTACH-3), and one enabled "Stop sharing"
+menu item. The menu sets the same stop Event used by signals and portal revocation
+(R-ATTACH-4). Pending
 input cancels through the existing worker cleanup; no app process is stopped.
 Shutdown unregisters the objects before closing the portal connection. Forced
 owner death closes the connection and removes both sharing access and the item.
@@ -1094,7 +1095,7 @@ errors and missing hosts report the terminal/shortcut stop methods without endin
 sharing. Successful registration reports no promise of visible placement.
 KDE Plasma, COSMIC's status area, and GNOME with an enabled compatible
 StatusNotifierItem/AppIndicator extension are the supported host configurations.
-The host owns placement, overflow, auto-hide, and visibility. The independent
+The host owns placement, overflow, auto-hide, and visibility (R-ATTACH-6). The independent
 emergency detach command remains necessary for suspended or unresponsive owners.
 Desktop verification status and required setup live in docs/desktop-sharing-tray.md.
 

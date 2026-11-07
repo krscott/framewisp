@@ -728,7 +728,10 @@ def test_portal_failure_closes_owner(
 
 
 @pytest.fixture
-def terminal_process(tmp_path: Path) -> Iterator[tuple[subprocess.Popen[bytes], int]]:
+def terminal_prompt(
+    tmp_path: Path,
+) -> Iterator[tuple[subprocess.Popen[bytes], int, bytes]]:
+    """Yield an owner waiting at the confirmation prompt and all it printed."""
     master, slave = pty.openpty()
     process = subprocess.Popen(
         [sys.executable, "-c", _SERVER, str(tmp_path), "terminal"],
@@ -739,8 +742,7 @@ def terminal_process(tmp_path: Path) -> Iterator[tuple[subprocess.Popen[bytes], 
     )
     os.close(slave)
     try:
-        read_terminal(master, b"Type ATTACH")
-        yield process, master
+        yield process, master, read_terminal(master, b"Type ATTACH")
     finally:
         if process.poll() is None:
             process.kill()
@@ -751,7 +753,14 @@ def terminal_process(tmp_path: Path) -> Iterator[tuple[subprocess.Popen[bytes], 
             pass
 
 
-def read_terminal(descriptor: int, expected: bytes) -> None:
+@pytest.fixture
+def terminal_process(
+    terminal_prompt: tuple[subprocess.Popen[bytes], int, bytes],
+) -> tuple[subprocess.Popen[bytes], int]:
+    return terminal_prompt[:2]
+
+
+def read_terminal(descriptor: int, expected: bytes) -> bytes:
     output = b""
     deadline = time.monotonic() + 5
     while expected not in output:
@@ -759,6 +768,18 @@ def read_terminal(descriptor: int, expected: bytes) -> None:
         ready, _, _ = select.select([descriptor], [], [], 0.05)
         if ready:
             output += os.read(descriptor, 4096)
+    return output
+
+
+# R-ATTACH-5
+def test_terminal_names_stop_methods_before_confirmation(
+    tmp_path: Path,
+    terminal_prompt: tuple[subprocess.Popen[bytes], int, bytes],
+) -> None:
+    _process, _master, printed = terminal_prompt
+    assert b"framewisp --detach" in printed
+    assert b"Ctrl+C" in printed
+    assert not (tmp_path / "waiting").exists()
 
 
 # R-ATTACH-1
