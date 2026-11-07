@@ -176,10 +176,14 @@ verification evidence or blockers; orchestration remains outside Framewisp.
 4. Prepare separate runtime and caller app environments. Remove inherited display and session-bus addresses,
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
-   and `GSK_RENDERER=cairo`. Private D-Bus addresses percent-escape runtime
+   `QT_QPA_PLATFORM=wayland` and `GSK_RENDERER=cairo`. For the app, these
+   session settings apply after sanitizing, so they always win over it. Private D-Bus addresses percent-escape runtime
    filesystem bytes so temporary paths with spaces or address delimiters work.
    `environment.sanitized_environment` is the one step that sanitizes the app
-   environment (R-ENV-1, R-ENV-4). It creates private HOME/config/cache/data/
+   environment (R-ENV-1, R-ENV-4). `run --real-env` skips only this step, so the
+   app gets the caller's environment with the session settings applied and no
+   private directories are created (R-ENV-8). Framewisp's own tools keep their
+   fixed font file and cursor in both cases. It creates private HOME/config/cache/data/
    state/tmp directories under this runtime (R-ENV-6), removes inherited locale,
    toolkit, font and desktop identity settings, and fixes `C.UTF-8`, `TZ=UTC` and
    the font file. That one Nix-built Fontconfig file lists only store font

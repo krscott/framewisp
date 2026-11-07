@@ -78,7 +78,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `run [--retain-input-content] [--x11] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, `--captions`, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
+| `run [--retain-input-content] [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, `--captions`, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -178,6 +178,14 @@ Prefer an app's own option when it has one, such as Chromium's
 and `nix`, may fail or start cold under `run`, so build first and `run` the built
 program, or use a virtual environment. Without Nix,
 `run` fails until `FRAMEWISP_FONTCONFIG_FILE` names a Fontconfig file.
+
+When a problem may come from the user's own setup, such as their fonts, theme,
+locale, time zone or app profile, add `--real-env` to `run`. The app then gets
+the environment framewisp was started with, as if the user had launched it,
+apart from the private display and buses. Its writes to `HOME` and `TMPDIR`
+remain after the session. Use it only for that kind of debugging, because its
+images and videos can differ between hosts. To show a difference, compare it
+with a default run of the same app.
 
 Start a demo on a private display in a terminal or background tool session.
 Use a distinct session name and a fresh working directory, wait for

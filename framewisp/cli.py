@@ -149,6 +149,14 @@ def main() -> None:
         "--x11", action="store_true", help="run the app on a private Xwayland display"
     )
     run.add_argument(
+        "--real-env",
+        action="store_true",
+        help="give the app the environment framewisp was started with, including "
+        "its home, XDG and temp directories, fonts, theme, locale, time zone and "
+        "desktop identity, instead of a sanitized one; output can then differ "
+        "between hosts",
+    )
+    run.add_argument(
         "--record", type=Path, metavar="FILE", help="record the session to MP4"
     )
     run.add_argument(
@@ -486,6 +494,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             size=(args.width, args.height),
             x11=args.x11,
             retain_input_content=args.retain_input_content,
+            real_env=args.real_env,
         )
     elif args.action in {"record-start", "record-stop", "status", "stop"}:
         if attached and args.action in {"status", "stop"}:

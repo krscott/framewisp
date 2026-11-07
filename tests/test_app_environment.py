@@ -225,11 +225,17 @@ def test_gtk_app_ignores_conflicting_caller(
     assert host_files(host) == original
 
 
-def session_env(tmp_path: Path, name: str, caller: dict[str, str], *app: str) -> str:
+def session_env(
+    tmp_path: Path,
+    name: str,
+    caller: dict[str, str],
+    *app: str,
+    options: tuple[str, ...] = (),
+) -> str:
     """Run a command that exits by itself and return what it printed."""
     session = tmp_path / f"session-{name}"
     result = subprocess.run(
-        ["framewisp", str(session), "run", "--", *app],
+        ["framewisp", str(session), "run", *options, "--", *app],
         env=os.environ | caller,
         capture_output=True,
         text=True,
@@ -536,6 +542,78 @@ print(json.dumps(paths))
     assert not any(Path(path).exists() for path in paths.values())
     assert not any(home.rglob("app-file"))
     assert not any(temporary.rglob("app-file"))
+
+
+
+# R-ENV-8
+@pytest.mark.integration
+def test_real_environment_reaches_app_and_survives_cleanup(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    home = tmp_path / "caller home"
+    # The symlink the app leaves in the runtime points here; cleanup must not
+    # follow it.
+    target = home / "target"
+    target.mkdir(parents=True)
+    (target / "file").touch()
+    target.chmod(0o555)
+    # TMPDIR holds the runtime sockets, so it needs a short path.
+    temporary_directory = tempfile.TemporaryDirectory(dir="/tmp")
+    request.addfinalizer(temporary_directory.cleanup)
+    temporary = Path(temporary_directory.name)
+    caller = {
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / "config"),
+        "XDG_CACHE_HOME": str(home / "cache"),
+        "XDG_DATA_HOME": str(home / "data"),
+        "XDG_STATE_HOME": str(home / "state"),
+        "XDG_CONFIG_DIRS": str(home / "config-dirs"),
+        "TMPDIR": str(temporary),
+        "LANG": "en_GB.UTF-8",
+        "TZ": "Asia/Tokyo",
+        "GTK_THEME": "HostTheme",
+        "GDK_SCALE": "3",
+        "QT_SCALE_FACTOR": "3",
+        "XDG_CURRENT_DESKTOP": "GNOME",
+        "FONTCONFIG_FILE": str(home / "fonts.conf"),
+        # The display backend follows the private display, not the caller.
+        "QT_QPA_PLATFORM": "xcb",
+    }
+    script = """
+import json, os
+from pathlib import Path
+for name in ("HOME", "TMPDIR"):
+    path = Path(os.environ[name])
+    (path / "app-file").touch()
+    directory = path / "read-only"
+    directory.mkdir()
+    (directory / "file").touch()
+    directory.chmod(0o555)
+runtime = Path(os.environ["XDG_RUNTIME_DIR"])
+(runtime / "link").symlink_to(Path(os.environ["HOME"]) / "target")
+print(json.dumps(dict(os.environ)))
+"""
+    output = session_env(
+        tmp_path,
+        "real",
+        caller,
+        sys.executable,
+        "-I",
+        "-c",
+        script,
+        options=("--real-env",),
+    )
+    seen = json.loads(output.splitlines()[-1] if output.strip() else "{}")
+    assert {name: seen.get(name) for name in caller} == caller | {
+        "QT_QPA_PLATFORM": "wayland"
+    }
+    assert not Path(seen["XDG_RUNTIME_DIR"]).exists()
+    for path in (home, temporary):
+        assert (path / "app-file").is_file()
+        assert (path / "read-only" / "file").is_file()
+        assert (path / "read-only").stat().st_mode & 0o777 == 0o555
+    assert (target / "file").is_file()
+    assert target.stat().st_mode & 0o777 == 0o555
 
 
 CAPTION_REGION = (0, 0, 1280, 720)
