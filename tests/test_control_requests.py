@@ -18,12 +18,21 @@ from framewisp.errors import SessionError, display_command
 from framewisp.inputs import InputWorker
 from framewisp.lib import (
     Recordings,
+    RecordStart,
     handle_session_command,
     parse_batch,
     recording_summary,
 )
 
 SECRET = "typed secret"
+
+
+@pytest.mark.parametrize("raw", [None, 1, "yes", {"before": 1, "after": 2}])
+def test_record_start_requires_a_boolean_compact(raw: object) -> None:
+    with pytest.raises(ValueError, match="compact must be true or false"):
+        RecordStart.parse(
+            {"destination": "/tmp/clip.mp4", "captions": "keys", "compact": raw}
+        )
 
 
 @pytest.fixture

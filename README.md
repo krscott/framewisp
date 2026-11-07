@@ -220,10 +220,10 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE \| --no-captions] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE \| --no-captions] [--no-click-pings] FILE` | Start a clip in the running session. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -633,7 +633,7 @@ text panel, on the right and 640 pixels wide by default:
 ```sh
 framewisp demo run --record /tmp/startup.mp4 --console -- framewisp-demo
 # Or capture a later clip, with or without input captions:
-framewisp demo record-start --console --no-captions /tmp/console.mp4
+framewisp demo record-start --console --captions none /tmp/console.mp4
 framewisp demo record-stop
 # Or place a 200-pixel panel under the GUI:
 framewisp demo record-start --console --console-position bottom --console-size 200 /tmp/below.mp4
@@ -668,17 +668,15 @@ Add `--compact` to remove gaps between commands when the clip is finalized:
 
 ```sh
 framewisp demo run --record /tmp/demo.mp4 --compact -- framewisp-demo
-# Or choose padding for a later clip:
-framewisp demo record-start --compact --compact-before 1 --compact-after 2 /tmp/compact.mp4
+# Or compact a later clip:
+framewisp demo record-start --compact /tmp/compact.mp4
 framewisp demo record-stop
 ```
 
 Compaction keeps each input's full duration, including paced typing and drags.
-It keeps 1 second before and 2 seconds after by default, merging overlapping
-sections. The same padding keeps the opening 1 second and closing 2 seconds.
-Both padding values accept finite, nonnegative seconds; their options require
-`--compact`, and `run --compact` requires `--record`. Cuts round outward to
-30 fps frames. At least the first and last frames remain even with zero padding.
+It keeps 1 second before and 2 seconds after, merging overlapping sections. The
+same padding keeps the opening 1 second and closing 2 seconds. `run --compact`
+requires `--record`. Cuts round outward to 30 fps frames.
 
 Batch checks (`baseline`, `wait`, and `assert`) and batch capture delays remain
 in full, including failed and cancelled steps. Their timestamp-only spans are
@@ -688,12 +686,10 @@ Each clip chooses compaction independently; the default keeps the full recording
 
 Cuts use command timestamps, not pixel changes. Blinking cursors do not prevent
 trimming. Animations, app output, and delayed responses in removed gaps can be
-omitted. Use larger padding or a batch wait when an app needs time to respond;
-leave compaction off when the entire timeline matters. External sleeps between
-commands are gaps and can be removed. Captions, click pings, and console text
-stay aligned with the retained GUI frames; console timestamps still show original
-clip time. Each click ping keeps its full half second even when padding is shorter.
-The reported duration measures the compacted MP4. Session logs keep their original
+omitted. Use a batch wait when an app needs time to respond; leave compaction off
+when the entire timeline matters. External sleeps between commands are gaps and
+can be removed. Captions, click pings, and console text stay aligned with the
+retained GUI frames; console timestamps still show original clip time. The reported duration measures the compacted MP4. Session logs keep their original
 timestamps and content.
 
 Compaction, console rendering, input captions, and click pings share one FFmpeg
@@ -775,12 +771,11 @@ Recordings caption keyboard input by default. Choose what a clip captions with
 | `keys` (default) | `key` and `type`. |
 | `pointer` | `move`, `click`, `drag`, and `scroll`. |
 | `all` | Keyboard and pointer inputs. |
-| `none` | Nothing. `--no-captions` is shorthand for this. |
+| `none` | Nothing. |
 
 Under the default, a clip with no keyboard input has no captions. Every value
 follows the input-content policy above, so a default `key` or `type` caption shows
-only what the log retained. Combining `--captions` and `--no-captions` is an
-error, as is using either with `run` without `--record`.
+only what the log retained. `run` accepts `--captions` only with `--record`.
 
 Captions stay visible during paced input and briefly after quick commands, until
 the next captioned input. Opted-in text is abbreviated in the video; the log
@@ -793,7 +788,7 @@ For example:
 # Show pointer gestures too:
 framewisp demo record-start --captions all /tmp/gestures.mp4
 # Or start the session with an uncaptioned recording:
-framewisp demo run --record /tmp/plain.mp4 --no-captions -- framewisp-demo
+framewisp demo run --record /tmp/plain.mp4 --captions none -- framewisp-demo
 ```
 
 Click pings mark each pointer press in a recording: a red ring grows and fades
@@ -801,7 +796,7 @@ over half a second at the click position. Each click of a double click and the
 press and release of a completed drag get their own ping; a cancelled drag pings
 its press but not its cleanup release. Scrolls and moves get none.
 Clips with `run --record` and `record-start` show them by default, independently
-of `--captions` and `--no-captions`. Screenshots never include them (R-LOG-3), and `inspect` and
+of `--captions`. Screenshots never include them (R-LOG-3), and `inspect` and
 input coordinates are unaffected. Disable them for a clip with:
 
 ```sh
@@ -810,7 +805,7 @@ framewisp demo record-start --no-click-pings /tmp/plain.mp4
 framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
 ```
 
-A clip with a click is encoded again to draw its pings, even with `--no-captions`
+A clip with a click is encoded again to draw its pings, even with `--captions none`
 or no keyboard input. Add `--no-click-pings` to keep the recorder's output
 unprocessed when nothing else needs rendering. With a
 runner started by an older framewisp, `record-start` fails until you restart the

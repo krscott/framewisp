@@ -161,39 +161,6 @@ def test_console_requires_recording(tmp_path: Path) -> None:
     assert not (tmp_path / "session").exists()
 
 
-@pytest.mark.parametrize("action", ["run", "record-start"])
-@pytest.mark.parametrize(
-    "options,message",
-    [
-        (["--compact-before", "1"], "require --compact"),
-        (["--compact-after", "2"], "require --compact"),
-        (["--compact", "--compact-before", "nan"], "finite, nonnegative"),
-        (["--compact", "--compact-after", "inf"], "finite, nonnegative"),
-        (["--compact", "--compact-before=-1"], "finite, nonnegative"),
-    ],
-)
-def test_invalid_compact_options(
-    tmp_path: Path,
-    action: str,
-    options: list[str],
-    message: str,
-) -> None:
-    session = tmp_path / "session"
-    arguments = (
-        ["--", "framewisp-demo"] if action == "run" else [str(tmp_path / "clip.mp4")]
-    )
-    result = subprocess.run(
-        [sys.executable, "-m", "framewisp", str(session), action, *options, *arguments],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=5,
-    )
-    assert result.returncode == 2
-    assert message in result.stderr
-    assert not session.exists()
-
-
 def test_compact_requires_recording(tmp_path: Path) -> None:
     result = subprocess.run(
         [
@@ -411,8 +378,8 @@ def test_run_no_click_pings_requires_record(tmp_path: Path) -> None:
     assert not (tmp_path / "session").exists()
 
 
-@pytest.mark.parametrize("option", [["--captions", "all"], ["--no-captions"]])
-def test_run_caption_options_require_record(tmp_path: Path, option: list[str]) -> None:
+@pytest.mark.parametrize("mode", ["all", "none"])
+def test_run_captions_requires_record(tmp_path: Path, mode: str) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -420,7 +387,8 @@ def test_run_caption_options_require_record(tmp_path: Path, option: list[str]) -
             "framewisp",
             str(tmp_path / "session"),
             "run",
-            *option,
+            "--captions",
+            mode,
             "--",
             "framewisp-demo",
         ],
@@ -430,48 +398,8 @@ def test_run_caption_options_require_record(tmp_path: Path, option: list[str]) -
         timeout=5,
     )
     assert result.returncode == 2
-    assert "--captions and --no-captions require --record" in result.stderr
+    assert "--captions requires --record" in result.stderr
     assert not (tmp_path / "session").exists()
-
-
-# R-LOG-6
-@pytest.mark.parametrize("action", ["run", "record-start"])
-@pytest.mark.parametrize(
-    "options",
-    [
-        ["--captions", "keys", "--no-captions"],
-        ["--no-captions", "--captions", "keys"],
-        ["--no-captions", "--captions", "none"],
-    ],
-)
-def test_caption_options_conflict(
-    tmp_path: Path, action: str, options: list[str]
-) -> None:
-    destination = tmp_path / "clip.mp4"
-    arguments = (
-        ["--record", str(destination), *options, "--", "framewisp-demo"]
-        if action == "run"
-        else [*options, str(destination)]
-    )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "framewisp",
-            str(tmp_path / "session"),
-            action,
-            *arguments,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=5,
-    )
-    assert result.returncode == 2
-    assert "not allowed with argument" in result.stderr
-    assert "--captions" in result.stderr and "--no-captions" in result.stderr
-    assert not (tmp_path / "session").exists()
-    assert not destination.exists()
 
 
 @pytest.mark.parametrize("action", ["run", "record-start"])
