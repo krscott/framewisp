@@ -587,8 +587,8 @@ cleanup steps.
 Recovery verifies the journal's session identity and reads its absolute runtime
 path. It refuses a path whose basename does not match the UID and session
 identity, or whose status cannot be checked, and a journal without a path
-(R-LIFE-5). Recovery checks the runtime's inode, owner, permissions, and directory
-type regardless of the current `TMPDIR`. Normal cleanup reads the same journal
+(R-LIFE-5). Recovery checks the runtime's inode, owner, and permissions regardless
+of the current `TMPDIR`. Normal cleanup reads the same journal
 path. Recovery never signals stored PIDs or uses `session.json` to authorize
 cleanup. A null runtime identity permits only rmdir of an empty directory,
 covering interruption between mkdir and journal update. Missing runtimes are
@@ -599,10 +599,15 @@ journals, symlink ownership files, and replaced runtimes fail verification
 descriptor the caller holds. A replaced or deleted lock leaves recovery holding a
 different inode from any live owner, so it refuses with manual cleanup steps
 (R-LIFE-5). A live owner compares its own descriptor, so its cleanup succeeds even
-if the lock path was replaced.
+if the lock path was replaced. Only lock identity decides, so a permissive
+`chmod -R` or a hard-linked copy does not block recovery of the original, and the
+copy still fails its session identity check. A lock that is a symlink or directory,
+or that the caller cannot open, is refused with steps. These checks catch copies,
+damage, and accidental replacement. A journal deliberately rewritten to match the
+session, lock, and runtime passes them (R-LIFE-5).
 
-`read_journal` is the one check for every other unreadable journal: an open,
-ownership, size, parse, session, runtime-path, runtime-identity, or lock-identity
+`read_journal` is the one check for every other unreadable journal: an open, size,
+parse, session, runtime-path, runtime-identity, or lock-identity
 failure removes nothing and prints manual cleanup steps (R-LIFE-7). A missing
 journal with resources remaining prints the same steps. Those steps use the runtime
 path derived from the session identity and the current TMPDIR, because a damaged
@@ -612,8 +617,7 @@ or read-only directory, so these steps and the no-journal check look for the run
 in `gettempdir()`, `TMPDIR`, and `/tmp`. A location that cannot be checked counts as
 holding it, so recovery refuses, names it, and says to restore access. Unsetting
 `TMPDIR` only stops the check, so it is offered just for a session known not to have
-run there. A lock that changes while the lease is acquired prints them too,
-and running recover again compares the new lock with the journal. A missing session
+run there. A missing session
 directory has no identity to derive a name from, so those steps list runtime
 directory names and the names running processes use. They never single out a
 directory to delete, because a starting session has no marked process yet, and a
@@ -625,7 +629,7 @@ a runtime that cannot be removed, prints steps using the journal's path
 directory's name, which is the same under any TMPDIR. Stale attachment metadata
 without a journal gets attachment steps instead, because `run`, `status`, and `stop`
 do not apply to it (R-LIFE-7). That is the only use of `session.json`, and it only
-selects the message; recovery reads it as untrusted input, like the journal.
+selects the message; recovery reads it as possibly damaged input, like the journal.
 
 Once ownership is verified and no supervisor records remain,
 recovery removes the runtime, `session.json`, its temporary file, and the
@@ -643,7 +647,7 @@ with a missing runtime or refuses resources without a journal, with manual steps
 
 The lock file persists across runs and must not be unlinked or replaced. Acquiring
 the lease refuses session directories that the caller does not own or that
-group or others can write (R-SESSION-6); malicious same-user filesystem mutation is outside the protocol.
+group or others can write (R-SESSION-6); deliberate same-user filesystem changes are outside the protocol (R-LIFE-5).
 Recovery
 cannot prove cleanup if supervisors also die or kernel I/O prevents child exit;
 records and runtime remain for manual investigation. Attached sessions acquire this same session lease before writing metadata and
