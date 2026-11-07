@@ -161,6 +161,9 @@ observable behaviour, not implementation, in short sentences.
   links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports
   the path of the interrupted clip. That clip does not block later recordings.
+- **R-REC-21** [test] `screenshot` and batch capture reject their own session's
+  active recording destination, directly or through a symlink. The recording
+  continues, and `record-stop` publishes it at that destination.
 
 ## Lifetime and recovery (LIFE)
 

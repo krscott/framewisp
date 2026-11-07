@@ -3699,7 +3699,7 @@ def test_batch_capture_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> 
     assert not list(tmp_path.glob(".framewisp-capture-*"))
 
 
-# R-REC-1
+# R-REC-1, R-REC-21
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_batch_capture_rejects_active_recording_destination(
@@ -3719,6 +3719,95 @@ def test_batch_capture_rejects_active_recording_destination(
     assert "active recording" in response["error"]
     cli(demo.directory, "record-stop")
     recording_frames(clip)
+
+
+def rejected_screenshot(demo: Demo, path: Path) -> str:
+    result = subprocess.run(
+        ["framewisp", str(demo.directory), "screenshot", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 1, result.stderr
+    return result.stderr
+
+
+# R-REC-21
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_batch_capture_yields_to_a_recording_started_during_the_batch(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    with input_request(
+        demo,
+        "batch",
+        {
+            "actions": [{"action": "type", "text": "", "interval": 0}],
+            # Longer than record-start's ten-second limit, so it finishes first.
+            "capture": {"path": str(clip), "delay": 11},
+        },
+    ) as connection:
+        connection.settimeout(20)
+        cli(demo.directory, "record-start", str(clip))
+        response = json.loads(connection.makefile().readline())
+    assert response["data"]["failed_phase"] == "capture"
+    assert "active recording" in response["error"]
+    assert not clip.exists()
+    cli(demo.directory, "record-stop")
+    assert demo.process.poll() is None
+    recording_frames(clip)
+
+
+# R-REC-21
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None, True], indirect=True)
+def test_screenshot_rejects_active_recording_destination(
+    demo: Demo, tmp_path: Path
+) -> None:
+    clip = demo.recording or tmp_path / "clip.mp4"
+    if demo.recording is None:
+        cli(demo.directory, "record-start", str(clip))
+    alias = tmp_path / "alias.mp4"
+    alias.symlink_to(clip)
+    for path in (clip, alias):
+        assert "active recording" in rejected_screenshot(demo, path)
+        assert not clip.exists()
+    cli(demo.directory, "record-stop")
+    assert demo.process.poll() is None
+    recording_frames(clip)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [None], indirect=True)
+def test_screenshot_works_on_a_runner_without_the_recording_key(
+    demo: Demo, tmp_path: Path
+) -> None:
+    state_path = demo.directory / "session.json"
+    state = json.loads(state_path.read_text())
+    del state["recording"]
+    state_path.write_text(json.dumps(state))
+    cli(demo.directory, "screenshot", str(tmp_path / "shot.png"))
+    assert (tmp_path / "shot.png").read_bytes().startswith(b"\x89PNG")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("demo", [True], indirect=True)
+def test_screenshot_during_a_recording_keeps_plain_outputs(
+    demo: Demo, tmp_path: Path
+) -> None:
+    existing = tmp_path / "existing.png"
+    existing.write_bytes(b"replace me")
+    cli(demo.directory, "screenshot", str(existing))
+    assert existing.read_bytes().startswith(b"\x89PNG")
+    piped = subprocess.run(
+        ["framewisp", str(demo.directory), "screenshot", "-"],
+        capture_output=True,
+        check=True,
+        timeout=20,
+    )
+    assert piped.stdout.startswith(b"\x89PNG")
 
 
 # R-REC-1, R-REC-18

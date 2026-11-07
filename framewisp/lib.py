@@ -31,6 +31,7 @@ from framewisp.captions import (
 )
 from framewisp.compact import CompactSettings
 from framewisp.connection import (
+    capture_path_error,
     parse_command,
     receive_request,
     reply,
@@ -760,11 +761,9 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
         path_error = recording_path_error(recordings.session, resolved)
         if path_error is not None:
             raise ValueError(path_error.replace("recording path", "capture path"))
-        if resolved == recordings.destination:
-            raise ValueError(
-                f"{capture.path} is the active recording's destination. "
-                "Choose a new capture path."
-            )
+        error = capture_path_error(resolved, recordings.destination)
+        if error is not None:
+            raise ValueError(error)
     return batch
 
 
@@ -1059,7 +1058,7 @@ def _run_session(
                 size=size,
                 retain_input_content=retain_input_content,
                 capture=lambda path, cancelled: batch_screenshot(
-                    session, path, cancelled
+                    recordings, path, cancelled
                 ),
             )
             stack.callback(inputs.close)
@@ -1089,6 +1088,11 @@ def _run_session(
                             "width": size[0],
                             "height": size[1],
                             "x11_display": x11_display,
+                            "recording": (
+                                str(recordings.destination)
+                                if recordings.destination is not None
+                                else None
+                            ),
                             "processes": {
                                 name: process.pid for name, process in processes.items()
                             },
@@ -1190,6 +1194,14 @@ def screenshot(
         raise SessionError(
             "screenshot --json requires a file path; '-' writes PNG to stdout."
         )
+    if str(destination) != "-":
+        # A runner from an older framewisp publishes no recording key.
+        recording = json.loads((session / "session.json").read_text()).get("recording")
+        error = capture_path_error(
+            destination, Path(recording) if isinstance(recording, str) else None
+        )
+        if error is not None:
+            raise SessionError(error)
     selector = ["-o", "HEADLESS-1"]
     width = height = 0
     x = y = 0
@@ -1246,7 +1258,7 @@ def screenshot(
 
 
 def batch_screenshot(
-    session: Path, destination: Path, cancelled: Callable[[], bool]
+    recordings: Recordings, destination: Path, cancelled: Callable[[], bool]
 ) -> int:
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
@@ -1254,11 +1266,15 @@ def batch_screenshot(
             prefix=".framewisp-capture-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "capture.png"
-            screenshot(session, temporary, cancelled=cancelled)
+            screenshot(recordings.session, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Capture cancelled; caller disconnected or session stopped."
                 )
+            # A recording may have started since this batch was validated.
+            error = capture_path_error(destination, recordings.destination)
+            if error is not None:
+                raise SessionError(error)
             destination.hardlink_to(temporary)
     except InterruptedError:
         raise
