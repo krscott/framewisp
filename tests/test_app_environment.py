@@ -483,11 +483,15 @@ print(json.dumps(paths))
     assert not any(temporary.rglob("app-file"))
 
 
+def has_text(frame: Image.Image, region: tuple[int, int, int, int]) -> bool:
+    """Overlay text is near white on a dark background."""
+    return sum(frame.crop(region).convert("L").histogram()[200:]) > 20
+
+
 def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Image:
     """Record a caption over a console panel and return a frame showing both."""
     session = tmp_path / f"session-{name}"
     clip = tmp_path / f"{name}.mp4"
-    frame = tmp_path / f"{name}.png"
     log = tmp_path / f"runner-{name}.log"
     with log.open("w") as output:
         process = subprocess.Popen(
@@ -511,32 +515,37 @@ def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Im
     try:
         wait_until(lambda: "Session ready:" in log.read_text())
         wait_until(lambda: "Console text" in (session / "app.log").read_text())
-        # Repeat the key so the caption stays visible until the clip ends.
+        # A paced clip gives the console text time to appear beside a caption.
         for _ in range(6):
             cli(session, "key", "F5")
             time.sleep(0.4)
     finally:
         process.terminate()
         process.wait(timeout=60)
+    frames = tmp_path / f"{name}-frames"
+    frames.mkdir()
     subprocess.run(
         [
             "ffmpeg",
             "-v",
             "error",
-            "-y",
-            "-sseof",
-            "-1",
             "-i",
             str(clip),
-            "-frames:v",
-            "1",
-            str(frame),
+            "-vf",
+            "fps=5",
+            str(frames / "%04d.png"),
         ],
         check=True,
         timeout=20,
     )
-    with Image.open(frame) as image:
-        return image.convert("RGB")
+    for path in sorted(frames.iterdir(), reverse=True):
+        with Image.open(path) as image:
+            frame = image.convert("RGB")
+        if has_text(frame, (0, 0, 1280, 720)) and has_text(
+            frame, (1280, 0, frame.width, 720)
+        ):
+            return frame
+    raise AssertionError(f"No frame of {clip} shows a caption and console text")
 
 
 # R-REC-23
@@ -559,6 +568,3 @@ def test_caller_font_rules_leave_recording_text_unchanged(tmp_path: Path) -> Non
     # Encoding varies faintly between clips; a different typeface does not.
     difference = ImageChops.difference(base, other).convert("L")
     assert cast(tuple[int, int], difference.getextrema())[1] <= 24
-    # Both overlays must show bright text for the comparison to mean anything.
-    for region in ((0, 0, 1280, 720), (1280, 0, base.width, 720)):
-        assert sum(base.crop(region).convert("L").histogram()[200:]) > 20
