@@ -4,6 +4,12 @@
   shards,
 }:
 assert shards > 0 && shard >= 1 && shard <= shards;
+let
+  # The `library` check runs the package's own test phase once for all shards.
+  framewisp = pkgs.framewisp.overridePythonAttrs (_: {
+    doCheck = false;
+  });
+in
 pkgs.runCommand "framewisp-package-test-${toString shard}-of-${toString shards}"
   {
     nativeBuildInputs = [ pkgs.gobject-introspection ];
@@ -16,11 +22,11 @@ pkgs.runCommand "framewisp-package-test-${toString shard}-of-${toString shards}"
     export HOME="$TMPDIR"
     mkdir -p "$out"
     ${pkgs.coreutils}/bin/env -i \
-      ${pkgs.framewisp}/bin/framewisp --agent-skill > agent-skill.md
+      ${framewisp}/bin/framewisp --agent-skill > agent-skill.md
     ${pkgs.diffutils}/bin/diff ${../framewisp/SKILL.md} agent-skill.md
     ${pkgs.coreutils}/bin/env -i \
       HOME="$HOME" \
-      PATH="${pkgs.framewisp}/bin:${pkgs.ffmpeg}/bin:${pkgs.qt6.qtdeclarative}/bin:${pkgs.git}/bin:${pkgs.gnugrep}/bin" \
+      PATH="${framewisp}/bin:${pkgs.ffmpeg}/bin:${pkgs.qt6.qtdeclarative}/bin:${pkgs.git}/bin:${pkgs.gnugrep}/bin" \
       QML_IMPORT_PATH="${pkgs.qt6.qtdeclarative}/lib/qt-6/qml" \
       QT_PLUGIN_PATH="${pkgs.qt6.qtbase}/lib/qt-6/plugins" \
       GI_TYPELIB_PATH="$GI_TYPELIB_PATH" \
