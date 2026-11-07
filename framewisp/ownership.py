@@ -121,7 +121,7 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     value = journal.get("runtime_path")
     if value is None:
         raise ValueError("journal has no runtime path")
-    if not isinstance(value, str) or "\0" in value:
+    if not isinstance(value, str):
         raise ValueError("journal runtime path must be an absolute path")
     runtime = Path(value)
     if not runtime.is_absolute() or runtime.name != runtime_name(session):
@@ -148,13 +148,10 @@ def kept_recording_note(session: Path) -> str:
 
 def unusable_lock(lock: Path, problem: str) -> str:
     recover = shlex.join(["framewisp", str(lock.parent), "recover"])
-    links = shlex.join(["find", str(lock.parent), "-samefile", str(lock)])
     return (
-        f"Session lock {lock} is unusable ({problem}): it must be a private regular "
-        "file with one link. It may have been replaced, so nothing was changed. "
-        f"If only its mode changed, run chmod 600 on it. If it has extra links, "
-        f"find them with `{links}` and delete all but the lock. Otherwise move it "
-        "aside. "
+        f"Session lock {lock} is unusable ({problem}). It may have been replaced, so "
+        "nothing was changed. If only its mode changed, run chmod 600 on it. "
+        "Otherwise move it aside. "
         f"Then run `{recover}`, which checks the lock against the session's "
         "ownership journal and reports what to do next."
     ) + kept_recording_note(lock.parent)
@@ -190,27 +187,12 @@ def session_lease(session: Path) -> Generator[int, None, None]:
             raise SessionError(unusable_lock(lock, str(error.strerror))) from error
         raise
     try:
-        info = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_nlink != 1
-            or info.st_uid != os.getuid()
-            or info.st_mode & 0o077
-        ):
-            problem = f"{stat.filemode(info.st_mode)}, {info.st_nlink} links"
-            raise SessionError(unusable_lock(lock, problem))
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SessionError(
                 "Session owner or descendant cleanup is still live. Wait for cleanup and retry."
             ) from None
-        try:
-            changed = identity(lock) != lease_identity(descriptor)
-        except FileNotFoundError:
-            changed = True
-        if changed:
-            raise SessionError(lock_changed(session))
         yield descriptor
     finally:
         # Supervisors share this open file description. Closing, rather than
@@ -244,17 +226,13 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
 
 
 def read_metadata(path: Path) -> object:
-    """Parse a session metadata file that may be damaged or tampered with."""
+    """Parse a session metadata file that may be damaged."""
     # Deeply nested JSON raises RecursionError, which callers must also handle.
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor) as source:
         info = os.fstat(source.fileno())
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-        ):
-            raise ValueError(f"{path.name} must be an owned regular file with one link")
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"{path.name} must be a regular file")
         if info.st_size > MAX_METADATA_BYTES:
             raise ValueError(f"{path.name} is over {MAX_METADATA_BYTES} bytes")
         return json.load(source)
@@ -325,22 +303,6 @@ def unreadable_journal(session: Path, problem: str) -> str:
         f"Cannot verify ownership at {session / JOURNAL}: {problem}\n"
         "Cannot prove the session has exited. Nothing was removed.\n"
         + derived_steps(session)
-    )
-
-
-def lock_changed(session: Path) -> str:
-    lock = session / LOCK
-    recover = shlex.join(["framewisp", str(session), "recover"])
-    return (
-        f"Session lock {lock} changed while acquiring ownership, so ownership "
-        "cannot be verified. Nothing was removed.\n"
-        f"Stop anything else changing it, then run `{recover}`, which checks the "
-        "lock against any ownership journal.\n"
-        + (
-            stale_attachment(session)
-            if records_attachment(session)
-            else derived_steps(session)
-        )
     )
 
 
@@ -433,9 +395,7 @@ def sync_directory(path: Path) -> None:
 
 def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) -> None:
     temporary = session / ".headless-owner.tmp"
-    descriptor = os.open(
-        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
-    )
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as output:
         json.dump(
             {
@@ -470,11 +430,7 @@ def remove_runtime(session: Path, lease: int) -> None:
         )
     if runtime.exists():
         info = runtime.lstat()
-        if (
-            not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_mode & 0o077
-        ):
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise SessionError(
                 unverified_runtime(
                     session,
@@ -521,15 +477,8 @@ def remove_runtime(session: Path, lease: int) -> None:
 
 
 def refuse_abandoned_ownership(session: Path) -> None:
-    runtime = runtime_path(session)
-    if (
-        (session / JOURNAL).exists()
-        or (session / JOURNAL).is_symlink()
-        or (session / ".headless-owner.tmp").exists()
-        or (session / ".headless-owner.tmp").is_symlink()
-        or runtime.exists()
-        or runtime.is_symlink()
-    ):
+    paths = (session / JOURNAL, session / ".headless-owner.tmp", runtime_path(session))
+    if any(path_status(path) != "absent" for path in paths):
         raise SessionError(
             "Abandoned headless ownership remains. Run framewisp SESSION recover first."
         )
@@ -556,16 +505,14 @@ def headless_runtime(session: Path, lease: int) -> Generator[Path, None, None]:
 
 def recover_session(session: Path) -> int:
     with session_lease(session) as lease:
-        if not (session / JOURNAL).exists() and not (session / JOURNAL).is_symlink():
+        if path_status(session / JOURNAL) == "absent":
             # Before the first journal commit, no runtime or children may exist.
             # A partial temporary journal is disposable, but stale session JSON
             # without an ownership journal belongs to an unsupported older run.
-            if (
-                path_status(likely_runtime(session)) != "absent"
-                or (session / "session.json").exists()
-                or (session / "session.json").is_symlink()
-                or (session / ".session.json").exists()
-                or (session / ".session.json").is_symlink()
+            metadata = (session / "session.json", session / ".session.json")
+            if any(
+                path_status(path) != "absent"
+                for path in (likely_runtime(session), *metadata)
             ):
                 if records_attachment(session):
                     raise SessionError(stale_attachment(session))

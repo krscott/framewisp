@@ -225,8 +225,14 @@ investigate or ask; never invent a rationale.
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
   directory usable again.
-- **R-LIFE-5** [test] Recovery refuses copied, tampered, symlinked, or
-  replaced ownership files and runtime directories.
+- **R-LIFE-5** [test] Recovery refuses copied, damaged, symlinked, or replaced
+  ownership files and runtime directories. A same-user program that deliberately
+  rewrites them so they verify is out of scope.
+
+  Rationale: Copies, damage and accidental replacement are honest mistakes, and
+  they must not delete a live session. A same-user program can already remove
+  these files directly, so framewisp cannot stop it.
+
 - **R-LIFE-6** [test] Session metadata copied to another directory cannot
   control the original session.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
