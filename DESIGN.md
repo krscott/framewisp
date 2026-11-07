@@ -553,7 +553,11 @@ before launching its command. It reports the real app PID and return code over a
 private, non-inherited socket. It resets inherited SIGCHLD dispositions so child
 exit statuses remain waitable. Detached and double-forked descendants reparent
 to this supervisor when their parents exit (R-LIFE-1). App exit also initiates
-tree cleanup.
+tree cleanup. Finalization's FFmpeg and FFprobe calls run to completion through
+`run_owned`, under the same supervisor. That keeps them out of the runner's process
+group, so a terminal's Ctrl+C reaches only the runner, which still renders the
+clip (R-REC-3). Each supervisor ends its helper when the runner dies. Each call
+costs a supervisor start, under 0.1 s.
 
 Cleanup enumerates only the supervisor's immediate children through
 `/proc/self/task/PID/children`, signals them through pidfds, and reaps them. It

@@ -60,7 +60,7 @@ from framewisp.ownership import (
     refuse_abandoned_ownership,
     session_lease,
 )
-from framewisp.processes import OwnedProcess, managed_process
+from framewisp.processes import OwnedProcess, ffprobe, managed_process, run_owned
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -510,30 +510,16 @@ class ClipProbe:
 
 
 def probe_clip(path: Path) -> ClipProbe:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "format=duration:stream=width,height",
-            "-of",
-            "json",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        check=False,
-        timeout=10,
+    output = ffprobe(
+        path,
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "format=duration:stream=width,height",
+        "-of",
+        "json",
     )
-    if result.returncode:
-        raise SessionError(
-            f"Could not inspect recording {path}: {result.stderr.strip()}"
-        )
-    data = cast(dict[str, Any], json.loads(result.stdout))
+    data = cast(dict[str, Any], json.loads(output))
     duration = data["format"].get("duration")
     streams = cast(list[dict[str, Any]], data["streams"])
     stream = streams[0] if streams else {}
@@ -556,8 +542,9 @@ def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
     if probe.width is None:
         return False
     remuxed = clip.with_name("remuxed.mp4")
+    remux_log = clip.with_name("remux.log")
     try:
-        result = subprocess.run(
+        result = run_owned(
             [
                 "ffmpeg",
                 "-nostdin",
@@ -571,15 +558,14 @@ def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
                 "copy",
                 str(remuxed),
             ],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            check=False,
+            log=remux_log,
+            env=dict(os.environ),
             timeout=10,
         )
-        problem = result.stderr.strip() if result.returncode else None
-    except subprocess.TimeoutExpired as error:
+        problem = remux_log.read_text(errors="replace").strip() if result else None
+    except (RuntimeError, subprocess.TimeoutExpired) as error:
         problem = str(error)
+    remux_log.unlink(missing_ok=True)
     if problem is not None:
         remuxed.unlink(missing_ok=True)
         try:

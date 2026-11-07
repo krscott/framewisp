@@ -2,13 +2,14 @@
 
 import json
 import math
-import subprocess
 import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TypedDict
+
+from framewisp.processes import ffprobe
 
 # Seconds kept around each activity span and at each end of a clip. A click ping
 # starts inside its input's span, so PADDING_AFTER also keeps it whole (R-REC-8).
@@ -108,31 +109,17 @@ def compact_filter(ranges: list[tuple[int, int]]) -> str:
 
 def recording_duration(path: Path) -> float:
     """Use the encoded timeline so stop/encoder latency cannot remove the tail."""
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        check=False,
-        timeout=10,
+    output = ffprobe(
+        path,
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
     )
-    if result.returncode:
-        raise RuntimeError(
-            f"Could not inspect recording {path}: {result.stderr.strip()}"
-        )
     try:
-        duration = float(result.stdout)
+        duration = float(output)
     except ValueError:
         raise RuntimeError(
             f"Recording {path} has no readable video duration."

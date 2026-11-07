@@ -1,9 +1,11 @@
 """Runner-side handle for a private descendant-owning supervisor."""
 
 import json
+import os
 import select
 import socket
 import subprocess
+import tempfile
 import time
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
@@ -90,6 +92,7 @@ def managed_process(
     log: Path,
     env: dict[str, str],
     output: BinaryIO | None = None,
+    cwd: Path | None = None,
 ) -> Generator[OwnedProcess, None, None]:
     parent, child = socket.socketpair()
     with parent, child, ExitStack() as stack:
@@ -114,6 +117,7 @@ def managed_process(
             stderr=subprocess.STDOUT,
             pass_fds=(child.fileno(),) + ((lease,) if lease >= 0 else ()),
             start_new_session=True,
+            cwd=cwd,
         )
         child.close()
         process = OwnedProcess(supervisor, parent, log)
@@ -132,3 +136,42 @@ def managed_process(
             yield process
         finally:
             process.close()
+
+
+def run_owned(
+    command: list[str],
+    *,
+    log: Path,
+    env: dict[str, str],
+    cwd: Path | None = None,
+    timeout: float | None = None,
+) -> int:
+    """Run a helper to completion under its own supervisor; return its exit code.
+
+    The helper is outside the runner's process group, so a terminal's Ctrl+C
+    reaches only the runner, and its supervisor ends it if the runner dies.
+    """
+    with managed_process(command, log=log, env=env, cwd=cwd) as process:
+        started = time.monotonic()
+        while (result := process.poll()) is None:
+            if timeout is not None and time.monotonic() - started >= timeout:
+                raise subprocess.TimeoutExpired(command, timeout)
+            process.receive(0.05)
+    return result
+
+
+def ffprobe(path: Path, *arguments: str) -> str:
+    """Return ffprobe's output for `path`, run with `run_owned`."""
+    with tempfile.TemporaryDirectory(prefix="framewisp-ffprobe-") as directory:
+        work = Path(directory)
+        output = work / "output"
+        result = run_owned(
+            ["ffprobe", "-v", "error", *arguments, "-o", str(output), str(path)],
+            log=work / "ffprobe.log",
+            env=dict(os.environ),
+            timeout=10,
+        )
+        if result:
+            problem = (work / "ffprobe.log").read_text(errors="replace").strip()
+            raise RuntimeError(f"Could not inspect recording {path}: {problem}")
+        return output.read_text(errors="replace")
