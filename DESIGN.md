@@ -1351,10 +1351,12 @@ PNG capture alone never set batch `verified` to true (R-CHECK-3).
 ## Continuous integration
 
 GitHub Actions runs formatting and development-shell quality checks alongside
-eight installed-package test shards on standard Ubuntu runners. Each shard
-builds the package and runs its unit tests serially, then runs its assigned GUI
-cases serially. `nix flake check` runs all eight checks; a single shard can be run
-with `nix build -L .#checks.x86_64-linux.package-1` through `package-8`.
+one library test job and eight installed-package test shards on standard Ubuntu
+runners. The `library` check is the package build with its test phase, which runs
+the unit tests serially. Each shard builds the package without that phase, then
+runs its assigned GUI cases serially. `nix flake check` runs all nine checks; a
+single check can be run with `nix build -L .#checks.x86_64-linux.library` or
+`package-1` through `package-8`.
 
 `nix/package-check.nix` runs installed-package tests in an empty environment with
 explicit GTK, Qt, recording, and Python dependencies. `tests/conftest.py` assigns
@@ -1365,5 +1367,6 @@ selects every case for ordinary pytest invocations. CI uses all eight groups.
 Successful package checks publish JUnit reports. Failed installed-package checks
 retain their Nix build directories so CI can upload test logs, recordings, and
 JUnit reports.
-The `build` status requires formatting, quality checks, and every package shard to
-succeed. New commits cancel obsolete runs for the same workflow and Git ref.
+The `build` status requires formatting, quality checks, library tests, and every
+package shard to succeed. New commits cancel obsolete runs for the same workflow
+and Git ref.

@@ -61,7 +61,10 @@
           default = pkgs.framewisp;
         };
 
-        checks = builtins.listToAttrs (
+        checks = {
+          library = pkgs.framewisp;
+        }
+        // builtins.listToAttrs (
           map (shard: {
             name = "package-${toString shard}";
             value = import ./nix/package-check.nix {

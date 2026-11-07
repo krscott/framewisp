@@ -67,6 +67,18 @@ jobs:
         nix flake check --no-build
         nix flake show '.?submodules=1'
 
+  library:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build package and run library tests
+      run: nix build -L ".#checks.x86_64-linux.library"
+
   package:
     name: package (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
@@ -113,7 +125,7 @@ jobs:
 
   build:
     if: always()
-    needs: [format, quality, package]
+    needs: [format, quality, library, package]
     runs-on: ubuntu-latest
     steps:
     - name: Require all CI jobs to pass
