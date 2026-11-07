@@ -33,6 +33,15 @@ def conflicting_home(tmp_path: Path) -> Path:
     return host
 
 
+def host_files(host: Path) -> dict[Path, bytes]:
+    # Framewisp's own tools may share the caller's font cache; the app may not.
+    return {
+        path.relative_to(host): path.read_bytes()
+        for path in host.rglob("*")
+        if path.is_file() and "fontconfig" not in path.relative_to(host).parts[:2]
+    }
+
+
 # R-ENV-4, R-ENV-6
 @pytest.mark.integration
 @pytest.mark.parametrize("x11", [False, True], ids=["wayland", "x11"])
@@ -44,11 +53,7 @@ def test_gtk_app_ignores_conflicting_caller(
     assert app and Path(app).is_file(), "Run inside nix develop for GTK's demo app"
     host = conflicting_home
     config = host / ".config"
-    original = {
-        path.relative_to(host): path.read_bytes()
-        for path in host.rglob("*")
-        if path.is_file()
-    }
+    original = host_files(host)
     services = tmp_path / "services"
     services.mkdir()
     (services / "ca.desrt.dconf.service").write_text(
@@ -216,11 +221,7 @@ def test_gtk_app_ignores_conflicting_caller(
         ImageChops.difference(*(image.crop(region) for image in captures)).getbbox()
         is None
     )
-    assert {
-        path.relative_to(host): path.read_bytes()
-        for path in host.rglob("*")
-        if path.is_file()
-    } == original
+    assert host_files(host) == original
 
 
 def session_env(tmp_path: Path, name: str, caller: dict[str, str], *app: str) -> str:
@@ -334,9 +335,15 @@ def test_qt_app_ignores_caller_difference(
 
 # R-ENV-4
 @pytest.mark.integration
-def test_qt_app_ignores_caller_fonts(tmp_path: Path) -> None:
+@pytest.mark.parametrize("override", ["file", "sysroot"])
+def test_qt_app_ignores_caller_fonts(tmp_path: Path, override: str) -> None:
+    caller = (
+        empty_fontconfig(tmp_path)
+        if override == "file"
+        else {"FONTCONFIG_SYSROOT": str(tmp_path / "nonexistent")}
+    )
     base = qt_probe_capture(tmp_path, "base", {})
-    other = qt_probe_capture(tmp_path, "other", empty_fontconfig(tmp_path))
+    other = qt_probe_capture(tmp_path, "other", caller)
     assert ImageChops.difference(base, other).getbbox() is None
 
 
@@ -458,6 +465,11 @@ for name in (
     assert not any(path.rglob("caller-file")), name
     (path / "app-file").touch()
     paths[name] = str(path)
+    # Tools such as Go's module cache leave directories like this one.
+    directory = path / "read-only"
+    directory.mkdir()
+    (directory / "file").touch()
+    directory.chmod(0o555)
 print(json.dumps(paths))
 """
     output = session_env(
@@ -481,6 +493,11 @@ print(json.dumps(paths))
     assert not any(Path(path).exists() for path in paths.values())
     assert not any(home.rglob("app-file"))
     assert not any(temporary.rglob("app-file"))
+
+
+CAPTION_REGION = (0, 0, 1280, 720)
+# Skip each console line's timestamp, which depends on app startup time.
+CONSOLE_TEXT_REGION = (1400, 0, 1920, 720)
 
 
 def has_text(frame: Image.Image, region: tuple[int, int, int, int]) -> bool:
@@ -541,16 +558,17 @@ def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Im
     for path in sorted(frames.iterdir(), reverse=True):
         with Image.open(path) as image:
             frame = image.convert("RGB")
-        if has_text(frame, (0, 0, 1280, 720)) and has_text(
-            frame, (1280, 0, frame.width, 720)
-        ):
+        if has_text(frame, CAPTION_REGION) and has_text(frame, CONSOLE_TEXT_REGION):
             return frame
     raise AssertionError(f"No frame of {clip} shows a caption and console text")
 
 
 # R-REC-23
 @pytest.mark.integration
-def test_caller_font_rules_leave_recording_text_unchanged(tmp_path: Path) -> None:
+@pytest.mark.parametrize("override", ["home", "sysroot"])
+def test_caller_font_settings_leave_recording_text_unchanged(
+    tmp_path: Path, override: str
+) -> None:
     home = tmp_path / "home"
     config = home / ".config" / "fontconfig"
     config.mkdir(parents=True)
@@ -563,8 +581,19 @@ def test_caller_font_rules_leave_recording_text_unchanged(tmp_path: Path) -> Non
     other = overlay_frame(
         tmp_path,
         "other",
-        {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")},
+        (
+            {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")}
+            if override == "home"
+            else {"FONTCONFIG_SYSROOT": str(tmp_path / "nonexistent")}
+        ),
     )
     # Encoding varies faintly between clips; a different typeface does not.
     difference = ImageChops.difference(base, other).convert("L")
-    assert cast(tuple[int, int], difference.getextrema())[1] <= 24
+    largest = {
+        name: cast(tuple[int, int], difference.crop(region).getextrema())[1]
+        for name, region in {
+            "caption": CAPTION_REGION,
+            "console": CONSOLE_TEXT_REGION,
+        }.items()
+    }
+    assert largest == {name: min(value, 24) for name, value in largest.items()}

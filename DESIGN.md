@@ -127,7 +127,9 @@ services cannot inherit wrapper defaults for variables absent in the caller.
 The runtime resolves the daemon executable through its own PATH before running it
 with the app environment. The registry, compositor,
 VNC server, and capture tools keep the runtime environment. Sanitizing applies
-to the app and its buses; the runtime supplies the font file explicitly. The process supervisor also reads its original exec environment
+to the app and its buses. The runner gives its own tools the same font file
+through `environment.fixed_fonts`, so compositor title bars and captions cannot
+use the caller's fonts (R-ENV-4, R-REC-23). The process supervisor also reads its original exec environment
 and passes it explicitly to each managed child, so its Python startup cannot
 add locale variables to the child's environment.
 The supervisor runs with the current interpreter binary from `/proc/self/exe`,
@@ -187,9 +189,9 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    Fusion/software rendering at 96 DPI. It is a denylist: lookup paths and
    app-specific variables pass through, because no fixed list can name them
    (R-ENV-3). Callers change the result with `env` on the app command, which
-   runs after this step (R-ENV-5), so no framewisp option does. These directories
+   runs after this step (R-ENV-5). These directories
    share runtime ownership, shutdown and recovery; nothing in them survives
-   successful cleanup. See README for compatibility limits.
+   successful cleanup, including read-only directories an app leaves behind. See README for compatibility limits.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at the requested width and height (default 1280x720) and
    60 Hz, a fallback seat, US keyboard layout,

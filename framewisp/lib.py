@@ -38,6 +38,8 @@ from framewisp.connection import (
 from framewisp.console import ConsoleCapture, app_output
 from framewisp.environment import (
     caller_environment,
+    configured_fonts,
+    fixed_fonts,
     sanitized_environment,
     unix_bus_address,
 )
@@ -925,8 +927,8 @@ def run_session(
     x11: bool = False,
     retain_input_content: bool = False,
 ) -> int:
-    fonts = os.environ.get("FRAMEWISP_FONTCONFIG_FILE")
-    if not fonts or not Path(fonts).is_file():
+    fonts = configured_fonts(os.environ)
+    if fonts is None:
         raise SessionError(
             "run requires FRAMEWISP_FONTCONFIG_FILE, a Fontconfig file that selects "
             "a fixed set of fonts. Use the Nix package or nix develop, or set it to "
@@ -999,7 +1001,10 @@ def _run_session(
             ExitStack() as stack,
         ):
             directory = str(runtime)
-            env = session_environment_for_run(runtime, dict(os.environ))
+            # Compositor title bars must not use the caller's fonts either.
+            env = fixed_fonts(
+                session_environment_for_run(runtime, dict(os.environ)), fonts=fonts
+            )
             app_env = sanitized_environment(
                 runtime,
                 session_environment_for_run(runtime, caller_environment()),

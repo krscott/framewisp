@@ -5,8 +5,11 @@ import QtQuick.Controls
 ApplicationWindow {
     visible: true
     title: "Environment probe"
-    width: 640
-    height: 400
+    // A fixed size makes Sway float the window, so its title bar shows too.
+    minimumWidth: 640
+    maximumWidth: 640
+    minimumHeight: 400
+    maximumHeight: 400
 
     Column {
         padding: 12

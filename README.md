@@ -836,7 +836,7 @@ Review artifacts before sharing.
 ## App environment
 
 `run` sanitizes the app's environment, so the same app build shows the same
-pixels whichever environment started it. There is no option to turn this on.
+pixels whichever environment started it.
 
 Each session gives the app private HOME, XDG config/cache/data/state directories
 and TMPDIR under its owned runtime directory. `XDG_CONFIG_DIRS` points at the
@@ -845,14 +845,15 @@ app and its services. **Anything the app writes there is lost.** Save wanted dat
 to the working directory or another explicit path. After a failed cleanup, use
 `recover` as usual; it preserves logs and removes the abandoned runtime.
 
-The app gets `LANG` and `LC_ALL` set to `C.UTF-8`, `TZ=UTC`, and the bundled
-Fontconfig file, which loads DejaVu and Noto fonts and no host rules or font
-directories. GTK 3/4 use Adwaita, DejaVu Sans 11, a light theme, 96 DPI and scale
+The app gets `LANG` and `LC_ALL` set to `C.UTF-8`, `TZ=UTC`, and the configured
+Fontconfig file. The Nix package's file loads DejaVu and Noto fonts and no host
+rules or font directories. GTK 3/4 use Adwaita, DejaVu Sans 11, a light theme, 96 DPI and scale
 1, with animations and overlay scrollbars disabled. GSettings use the keyfile
 backend instead of the user's dconf database. Qt uses Fusion, 96 DPI, scale 1 and
 software Qt Quick rendering. Inherited `LC_*`, `QT_*`, `GTK_*`, `GDK_*` and `XKB_*`
-settings and desktop identity such as `XDG_CURRENT_DESKTOP` are removed, except Qt
-plugin lookup paths and GdkPixbuf loader settings. The display uses scale 1 and
+settings, Fontconfig overrides, X resources and desktop identity such as
+`XDG_CURRENT_DESKTOP` are removed, except Qt plugin lookup paths and GdkPixbuf
+loader settings. The display uses scale 1 and
 the US keyboard layout. Input methods and non-US shortcuts are unsupported.
 
 Everything else stays, including `PATH`, library and plugin paths, XDG data search
@@ -868,7 +869,7 @@ framewisp has sanitized the environment, so it always wins:
 framewisp app run -- env GTK_THEME=Adwaita:dark your-app
 framewisp app run -- env -u TZ your-app
 
-# Real state, such as a logged-in profile or the user's Git identity.
+# The user's home and config, such as a logged-in profile or Git identity.
 framewisp app run -- env HOME="$HOME" XDG_CONFIG_HOME="$HOME/.config" your-app
 
 # User-installed Flatpaks.
@@ -882,14 +883,17 @@ Prefer an app's own option when it has one, such as Chromium's
 `--user-data-dir=PATH`. Restoring HOME does not restore the look: the theme, scale
 and locale stay fixed unless you change those too. Tool caches under HOME, such as
 those of `cargo`, `uv` and `npm`, start cold in each session unless you point them
-somewhere else. `env` hides a bare `framewisp-demo` from the bundled demo fallback,
+somewhere else, and tools managed under HOME, such as `rustup` toolchains, are
+missing. Build first and `run` the built program, or use a virtual environment.
+`env` hides a bare `framewisp-demo` from the bundled demo fallback,
 so use its full path if it is not on your PATH.
 
 ### D-Bus services
 
 The private session and accessibility buses load no desktop service activation
 directories. If an app requires activation, give it its own bus with a directory
-containing only the `.service` files it needs:
+containing only the `.service` files it needs. `dbus-run-session` must be on your
+PATH:
 
 ```sh
 cat > app-bus.conf <<'EOF'
@@ -938,7 +942,7 @@ The [real-app compatibility runs](docs/ui-inspection.md#real-app-compatibility-r
 cover a GTK 3 Writer Flatpak and Blender on private Wayland and Xwayland, with
 versions, launch commands, input outcomes, accessibility limits, and opt-in tests.
 
-With the `org.gnome.SwellFoop` Flatpak installed, run:
+With the `org.gnome.SwellFoop` Flatpak installed system-wide, run:
 
 ```sh
 framewisp swell run -- \
@@ -959,7 +963,7 @@ This is not a general animation-completion guarantee.
 
 ## Drawing with a drag
 
-With the `org.kde.kolourpaint` Flatpak installed, run:
+With the `org.kde.kolourpaint` Flatpak installed system-wide, run:
 
 ```sh
 framewisp paint run -- \
@@ -1056,7 +1060,7 @@ A command that would exceed the limit fails before sending any input. These
 mappings use upper keycodes reserved by framewisp; ordinary US keys
 and the supported shortcuts retain their mappings.
 
-LibreOffice Writer was tested as a Flatpak with a private D-Bus session:
+LibreOffice Writer was tested as a system-wide Flatpak with a private D-Bus session:
 
 ```sh
 framewisp writer run -- \

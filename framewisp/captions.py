@@ -27,6 +27,7 @@ from framewisp.compact import (
     retained_frames,
 )
 from framewisp.console import ConsoleCapture, console_frames
+from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
 from framewisp.layout import VideoLayout
@@ -438,6 +439,9 @@ def render_recording(
                     )
                 )
             )
+        fonts = configured_fonts(os.environ)
+        if fonts is None:
+            raise RuntimeError("FRAMEWISP_FONTCONFIG_FILE does not name a file.")
         # A long recording can have more cut ranges than fit in an exec argument.
         (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
         with log.open("w") as output:
@@ -466,8 +470,7 @@ def render_recording(
                     "+faststart",
                     "captioned.mp4",
                 ],
-                env=os.environ
-                | {"FONTCONFIG_FILE": os.environ["FRAMEWISP_FONTCONFIG_FILE"]},
+                env=fixed_fonts(dict(os.environ), fonts=fonts),
                 cwd=work,
                 stdout=output,
                 stderr=subprocess.STDOUT,

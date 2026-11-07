@@ -172,8 +172,11 @@ framewisp app run -- env -u TZ your-app
 framewisp app run -- env HOME="$HOME" XDG_CONFIG_HOME="$HOME/.config" your-app
 ```
 
-The last form restores real state, such as a logged-in profile. Prefer an app's own
-option when it has one, such as Chromium's `--user-data-dir=PATH`. Without Nix,
+The last form restores the user's home and config, such as a logged-in profile.
+Prefer an app's own option when it has one, such as Chromium's
+`--user-data-dir=PATH`. Tools that keep state under `HOME`, such as `cargo`, `uv`
+and `nix`, may fail or start cold under `run`, so build first and `run` the built
+program, or use a virtual environment. Without Nix,
 `run` fails until `FRAMEWISP_FONTCONFIG_FILE` names a Fontconfig file.
 
 Start a demo on a private display in a terminal or background tool session.

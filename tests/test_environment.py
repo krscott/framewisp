@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.environment import caller_environment, sanitized_environment
+from framewisp.environment import (
+    caller_environment,
+    configured_fonts,
+    sanitized_environment,
+)
 from framewisp.lib import app_command, session_environment_for_run
 
 
@@ -127,6 +131,7 @@ def test_bundled_demo_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert app_command(command, {"PATH": ""}) == command
 
 
+# R-ENV-1
 def test_sanitizing_keeps_lookup_paths_and_app_settings(tmp_path: Path) -> None:
     kept = {
         "PATH": "/caller/bin",
@@ -134,7 +139,9 @@ def test_sanitizing_keeps_lookup_paths_and_app_settings(tmp_path: Path) -> None:
         "XDG_DATA_DIRS": "/caller/share",
         "GDK_PIXBUF_MODULE_FILE": "/caller/loaders.cache",
         "GDK_PIXBUF_MODULEDIR": "/caller/loaders",
+        "GSETTINGS_SCHEMA_DIR": "/caller/schemas",
         "QT_PLUGIN_PATH": "/caller/plugins",
+        "QT_QPA_PLATFORM_PLUGIN_PATH": "/caller/platforms",
         "QML_IMPORT_PATH": "/caller/qml",
         "MY_APP_SETTING": "value",
     }
@@ -163,6 +170,16 @@ def test_sanitizing_removes_desktop_identity(tmp_path: Path, name: str) -> None:
 def test_sanitizing_fixes_time_zone(tmp_path: Path) -> None:
     env = sanitized_environment(tmp_path, {"TZ": "Asia/Tokyo"}, fonts="fonts.conf")
     assert env["TZ"] == "UTC"
+
+
+# R-ENV-7
+def test_relative_font_file_becomes_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "fonts.conf").touch()
+    monkeypatch.chdir(tmp_path)
+    fonts = configured_fonts({"FRAMEWISP_FONTCONFIG_FILE": "fonts.conf"})
+    assert fonts == str((tmp_path / "fonts.conf").resolve())
 
 
 # R-ENV-7

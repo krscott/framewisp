@@ -1,19 +1,21 @@
 """Keep the caller's app environment separate from framewisp's runtime."""
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import quote_from_bytes
 
 _caller_environment: dict[str, str] | None = None
 
-_UNSANITIZED_PREFIXES = ("GDK_PIXBUF_",)
+# These match a sanitized prefix, but select installed binaries, not appearance.
+_UNSANITIZED_PREFIXES = (
+    "GDK_PIXBUF_",
+    "QT_PLUGIN_PATH",
+    "QT_QPA_PLATFORM_PLUGIN_PATH",
+)
 _SANITIZED_PREFIXES = ("LC_", "QT_", "GTK_", "GDK_", "XKB_")
 _SANITIZED_NAMES = {
     "LANGUAGE",
-    "FONTCONFIG_PATH",
-    "FONTCONFIG_SYSROOT",
-    "FC_LANG",
-    "GSETTINGS_SCHEMA_DIR",
     "DCONF_PROFILE",
     "XENVIRONMENT",
     "RESOURCE_MANAGER",
@@ -26,12 +28,7 @@ _SANITIZED_NAMES = {
     "KDE_FULL_SESSION",
     "KDE_SESSION_VERSION",
 }
-# Nix's plugin lookup paths select installed toolkit binaries, not appearance.
-_TOOLKIT_LOOKUP_PATHS = (
-    "QT_PLUGIN_PATH",
-    "QML_IMPORT_PATH",
-    "QT_QPA_PLATFORM_PLUGIN_PATH",
-)
+_FONT_OVERRIDES = ("FONTCONFIG_PATH", "FONTCONFIG_SYSROOT", "FC_LANG")
 _GTK_SETTINGS = """\
 [Settings]
 gtk-theme-name=Adwaita
@@ -70,16 +67,33 @@ def caller_environment() -> dict[str, str]:
     return dict(os.environ if _caller_environment is None else _caller_environment)
 
 
+def configured_fonts(env: Mapping[str, str]) -> str | None:
+    """Return an absolute path; Fontconfig ignores the working directory."""
+    fonts = env.get("FRAMEWISP_FONTCONFIG_FILE")
+    if not fonts or not Path(fonts).is_file():
+        return None
+    return str(Path(fonts).resolve())
+
+
+def fixed_fonts(env: dict[str, str], *, fonts: str) -> dict[str, str]:
+    """Make Fontconfig read only this file, whatever else the caller set."""
+    result = {key: value for key, value in env.items() if key not in _FONT_OVERRIDES}
+    result["FONTCONFIG_FILE"] = fonts
+    return result
+
+
 def sanitized_environment(
     runtime: Path, env: dict[str, str], *, fonts: str
 ) -> dict[str, str]:
-    """Fix everything that changes app output, keeping lookup paths and app settings.
+    """Fix the settings known to change app output, keeping everything else.
 
     Creates private app directories under the owned runtime, so call this before
     starting any children.
     """
-    root = runtime / "profile"
-    for name in ("home", "config", "cache", "data", "state", "tmp"):
+    root = runtime / "app"
+    temporary = runtime / "tmp"
+    temporary.mkdir(mode=0o700)
+    for name in ("home", "config", "cache", "data", "state"):
         (root / name).mkdir(parents=True, mode=0o700)
     result = {
         key: value
@@ -94,11 +108,10 @@ def sanitized_environment(
         XDG_DATA_HOME=str(root / "data"),
         XDG_STATE_HOME=str(root / "state"),
         XDG_CONFIG_DIRS=str(root / "config"),
-        TMPDIR=str(root / "tmp"),
+        TMPDIR=str(temporary),
         LANG="C.UTF-8",
         LC_ALL="C.UTF-8",
         TZ="UTC",
-        FONTCONFIG_FILE=fonts,
         GSETTINGS_BACKEND="keyfile",
         GTK_THEME="Adwaita",
         GDK_BACKEND="wayland",
@@ -118,11 +131,8 @@ def sanitized_environment(
         XCURSOR_THEME="Adwaita",
         XCURSOR_SIZE="24",
     )
-    for key in _TOOLKIT_LOOKUP_PATHS:
-        if key in env:
-            result[key] = env[key]
     for version in ("3.0", "4.0"):
         directory = root / "config" / f"gtk-{version}"
         directory.mkdir(mode=0o700)
         (directory / "settings.ini").write_text(_GTK_SETTINGS)
-    return result
+    return fixed_fonts(result, fonts=fonts)

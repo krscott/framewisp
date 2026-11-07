@@ -85,7 +85,6 @@ investigate or ask; never invent a rationale.
   Rationale: Host fonts would silently break R-ENV-4, so a missing font file must
   be a clear result, not a surprise.
 
-
 ## Display (DISPLAY)
 
 - **R-DISPLAY-1** [manual: In `nix develop`, pin a shell to two CPUs with
