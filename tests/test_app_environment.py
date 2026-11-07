@@ -558,6 +558,6 @@ def test_caller_font_rules_leave_recording_text_unchanged(tmp_path: Path) -> Non
     )
     # Encoding varies faintly between clips; a different typeface does not.
     difference = ImageChops.difference(base, other).convert("L")
-    assert difference.point([0] * 25 + [255] * 231).getbbox() is None
+    assert difference.getextrema()[1] <= 24
     # Both overlays must be present for the comparison to mean anything.
     assert base.convert("L").getextrema() != (0, 0)
