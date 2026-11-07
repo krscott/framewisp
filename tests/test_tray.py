@@ -4,8 +4,10 @@
 
 import subprocess
 import sys
+import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event, Thread
 
@@ -13,11 +15,11 @@ import pytest
 from gi.repository import Gio, GLib
 
 from framewisp.attach import AttachedInput
+from framewisp.desktop import detach_desktop
 from framewisp.portal import DesktopPortal, dispatch_events
 from framewisp.tray import (
     ITEM,
     ITEM_PATH,
-    LABEL,
     MENU,
     MENU_PATH,
     WATCHER,
@@ -66,8 +68,8 @@ def buses(
         daemon.stdout.close()
 
 
-def until(predicate: Callable[[], bool]) -> None:
-    deadline = time.monotonic() + 3
+def until(predicate: Callable[[], bool], timeout: float = 3) -> None:
+    deadline = time.monotonic() + timeout
     while not predicate():
         dispatch_events()
         assert time.monotonic() < deadline
@@ -122,6 +124,7 @@ def indicator(
         item.close()
 
 
+# R-ATTACH-3, R-ATTACH-4
 def test_menu_and_active_text(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection], indicator: SharingIndicator
 ) -> None:
@@ -137,8 +140,8 @@ def test_menu_and_active_text(
         GLib.Variant("(s)", (ITEM,)),
     ).unpack()[0]
     assert properties["Status"] == "Active"
-    assert properties["Title"] == LABEL
-    assert properties["ToolTip"][2] == LABEL
+    assert properties["Title"] == "framewisp desktop sharing is active"
+    assert properties["ToolTip"][2] == "framewisp desktop sharing is active"
     assert properties["Menu"] == MENU_PATH
     assert properties["ItemIsMenu"]
     width, height, pixels = properties["IconPixmap"][0]
@@ -192,6 +195,63 @@ def test_no_host_diagnostic(
     assert not indicator.stop.is_set()
 
 
+Register = Callable[[str, str, Gio.DBusMethodInvocation], None]
+
+
+@contextmanager
+def watcher_object(
+    host: Gio.DBusConnection,
+    register: Register,
+    host_available: Callable[[], bool],
+) -> Generator[None]:
+    info = Gio.DBusNodeInfo.new_for_xml(
+        """<node><interface name="org.kde.StatusNotifierWatcher">
+      <method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
+      <signal name="StatusNotifierHostRegistered"/>
+      <property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
+    </interface></node>"""
+    ).interfaces[0]
+
+    def method(
+        bus: Gio.DBusConnection,
+        sender: str,
+        path: str,
+        interface: str,
+        method: str,
+        parameters: GLib.Variant,
+        invocation: Gio.DBusMethodInvocation,
+    ) -> None:
+        register(sender, parameters.unpack()[0], invocation)
+
+    def property(
+        bus: Gio.DBusConnection, sender: str, path: str, interface: str, name: str
+    ) -> GLib.Variant:
+        return GLib.Variant("b", host_available())
+
+    registration = host.register_object(
+        "/StatusNotifierWatcher", info, method, property, None
+    )
+    try:
+        yield
+    finally:
+        host.unregister_object(registration)
+
+
+def own_watcher_name(host: Gio.DBusConnection) -> None:
+    host.call_sync(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+        GLib.Variant("(su)", (WATCHER, 0)),
+        None,
+        Gio.DBusCallFlags.NONE,
+        1000,
+        None,
+    )
+
+
+# R-ATTACH-3
 @pytest.mark.parametrize("delay_registration", [False, True])
 def test_watcher_registration_and_restart(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
@@ -202,50 +262,17 @@ def test_watcher_registration_and_restart(
     registrations: list[str] = []
     host_available = False
     pending: list[Gio.DBusMethodInvocation] = []
-    info = Gio.DBusNodeInfo.new_for_xml(
-        """<node><interface name="org.kde.StatusNotifierWatcher">
-      <method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
-      <signal name="StatusNotifierHostRegistered"/>
-      <property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
-    </interface></node>"""
-    ).interfaces[0]
 
-    def register(
-        bus: Gio.DBusConnection,
-        sender: str,
-        path: str,
-        interface: str,
-        method: str,
-        parameters: GLib.Variant,
-        invocation: Gio.DBusMethodInvocation,
-    ) -> None:
-        registrations.append(sender + parameters.unpack()[0])
+    def register(sender: str, path: str, invocation: Gio.DBusMethodInvocation) -> None:
+        registrations.append(sender + path)
         if delay_registration:
             pending.append(invocation)
         else:
             invocation.return_value(None)
 
-    def property(
-        bus: Gio.DBusConnection, sender: str, path: str, interface: str, name: str
-    ) -> GLib.Variant:
-        return GLib.Variant("b", host_available)
-
-    registration = host.register_object(
-        "/StatusNotifierWatcher", info, register, property, None
-    )
-    try:
+    with watcher_object(host, register, lambda: host_available):
         for count in (1, 2):
-            host.call_sync(
-                "org.freedesktop.DBus",
-                "/org/freedesktop/DBus",
-                "org.freedesktop.DBus",
-                "RequestName",
-                GLib.Variant("(su)", (WATCHER, 0)),
-                None,
-                Gio.DBusCallFlags.NONE,
-                1000,
-                None,
-            )
+            own_watcher_name(host)
             if count == 1:
                 until(
                     lambda: indicator.proxy is not None and indicator.available is False
@@ -304,10 +331,9 @@ def test_watcher_registration_and_restart(
                 None,
             )
             until(lambda: indicator.available is False)
-    finally:
-        host.unregister_object(registration)
 
 
+# R-ATTACH-4
 def test_menu_cancels_held_input(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
     indicator: SharingIndicator,
@@ -426,3 +452,166 @@ GLib.MainLoop().run()
         if process.poll() is None:
             process.kill()
         process.communicate(timeout=5)
+
+
+_OWNER = """
+import sys
+from pathlib import Path
+from gi.repository import Gio
+from framewisp import attach
+root = Path(sys.argv[1])
+class Portal:
+    def __init__(self, stop):
+        self.size = (800, 600)
+        self.node = 1
+        address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+        self.bus = Gio.DBusConnection.new_for_address_sync(address,
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            None, None)
+    def open(self):
+        pass
+    def close(self):
+        if not self.bus.is_closed():
+            self.bus.close_sync(None)
+            (root / 'closed').touch()
+attach.DesktopPortal = Portal
+raise SystemExit(attach.run_attachment(root / 'session', None))
+"""
+
+
+@pytest.fixture
+def start_owner(
+    buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
+    """Run the real attach owner against a stand-in portal on the isolated bus."""
+    processes: list[subprocess.Popen[bytes]] = []
+
+    def start() -> subprocess.Popen[bytes]:
+        with (tmp_path / "output").open("wb") as output:
+            process = subprocess.Popen(
+                [sys.executable, "-c", _OWNER, str(tmp_path)],
+                stdout=output,
+                stderr=output,
+            )
+        processes.append(process)
+        return process
+
+    with tempfile.TemporaryDirectory(prefix="fw-tray-", dir="/tmp") as runtime:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", runtime)
+        try:
+            yield start
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=5)
+
+
+def registered_item(
+    host: Gio.DBusConnection, start_owner: Callable[[], subprocess.Popen[bytes]]
+) -> tuple[subprocess.Popen[bytes], str, dict[str, object]]:
+    """Start an owner beneath a watcher object and read its item as a host does."""
+    items: list[tuple[str, str]] = []
+
+    def register(sender: str, path: str, invocation: Gio.DBusMethodInvocation) -> None:
+        items.append((sender, path))
+        invocation.return_value(None)
+
+    with watcher_object(host, register, lambda: True):
+        own_watcher_name(host)
+        owner = start_owner()
+        until(lambda: bool(items) or owner.poll() is not None, timeout=10)
+        assert items, "attach exited or registered no tray item"
+    sender, path = items[0]
+    properties = call(
+        host,
+        sender,
+        path,
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+        GLib.Variant("(s)", (ITEM,)),
+    ).unpack()[0]
+    return owner, sender, properties
+
+
+# R-ATTACH-3
+def test_attachment_offers_active_item_to_host(
+    buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
+    start_owner: Callable[[], subprocess.Popen[bytes]],
+) -> None:
+    host = buses[1]
+    owner, sender, properties = registered_item(host, start_owner)
+    assert properties["Status"] == "Active"
+    assert "desktop sharing is active" in str(properties["Title"])
+    assert detach_desktop() == 0
+    assert owner.wait(timeout=5) == 0
+    with pytest.raises(GLib.Error):
+        call(
+            host,
+            sender,
+            ITEM_PATH,
+            "org.freedesktop.DBus.Properties",
+            "GetAll",
+            GLib.Variant("(s)", (ITEM,)),
+        )
+
+
+# R-ATTACH-4
+def test_tray_stop_ends_attachment(
+    buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
+    start_owner: Callable[[], subprocess.Popen[bytes]],
+    tmp_path: Path,
+) -> None:
+    host = buses[1]
+    owner, sender, properties = registered_item(host, start_owner)
+    menu = str(properties["Menu"])
+    layout = call(
+        host, sender, menu, MENU, "GetLayout", GLib.Variant("(iias)", (0, -1, []))
+    ).unpack()
+    node, labels, _children = layout[1][2][0]
+    assert labels["label"] == "Stop sharing"
+    assert (tmp_path / "session/session.json").exists()
+    call(
+        host,
+        sender,
+        menu,
+        MENU,
+        "Event",
+        GLib.Variant("(isvu)", (node, "clicked", GLib.Variant("s", ""), 0)),
+    )
+    assert owner.wait(timeout=5) == 0
+    assert (tmp_path / "closed").exists()
+    assert not (tmp_path / "session/session.json").exists()
+
+
+@pytest.mark.parametrize("tray", ["no watcher", "no host", "refuses item"])
+def test_attach_names_stop_methods_without_host(
+    buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
+    start_owner: Callable[[], subprocess.Popen[bytes]],
+    tmp_path: Path,
+    tray: str,
+) -> None:
+    host = buses[1]
+    output = tmp_path / "output"
+    lines: list[str] = []
+
+    def refuse(sender: str, path: str, invocation: Gio.DBusMethodInvocation) -> None:
+        invocation.return_dbus_error("org.example.Refused", "Refused in this test")
+
+    def diagnosed() -> bool:
+        lines[:] = [
+            line
+            for line in output.read_text().splitlines()
+            if "indicator unavailable" in line
+        ]
+        return bool(lines)
+
+    with watcher_object(host, refuse, lambda: tray == "refuses item"):
+        if tray != "no watcher":
+            own_watcher_name(host)
+        owner = start_owner()
+        until(diagnosed, timeout=10)
+    assert "framewisp --detach" in lines[0] and "Ctrl+C" in lines[0]
+    assert owner.poll() is None

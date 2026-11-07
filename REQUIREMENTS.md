@@ -197,6 +197,30 @@ investigate or ask; never invent a rationale.
   terminal after the user types `ATTACH` exactly.
 - **R-ATTACH-2** [test] `attach` refuses a desktop runtime directory that is
   not private or not owned by the user.
+- **R-ATTACH-3** [test] While an attachment is active, framewisp offers a
+  compatible tray host an item that says desktop sharing is active.
+
+  Rationale: The tray item tells the user that an agent has their desktop, even
+  when the terminal is hidden.
+
+- **R-ATTACH-4** [test] The tray item's stop action ends the attachment.
+
+  Rationale: The user may have no visible terminal when they need to take back
+  the desktop.
+
+- **R-ATTACH-5** [test] Before the user confirms, `attach` names
+  `framewisp --detach` and Ctrl+C as ways to stop.
+
+  Rationale: The user needs to know how to end the attachment before granting
+  access, whether or not a tray item appears.
+
+- **R-ATTACH-6** [manual: On each supported desktop, allow the item if the
+  desktop requires it, then run `attach`. Check that the item is visible and
+  that its stop action ends the attachment.] A compatible desktop shows the tray
+  item to the user while an attachment is active.
+
+  Rationale: The host decides what appears on screen, so only a check on a real
+  desktop proves that the user can see the item.
 
 ## Control requests (CONTROL)
 

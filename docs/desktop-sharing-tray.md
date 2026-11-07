@@ -19,7 +19,9 @@ A successful registration is not proof that the user can see an icon.
 Automated tests use an isolated real D-Bus daemon to check the active-sharing
 properties, icon pixels, menu access, stop event, input cancellation with held
 Ctrl/Shift and pointer button release, object removal, missing-host diagnostic,
-and registration after watcher restart. Attachment tests cover emergency detach,
+and registration after watcher restart. They also run the real attach owner with
+a stand-in portal and a fake watcher to check its item, stop menu, and missing-host
+diagnostic. Attachment tests cover emergency detach,
 suspended owners, terminal loss, exit signals, and cancellation.
 
 Visual desktop acceptance has not been performed in the implementation environment.
@@ -29,7 +31,7 @@ GNOME extension versions when running the following checks on each desktop.
 | Desktop | Desktop version | Extension version | Visual and live portal checks |
 | --- | --- | --- | --- |
 | KDE Plasma | Not tested | Not applicable | Pending |
-| COSMIC | Not tested | Not applicable | Pending |
+| COSMIC | Not recorded | Not applicable | Visual check passed; tray stop button works. Other live checks pending |
 | GNOME | Not tested | Not tested | Pending |
 
 ## Live checks
