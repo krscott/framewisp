@@ -5,51 +5,21 @@ import math
 import subprocess
 import time
 import uuid
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
+
+# Seconds kept around each activity span and at each end of a clip. A click ping
+# starts inside its input's span, so PADDING_AFTER also keeps it whole (R-REC-8).
+PADDING_BEFORE = 1.0
+PADDING_AFTER = 2.0
 
 
 class ActivityEvent(TypedDict):
     id: str
     event: str
     time: float
-
-
-@dataclass(frozen=True)
-class CompactSettings:
-    before: float = 1.0
-    after: float = 2.0
-
-    def __post_init__(self) -> None:
-        for value in (self.before, self.after):
-            if type(value) not in {int, float}:
-                raise ValueError("compact padding must be finite and nonnegative.")
-            try:
-                valid = math.isfinite(value) and value >= 0
-            except OverflowError:
-                valid = False
-            if not valid:
-                raise ValueError("compact padding must be finite and nonnegative.")
-
-    @staticmethod
-    def parse(raw: object) -> "CompactSettings | None":
-        if raw is None:
-            return None
-        if not isinstance(raw, dict):
-            raise ValueError("compact must be an object with before and after seconds.")
-        settings = cast(dict[str, object], raw)
-        if settings.keys() != {"before", "after"}:
-            raise ValueError("compact requires only before and after seconds.")
-        return CompactSettings(
-            before=cast(float, settings["before"]),
-            after=cast(float, settings["after"]),
-        )
-
-    def parameters(self) -> dict[str, float]:
-        return {"before": self.before, "after": self.after}
 
 
 @contextmanager
@@ -87,26 +57,19 @@ def retained_frames(
     origin: float,
     stopped: float,
     duration: float,
-    settings: CompactSettings,
-    overlays: Iterable[tuple[float, float]] = (),
 ) -> list[tuple[int, int]]:
-    """Return merged half-open frame ranges, rounding cuts outward at 30 fps.
-
-    Overlays are spans in clip seconds that stay whole regardless of padding.
-    """
+    """Return merged half-open frame ranges, rounding cuts outward at 30 fps."""
     frame_count = max(1, round(duration * 30))
-    ranges = [(0, 1), (frame_count - 1, frame_count)]
+    ranges: list[tuple[int, int]] = []
 
     def retain(start: float, end: float) -> None:
-        first = max(0, math.floor(max(0.0, start) * 30))
+        first = math.floor(max(0.0, start) * 30)
         last = min(frame_count, math.ceil(min(duration, end) * 30))
         if first < last:
             ranges.append((first, last))
 
-    retain(0, min(duration, settings.before))
-    retain(max(0.0, duration - settings.after), duration)
-    for start, end in overlays:
-        retain(start, end)
+    retain(0, PADDING_BEFORE)
+    retain(duration - PADDING_AFTER, duration)
     for log in logs:
         events = activity_events(log)
         ends = {
@@ -119,7 +82,7 @@ def retained_frames(
             end = ends.get(event["id"], stopped)
             if start >= stopped or end < origin:
                 continue
-            retain(start - origin - settings.before, end - origin + settings.after)
+            retain(start - origin - PADDING_BEFORE, end - origin + PADDING_AFTER)
 
     merged: list[tuple[int, int]] = []
     for first, last in sorted(ranges):

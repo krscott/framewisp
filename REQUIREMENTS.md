@@ -117,9 +117,8 @@ investigate or ask; never invent a rationale.
 - **R-LOG-3** [test] Click pings appear only in recordings, never in screenshots.
 - **R-LOG-4** [test] By default, a recording captions only `key` and `type`
   inputs.
-- **R-LOG-5** [test] The `--captions` and `--no-captions` options do not change
-  `inputs.jsonl`.
-- **R-LOG-6** [test] Framewisp rejects `--captions` combined with `--no-captions`
+- **R-LOG-5** [test] The `--captions` option does not change `inputs.jsonl`.
+- **R-LOG-6** [retired] Framewisp rejects `--captions` combined with `--no-captions`
   before it starts a session or a clip.
 - **R-LOG-7** [test] An incomplete last line in `inputs.jsonl`, as left by an
   interrupted write, does not fail recording rendering.
@@ -148,7 +147,7 @@ investigate or ask; never invent a rationale.
 - **R-REC-10** [test] When recording rendering fails, a playable MP4 of the raw
   capture remains. It is at the requested path, unless framewisp cannot publish
   it there (R-REC-18). The error names the MP4's path and `captions.log`.
-- **R-REC-11** [test] `--no-captions` does not change click pings.
+- **R-REC-11** [test] `--captions none` does not change click pings.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the video. The default is right.
 - **R-REC-13** [test] `--console-size` sets the panel width for `left` and

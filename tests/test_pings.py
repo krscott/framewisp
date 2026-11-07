@@ -15,7 +15,7 @@ from framewisp.captions import (
     render_recording,
     subtitle_script,
 )
-from framewisp.compact import CompactSettings, recording_duration, retained_frames
+from framewisp.compact import recording_duration, retained_frames
 from framewisp.console import ConsoleCapture
 from framewisp.layout import (
     ConsolePanel,
@@ -247,22 +247,19 @@ def test_compaction_maps_pings_to_retained_frames(
     (tmp_path / "console.jsonl").write_text("")
     (tmp_path / "activity.jsonl").write_text("")
     log.write_text(command_lines(4, 4.3) + ping_line(4.25, 600, 300))
-    settings = CompactSettings(before=0.2, after=0.1)
     layout = plain_layout(SIZE) if position is None else panel_layout(position)
     ranges = retained_frames(
         (log, tmp_path / "activity.jsonl"),
         origin=ORIGIN,
         stopped=STOPPED,
         duration=recording_duration(raw_video),
-        settings=settings,
-        overlays=[(4.25, 4.25 + PING_SECONDS)],
     )
     source = [frame for first, last in ranges for frame in range(first, last)]
     render(
         raw_video,
         log,
         captions="none",
-        compact=settings,
+        compact=True,
         layout=layout,
     )
     size = (layout.width, layout.height)
@@ -279,40 +276,38 @@ def test_compaction_maps_pings_to_retained_frames(
 
 
 # R-REC-8
-def test_zero_padding_retains_every_ping_frame(raw_video: Path, log: Path) -> None:
+def test_padding_retains_every_ping_frame(log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
-    log.write_text(command_lines(3, 3.01))
+    log.write_text(command_lines(10, 10.01))
     ranges = retained_frames(
         (log, log.parent / "activity.jsonl"),
         origin=ORIGIN,
-        stopped=STOPPED,
-        duration=recording_duration(raw_video),
-        settings=CompactSettings(before=0, after=0),
-        overlays=[(3.005, 3.005 + PING_SECONDS)],
+        stopped=ORIGIN + 30,
+        duration=30,
     )
     kept = {frame for first, last in ranges for frame in range(first, last)}
-    assert set(range(90, 106)) <= kept
+    assert set(range(300, math.ceil((10.005 + PING_SECONDS) * 30))) <= kept
 
 
 # R-REC-8
 def test_clip_end_cuts_a_late_ping_short(raw_video: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(5.7, 5.71) + ping_line(5.8, 300, 200))
-    render(raw_video, log, captions="none", compact=CompactSettings(before=0, after=0))
+    render(raw_video, log, captions="none", compact=True)
     shown = compacted_ring_frames(raw_video, size=SIZE)
     assert 4 <= len(shown) < 15
     assert max(shown) == round(recording_duration(raw_video) * 30) - 1
 
 
 # R-REC-8
-def test_zero_padding_keeps_each_ping_whole(raw_video: Path, log: Path) -> None:
+def test_compaction_keeps_each_ping_whole(raw_video: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(3, 3.01) + ping_line(3.005, 300, 200))
     render(
         raw_video,
         log,
         captions="none",
-        compact=CompactSettings(before=0, after=0),
+        compact=True,
     )
     shown = compacted_ring_frames(raw_video, size=SIZE)
     # The fading ring outgrows the 28-pixel opening ring only late in its animation.
@@ -478,7 +473,7 @@ LOG_READERS = {
     "compaction": {
         "captions": "none",
         "click_pings": False,
-        "compact": CompactSettings(before=0, after=0),
+        "compact": True,
     },
 }
 
