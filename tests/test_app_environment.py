@@ -544,7 +544,6 @@ print(json.dumps(paths))
     assert not any(temporary.rglob("app-file"))
 
 
-
 # R-ENV-8
 @pytest.mark.integration
 def test_real_environment_reaches_app_and_survives_cleanup(

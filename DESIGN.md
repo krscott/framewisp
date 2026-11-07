@@ -111,8 +111,8 @@ anonymous `memfd`, then executes the wrapped runtime. Only the descriptor number
 an extra exec argument/environment string. `__main__.main` consumes and closes
 the descriptor through `environment.initialize_environment` before dispatch.
 The runtime keeps Nix's environment for its imports and tools. Target apps use
-the captured caller environment, sanitized and with the private session settings
-applied (R-ENV-1, R-ENV-3).
+the captured caller environment with the private session settings applied,
+sanitized unless `run --real-env` is given (R-ENV-1, R-ENV-3, R-ENV-8).
 This boundary covers every wrapper variable without tracking which variables
 Nix adds, prefixes, or defaults, and preserves unset and empty values. Reading
 the initial exec environment also excludes Python's startup locale coercion.
@@ -177,13 +177,11 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    and set the private `XDG_RUNTIME_DIR`. Set `WLR_BACKENDS=headless`,
    `WLR_RENDERER=pixman`, `WLR_LIBINPUT_NO_DEVICES=1`, `GDK_BACKEND=wayland`,
    `QT_QPA_PLATFORM=wayland` and `GSK_RENDERER=cairo`. For the app, these
-   session settings apply after sanitizing, so they always win over it. Private D-Bus addresses percent-escape runtime
-   filesystem bytes so temporary paths with spaces or address delimiters work.
+   session settings apply after sanitizing, so they always win over it. Private
+   D-Bus addresses percent-escape runtime filesystem bytes so temporary paths
+   with spaces or address delimiters work.
    `environment.sanitized_environment` is the one step that sanitizes the app
-   environment (R-ENV-1, R-ENV-4). `run --real-env` skips only this step, so the
-   app gets the caller's environment with the session settings applied and no
-   private directories are created (R-ENV-8). Framewisp's own tools keep their
-   fixed font file and cursor in both cases. It creates private HOME/config/cache/data/
+   environment (R-ENV-1, R-ENV-4). It creates private HOME/config/cache/data/
    state/tmp directories under this runtime (R-ENV-6), removes inherited locale,
    toolkit, font and desktop identity settings, and fixes `C.UTF-8`, `TZ=UTC` and
    the font file. That one Nix-built Fontconfig file lists only store font
@@ -196,7 +194,11 @@ verification evidence or blockers; orchestration remains outside Framewisp.
    (R-ENV-3). Callers change the result with `env` on the app command, which
    runs after this step (R-ENV-5). These directories
    share runtime ownership, shutdown and recovery; nothing in them survives
-   successful cleanup, including read-only directories an app leaves behind. See README for compatibility limits.
+   successful cleanup, including read-only directories an app leaves behind. See
+   README for compatibility limits. `run --real-env` skips only this step, so the
+   app gets the caller's environment with the session settings applied and no
+   private directories are created (R-ENV-8). Framewisp's own tools keep their
+   fixed font file and cursor in both cases.
 5. Start Sway with a generated configuration: Xwayland disabled, a single
    `HEADLESS-1` output at the requested width and height (default 1280x720) and
    60 Hz, a fallback seat, US keyboard layout,

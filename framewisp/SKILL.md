@@ -157,7 +157,8 @@ Apps started with `run` run as the invoking user, with the file and account acce
 allowed by the surrounding environment. The private display does not restrict
 that access.
 
-`run` sanitizes the app's environment so images and videos match across agents.
+By default, `run` sanitizes the app's environment so images and videos match
+across agents.
 The app gets a disposable `HOME`, XDG directories and `TMPDIR`, which are deleted
 when the session stops, plus fixed fonts, theme, scale, `C.UTF-8` locale and
 `TZ=UTC`. Save anything worth keeping to the working directory or another explicit
@@ -182,10 +183,13 @@ program, or use a virtual environment. Without Nix,
 When a problem may come from the user's own setup, such as their fonts, theme,
 locale, time zone or app profile, add `--real-env` to `run`. The app then gets
 the environment framewisp was started with, as if the user had launched it,
-apart from the private display and buses. Its writes to `HOME` and `TMPDIR`
-remain after the session. Use it only for that kind of debugging, because its
-images and videos can differ between hosts. To show a difference, compare it
-with a default run of the same app.
+apart from the private display and buses. It uses the user's real profile, so
+its writes and any settings or data you change there remain after the session;
+ask before changing them. If the user already has the app open, that copy may
+take over the launch or the app may refuse to start; ask the user to close it,
+or point the app at a separate profile. Use it only for that kind of debugging,
+because its images and videos can differ between hosts. To show a difference,
+compare it with a default run of the same app.
 
 Start a demo on a private display in a terminal or background tool session.
 Use a distinct session name and a fresh working directory, wait for

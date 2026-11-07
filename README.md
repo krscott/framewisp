@@ -900,10 +900,14 @@ framewisp app run --real-env -- your-app
 The app then gets the environment framewisp was started with, including its
 HOME, XDG directories, TMPDIR, fonts, theme, locale, time zone and desktop
 identity. Only the private session settings still apply: the display and its
-backend selection (`GDK_BACKEND`, `QT_QPA_PLATFORM`), the D-Bus and accessibility
-buses, `XDG_RUNTIME_DIR` and `GSK_RENDERER=cairo`. Anything the app writes to HOME
-or TMPDIR stays after the session. Captions, console panels, title bars and the
-cursor that framewisp draws stay fixed. App output can differ between hosts.
+backend selection (`GDK_BACKEND`, `QT_QPA_PLATFORM`), the D-Bus and
+accessibility buses, `XDG_RUNTIME_DIR` and `GSK_RENDERER=cairo`. Settings that
+apps read over D-Bus, such as the desktop portal's color scheme, are not
+available. The app uses the user's real profile, so anything it writes stays
+after the session. A copy of the app the user already has open may take over the
+launch or make it refuse to start; ask the user to close it, or point the app at
+a separate profile. Captions, console panels, title bars and the cursor that
+framewisp draws stay fixed. App output can differ between hosts.
 
 ### D-Bus services
 
