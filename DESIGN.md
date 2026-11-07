@@ -600,10 +600,11 @@ descriptor the caller holds. A replaced or deleted lock leaves recovery holding 
 different inode from any live owner, so it refuses with manual cleanup steps
 (R-LIFE-5). A live owner compares its own descriptor, so its cleanup succeeds even
 if the lock path was replaced. Only lock identity decides whether a lock is the
-session's, so a permissive `chmod -R` or a hard-linked copy does not block recovery
-of the original, and the copy still fails its session identity check. A hard-linked
-copy shares the lock's inode, so a session running in either directory holds the
-lease for both until the copy's lock is deleted. A lock that is a symlink or
+session's, so a `chmod -R` that adds read access or a hard-linked copy does not
+block recovery of the original, and the copy still fails its session identity check.
+A hard-linked copy shares the lock's inode, so a session running in either directory
+holds the lease for both until the copy's lock is deleted and any session started
+from the copy has exited. A lock that is a symlink or
 directory, or that the caller cannot open, is refused with steps. These checks catch
 copies, damage, and accidental replacement. A journal deliberately rewritten to
 match the session, lock, and runtime passes them (R-LIFE-5).
