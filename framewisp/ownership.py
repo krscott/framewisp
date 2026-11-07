@@ -231,6 +231,8 @@ def read_metadata(path: Path) -> object:
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor) as source:
         info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"{path.name} must be a regular file")
         if info.st_size > MAX_METADATA_BYTES:
             raise ValueError(f"{path.name} is over {MAX_METADATA_BYTES} bytes")
         return json.load(source)
@@ -393,9 +395,7 @@ def sync_directory(path: Path) -> None:
 
 def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) -> None:
     temporary = session / ".headless-owner.tmp"
-    descriptor = os.open(
-        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-    )
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as output:
         json.dump(
             {
@@ -421,10 +421,7 @@ def remove_runtime(session: Path, lease: int) -> None:
         )
     if runtime.exists():
         info = runtime.lstat()
-        if (
-            info.st_uid != os.getuid()
-            or info.st_mode & 0o077
-        ):
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise SessionError(
                 unverified_runtime(
                     session,

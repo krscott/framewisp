@@ -599,15 +599,17 @@ journals, symlink ownership files, and replaced runtimes fail verification
 descriptor the caller holds. A replaced or deleted lock leaves recovery holding a
 different inode from any live owner, so it refuses with manual cleanup steps
 (R-LIFE-5). A live owner compares its own descriptor, so its cleanup succeeds even
-if the lock path was replaced. Only lock identity decides, so a permissive
-`chmod -R` or a hard-linked copy does not block recovery of the original, and the
-copy still fails its session identity check. A lock that is a symlink or directory,
-or that the caller cannot open, is refused with steps. These checks catch copies,
-damage, and accidental replacement. A journal deliberately rewritten to match the
-session, lock, and runtime passes them (R-LIFE-5).
+if the lock path was replaced. Only lock identity decides whether a lock is the
+session's, so a permissive `chmod -R` or a hard-linked copy does not block recovery
+of the original, and the copy still fails its session identity check. A hard-linked
+copy shares the lock's inode, so a session running in either directory holds the
+lease for both until the copy's lock is deleted. A lock that is a symlink or
+directory, or that the caller cannot open, is refused with steps. These checks catch
+copies, damage, and accidental replacement. A journal deliberately rewritten to
+match the session, lock, and runtime passes them (R-LIFE-5).
 
-`read_journal` is the one check for every other unreadable journal: an open, size,
-parse, session, runtime-path, runtime-identity, or lock-identity
+`read_journal` is the one check for every other unreadable journal: an open,
+file-type, size, parse, session, runtime-path, runtime-identity, or lock-identity
 failure removes nothing and prints manual cleanup steps (R-LIFE-7). A missing
 journal with resources remaining prints the same steps. Those steps use the runtime
 path derived from the session identity and the current TMPDIR, because a damaged
