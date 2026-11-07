@@ -87,9 +87,8 @@ def test_packaged_demo_ignores_caller_python_settings(
 
 # R-ENV-3
 @pytest.mark.parametrize("pythonpath", ["unset", "empty", "foreign"])
-@pytest.mark.parametrize("fresh", [False, True])
 def test_target_app_inherits_caller_pythonpath(
-    tmp_path: Path, foreign_python: Path, pythonpath: str, fresh: bool
+    tmp_path: Path, foreign_python: Path, pythonpath: str
 ) -> None:
     session = tmp_path / "session"
     env = os.environ.copy()
@@ -107,8 +106,6 @@ def test_target_app_inherits_caller_pythonpath(
     if pythonpath == "foreign":
         script += "; import caller_only; print(caller_only.VALUE, flush=True)"
     command = ["framewisp", str(session), "run"]
-    if fresh:
-        command.extend(["--profile", "fresh"])
     # Skip sitecustomize in the probe while retaining PYTHONPATH imports.
     command.extend(["--", sys.executable, "-S", "-c", script])
     result = subprocess.run(
@@ -128,9 +125,8 @@ def test_target_app_inherits_caller_pythonpath(
 
 # R-ENV-1
 @pytest.mark.parametrize("value", [None, "", "/caller/sentinel"])
-@pytest.mark.parametrize("fresh", [False, True])
 def test_target_app_preserves_wrapper_variables(
-    tmp_path: Path, value: str | None, fresh: bool
+    tmp_path: Path, value: str | None
 ) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
@@ -152,8 +148,6 @@ def test_target_app_preserves_wrapper_variables(
             env[key] = value
     session = tmp_path / "session"
     command = [framewisp, str(session), "run"]
-    if fresh:
-        command.extend(["--profile", "fresh"])
     command.extend(
         [
             "--",
@@ -174,10 +168,7 @@ def test_target_app_preserves_wrapper_variables(
 
 
 @pytest.mark.parametrize("value", [None, "0", ""])
-@pytest.mark.parametrize("fresh", [False, True])
-def test_target_app_accessibility_default(
-    tmp_path: Path, value: str | None, fresh: bool
-) -> None:
+def test_target_app_accessibility_default(tmp_path: Path, value: str | None) -> None:
     env = os.environ.copy()
     if value is None:
         env.pop("ACCESSIBILITY_ENABLED", None)
@@ -185,8 +176,6 @@ def test_target_app_accessibility_default(
         env["ACCESSIBILITY_ENABLED"] = value
     session = tmp_path / "session"
     command = ["framewisp", str(session), "run"]
-    if fresh:
-        command.extend(["--profile", "fresh"])
     command.extend(
         [
             "--",
@@ -259,7 +248,8 @@ def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     observed = json.loads((session / "app.log").read_text())
-    for key in ("PATH", "LC_CTYPE", "LANG", "GI_TYPELIB_PATH", "XDG_DATA_DIRS"):
+    for key in ("PATH", "LC_CTYPE", "GI_TYPELIB_PATH", "XDG_DATA_DIRS"):
         assert key not in observed
     assert not any(key.startswith("FRAMEWISP_") for key in observed)
     assert observed["GDK_BACKEND"] == "wayland"
+    assert observed["LANG"] == "C.UTF-8"

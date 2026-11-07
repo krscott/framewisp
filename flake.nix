@@ -103,6 +103,7 @@
               pkgs.ffmpeg
               pkgs.gst_all_1.gstreamer
               pkgs.qt6.qtdeclarative # Qt menu regression probe
+              pkgs.fontconfig.bin # Font selection regression probe
             ];
             venvDir = ".venv";
             postVenvCreation = ''
@@ -111,8 +112,7 @@
             '';
             shellHook = ''
               export GST_PLUGIN_SYSTEM_PATH_1_0=${pkgs.framewisp.capturePlugins}
-              export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.captionFonts}
-              export FRAMEWISP_PROFILE_FONTCONFIG_FILE=${pkgs.framewisp.profileFonts}
+              export FRAMEWISP_FONTCONFIG_FILE=${pkgs.framewisp.fontsConf}
               export FRAMEWISP_TEST_GTK_APP=${pkgs.gtk4.dev}/bin/gtk4-demo
               export FRAMEWISP_TEST_DCONF_MODULES=${pkgs.dconf.lib}/lib/gio/modules
               export FRAMEWISP_TEST_DCONF_SERVICE=${pkgs.dconf}/share/dbus-1/services/ca.desrt.dconf.service
