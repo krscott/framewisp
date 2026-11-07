@@ -8,7 +8,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from PIL import Image, ImageChops
@@ -558,6 +558,7 @@ def test_caller_font_rules_leave_recording_text_unchanged(tmp_path: Path) -> Non
     )
     # Encoding varies faintly between clips; a different typeface does not.
     difference = ImageChops.difference(base, other).convert("L")
-    assert difference.getextrema()[1] <= 24
-    # Both overlays must be present for the comparison to mean anything.
-    assert base.convert("L").getextrema() != (0, 0)
+    assert cast(tuple[int, int], difference.getextrema())[1] <= 24
+    # Both overlays must show bright text for the comparison to mean anything.
+    for region in ((0, 0, 1280, 720), (1280, 0, base.width, 720)):
+        assert sum(base.crop(region).convert("L").histogram()[200:]) > 20
