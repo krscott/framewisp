@@ -173,5 +173,5 @@ def ffprobe(path: Path, *arguments: str) -> str:
         )
         if result:
             problem = (work / "ffprobe.log").read_text(errors="replace").strip()
-            raise RuntimeError(f"Could not inspect recording {path}: {problem}")
+            raise SessionError(f"Could not inspect recording {path}: {problem}")
         return output.read_text(errors="replace")
