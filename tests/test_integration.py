@@ -21,8 +21,6 @@ from typing import Any, cast
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp import inspection_limits as limits
-
 # Startup clips, one session each: position, size in pixels, caption mode.
 CONSOLE_STARTS = {
     "console-left": ("left", 640, "keys"),
@@ -3309,11 +3307,11 @@ def wait_for_control(session: Demo | Path, name: str) -> None:
     def exported() -> int:
         nonlocal observation
         # The control can sit deep or after many nodes; the walk stops at the match.
+        # These are the maximums in framewisp/inspection_limits.py.
         observation = inspect(
             session,
             *("--name", name, "--limit", "1"),
-            *("--max-depth", str(limits.MAX_DEPTH)),
-            *("--max-nodes", str(limits.MAX_NODES)),
+            *("--max-depth", "64", "--max-nodes", "4096"),
         )
         return cast(int, observation["match_count"])
 

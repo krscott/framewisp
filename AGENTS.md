@@ -60,6 +60,9 @@ affected module in `pyproject.toml`.
 `tests/test_python_environment.py` runs only in the installed-package checks,
 which split cases across eight shards. Run `nix flake check` when changing how
 framewisp or its target apps get their environment.
+The installed-package checks also run `test_integration.py`,
+`test_app_environment.py` and `test_unresponsive_app.py` without the `framewisp`
+module on the Python path, so those files must not import it.
 
 Both type checkers must pass. Keep any necessary type-checking exceptions narrow
 and explain why they are needed.
