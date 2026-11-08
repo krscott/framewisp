@@ -316,9 +316,7 @@ def test_hold_from_before_the_clip_shows_from_its_first_frame(
 
 
 # R-REC-5
-def test_instant_drag_fades_at_its_release_position(
-    raw_video: Path, log: Path
-) -> None:
+def test_instant_drag_fades_at_its_release_position(raw_video: Path, log: Path) -> None:
     log.write_text(drag_lines(1, (300, 200), 1, (500, 200)))
     render(raw_video, log, captions="none")
     # The press ring stays at x=300; crop it away to measure only the disc while
@@ -524,7 +522,9 @@ def test_hold_disc_clips_at_the_console_panel(
     gui, panel = layout.gui, layout.panel
     decoded = frames(raw_video, 30, 75, size=(layout.width, layout.height))
     for frame in decoded:
-        assert red_box(frame.crop((panel.x, panel.y, panel.right, panel.bottom))) is None
+        assert (
+            red_box(frame.crop((panel.x, panel.y, panel.right, panel.bottom))) is None
+        )
     # The disc starts against the shared edge, then leaves it.
     assert red_box(decoded[1].crop((gui.x, gui.y, gui.right, gui.bottom))) is not None
     fraction = 54 / 30 - 1

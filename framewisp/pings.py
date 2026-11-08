@@ -23,7 +23,9 @@ HOLD_RADIUS = 24
 HOLD_OPACITY = 0.3
 # Grow at the ring's rate, so the disc fills the ring until it reaches its size.
 HOLD_GROW_SECONDS = (
-    PING_SECONDS * (HOLD_RADIUS - RING_START_RADIUS) / (RING_END_RADIUS - RING_START_RADIUS)
+    PING_SECONDS
+    * (HOLD_RADIUS - RING_START_RADIUS)
+    / (RING_END_RADIUS - RING_START_RADIUS)
 )
 
 
@@ -76,9 +78,7 @@ class Hold:
         return self.release + PING_SECONDS
 
 
-def pings_for_clip(
-    log: Path, *, origin: float, stopped: float
-) -> list[Ping | Hold]:
+def pings_for_clip(log: Path, *, origin: float, stopped: float) -> list[Ping | Hold]:
     """Return a ping per click or drag press and a hold per completed drag."""
     presses: list[PingEvent] = []
     drags: dict[str, list[PingEvent]] = {}
