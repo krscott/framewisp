@@ -554,10 +554,12 @@ private, non-inherited socket. It resets inherited SIGCHLD dispositions so child
 exit statuses remain waitable. Detached and double-forked descendants reparent
 to this supervisor when their parents exit (R-LIFE-1). App exit also initiates
 tree cleanup. Finalization's FFmpeg and FFprobe calls run to completion through
-`run_owned`, under the same supervisor. That keeps them out of the runner's process
-group, so a terminal's Ctrl+C reaches only the runner, which still renders the
-clip (R-REC-3). Each supervisor ends its helper when the runner dies. Each call
-costs a supervisor start, under 0.1 s.
+`run_owned`, each under its own supervisor with the runner's owner settings. That
+keeps them out of the runner's process group, so a terminal's Ctrl+C reaches only
+the runner, which still renders the clip (R-REC-3). Like the app's supervisor,
+each holds the session lease and writes an owner record, so `recover` waits until
+a killed runner's helpers have gone. Each call costs a supervisor start, under
+0.1 s, so finalization spends about 0.3 s on them.
 
 Cleanup enumerates only the supervisor's immediate children through
 `/proc/self/task/PID/children`, signals them through pidfds, and reaps them. It

@@ -383,6 +383,7 @@ def render_recording(
     console: ConsoleCapture,
     compact: bool = False,
     layout: VideoLayout,
+    env: dict[str, str],
 ) -> None:
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
@@ -435,11 +436,11 @@ def render_recording(
                         (input_log, input_log.parent / "activity.jsonl"),
                         origin=origin,
                         stopped=stopped,
-                        duration=recording_duration(clip),
+                        duration=recording_duration(clip, env=env),
                     )
                 )
             )
-        fonts = configured_fonts(os.environ)
+        fonts = configured_fonts(env)
         if fonts is None:
             raise RuntimeError("FRAMEWISP_FONTCONFIG_FILE does not name a file.")
         # A long recording can have more cut ranges than fit in an exec argument.
@@ -470,7 +471,7 @@ def render_recording(
                 "captioned.mp4",
             ],
             log=log,
-            env=fixed_fonts(dict(os.environ), fonts=fonts),
+            env=fixed_fonts(env, fonts=fonts),
             cwd=work,
         )
         if result:

@@ -2,6 +2,7 @@
 
 import json
 import math
+import tempfile
 import time
 import uuid
 from collections.abc import Generator
@@ -9,7 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TypedDict
 
-from framewisp.processes import ffprobe
+from framewisp.errors import SessionError
+from framewisp.processes import run_owned
 
 # Seconds kept around each activity span and at each end of a clip. A click ping
 # starts inside its input's span, so PADDING_AFTER also keeps it whole (R-REC-8).
@@ -107,7 +109,28 @@ def compact_filter(ranges: list[tuple[int, int]]) -> str:
     return f"fps=30,select='{selected}',setpts=N/(30*TB)"
 
 
-def recording_duration(path: Path) -> float:
+def ffprobe(path: Path, *arguments: str, env: dict[str, str]) -> str:
+    """Return ffprobe's output for `path`, run with `run_owned`."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="framewisp-ffprobe-") as directory:
+            work = Path(directory)
+            output = work / "output"
+            result = run_owned(
+                ["ffprobe", "-v", "error", *arguments, "-o", str(output), str(path)],
+                log=work / "ffprobe.log",
+                env=env,
+                timeout=10,
+            )
+            if result:
+                problem = (work / "ffprobe.log").read_text(errors="replace").strip()
+            else:
+                return output.read_text(errors="replace")
+    except OSError as error:
+        problem = str(error)
+    raise SessionError(f"Could not inspect recording {path}: {problem}")
+
+
+def recording_duration(path: Path, *, env: dict[str, str]) -> float:
     """Use the encoded timeline so stop/encoder latency cannot remove the tail."""
     output = ffprobe(
         path,
@@ -117,6 +140,7 @@ def recording_duration(path: Path) -> float:
         "stream=duration",
         "-of",
         "default=noprint_wrappers=1:nokey=1",
+        env=env,
     )
     try:
         duration = float(output)

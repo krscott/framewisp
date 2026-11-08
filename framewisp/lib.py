@@ -28,6 +28,7 @@ from framewisp.captions import (
     recorder_output,
     render_recording,
 )
+from framewisp.compact import ffprobe
 from framewisp.connection import (
     capture_path_error,
     parse_command,
@@ -60,7 +61,7 @@ from framewisp.ownership import (
     refuse_abandoned_ownership,
     session_lease,
 )
-from framewisp.processes import OwnedProcess, ffprobe, managed_process, run_owned
+from framewisp.processes import OwnedProcess, managed_process, run_owned
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -387,7 +388,7 @@ def start_recording(
         failure = None
         try:
             # A clip with no duration has no video to render on (R-REC-22).
-            if restore_hidden_frames(clip, log=log) and timed:
+            if restore_hidden_frames(clip, log=log, env=env) and timed:
                 render_recording(
                     clip,
                     input_log=log.parent / "inputs.jsonl",
@@ -399,6 +400,7 @@ def start_recording(
                     console=console,
                     compact=compact,
                     layout=layout,
+                    env=env,
                 )
         except (RuntimeError, subprocess.TimeoutExpired) as error:
             failure = error
@@ -509,7 +511,7 @@ class ClipProbe:
     height: int | None
 
 
-def probe_clip(path: Path) -> ClipProbe:
+def probe_clip(path: Path, *, env: dict[str, str]) -> ClipProbe:
     output = ffprobe(
         path,
         "-select_streams",
@@ -518,6 +520,7 @@ def probe_clip(path: Path) -> ClipProbe:
         "format=duration:stream=width,height",
         "-of",
         "json",
+        env=env,
     )
     data = cast(dict[str, Any], json.loads(output))
     duration = data["format"].get("duration")
@@ -530,13 +533,13 @@ def probe_clip(path: Path) -> ClipProbe:
     )
 
 
-def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
+def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool:
     """Remux a clip whose edit list hides its frames (R-REC-3).
 
     Return whether the clip has a duration. A failed remux is logged because the
     clip stays usable as evidence, and its summary reports the null (R-REC-22).
     """
-    probe = probe_clip(clip)
+    probe = probe_clip(clip, env=env)
     if probe.duration is not None:
         return True
     if probe.width is None:
@@ -559,11 +562,11 @@ def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
                 str(remuxed),
             ],
             log=remux_log,
-            env=dict(os.environ),
+            env=env,
             timeout=10,
         )
         problem = remux_log.read_text(errors="replace").strip() if result else None
-    except (RuntimeError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
         problem = str(error)
     remux_log.unlink(missing_ok=True)
     if problem is not None:
@@ -575,11 +578,11 @@ def restore_hidden_frames(clip: Path, *, log: Path) -> bool:
             pass  # The disk that failed the remux can also refuse this note.
         return False
     remuxed.replace(clip)
-    return probe_clip(clip).duration is not None
+    return probe_clip(clip, env=env).duration is not None
 
 
-def recording_summary(destination: Path) -> dict[str, object]:
-    probe = probe_clip(destination)
+def recording_summary(destination: Path, *, env: dict[str, str]) -> dict[str, object]:
+    probe = probe_clip(destination, env=env)
     return {
         "path": str(destination),
         "duration_seconds": probe.duration,
@@ -652,7 +655,7 @@ class Recordings:
         try:
             self.resources.close()
             if self.destination is not None:
-                self.last_summary = recording_summary(self.destination)
+                self.last_summary = recording_summary(self.destination, env=self.env)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
             raise SessionError(self.with_kept_clip(str(error))) from None
         finally:

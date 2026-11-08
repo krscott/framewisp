@@ -156,6 +156,7 @@ def render(video: Path, log: Path, **options: object) -> None:
         origin=ORIGIN,
         stopped=STOPPED,
         log=log.parent / "captions.log",
+        env=dict(os.environ),
         **({"layout": plain_layout(SIZE), "console": ConsoleCapture(log.parent)} | options),  # type: ignore[arg-type]
     )
 
@@ -252,7 +253,7 @@ def test_compaction_maps_pings_to_retained_frames(
         (log, tmp_path / "activity.jsonl"),
         origin=ORIGIN,
         stopped=STOPPED,
-        duration=recording_duration(raw_video),
+        duration=recording_duration(raw_video, env=dict(os.environ)),
     )
     source = [frame for first, last in ranges for frame in range(first, last)]
     render(
@@ -267,7 +268,9 @@ def test_compaction_maps_pings_to_retained_frames(
     first = source.index(math.ceil(4.25 * 30))
     # The render keeps the whole animation, not only its opening frames.
     assert source[first + 14] == source[first] + 14
-    assert round(recording_duration(raw_video) * 30) == len(source)
+    assert round(recording_duration(raw_video, env=dict(os.environ)) * 30) == len(
+        source
+    )
     assert first <= min(shown) <= first + 1
     assert ring_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
         (layout.gui.x + 600, layout.gui.y + 300), abs=1
@@ -296,7 +299,10 @@ def test_clip_end_cuts_a_late_ping_short(raw_video: Path, log: Path) -> None:
     render(raw_video, log, captions="none", compact=True)
     shown = compacted_ring_frames(raw_video, size=SIZE)
     assert 4 <= len(shown) < 15
-    assert max(shown) == round(recording_duration(raw_video) * 30) - 1
+    assert (
+        max(shown)
+        == round(recording_duration(raw_video, env=dict(os.environ)) * 30) - 1
+    )
 
 
 # R-REC-8

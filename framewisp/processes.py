@@ -1,11 +1,9 @@
 """Runner-side handle for a private descendant-owning supervisor."""
 
 import json
-import os
 import select
 import socket
 import subprocess
-import tempfile
 import time
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
@@ -149,29 +147,16 @@ def run_owned(
     """Run a helper to completion under its own supervisor; return its exit code.
 
     The helper is outside the runner's process group, so a terminal's Ctrl+C
-    reaches only the runner, and its supervisor ends it if the runner dies.
+    reaches only the runner. With the runner's owner settings in `env`, the
+    supervisor holds the session lease and ends the helper if the runner dies.
     """
-    with managed_process(command, log=log, env=env, cwd=cwd) as process:
-        started = time.monotonic()
-        while (result := process.poll()) is None:
-            if timeout is not None and time.monotonic() - started >= timeout:
-                raise subprocess.TimeoutExpired(command, timeout)
-            process.receive(0.05)
+    try:
+        with managed_process(command, log=log, env=env, cwd=cwd) as process:
+            started = time.monotonic()
+            while (result := process.poll()) is None:
+                if timeout is not None and time.monotonic() - started >= timeout:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                process.receive(0.05)
+    except OSError as error:
+        raise SessionError(f"Cannot run {command[0]}: {error}") from None
     return result
-
-
-def ffprobe(path: Path, *arguments: str) -> str:
-    """Return ffprobe's output for `path`, run with `run_owned`."""
-    with tempfile.TemporaryDirectory(prefix="framewisp-ffprobe-") as directory:
-        work = Path(directory)
-        output = work / "output"
-        result = run_owned(
-            ["ffprobe", "-v", "error", *arguments, "-o", str(output), str(path)],
-            log=work / "ffprobe.log",
-            env=dict(os.environ),
-            timeout=10,
-        )
-        if result:
-            problem = (work / "ffprobe.log").read_text(errors="replace").strip()
-            raise SessionError(f"Could not inspect recording {path}: {problem}")
-        return output.read_text(errors="replace")

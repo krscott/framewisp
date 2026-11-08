@@ -2,6 +2,7 @@
 
 import errno
 import json
+import os
 import socket
 import sys
 from collections.abc import Callable, Iterator
@@ -235,4 +236,4 @@ def test_inspecting_a_missing_non_utf8_recording_is_a_session_error(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(SessionError, match="Could not inspect recording"):
-        recording_summary(tmp_path / "\udc80gone.mp4")
+        recording_summary(tmp_path / "\udc80gone.mp4", env=dict(os.environ))

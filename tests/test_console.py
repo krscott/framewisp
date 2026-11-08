@@ -190,6 +190,7 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
         click_pings=False,
         console=ConsoleCapture(tmp_path),
         layout=PANEL_LAYOUT,
+        env=dict(os.environ),
     )
 
     def frame(second: float) -> Image.Image:
@@ -266,6 +267,7 @@ def test_console_render_failure_preserves_raw_video(tmp_path: Path) -> None:
             click_pings=False,
             console=ConsoleCapture(tmp_path),
             layout=PANEL_LAYOUT,
+            env=dict(os.environ),
         )
     assert video.read_bytes() == b"raw file contents"
     assert (tmp_path / "captions.log").stat().st_size > 0
