@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from inspect import FrameInfo, getsource, stack
 from pathlib import Path
@@ -718,6 +718,141 @@ def test_recording_finalizes_on_shutdown(
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+
+
+@contextmanager
+def paused_render(
+    tmp_path: Path,
+) -> Generator[
+    tuple[subprocess.Popen[bytes], int, subprocess.Popen[bytes]], None, None
+]:
+    """Run a clip with a click ping, and hold its render FFmpeg stopped.
+
+    The runner gets its own process group, as a terminal job does. Yield the
+    runner, a pidfd for the stopped FFmpeg, and `record-stop`, which waits for
+    the render.
+    """
+    directory = tmp_path / "session"
+    clip = tmp_path / "clip.mp4"
+    with (tmp_path / "runner.log").open("w") as output:
+        runner = subprocess.Popen(
+            ["framewisp", str(directory), "run", "--", "framewisp-demo"],
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    try:
+        wait_until(lambda: (directory / "session.json").exists())
+        cli(directory, "record-start", str(clip))
+        cli(directory, "click", "120", "100")
+        # A 3 s clip renders long enough for the scan below to catch it.
+        time.sleep(3)
+        with subprocess.Popen(
+            ["framewisp", str(directory), "record-stop"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as stop:
+            found: tuple[int, int] | None = None
+            deadline = time.monotonic() + 20
+
+            def is_render(pid: int) -> bool:
+                try:
+                    argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                except OSError:
+                    return False  # Other processes can exit during enumeration.
+                return (
+                    argv[0].endswith(b"ffmpeg")
+                    and b"captioned.mp4" in argv
+                    and private_clip(tmp_path)
+                    == Path(os.fsdecode(argv[argv.index(b"-i") + 1]))
+                )
+
+            while found is None and time.monotonic() < deadline:
+                for path in Path("/proc").glob("[0-9]*"):
+                    pid = int(path.name)
+                    if not is_render(pid):
+                        continue
+                    try:
+                        pidfd = os.pidfd_open(pid)
+                    except ProcessLookupError:
+                        continue
+                    # The pidfd pins this PID, so a second check rules out reuse.
+                    if is_render(pid):
+                        signal.pidfd_send_signal(pidfd, signal.SIGSTOP)
+                        found = (pid, pidfd)
+                        break
+                    os.close(pidfd)
+                time.sleep(0.01)
+            assert found is not None, "render FFmpeg not seen"
+            pid, render = found
+            try:
+                # A render that finished before SIGSTOP would test nothing.
+                wait_until(lambda: not exited(render) and process_state(pid) == "T")
+                yield runner, render, stop
+            finally:
+                with suppress(ProcessLookupError):
+                    signal.pidfd_send_signal(render, signal.SIGCONT)
+                os.close(render)
+                stop.communicate(timeout=60)
+    finally:
+        if runner.poll() is None:
+            runner.terminate()
+        runner.wait(timeout=60)
+
+
+def process_state(pid: int) -> str | None:
+    """Return the procfs state letter, or None once the process is reaped."""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return None
+
+
+def exited(pidfd: int) -> bool:
+    return bool(select.select([pidfd], [], [], 0)[0])
+
+
+# R-REC-3
+@pytest.mark.integration
+def test_terminal_interrupt_during_render_publishes_rendered_clip(
+    tmp_path: Path,
+) -> None:
+    with paused_render(tmp_path) as (runner, render, stop):
+        # A terminal's Ctrl+C signals the runner's whole process group.
+        os.killpg(runner.pid, signal.SIGINT)
+        signal.pidfd_send_signal(render, signal.SIGCONT)
+        assert stop.wait(timeout=60) == 0
+        assert runner.wait(timeout=60) == 0, (tmp_path / "runner.log").read_text()
+    assert len(ring_frames(tmp_path / "clip.mp4", 120, 100)) >= 8
+    assert not private_directories(tmp_path)
+
+
+# R-LIFE-4
+@pytest.mark.integration
+def test_recover_waits_for_render_of_killed_runner(tmp_path: Path) -> None:
+    with paused_render(tmp_path) as (runner, render, _):
+        runner.kill()
+        runner.wait(timeout=5)
+
+        def recovered() -> bool:
+            return (
+                subprocess.run(
+                    ["framewisp", str(tmp_path / "session"), "recover"],
+                    capture_output=True,
+                    check=False,
+                    timeout=30,
+                ).returncode
+                == 0
+            )
+
+        # The render's supervisor holds the session until FFmpeg has gone. A
+        # stopped FFmpeg defers SIGTERM, so that waits for the supervisor's
+        # SIGKILL after 5 s; allow well beyond that.
+        deadline = time.monotonic() + 20
+        while not recovered():
+            assert time.monotonic() < deadline, "recover kept refusing"
+            time.sleep(0.1)
+        assert exited(render)
 
 
 # R-REC-3

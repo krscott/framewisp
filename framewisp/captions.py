@@ -4,7 +4,6 @@ import json
 import os
 import re
 import select
-import subprocess
 import tempfile
 import time
 import unicodedata
@@ -32,6 +31,7 @@ from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
 from framewisp.layout import VideoLayout
 from framewisp.pings import PING_STYLE, Ping, ping_text, pings_for_clip
+from framewisp.processes import run_owned
 
 CaptionMode = Literal["none", "keys", "pointer", "all"]
 CAPTION_MODES: tuple[CaptionMode, ...] = get_args(CaptionMode)
@@ -383,6 +383,7 @@ def render_recording(
     console: ConsoleCapture,
     compact: bool = False,
     layout: VideoLayout,
+    env: dict[str, str],
 ) -> None:
     entries = (
         captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
@@ -435,47 +436,44 @@ def render_recording(
                         (input_log, input_log.parent / "activity.jsonl"),
                         origin=origin,
                         stopped=stopped,
-                        duration=recording_duration(clip),
+                        duration=recording_duration(clip, env=env),
                     )
                 )
             )
-        fonts = configured_fonts(os.environ)
+        fonts = configured_fonts(env)
         if fonts is None:
             raise RuntimeError("FRAMEWISP_FONTCONFIG_FILE does not name a file.")
         # A long recording can have more cut ranges than fit in an exec argument.
         (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
-        with log.open("w") as output:
-            result = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-nostdin",
-                    "-v",
-                    "warning",
-                    "-i",
-                    str(clip),
-                    "-/filter:v",
-                    "filters.txt",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "veryfast",
-                    "-crf",
-                    "18",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-color_range",
-                    "pc",
-                    "-an",
-                    "-movflags",
-                    "+faststart",
-                    "captioned.mp4",
-                ],
-                env=fixed_fonts(dict(os.environ), fonts=fonts),
-                cwd=work,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                check=False,
-            )
-        if result.returncode:
-            raise RuntimeError(f"FFmpeg exited with status {result.returncode}.")
+        result = run_owned(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "warning",
+                "-i",
+                str(clip),
+                "-/filter:v",
+                "filters.txt",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-color_range",
+                "pc",
+                "-an",
+                "-movflags",
+                "+faststart",
+                "captioned.mp4",
+            ],
+            log=log,
+            env=fixed_fonts(env, fonts=fonts),
+            cwd=work,
+        )
+        if result:
+            raise RuntimeError(f"FFmpeg exited with status {result}.")
         (work / "captioned.mp4").replace(clip)

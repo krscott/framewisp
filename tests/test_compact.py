@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -234,6 +235,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         console=ConsoleCapture(tmp_path),
         compact=True,
         layout=clip_layout(overlays),
+        env=dict(os.environ),
     )
     summary = json.loads(
         subprocess.run(
@@ -324,6 +326,7 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         console=ConsoleCapture(tmp_path),
         compact=True,
         layout=clip_layout(console),
+        env=dict(os.environ),
     )
 
     def shown(second: float) -> bool:

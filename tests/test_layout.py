@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -162,8 +163,9 @@ def render(
         click_pings=False,
         console=ConsoleCapture(tmp_path),
         layout=layout,
+        env=dict(os.environ),
     )
-    summary = recording_summary(video)
+    summary = recording_summary(video, env=dict(os.environ))
     assert (summary["width"], summary["height"]) == (layout.width, layout.height)
     return frame(video, (layout.width, layout.height))
 

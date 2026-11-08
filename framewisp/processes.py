@@ -90,6 +90,7 @@ def managed_process(
     log: Path,
     env: dict[str, str],
     output: BinaryIO | None = None,
+    cwd: Path | None = None,
 ) -> Generator[OwnedProcess, None, None]:
     parent, child = socket.socketpair()
     with parent, child, ExitStack() as stack:
@@ -114,6 +115,7 @@ def managed_process(
             stderr=subprocess.STDOUT,
             pass_fds=(child.fileno(),) + ((lease,) if lease >= 0 else ()),
             start_new_session=True,
+            cwd=cwd,
         )
         child.close()
         process = OwnedProcess(supervisor, parent, log)
@@ -132,3 +134,29 @@ def managed_process(
             yield process
         finally:
             process.close()
+
+
+def run_owned(
+    command: list[str],
+    *,
+    log: Path,
+    env: dict[str, str],
+    cwd: Path | None = None,
+    timeout: float | None = None,
+) -> int:
+    """Run a helper to completion under its own supervisor; return its exit code.
+
+    The helper is outside the runner's process group, so a terminal's Ctrl+C
+    reaches only the runner. With the runner's owner settings in `env`, the
+    supervisor holds the session lease and ends the helper if the runner dies.
+    """
+    try:
+        with managed_process(command, log=log, env=env, cwd=cwd) as process:
+            started = time.monotonic()
+            while (result := process.poll()) is None:
+                if timeout is not None and time.monotonic() - started >= timeout:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                process.receive(0.05)
+    except OSError as error:
+        raise SessionError(f"Cannot run {command[0]}: {error}") from None
+    return result

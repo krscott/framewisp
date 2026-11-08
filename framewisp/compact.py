@@ -2,13 +2,16 @@
 
 import json
 import math
-import subprocess
+import tempfile
 import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TypedDict
+
+from framewisp.errors import SessionError
+from framewisp.processes import run_owned
 
 # Seconds kept around each activity span and at each end of a clip. A click ping
 # starts inside its input's span, so PADDING_AFTER also keeps it whole (R-REC-8).
@@ -106,33 +109,44 @@ def compact_filter(ranges: list[tuple[int, int]]) -> str:
     return f"fps=30,select='{selected}',setpts=N/(30*TB)"
 
 
-def recording_duration(path: Path) -> float:
-    """Use the encoded timeline so stop/encoder latency cannot remove the tail."""
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        errors="replace",
-        check=False,
-        timeout=10,
-    )
-    if result.returncode:
-        raise RuntimeError(
-            f"Could not inspect recording {path}: {result.stderr.strip()}"
-        )
+def ffprobe(path: Path, *arguments: str, env: dict[str, str]) -> str:
+    """Return ffprobe's output for `path`, run with `run_owned`."""
     try:
-        duration = float(result.stdout)
+        # In a session, `recover` removes what a killed runner leaves.
+        with tempfile.TemporaryDirectory(
+            prefix="framewisp-ffprobe-", dir=env.get("FRAMEWISP_OWNER_RUNTIME")
+        ) as directory:
+            work = Path(directory)
+            output = work / "output"
+            result = run_owned(
+                ["ffprobe", "-v", "error", *arguments, "-o", str(output), str(path)],
+                log=work / "ffprobe.log",
+                env=env,
+                timeout=10,
+            )
+            if result:
+                problem = (work / "ffprobe.log").read_text(errors="replace").strip()
+            else:
+                return output.read_text(errors="replace")
+    except OSError as error:
+        problem = str(error)
+    raise SessionError(f"Could not inspect recording {path}: {problem}")
+
+
+def recording_duration(path: Path, *, env: dict[str, str]) -> float:
+    """Use the encoded timeline so stop/encoder latency cannot remove the tail."""
+    output = ffprobe(
+        path,
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        env=env,
+    )
+    try:
+        duration = float(output)
     except ValueError:
         raise RuntimeError(
             f"Recording {path} has no readable video duration."
