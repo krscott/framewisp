@@ -1889,8 +1889,11 @@ def caption_patches(path: Path) -> list[bytes]:
 RING_CROP = 100
 
 
-def ring_frames(path: Path, x: int, y: int) -> list[int]:
-    """List 30 fps frames with a centred red ring around a display position."""
+def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
+    """List 30 fps frames with a centred red ring or disc around a display position.
+
+    Red pixels exceed green and blue by more than `contrast`.
+    """
     crop = f"crop={RING_CROP}:{RING_CROP}:{x - RING_CROP // 2}:{y - RING_CROP // 2}"
     data = subprocess.run(
         [
@@ -1918,8 +1921,8 @@ def ring_frames(path: Path, x: int, y: int) -> list[int]:
         points = [
             (offset % RING_CROP, offset // RING_CROP)
             for offset in range(RING_CROP * RING_CROP)
-            if frame[offset * 3] - frame[offset * 3 + 1] > 40
-            and frame[offset * 3] - frame[offset * 3 + 2] > 40
+            if frame[offset * 3] - frame[offset * 3 + 1] > contrast
+            and frame[offset * 3] - frame[offset * 3 + 2] > contrast
         ]
         if len(points) < 20:
             continue
@@ -1977,13 +1980,23 @@ def assert_rings_mark_gestures(demo: Demo, video: Path, *, timed: bool = True) -
     pings = logged_pings(demo)[-len(GESTURE_PINGS) :]
     assert [(action, x, y) for action, _, x, y in pings] == GESTURE_PINGS
     origin = clip_origin(demo)
-    for action, moment, x, y in pings:
+    *presses, release = pings
+    # The drag's hold disc stops at its release and fades there; the translucent
+    # fill stays visible for fewer frames than a ring.
+    discs = ring_frames(video, release[2], release[3])
+    assert len(discs) >= 3, f"no hold disc at drag release ({release[2]}, {release[3]})"
+    if timed:
+        assert abs(discs[0] / 30 - (release[1] - origin)) <= 0.05
+    for action, moment, x, y in presses:
         rings = ring_frames(video, x, y)
         assert len(rings) >= 8, f"no ring for {action} at ({x}, {y})"
         if timed:
+            # A drag's translucent disc leaves the crop over a few frames and
+            # skews the ring's bounds. Only the ring's early stroke is this red.
+            opaque = ring_frames(video, x, y, contrast=120)
             first = min(when for _, when, px, py in pings if (px, py) == (x, y))
-            assert abs(rings[0] / 30 - (first - origin)) <= 0.05
-            assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
+            assert abs(opaque[0] / 30 - (first - origin)) <= 0.05
+            assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in opaque)
 
 
 # R-REC-5, R-REC-6

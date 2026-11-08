@@ -462,8 +462,9 @@ kept clip. After a killed runner, `recover` prints the interrupted clip's path a
 `interrupted_recording`. `--captions` selects what each clip captions: `keys`
 (`key` and `type`, the default), `pointer` (`move`, `click`, `drag`, and `scroll`),
 `all`, or `none`. Use `--captions all` to show pointer gestures. A red ring also
-marks each click and both ends of each completed drag, whatever the caption mode;
-`--no-click-pings` disables it for that clip. Pings appear only in recordings, not
+marks each click and drag press, and a translucent disc follows each completed
+drag while its button is held, whatever the caption mode; `--no-click-pings`
+disables both for that clip. Pings appear only in recordings, not
 in screenshots or `inspect`. Wait about 0.5 seconds after a final click before
 `record-stop`, or its ring is cut short. Every input is
 still logged to `SESSION/inputs.jsonl`. Logs and captions omit typed text (including Unicode) and

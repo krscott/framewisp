@@ -30,7 +30,7 @@ from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
 from framewisp.layout import VideoLayout
-from framewisp.pings import PING_STYLE, Ping, ping_text, pings_for_clip
+from framewisp.pings import PING_STYLE, Hold, Ping, ping_text, pings_for_clip
 from framewisp.processes import run_owned
 
 CaptionMode = Literal["none", "keys", "pointer", "all"]
@@ -313,7 +313,7 @@ def ass_time(seconds: float) -> str:
 def subtitle_script(
     captions: list[Caption],
     *,
-    pings: Iterable[Ping] = (),
+    pings: Iterable[Ping | Hold] = (),
     layout: VideoLayout,
 ) -> str:
     gui = layout.gui

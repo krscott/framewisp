@@ -56,6 +56,7 @@ affected module in `pyproject.toml`.
 | Mypy | `python -m mypy .` |
 | Tests | `python -m pytest` |
 | Installed-package tests | `nix flake check` |
+| Format | `nix run .#format` (CI fails if this changes files) |
 
 `tests/test_python_environment.py` runs only in the installed-package checks,
 which split cases across eight shards. Run `nix flake check` when changing how

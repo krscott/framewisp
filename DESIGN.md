@@ -29,7 +29,7 @@ acceptance application.
 - `framewisp/layout.py` is the one calculation of a clip's video size, GUI
   rectangle, and console panel rectangle. It also validates panel requests.
 - `framewisp/pings.py` selects a clip's `ping` records from `inputs.jsonl` and
-  builds the ASS drawing for each click ping.
+  builds the ASS drawing for each click ping and drag hold disc.
 - `framewisp/demo.py` displays a text field, button, and result label. Return
   changes the label to `Entered: TEXT`; clicking the button changes it to
   `Applied: TEXT`. A check button with a tooltip, a numbered slider, and a
@@ -78,7 +78,8 @@ Cut planning adds 1 second of padding before and 2 seconds after activity spans,
 keeps the opening 1 second and closing 2 seconds, rounds ranges outward to 30 fps
 frames, and merges touching or overlapping ranges. Each click ping starts inside
 its input's span and is shorter than the after-padding, so the padding keeps its
-whole animation (R-REC-8). Compaction requires the recorder's first-frame
+whole animation. A hold disc moves only inside its drag's span, and its fade is
+as long as a ping (R-REC-8). Compaction requires the recorder's first-frame
 monotonic timestamp even with captions and console disabled. Finalization renders
 overlays on the original timeline. ffprobe supplies the encoded duration for
 closing cuts, independent of stop/encoder latency. The renderer
@@ -974,8 +975,9 @@ session paths.
 
 ## Click pings in recordings
 
-Clips show a click ping by default (R-REC-5). `--no-click-pings` turns it off for
-one clip (R-REC-7), and caption modes leave it on (R-REC-11). Command start and
+Clips show click pings and drag hold discs by default (R-REC-5).
+`--no-click-pings` turns both off for one clip (R-REC-7), and caption modes leave
+them on (R-REC-11). Command start and
 end times can't place a ping: a press follows the pointer approach, and double
 clicks and drags press more than once. So the input worker calls `ping` from
 `log_input` right after each click's `mouseDown`, and after a drag's `mouseDown`
@@ -985,8 +987,9 @@ Scroll presses, refused presses, and the cleanup release of a cancelled action
 log no ping. `ping` events carry no typed content, and readers of start and end
 events ignore them.
 
-`pings.py` selects events in `origin <= time < stopped`. It writes one ASS
-drawing per ping into the script that holds captions and console text, so all
+`pings.py` draws a ring for each press in `origin <= time < stopped`, and a hold
+disc for each completed drag pressed before `stopped` and released at or after
+`origin`. It writes one ASS drawing per ring or disc into the script that holds captions and console text, so all
 overlays share one FFmpeg pass and the existing filter order aligns them: `ass`
 draws on the original timeline, and the compact `select` cuts afterwards. No
 mode needs its own handling.
@@ -995,6 +998,21 @@ The ring grows from radius 10 to 40 pixels with a 4-pixel stroke while fading ov
 coordinates, because libass otherwise shifts a scaled drawing off its `\pos`
 (R-REC-6). The ring's `\pos` adds the GUI offset from the clip's `VideoLayout`, and
 a `\clip` to the GUI rectangle keeps it off the console panel on every edge (R-REC-9).
+
+A drag's press ping draws the same ring. `pings.py` pairs it with the drag's
+release ping by command ID and adds one hold disc: the same circle path with no
+stroke, red fill at 30% opacity, radius 24 pixels. The input worker moves the
+pointer in equal steps of equal time between those pings, so the disc's
+`\move` from the press position to the release position over the logged hold
+time follows the pointer with no extra log data (R-REC-6). The disc grows from
+radius 10 at the ring's rate, filling the ring until it reaches its own radius,
+and fades over 0.5 seconds from the release. Its `\move` and `\clip` use the
+same GUI offset and rectangle as the ring (R-REC-9). libass moves over the whole
+line, fade included, when both `\move` times are zero, so the hold time is at
+least 1 ms. Discs precede rings in the script so rings draw on top. A drag
+pressed before the clip's origin and released after it starts its disc at the
+clip's first frame, fully grown, at the position interpolated for the origin
+(R-REC-5). A cancelled drag logs no release, so it keeps only its press ring.
 Screenshots read the compositor, which never sees this overlay (R-LOG-3).
 
 The control request's `click_pings` boolean defaults to true. Session metadata
