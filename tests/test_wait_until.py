@@ -49,6 +49,14 @@ def test_timeout_shows_a_named_predicate_source_and_its_last_value() -> None:
 
 
 @pytest.mark.usefixtures("short_timeout")
+def test_timeout_uses_a_given_description() -> None:
+    with pytest.raises(AssertionError) as failure:
+        wait_until(lambda: 0, "the control")
+
+    assert "waiting for: the control\nLast returned: 0" in str(failure.value)
+
+
+@pytest.mark.usefixtures("short_timeout")
 def test_timeout_falls_back_when_the_call_cannot_be_found() -> None:
     with pytest.raises(AssertionError, match="waiting for: the condition\n"):
         test_integration.wait_until(lambda: False)
@@ -93,6 +101,7 @@ def test_input_probe_wait_keeps_its_own_timeout_message(
         runtime=tmp_path,
         child_pids=[],
         recording=None,
+        control=None,
     )
 
     with pytest.raises(AssertionError) as failure:
