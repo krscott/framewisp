@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from test_integration import wait_for_control
 
 from framewisp.errors import SessionError
 from framewisp.ownership import (
@@ -155,17 +156,7 @@ def test_session_controls_with_changed_tmpdir(
             )
 
         assert command("status").returncode == 0
-        # Wait for the app's accessibility registration after socket readiness.
-        deadline = time.monotonic() + 10
-        while True:
-            observation = command("inspect", "--json", "--name", "Apply")
-            if (
-                observation.returncode == 0
-                and json.loads(observation.stdout)["matches"]
-            ):
-                break
-            assert time.monotonic() < deadline, observation
-            time.sleep(0.05)
+        wait_for_control(session, "Apply text")
         batch = tmp_path / "batch.json"
         batch.write_text(json.dumps({"actions": [{"action": "key", "chord": "Tab"}]}))
         result = command("batch", "--file", str(batch))

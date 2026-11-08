@@ -49,6 +49,8 @@ class Demo:
     runtime: Path
     child_pids: list[int]
     recording: Path | None
+    # Name of a control the app exports once its accessibility tree is ready.
+    control: str | None
 
 
 WAIT_TIMEOUT_SECONDS = 10
@@ -76,22 +78,28 @@ def wait_timeout_message(
     predicate: Callable[[], object],
     elapsed: float,
     last_value: object,
+    describe: Callable[[], str] | None,
 ) -> str:
     return (
         f"Timed out after {elapsed:.1f} s at "
         f"{Path(caller.filename).name}:{caller.lineno} "
-        f"waiting for: {wait_description(caller, predicate)}\n"
+        f"waiting for: {describe() if describe else wait_description(caller, predicate)}\n"
         f"Last returned: {last_value!r}"
     )
 
 
-def wait_until(predicate: Callable[[], object], /) -> None:
+def wait_until(
+    predicate: Callable[[], object], /, describe: Callable[[], str] | None = None
+) -> None:
+    """Poll until predicate is truthy; describe() replaces its source in errors."""
     started = time.monotonic()
     while not (last_value := predicate()):
         elapsed = time.monotonic() - started
         if elapsed >= WAIT_TIMEOUT_SECONDS:
             raise AssertionError(
-                wait_timeout_message(stack()[1], predicate, elapsed, last_value)
+                wait_timeout_message(
+                    stack()[1], predicate, elapsed, last_value, describe
+                )
             )
         time.sleep(0.05)
 
@@ -205,6 +213,21 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         if mode in probes
         else ["framewisp-demo"]
     )
+    controls = {
+        "waits": "Result",
+        "large-waits": "Result",
+        "deep": "Shallow",
+        "dialog": "Activate General",
+        "dialog-untitled": "Activate General",
+        "qt": "Inspection button",
+        "qt-tree": "Block main loop",
+        "qt-coordinates": "Activate dialog",
+    }
+    control = (
+        controls[mode]
+        if isinstance(mode, str) and mode in controls
+        else "Apply text" if app == ["framewisp-demo"] else None
+    )
     if mode in {"qt", "qt-tree", "qt-coordinates"}:
         app = [
             "env",
@@ -296,6 +319,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             runtime=Path(state["runtime_directory"]),
             child_pids=list(state["processes"].values()),
             recording=recording,
+            control=control,
         )
     finally:
         if process.poll() is None:
@@ -441,6 +465,7 @@ def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_compact_clip_preserves_failed_wait_and_capture_delay(
     demo: Demo, tmp_path: Path
@@ -3260,9 +3285,10 @@ def test_qt_menu_survives_between_commands(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Item chosen" in log.read_text())
 
 
-def inspect(demo: Demo, *arguments: str) -> dict[str, Any]:
+def inspect(session: Demo | Path, *arguments: str) -> dict[str, Any]:
+    directory = session.directory if isinstance(session, Demo) else session
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "inspect", "--json", *arguments],
+        ["framewisp", str(directory), "inspect", "--json", *arguments],
         capture_output=True,
         text=True,
         timeout=15,
@@ -3273,7 +3299,42 @@ def inspect(demo: Demo, *arguments: str) -> dict[str, Any]:
     return observation
 
 
+def wait_for_control(session: Demo | Path, name: str) -> None:
+    # GTK and Qt can finish exporting the tree after the app logs that it is ready.
+    # Until then, inspect correctly reports "unsupported".
+    observation: dict[str, Any] = {}
+
+    def exported() -> int:
+        nonlocal observation
+        # The control can sit deep or after many nodes; the walk stops at the match.
+        # These are the maximums in framewisp/inspection_limits.py.
+        observation = inspect(
+            session,
+            *("--name", name, "--limit", "1"),
+            *("--max-depth", "64", "--max-nodes", "4096"),
+        )
+        return cast(int, observation["match_count"])
+
+    wait_until(
+        exported,
+        lambda: f"the app to export a control named {name!r} to the accessibility "
+        f"tree. Last observation: status={observation['status']!r}, "
+        f"reasons={observation['reasons']!r}, errors={observation['errors']!r}",
+    )
+
+
+@pytest.fixture
+def exported_tree(demo: Demo) -> None:
+    """Wait until the demo app has exported its accessibility tree.
+
+    Use this in every test that inspects the tree or runs checks.
+    """
+    assert demo.control is not None, "Name a control for this app in the demo fixture"
+    wait_for_control(demo, demo.control)
+
+
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
@@ -3313,6 +3374,7 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
     # GTK exposes both the button and its child label with the same name.
@@ -3349,6 +3411,7 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
 
 # R-INSPECT-5, R-INSPECT-6
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
     assert inspect(demo, "--name", "Apply text")["status"] == "ok"
@@ -3370,6 +3433,7 @@ def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["qt", "x11-qt"], indirect=True)
 def test_inspect_qt_controls_and_popup_gap(demo: Demo) -> None:
     wait_until(lambda: "Menu probe ready" in (demo.directory / "app.log").read_text())
@@ -3390,6 +3454,7 @@ def test_inspect_qt_controls_and_popup_gap(demo: Demo) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("app", ["framewisp-demo", "sleep"])
 def test_inspection_private_buses_and_unsupported_apps(
     demo: Demo, tmp_path: Path, app: str
@@ -3430,6 +3495,7 @@ def test_inspection_private_buses_and_unsupported_apps(
         assert state["accessibility_bus"] != first["accessibility_bus"]
         if app == "framewisp-demo":
             wait_until(lambda: "Demo ready" in (second / "app.log").read_text())
+            wait_for_control(second, "Apply text")
             cli(second, "type", "--interval", "0", "Second session only")
             result = json.loads(
                 cli(second, "inspect", "--json", "--text", "Second session only").stdout
@@ -4185,6 +4251,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
@@ -4279,6 +4346,7 @@ def checked_batch(
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["waits", "x11-waits"], indirect=True)
 @pytest.mark.parametrize("text", ["Done", "replace"])
 def test_checks_submit_delayed_and_replaced_widgets(
@@ -4308,6 +4376,7 @@ def test_checks_submit_delayed_and_replaced_widgets(
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["large-waits", "x11-large-waits"], indirect=True)
 def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
@@ -4364,13 +4433,10 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
 
 # R-CHECK-4
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["deep", "x11-deep"], indirect=True)
 def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Deep probe ready" in (demo.directory / "app.log").read_text())
-    # GTK can finish exporting the accessibility tree after the probe logs ready.
-    wait_until(
-        lambda: inspect(demo, "--role", "button", "--name", "Shallow")["match_count"]
-    )
     shallow = inspect(
         demo, "--role", "button", "--name", "Shallow", "--max-depth", "32"
     )
@@ -4418,6 +4484,7 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["qt-tree", "x11-qt-tree"], indirect=True)
 def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
     wait_until(
@@ -4446,6 +4513,7 @@ def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["waits"], indirect=True)
 @pytest.mark.parametrize(
     "action,text,timeout",
@@ -4485,6 +4553,7 @@ def test_failed_checks_stop_and_capture(
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["waits"], indirect=True)
 def test_wait_duplicate_matches_fail(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
@@ -4500,6 +4569,7 @@ def test_wait_duplicate_matches_fail(demo: Demo, tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["waits"], indirect=True)
 @pytest.mark.parametrize("ending", ["disconnect", "stop", "exit"])
 def test_wait_cancellation_and_app_exit(
@@ -4753,6 +4823,7 @@ def test_normal_stop_clears_previous_app_exit(demo: Demo) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["x11-qt-tree"], indirect=True)
 def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
     log = demo.directory / "app.log"
@@ -4840,6 +4911,7 @@ def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
 
 # R-INSPECT-2
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize(
     "demo", [None, "x11", "qt-coordinates", "x11-qt-coordinates"], indirect=True
 )
@@ -4939,6 +5011,7 @@ def test_inspect_display_bounds_activate_offset_controls(
 
 # R-INSPECT-2
 @pytest.mark.integration
+@pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["dialog", "dialog-untitled"], indirect=True)
 def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
