@@ -337,7 +337,7 @@ def test_frame_size_limit_matches_ffmpeg(
             "-c:v",
             "libx264",
             "-preset",
-            "fast",
+            "veryfast",
             "-pix_fmt",
             "yuv420p",
             str(tmp_path / "frame.mp4"),
