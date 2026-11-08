@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Generator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -566,9 +566,10 @@ def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool
             timeout=10,
         )
         problem = remux_log.read_text(errors="replace").strip() if result else None
-        remux_log.unlink(missing_ok=True)
     except (subprocess.TimeoutExpired, OSError) as error:
         problem = str(error)
+    with suppress(OSError):
+        remux_log.unlink(missing_ok=True)
     if problem is not None:
         remuxed.unlink(missing_ok=True)
         try:

@@ -745,7 +745,7 @@ def paused_render(
         wait_until(lambda: (directory / "session.json").exists())
         cli(directory, "record-start", str(clip))
         cli(directory, "click", "120", "100")
-        # A longer clip makes the render easier to catch.
+        # A 3 s clip renders long enough for the scan below to catch it.
         time.sleep(3)
         with subprocess.Popen(
             ["framewisp", str(directory), "record-stop"],
