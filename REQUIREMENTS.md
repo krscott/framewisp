@@ -181,19 +181,30 @@ investigate or ask; never invent a rationale.
   the app exits, on SIGINT, on SIGTERM, and on `stop`.
 - **R-REC-4** [test] Recorded colours match screenshot colours.
 - **R-REC-5** [test] By default, a recording shows a click ping at each press
-  of a `click` and at each press and release of a completed `drag`. Each press of
-  a double click has its own ping. `scroll` and `move` show no click ping.
+  of a `click` or `drag`. Each press of a double click has its own ping. While a
+  completed drag holds its button, a translucent hold disc follows the pointer,
+  and it fades after the release. A hold that began before the clip shows its
+  disc from the clip's first frame. `scroll` and `move` show neither.
+
+  Rationale: Viewers can tell a click from a drag and see where the button was
+  held and for how long.
+
 - **R-REC-6** [test] A click ping is centred on the pointer position of its
-  event. It starts within 0.05 seconds of that event.
-- **R-REC-7** [test] `--no-click-pings` removes click pings from that clip only.
+  event. It starts within 0.05 seconds of that event. A hold disc is centred on
+  the pointer position while its drag holds the button. It starts to fade within
+  0.05 seconds of the release.
+- **R-REC-7** [test] `--no-click-pings` removes click pings and hold discs from
+  that clip only.
 - **R-REC-8** [test] In a compacted clip, a click ping stays at the retained
-  position of its event. It keeps its full duration unless the clip ends first.
-- **R-REC-9** [test] With `--console`, a click ping keeps its GUI position. It
-  never draws on the console panel.
+  position of its event. A hold disc follows the pointer as it was at each
+  retained frame. Each keeps its full duration unless the clip ends first.
+- **R-REC-9** [test] With `--console`, click pings and hold discs keep their GUI
+  positions. They never draw on the console panel.
 - **R-REC-10** [test] When recording rendering fails, a playable MP4 of the raw
   capture remains. It is at the requested path, unless framewisp cannot publish
   it there (R-REC-18). The error names the MP4's path and `captions.log`.
-- **R-REC-11** [test] `--captions none` does not change click pings.
+- **R-REC-11** [test] `--captions none` does not change click pings or hold
+  discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the video. The default is right.
 - **R-REC-13** [test] `--console-size` sets the panel width for `left` and

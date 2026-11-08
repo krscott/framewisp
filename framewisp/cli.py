@@ -208,7 +208,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--no-click-pings",
             action="store_true",
-            help="record without the red ping at each click and drag end",
+            help="record without the red ring at each press and the disc that follows drags",
         )
     commands.add_parser(
         "record-stop", help="finalize the active clip and keep the app running"
