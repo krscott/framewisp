@@ -112,7 +112,10 @@ def compact_filter(ranges: list[tuple[int, int]]) -> str:
 def ffprobe(path: Path, *arguments: str, env: dict[str, str]) -> str:
     """Return ffprobe's output for `path`, run with `run_owned`."""
     try:
-        with tempfile.TemporaryDirectory(prefix="framewisp-ffprobe-") as directory:
+        # In a session, `recover` removes what a killed runner leaves.
+        with tempfile.TemporaryDirectory(
+            prefix="framewisp-ffprobe-", dir=env.get("FRAMEWISP_OWNER_RUNTIME")
+        ) as directory:
             work = Path(directory)
             output = work / "output"
             result = run_owned(

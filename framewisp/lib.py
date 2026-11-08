@@ -566,9 +566,9 @@ def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool
             timeout=10,
         )
         problem = remux_log.read_text(errors="replace").strip() if result else None
-    except subprocess.TimeoutExpired as error:
+        remux_log.unlink(missing_ok=True)
+    except (subprocess.TimeoutExpired, OSError) as error:
         problem = str(error)
-    remux_log.unlink(missing_ok=True)
     if problem is not None:
         remuxed.unlink(missing_ok=True)
         try:

@@ -729,7 +729,8 @@ def paused_render(
     """Run a clip with a click ping, and hold its render FFmpeg stopped.
 
     The runner gets its own process group, as a terminal job does. Yield the
-    runner, the stopped FFmpeg, and `record-stop`, which waits for the render.
+    runner, a pidfd for the stopped FFmpeg, and `record-stop`, which waits for
+    the render.
     """
     directory = tmp_path / "session"
     clip = tmp_path / "clip.mp4"
@@ -744,15 +745,16 @@ def paused_render(
         wait_until(lambda: (directory / "session.json").exists())
         cli(directory, "record-start", str(clip))
         cli(directory, "click", "120", "100")
-        time.sleep(1)
+        # A longer clip makes the render easier to catch.
+        time.sleep(3)
         with subprocess.Popen(
             ["framewisp", str(directory), "record-stop"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         ) as stop:
-            render = None
+            found: tuple[int, int] | None = None
             deadline = time.monotonic() + 20
-            while render is None and time.monotonic() < deadline:
+            while found is None and time.monotonic() < deadline:
                 for path in Path("/proc").glob("[0-9]*/cmdline"):
                     try:
                         argv = path.read_bytes().split(b"\0")
@@ -764,18 +766,23 @@ def paused_render(
                         and private_clip(tmp_path)
                         == Path(os.fsdecode(argv[argv.index(b"-i") + 1]))
                     ):
-                        render = int(path.parent.name)
-                        os.kill(render, signal.SIGSTOP)
+                        pid = int(path.parent.name)
+                        # A pidfd keeps signals and exit checks on this process.
+                        with suppress(ProcessLookupError):
+                            found = (pid, os.pidfd_open(pid))
+                            signal.pidfd_send_signal(found[1], signal.SIGSTOP)
                         break
                 time.sleep(0.01)
-            assert render is not None, "render FFmpeg not seen"
-            # A render that finished before SIGSTOP would test nothing.
-            wait_until(lambda: process_state(render) == "T")
+            assert found is not None, "render FFmpeg not seen"
+            pid, render = found
             try:
+                # A render that finished before SIGSTOP would test nothing.
+                wait_until(lambda: not exited(render) and process_state(pid) == "T")
                 yield runner, render, stop
             finally:
                 with suppress(ProcessLookupError):
-                    os.kill(render, signal.SIGCONT)
+                    signal.pidfd_send_signal(render, signal.SIGCONT)
+                os.close(render)
                 stop.communicate(timeout=60)
     finally:
         if runner.poll() is None:
@@ -791,6 +798,10 @@ def process_state(pid: int) -> str | None:
         return None
 
 
+def exited(pidfd: int) -> bool:
+    return bool(select.select([pidfd], [], [], 0)[0])
+
+
 # R-REC-3
 @pytest.mark.integration
 def test_terminal_interrupt_during_render_publishes_rendered_clip(
@@ -799,7 +810,7 @@ def test_terminal_interrupt_during_render_publishes_rendered_clip(
     with paused_render(tmp_path) as (runner, render, stop):
         # A terminal's Ctrl+C signals the runner's whole process group.
         os.killpg(runner.pid, signal.SIGINT)
-        os.kill(render, signal.SIGCONT)
+        signal.pidfd_send_signal(render, signal.SIGCONT)
         assert stop.wait(timeout=60) == 0
         assert runner.wait(timeout=60) == 0, (tmp_path / "runner.log").read_text()
     assert len(ring_frames(tmp_path / "clip.mp4", 120, 100)) >= 8
@@ -825,9 +836,13 @@ def test_recover_waits_for_render_of_killed_runner(tmp_path: Path) -> None:
             )
 
         # The render's supervisor holds the session until FFmpeg has gone. A
-        # stopped FFmpeg defers SIGTERM, so that takes the supervisor's SIGKILL.
-        wait_until(recovered)
-        assert process_state(render) in {None, "Z"}
+        # stopped FFmpeg defers SIGTERM, so that waits for the supervisor's
+        # SIGKILL after 5 s; allow well beyond that.
+        deadline = time.monotonic() + 20
+        while not recovered():
+            assert time.monotonic() < deadline, "recover kept refusing"
+            time.sleep(0.1)
+        assert exited(render)
 
 
 # R-REC-3
