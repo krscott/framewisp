@@ -51,7 +51,7 @@ def test_timeout_shows_a_named_predicate_source_and_its_last_value() -> None:
 @pytest.mark.usefixtures("short_timeout")
 def test_timeout_uses_a_given_description() -> None:
     with pytest.raises(AssertionError) as failure:
-        wait_until(lambda: 0, "the control")
+        wait_until(lambda: 0, lambda: "the control")
 
     assert "waiting for: the control\nLast returned: 0" in str(failure.value)
 

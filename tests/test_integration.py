@@ -21,6 +21,8 @@ from typing import Any, cast
 import pytest
 from PIL import Image, ImageChops
 
+from framewisp import inspection_limits as limits
+
 # Startup clips, one session each: position, size in pixels, caption mode.
 CONSOLE_STARTS = {
     "console-left": ("left", 640, "keys"),
@@ -78,27 +80,27 @@ def wait_timeout_message(
     predicate: Callable[[], object],
     elapsed: float,
     last_value: object,
-    description: str | None,
+    describe: Callable[[], str] | None,
 ) -> str:
     return (
         f"Timed out after {elapsed:.1f} s at "
         f"{Path(caller.filename).name}:{caller.lineno} "
-        f"waiting for: {description or wait_description(caller, predicate)}\n"
+        f"waiting for: {describe() if describe else wait_description(caller, predicate)}\n"
         f"Last returned: {last_value!r}"
     )
 
 
 def wait_until(
-    predicate: Callable[[], object], /, description: str | None = None
+    predicate: Callable[[], object], /, describe: Callable[[], str] | None = None
 ) -> None:
-    """Poll until predicate is truthy; description replaces its source in errors."""
+    """Poll until predicate is truthy; describe() replaces its source in errors."""
     started = time.monotonic()
     while not (last_value := predicate()):
         elapsed = time.monotonic() - started
         if elapsed >= WAIT_TIMEOUT_SECONDS:
             raise AssertionError(
                 wait_timeout_message(
-                    stack()[1], predicate, elapsed, last_value, description
+                    stack()[1], predicate, elapsed, last_value, describe
                 )
             )
         time.sleep(0.05)
@@ -3302,13 +3304,24 @@ def inspect(session: Demo | Path, *arguments: str) -> dict[str, Any]:
 def wait_for_control(session: Demo | Path, name: str) -> None:
     # GTK and Qt can finish exporting the tree after the app logs that it is ready.
     # Until then, inspect correctly reports "unsupported".
-    wait_until(
-        lambda: inspect(
+    observation: dict[str, Any] = {}
+
+    def exported() -> int:
+        nonlocal observation
+        # The control can sit deep or after many nodes; the walk stops at the match.
+        observation = inspect(
             session,
             *("--name", name, "--limit", "1"),
-            *("--max-depth", "64", "--max-nodes", "4096"),
-        )["match_count"],
-        f"the app to export a control named {name!r} to the accessibility tree",
+            *("--max-depth", str(limits.MAX_DEPTH)),
+            *("--max-nodes", str(limits.MAX_NODES)),
+        )
+        return cast(int, observation["match_count"])
+
+    wait_until(
+        exported,
+        lambda: f"the app to export a control named {name!r} to the accessibility "
+        f"tree. Last observation: status={observation['status']!r}, "
+        f"reasons={observation['reasons']!r}, errors={observation['errors']!r}",
     )
 
 
