@@ -754,24 +754,34 @@ def paused_render(
         ) as stop:
             found: tuple[int, int] | None = None
             deadline = time.monotonic() + 20
+
+            def is_render(pid: int) -> bool:
+                try:
+                    argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                except OSError:
+                    return False  # Other processes can exit during enumeration.
+                return (
+                    argv[0].endswith(b"ffmpeg")
+                    and b"captioned.mp4" in argv
+                    and private_clip(tmp_path)
+                    == Path(os.fsdecode(argv[argv.index(b"-i") + 1]))
+                )
+
             while found is None and time.monotonic() < deadline:
-                for path in Path("/proc").glob("[0-9]*/cmdline"):
+                for path in Path("/proc").glob("[0-9]*"):
+                    pid = int(path.name)
+                    if not is_render(pid):
+                        continue
                     try:
-                        argv = path.read_bytes().split(b"\0")
-                    except OSError:
-                        continue  # Other processes can exit during enumeration.
-                    if (
-                        argv[0].endswith(b"ffmpeg")
-                        and b"captioned.mp4" in argv
-                        and private_clip(tmp_path)
-                        == Path(os.fsdecode(argv[argv.index(b"-i") + 1]))
-                    ):
-                        pid = int(path.parent.name)
-                        # A pidfd keeps signals and exit checks on this process.
-                        with suppress(ProcessLookupError):
-                            found = (pid, os.pidfd_open(pid))
-                            signal.pidfd_send_signal(found[1], signal.SIGSTOP)
+                        pidfd = os.pidfd_open(pid)
+                    except ProcessLookupError:
+                        continue
+                    # The pidfd pins this PID, so a second check rules out reuse.
+                    if is_render(pid):
+                        signal.pidfd_send_signal(pidfd, signal.SIGSTOP)
+                        found = (pid, pidfd)
                         break
+                    os.close(pidfd)
                 time.sleep(0.01)
             assert found is not None, "render FFmpeg not seen"
             pid, render = found
