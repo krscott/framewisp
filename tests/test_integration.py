@@ -4367,6 +4367,8 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
 @pytest.mark.parametrize("demo", ["deep", "x11-deep"], indirect=True)
 def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Deep probe ready" in (demo.directory / "app.log").read_text())
+    # GTK registers with the accessibility registry asynchronously after mapping.
+    wait_until(lambda: inspect(demo, "--role", "button")["applications"])
     shallow = inspect(
         demo, "--role", "button", "--name", "Shallow", "--max-depth", "32"
     )
