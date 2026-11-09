@@ -2879,7 +2879,11 @@ def test_x11_failed_app_startup_cleans_up(
             else [
                 sys.executable,
                 "-c",
-                "import json, os; print(json.dumps({k: os.environ[k] for k in ('DISPLAY', 'XDG_RUNTIME_DIR')}), flush=True); raise SystemExit(7)",
+                "import json, os; "
+                "s = os.stat(f\"/tmp/.X11-unix/X{os.environ['DISPLAY'][1:]}\"); "
+                "print(json.dumps({'runtime': os.environ['XDG_RUNTIME_DIR'], "
+                "'display': os.environ['DISPLAY'], 'socket': [s.st_ino, s.st_ctime_ns]}), flush=True); "
+                "raise SystemExit(7)",
             ]
         )
         result = subprocess.run(
@@ -2892,9 +2896,16 @@ def test_x11_failed_app_startup_cleans_up(
         assert result.returncode == (1 if missing_executable else 7), result.stderr
         assert not (directory / "session.json").exists()
         if not missing_executable:
-            env = json.loads((directory / "app.log").read_text())
-            assert not Path(env["XDG_RUNTIME_DIR"]).exists()
-            assert not (Path("/tmp/.X11-unix") / f"X{env['DISPLAY'][1:]}").exists()
+            started = json.loads((directory / "app.log").read_text())
+            assert not Path(started["runtime"]).exists()
+            # Sway takes the lowest free X display number, so a concurrent
+            # session may already own a new socket at this path.
+            socket_path = Path("/tmp/.X11-unix") / f"X{started['display'][1:]}"
+            try:
+                left = socket_path.stat()
+            except FileNotFoundError:
+                continue
+            assert [left.st_ino, left.st_ctime_ns] != started["socket"], socket_path
 
 
 @pytest.mark.integration
