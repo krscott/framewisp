@@ -15,6 +15,7 @@ from framewisp.errors import SessionError, recorded_app_exit
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.layout import (
     CONSOLE_POSITIONS,
+    DEFAULT_CELL_SCALE,
     DEFAULT_CONSOLE_POSITION,
     DEFAULT_CONSOLE_SIZE,
     ConsolePanel,
@@ -198,6 +199,12 @@ def main() -> None:
             type=positive_integer,
             metavar="PIXELS",
             help=f"even panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
+        )
+        recording_parser.add_argument(
+            "--console-cell-scale",
+            type=float,
+            metavar="FACTOR",
+            help="assume each console text cell is FACTOR times the console font's cell, so fewer rows and columns fit; raise it, e.g. to 1.1, for scripts such as Thai or Devanagari that draw larger (default: 1; requires --console)",
         )
         # None marks "not given", so run can require --record for it.
         recording_parser.add_argument(
@@ -403,15 +410,27 @@ def main() -> None:
                 "--captions requires --record; use record-start for later clips"
             )
         args.captions = args.captions or DEFAULT_CAPTIONS
-        placed = args.console_position is not None or args.console_size is not None
+        placed = (
+            args.console_position is not None
+            or args.console_size is not None
+            or args.console_cell_scale is not None
+        )
         if placed and not args.console:
-            parser.error("--console-position and --console-size require --console")
+            parser.error(
+                "--console-position, --console-size and --console-cell-scale "
+                "require --console"
+            )
         args.console_panel = None
         if args.console:
             try:
                 args.console_panel = ConsolePanel(
                     args.console_position or DEFAULT_CONSOLE_POSITION,
                     args.console_size or DEFAULT_CONSOLE_SIZE,
+                    (
+                        DEFAULT_CELL_SCALE
+                        if args.console_cell_scale is None
+                        else args.console_cell_scale
+                    ),
                 )
             except ValueError as error:
                 parser.error(str(error))

@@ -101,6 +101,16 @@ def test_text_bounds_long_lines_and_scrollback() -> None:
     assert len(state.lines) <= 2
 
 
+# R-REC-24
+@pytest.mark.parametrize(
+    "seconds", [0, -9.5, 9999.99, -999.99, -1000, 10000, -999999, -(10**9), 10**9]
+)
+def test_timestamps_fit_the_reserved_prefix(seconds: float) -> None:
+    state = ConsoleText(rows=1, columns=4)
+    state.feed("x\n", seconds)
+    assert state.screen(0).index(" | ") == 7
+
+
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -142,7 +152,9 @@ def test_clip_has_context_coalesces_bursts_and_excludes_later_output(
             ]
         )
     )
-    frames = list(console_frames(log, origin=10, stopped=12, panel=DEFAULT_PANEL))
+    frames = list(
+        console_frames(log, origin=10, stopped=12, panel=DEFAULT_PANEL, cell_scale=1)
+    )
     assert len(frames) == 3
     assert frames[0].start == 0
     assert frames[0].text == "  -2.00 | setup"

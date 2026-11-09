@@ -29,7 +29,7 @@ from framewisp.console import ConsoleCapture, console_frames
 from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
-from framewisp.layout import VideoLayout
+from framewisp.layout import CONSOLE_FONT_SIZE, VideoLayout
 from framewisp.pings import PING_STYLE, Hold, Ping, ping_text, pings_for_clip
 from framewisp.processes import run_owned
 
@@ -303,6 +303,15 @@ def captions_for_clip(
     return entries
 
 
+def ass_text(text: str) -> str:
+    """Draw text literally, at its usual width.
+
+    Libass reads `\\{` and `\\}` as plain braces. A word joiner after each
+    backslash keeps it from starting `\\N`, `\\n` or `\\h`.
+    """
+    return text.replace("\\", "\\\u2060").replace("{", r"\{").replace("}", r"\}")
+
+
 def ass_time(seconds: float) -> str:
     centiseconds = max(0, round(seconds * 100))
     minutes, remainder = divmod(centiseconds, 6000)
@@ -332,16 +341,14 @@ WrapStyle: 2
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
 Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{margin_left},{margin_right},{margin_bottom}
-Style: Console,DejaVu Sans Mono,18,&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
+Style: Console,DejaVu Sans Mono,{CONSOLE_FONT_SIZE},&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
 {PING_STYLE}
 
 [Events]
 Format: Layer, Start, End, Style, Text
 """
     for caption in captions:
-        # ASS interprets braces and backslashes as formatting. Use visible fullwidth
-        # equivalents in captions; opted-in input logs retain the original text.
-        text = caption.text.translate(str.maketrans("\\{}", "＼｛｝"))
+        text = ass_text(caption.text)
         # A caption is one line, which can be wider than a narrow GUI.
         script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{{{gui.clip}}}{text}\n"
     for ping in pings:
@@ -415,10 +422,11 @@ def render_recording(
                     origin=origin,
                     stopped=stopped,
                     panel=panel,
+                    cell_scale=layout.cell_scale,
                 ):
-                    text = frame.text.translate(
-                        str.maketrans("\\{}", "＼｛｝")
-                    ).replace("\n", r"\N")
+                    # Libass drops a line's leading spaces, which would shift the
+                    # `|` after a short timestamp. Hard spaces keep the columns.
+                    text = ass_text(frame.text).replace(" ", r"\h").replace("\n", r"\N")
                     script.write(
                         f"Dialogue: 0,{ass_time(frame.start)},{ass_time(frame.end)},Console,{position}{text}\n"
                     )

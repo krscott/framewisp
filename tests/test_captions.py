@@ -423,7 +423,7 @@ def test_caption_text_cannot_inject_ass_formatting() -> None:
     assert "0:00:00.25,0:00:01.50" in script
     assert r"\pos" not in script
     assert r"\N" not in script
-    assert "｛＼pos(0,0)｝＼N日本語" in script
+    assert "\\{\\\u2060pos(0,0)\\}\\\u2060N日本語" in script
 
 
 @pytest.mark.parametrize("failure", [None, "cleanup failed: PID 123"])

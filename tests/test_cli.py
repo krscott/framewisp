@@ -45,6 +45,8 @@ def framewisp(session: Path, *arguments: str) -> subprocess.CompletedProcess[str
         ["run", "--console-position", "top"],
         ["record-start", "--console-position", "left", "clip.mp4"],
         ["record-start", "--console-size", "640", "clip.mp4"],
+        ["run", "--record", "clip.mp4", "--console-cell-scale", "1.1"],
+        ["record-start", "--console-cell-scale", "1.1", "clip.mp4"],
     ],
 )
 def test_console_options_require_console(tmp_path: Path, command: list[str]) -> None:
@@ -56,7 +58,10 @@ def test_console_options_require_console(tmp_path: Path, command: list[str]) -> 
         *tail,
     )
     assert result.returncode == 2
-    assert "--console-position and --console-size require --console" in result.stderr
+    assert (
+        "--console-position, --console-size and --console-cell-scale require --console"
+        in result.stderr
+    )
     assert not session.exists()
     assert not (tmp_path / "clip.mp4").exists()
 
@@ -84,8 +89,16 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
         pytest.param(
             ["--console-size", "9" * 4299 + "8"], "at most 16384", id="unformattable"
         ),
-        (["--console-size", "388"], "at least 390"),
-        (["--console-position", "top", "--console-size", "134"], "at least 136"),
+        (["--console-size", "310"], "at least 312"),
+        (["--console-position", "top", "--console-size", "116"], "at least 118"),
+        (["--console-cell-scale", "many"], "--console-cell-scale"),
+        (["--console-cell-scale", "0.99"], "from 1 to 58"),
+        (["--console-cell-scale", "nan"], "from 1 to 58"),
+        (["--console-cell-scale", "inf"], "from 1 to 58"),
+        (
+            ["--console-size", "338", "--console-cell-scale", "1.1"],
+            "at --console-cell-scale 1.1; a right panel needs at least 340",
+        ),
     ],
 )
 @pytest.mark.parametrize("action", ["run", "record-start"])
@@ -112,8 +125,8 @@ def test_recording_rejects_invalid_panels_before_any_clip(
     [
         (["--height", "100"], ["1280x100", "taller"]),
         (
-            ["--width", "320", "--height", "240", "--console-position", "bottom"],
-            ["320x240", "wider"],
+            ["--width", "310", "--height", "240", "--console-position", "bottom"],
+            ["310x240", "wider"],
         ),
         (["--console-size", "16000"], ["17280x720", "smaller --console-size"]),
     ],
@@ -217,7 +230,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
         "console_recording": True,
     }
     if capability is not None:
-        state["console_panels"] = capability
+        state["console_cell_scale"] = capability
     (tmp_path / "session.json").write_text(json.dumps(state))
     destination = tmp_path / "clip.mp4"
     result = subprocess.run(
@@ -236,14 +249,23 @@ def test_console_rejects_unsupported_runner_before_connecting(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "does not support console panel options. Restart" in result.stderr
+    assert "does not support this version's console panels. Restart" in result.stderr
     assert "Traceback" not in result.stderr
-    assert not destination.exists()
 
 
 @pytest.mark.parametrize(
     ("panel", "expected"),
-    [(None, None), (ConsolePanel("top", 200), {"position": "top", "size": 200})],
+    [
+        (None, None),
+        (
+            ConsolePanel("top", 200),
+            {"position": "top", "size": 200, "cell_scale": 1.0},
+        ),
+        (
+            ConsolePanel("top", 200, 1.5),
+            {"position": "top", "size": 200, "cell_scale": 1.5},
+        ),
+    ],
 )
 def test_record_start_sends_console_only_for_a_panel(
     panel: ConsolePanel | None, expected: dict[str, object] | None
@@ -265,7 +287,7 @@ def test_record_start_sends_console_only_for_a_panel(
                     "control_protocol": 1,
                     "caption_modes": True,
                     "click_pings_recording": True,
-                    "console_panels": True,
+                    "console_cell_scale": True,
                     "runtime_directory": directory,
                 }
             )

@@ -170,9 +170,18 @@ class ConsoleText:
         if self.current:
             lines.append((self.timestamp, self.current))
         return "\n".join(
-            f"{timestamp - origin:7.2f} | {text}"
+            f"{clip_seconds(timestamp - origin)} | {text}"
             for timestamp, text in lines[-self.rows :]
         )
+
+
+def clip_seconds(seconds: float) -> str:
+    """Seven characters, the width `text_columns` reserves, at any clip time."""
+    text = f"{seconds:7.2f}"
+    if len(text) > 7:
+        # Drop the decimals for long times; clamp beyond 11 days before the clip.
+        text = f"{max(-999999.0, min(seconds, 9999999.0)):7.0f}"
+    return text
 
 
 def cell_width(char: str) -> int:
@@ -189,10 +198,13 @@ class ConsoleFrame:
 
 
 def console_frames(
-    log: Path, *, origin: float, stopped: float, panel: Rect
+    log: Path, *, origin: float, stopped: float, panel: Rect, cell_scale: float
 ) -> Generator[ConsoleFrame, None, None]:
     """Keep pre-clip context and coalesce bursts to at most one update per frame."""
-    state = ConsoleText(rows=text_rows(panel.height), columns=text_columns(panel.width))
+    state = ConsoleText(
+        rows=text_rows(panel.height, cell_scale),
+        columns=text_columns(panel.width, cell_scale),
+    )
     start = 0.0
     screen = ""
     with log.open(encoding="utf-8") as source:

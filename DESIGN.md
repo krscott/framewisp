@@ -1035,13 +1035,13 @@ into a console panel. `--console-position` picks the video edge, default `right`
 (R-REC-12). `--console-size` sets the panel's width for `left` and `right` and its
 height for `top` and `bottom`, default 640 pixels (R-REC-13). The other panel
 dimension equals the matching GUI dimension. `run --console` without `--record` is
-invalid. The parser rejects either placement option without `--console`, on both
+invalid. The parser rejects any `--console-*` option without `--console`, on both
 commands, before it starts a session or clip. The control request's `console`
-value is absent, null, or an object with exactly `position` and `size`, so a position
-can't exist without a panel.
+value is absent, null, or an object with exactly `position`, `size` and
+`cell_scale`, so a position can't exist without a panel.
 Console capture uses the same first-frame monotonic origin as input captions,
 including with `--captions none`. A lock protects sidecar snapshots during rendering.
-Session metadata advertises `console_panels: true`. Every `--console` request,
+Session metadata advertises `console_cell_scale: true`. Every `--console` request,
 including the default placement, requires this capability before connecting, because
 an older runner can't read the object. The error tells the user to restart the
 session. A clip without a panel omits `console`, because an older runner also rejects
@@ -1052,8 +1052,25 @@ before final recording rendering, and bounded on shutdown if a pipe writer remai
 The renderer streams the snapshot into bounded text state, strips split ANSI CSI
 and OSC sequences, replaces lines after carriage returns, and handles backspaces,
 tabs, wide characters, wrapping, and a limited scrollback. The panel's width sets
-the wrap column and its height sets the rows kept: `(height - 64) // 24` rows and
-`(width - 32) * 10 // 119 - 10` columns, which is 41 columns in a 640-pixel panel.
+the wrap column and its height sets the rows kept: `(height - 64) // 18` rows and
+`(width - 32) * 100 // 931 - 10` columns, which is 55 columns in a 640-pixel panel.
+Both divisors are multiplied by `--console-cell-scale` (R-REC-25), computed
+exactly from the decimal given. The fixed font (R-REC-23) lets these use measured
+metrics: libass draws DejaVu Sans Mono 18 with 18-pixel lines and 9.30-pixel
+cells, rounded up to 9.31. Text starts
+16 pixels in from the left and 48 down, below the title, and keeps 16 pixels of
+padding at the right and bottom (R-REC-24). Each line starts with a 7-character
+timestamp and ` | `, so 10 cells are reserved; times from 1000 seconds before the
+clip or 10000 after drop their decimals, and clamp to -999999 and 9999999, to keep
+that width. Captions and console text escape braces as `\{` and `\}`, and follow
+each backslash with a word joiner so it can't start `\N`, `\n` or `\h`; all three
+then draw as themselves, one cell wide. Spaces render as ASS hard spaces, because
+libass drops a line's leading
+spaces and would shift the `|` after a shorter timestamp. Printable ASCII stays
+inside the panel (R-REC-24), and CJK and emoji fallbacks happen to fit their two
+cells. Other fallback fonts are not measured: Thai, Devanagari and Vietnamese lines
+are 19 to 20 pixels tall, and Tamil letters about 1.3 cells wide (ஔ 3.2), so a
+full panel of them needs a larger cell scale.
 Line timestamps are seconds relative to clip origin; negative values identify
 pre-clip context. Output received at or after the stop request is excluded. Updates
 coalesce to at most one per 30 fps frame. This is plain text rendering, without
@@ -1073,9 +1090,12 @@ A panel must be encodable and readable (R-REC-16):
 
 - `--console-size` is even. Yuv420p needs an even video, and `pad` rounds an odd
   offset down, which would shift the GUI off its overlays.
-- The panel has at least 20 text columns and 3 text rows, so at least 390 pixels wide
-  and 136 tall. This includes the dimension that follows the GUI, so a default panel
-  on a display under 136 pixels tall is rejected, naming the display size.
+- The panel has at least 20 text columns and 3 text rows, so at least 312 pixels wide
+  and 118 tall at the default cell scale. Both minimums grow with the scale, and
+  errors name it. This includes the dimension that follows the GUI, so a default
+  panel on a display under 118 pixels tall is rejected, naming the display size.
+- `--console-cell-scale` is a number from 1 to 58. Above about 58.5 even the
+  narrowest panel with 20 columns is wider than 16384 pixels.
 - Neither video dimension exceeds 16384 pixels, the libx264 limit, and
   `(width + 128) * (height + 128)` stays below 2^28, FFmpeg's frame size limit.
   Measured with the pinned FFmpeg, 16384x16128 and 16258x16254 encode, while
