@@ -249,7 +249,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "does not support these console panel options. Restart" in result.stderr
+    assert "does not support this version's console panels. Restart" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -287,7 +287,6 @@ def test_record_start_sends_console_only_for_a_panel(
                     "control_protocol": 1,
                     "caption_modes": True,
                     "click_pings_recording": True,
-                    "console_cell_scale": True,
                     "console_cell_scale": True,
                     "runtime_directory": directory,
                 }

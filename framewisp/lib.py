@@ -693,7 +693,7 @@ def session_command(
         )
     if console is not None and state.get("console_cell_scale") is not True:
         raise SessionError(
-            "This runner does not support these console panel options. Restart the "
+            "This runner does not support this version's console panels. Restart the "
             "session with this version of framewisp."
         )
     if compact and state.get("compact_recording") is not True:

@@ -742,7 +742,8 @@ def test_layout_names_the_scale_when_the_display_is_too_small() -> None:
 # R-REC-24
 def test_braces_and_backslashes_draw_as_one_cell(tmp_path: Path) -> None:
     # A backslash before N, n or h, or a brace, would otherwise act as ASS syntax.
-    lines = ["M" * 24, r"{\pos(0,0)}\N\n\h\{x\}{}\\"[:24].ljust(24, "M")]
+    # Lines can end with a backslash, or repeat one before a command letter.
+    lines = ["M" * 26, r"{\pos(0,0)}\N\n\h\{x\}{}\\", r"\\N\\n\\h".rjust(26, "M")]
     (tmp_path / "console.jsonl").write_text(
         "".join(
             json.dumps({"time": 10.1, "text": f"{line}\n"}) + "\n" for line in lines
@@ -751,8 +752,9 @@ def test_braces_and_backslashes_draw_as_one_cell(tmp_path: Path) -> None:
     layout = panel_layout(GUI_SIZE, "right", 640)
     assert layout.panel is not None
     bands = ink_rows(crop(render(tmp_path, "literal", layout), layout.panel))
-    assert len(bands) == 2
-    assert abs(bands[0][2] - bands[1][2]) <= 1
+    assert len(bands) == len(lines)
+    rights = [right for _, _, right in bands]
+    assert max(rights) - min(rights) <= 1
 
 
 def test_timestamps_of_any_width_keep_the_separator_aligned(tmp_path: Path) -> None:

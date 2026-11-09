@@ -193,7 +193,7 @@ def video_layout(
     beside = console.position in ("left", "right")
     panel_width = console.size if beside else width
     panel_height = height if beside else console.size
-    smaller = ", a smaller --console-cell-scale," if console.cell_scale != 1 else ""
+    smaller = ", a smaller --console-cell-scale," if console.scale_note else ""
     # Recordings need an even display, so name an even minimum.
     needed = min_panel_height(console.cell_scale)
     needed += needed % 2

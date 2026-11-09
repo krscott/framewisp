@@ -503,8 +503,8 @@ and the panel needs at least 312 pixels of width and 118 of height, including th
 dimension that follows the GUI. If the app prints scripts that draw larger than
 ASCII, such as Thai, Devanagari or Vietnamese (taller rows) or Tamil (wider
 letters), and the panel's last row or line ends look cut off, add
-`--console-cell-scale 1.1` (Tamil: 1.5, or 3.5 for text with many ஔ). It trades rows and columns for room, and
-raises the minimum panel size by the same factor. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
+`--console-cell-scale 1.1` (Tamil: 1.5, or 3.5 for text with many ஔ). It trades
+rows and columns for room, and raises the minimum panel size by the same factor. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
 A rejected `record-start` leaves the app running. If `--console` reports an older
 runner, restart the session.
 The GUI and screenshots keep their original dimensions. Panel lines show seconds

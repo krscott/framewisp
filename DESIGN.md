@@ -1064,7 +1064,8 @@ timestamp and ` | `, so 10 cells are reserved; times from 1000 seconds before th
 clip or 10000 after drop their decimals, and clamp to -999999 and 9999999, to keep
 that width. Captions and console text escape braces as `\{` and `\}`, and follow
 each backslash with a word joiner so it can't start `\N`, `\n` or `\h`; all three
-then draw as themselves, one cell wide. Spaces render as ASS hard spaces, because libass drops a line's leading
+then draw as themselves, one cell wide. Spaces render as ASS hard spaces, because
+libass drops a line's leading
 spaces and would shift the `|` after a shorter timestamp. Printable ASCII stays
 inside the panel (R-REC-24), and CJK and emoji fallbacks happen to fit their two
 cells. Other fallback fonts are not measured: Thai, Devanagari and Vietnamese lines
