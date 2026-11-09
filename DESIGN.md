@@ -914,7 +914,9 @@ Complete records, including malformed JSON, stay unchanged (R-LOG-7, R-LOG-8).
 The descriptor stays locked through the buffered append and close, which flushes
 before releasing the lock. This serializes repair and append across attached
 CLI clients without a separate lock file; headless inputs already share one
-worker. Readers retain their existing handling of in-progress trailing writes.
+worker. Readers hold a shared flock on their reading descriptor through the
+whole byte snapshot, so repair cannot splice old tail bytes into a new record.
+They release the lock before parsing and still ignore an unfinished trailing line.
 
 By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
 Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit

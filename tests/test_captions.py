@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from threading import Event
@@ -476,8 +476,52 @@ def test_append_waits_for_live_writer_before_repairing(
                 live.write(b"}\n")
                 # Close flushes the complete live record before releasing flock.
         task.result(timeout=5)
+    monkeypatch.setattr(fcntl, "flock", flock)
     events = activity_events(log)
     assert events[0]["id"] == "live"
+    assert [event["event"] for event in events[1:]] == ["start", "end"]
+
+
+# R-LOG-7, R-LOG-8
+def test_reader_snapshot_excludes_concurrent_tail_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "inputs.jsonl"
+    saved = {"id": "saved", "event": "start", "time": 1}
+    log.write_bytes(json.dumps(saved).encode() + b'\n{"id":"partial')
+    waiting = Event()
+    flock = fcntl.flock
+    task: Future[None] | None = None
+
+    def append() -> None:
+        with log_input(tmp_path, "key", {"chord": "Ctrl+s"}) as result:
+            result.returncode = 0
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+
+        def acquire(output: BinaryIO, operation: int) -> None:
+            nonlocal task
+            if operation == fcntl.LOCK_SH:
+                flock(output, operation)
+                # Attempt repair while the reader owns its snapshot. The real
+                # writer must wait until reading and descriptor close finish.
+                task = executor.submit(append)
+                assert waiting.wait(timeout=5), "Writer did not contend on the lock"
+            else:
+                assert operation == fcntl.LOCK_EX
+                if not waiting.is_set():
+                    with pytest.raises(BlockingIOError):
+                        flock(output, operation | fcntl.LOCK_NB)
+                    waiting.set()
+                flock(output, operation)
+
+        monkeypatch.setattr(fcntl, "flock", acquire)
+        assert activity_events(log) == [saved]
+        assert task is not None, "Reader did not lock its snapshot"
+        task.result(timeout=5)
+    monkeypatch.setattr(fcntl, "flock", flock)
+    events = activity_events(log)
+    assert events[0] == saved
     assert [event["event"] for event in events[1:]] == ["start", "end"]
 
 
