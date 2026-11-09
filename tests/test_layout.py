@@ -208,7 +208,7 @@ def test_layout_without_a_panel_fills_the_video_with_the_gui() -> None:
 
 
 def test_default_panel_keeps_its_text_capacity() -> None:
-    assert (text_columns(640), text_rows(720)) == (41, 27)
+    assert (text_columns(640), text_rows(720)) == (55, 36)
 
 
 # R-REC-16
@@ -223,10 +223,10 @@ def test_default_panel_keeps_its_text_capacity() -> None:
         ("right", "640", "positive even"),
         ("right", 16386, "at most 16384"),
         pytest.param("top", 10**4400, "at most 16384", id="unformattable"),
-        ("left", 388, "at least 390"),
-        ("right", 2, "at least 390"),
-        ("top", 134, "at least 136"),
-        ("bottom", 2, "at least 136"),
+        ("left", 310, "at least 312"),
+        ("right", 2, "at least 312"),
+        ("top", 116, "at least 118"),
+        ("bottom", 2, "at least 118"),
         ("middle", 640, "must be one of"),
     ],
 )
@@ -239,25 +239,28 @@ def test_panel_rejects_invalid_values(
 
 # R-REC-16
 @pytest.mark.parametrize(
-    ("position", "size"), [("left", 390), ("right", 390), ("top", 136), ("bottom", 136)]
+    ("position", "size"), [("left", 312), ("right", 312), ("top", 118), ("bottom", 118)]
 )
 def test_smallest_panel_has_the_minimum_text_capacity(
     position: ConsolePosition, size: int
 ) -> None:
-    panel = panel_layout((390, 136), position, size).panel
+    panel = panel_layout((312, 118), position, size).panel
     assert panel is not None
     assert text_columns(panel.width) == 20
     assert text_rows(panel.height) == 3
+    # The minimums are the smallest sizes that hold that much text.
+    assert text_columns(panel.width - 1) == 19
+    assert text_rows(panel.height - 1) == 2
 
 
 # R-REC-16
 @pytest.mark.parametrize(
     ("display", "position", "size", "named"),
     [
-        ((1280, 134), "right", 640, ["1280x134", "136", "taller", "top or bottom"]),
-        ((1280, 100), "left", 640, ["1280x100", "136", "taller", "top or bottom"]),
-        ((388, 480), "top", 200, ["388x480", "390", "wider", "left or right"]),
-        ((320, 240), "bottom", 200, ["320x240", "390", "wider", "left or right"]),
+        ((1280, 116), "right", 640, ["1280x116", "118", "taller", "top or bottom"]),
+        ((1280, 100), "left", 640, ["1280x100", "118", "taller", "top or bottom"]),
+        ((310, 480), "top", 200, ["310x480", "312", "wider", "left or right"]),
+        ((240, 240), "bottom", 200, ["240x240", "312", "wider", "left or right"]),
     ],
 )
 def test_layout_names_the_display_when_the_following_dimension_is_too_small(
@@ -500,14 +503,14 @@ def test_every_caption_mode_keeps_the_panel_and_gui(
 def test_text_wraps_to_the_panel_and_keeps_the_newest_rows(tmp_path: Path) -> None:
     log = tmp_path / "console.jsonl"
     log.write_text(json.dumps({"time": 10.1, "text": "x" * 100 + "\nlast\n"}) + "\n")
-    panel = Rect(0, 0, 390, 136)
+    panel = Rect(0, 0, 312, 118)
     frames = list(console_frames(log, origin=10, stopped=12, panel=panel))
     lines = frames[-1].text.split("\n")
     assert len(lines) == 3
     assert [line.split(" | ")[1] for line in lines] == ["x" * 20, "x" * 20, "last"]
 
 
-@pytest.mark.parametrize(("height", "rows"), [(136, 3), (200, 5)])
+@pytest.mark.parametrize(("height", "rows"), [(118, 3), (136, 4), (200, 7)])
 @pytest.mark.parametrize("position", ["top", "bottom"])
 def test_short_panel_draws_only_the_rows_that_fit(
     tmp_path: Path, position: ConsolePosition, height: int, rows: int
@@ -552,3 +555,81 @@ def test_panel_text_does_not_depend_on_the_edge(
     assert box is not None
     # Wrapping keeps text inside the panel instead of running into its clip.
     assert box[2] < panels[0].width - 16
+
+
+def ink_rows(panel: Image.Image) -> list[tuple[int, int, int]]:
+    """Each band of inked rows below the title, with its rightmost inked column."""
+    mask = ImageChops.subtract(
+        ImageChops.difference(
+            panel, Image.new("RGB", panel.size, PANEL_COLOUR)
+        ).convert("L"),
+        Image.new("L", panel.size, TOLERANCE),
+    )
+    bands: list[tuple[int, int, int]] = []
+    start = None
+    for y in range(44, mask.height + 1):
+        inked = y < mask.height and mask.crop((0, y, mask.width, y + 1)).getbbox()
+        if inked and start is None:
+            start = y
+        elif not inked and start is not None:
+            box = mask.crop((0, start, mask.width, y)).getbbox()
+            assert box is not None
+            bands.append((start, y, box[2]))
+            start = None
+    return bands
+
+
+# R-REC-24
+@pytest.mark.parametrize("fill", ["█", "你😀"])
+@pytest.mark.parametrize(
+    ("display", "position", "pixels"),
+    [
+        *(((640, 118), position, 312) for position in ("left", "right")),
+        *(((312, 480), position, 118) for position in ("top", "bottom")),
+        *((GUI_SIZE, position, 640) for position in CONSOLE_POSITIONS),
+    ],
+)
+def test_filled_panel_text_stays_inside_the_panel(
+    tmp_path: Path,
+    display: tuple[int, int],
+    position: ConsolePosition,
+    pixels: int,
+    fill: str,
+) -> None:
+    layout = panel_layout(display, position, pixels)
+    assert layout.panel is not None
+    columns, rows = text_columns(layout.panel.width), text_rows(layout.panel.height)
+    # Lines three panels long wrap; `-990.00` is the widest prefix the panel reserves.
+    (tmp_path / "console.jsonl").write_text(
+        json.dumps({"time": -980.0, "text": f"{fill * columns * 3}\n" * rows}) + "\n"
+    )
+    panel = crop(render(tmp_path, "filled", layout, display=display), layout.panel)
+    background = Image.new("RGB", panel.size, PANEL_COLOUR)
+    text = ink_box(
+        panel.crop((0, 44, *panel.size)), background.crop((0, 44, *panel.size))
+    )
+    assert text is not None
+    left, top, right, bottom = text[0], text[1] + 44, text[2], text[3] + 44
+    assert left >= 16 and right <= panel.width - 16
+    assert bottom <= panel.height - 8
+    if fill == "█":
+        # Blocks fill their cells, so they show every row and leave less than a
+        # spare cell or row.
+        assert round((bottom - top) / 18) == rows
+        assert right > panel.width - 16 - 10
+        assert bottom > panel.height - 16 - 18
+
+
+def test_timestamps_of_any_width_keep_the_separator_aligned(tmp_path: Path) -> None:
+    # Clip-relative times -100.5, -10.5, -9.5 and 0.5 print 7, 6, 5 and 4 characters.
+    (tmp_path / "console.jsonl").write_text(
+        "".join(
+            json.dumps({"time": 10 + offset, "text": "M\n"}) + "\n"
+            for offset in (-100.5, -10.5, -9.5, 0.5)
+        )
+    )
+    layout = panel_layout(GUI_SIZE, "right", 640)
+    assert layout.panel is not None
+    bands = ink_rows(crop(render(tmp_path, "aligned", layout), layout.panel))
+    assert len(bands) == 4
+    assert max(r for _, _, r in bands) - min(r for _, _, r in bands) <= 1

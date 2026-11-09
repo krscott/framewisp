@@ -2165,7 +2165,7 @@ def test_later_clips_pick_their_own_console_panel(demo: Demo, tmp_path: Path) ->
             ("top", 200, "keys"),
             ("top", 640, "none"),
             ("bottom", 640, "keys"),
-            ("bottom", 136, "none"),
+            ("bottom", 118, "none"),
         ]
     ):
         clip = tmp_path / f"clip-{index}.mp4"
@@ -2214,7 +2214,7 @@ def test_rejected_console_panel_leaves_the_app_running(
         ({"position": "up", "size": 640}, "console position must be one of"),
         ({"position": "left", "size": 641}, "must be even"),
         ({"position": "left", "size": True}, "positive even"),
-        ({"position": "left", "size": 2}, "at least 390"),
+        ({"position": "left", "size": 2}, "at least 312"),
         ({"position": "left", "size": int("9" * 4300)}, "at most 16384"),
     ):
         with socket.socket(socket.AF_UNIX) as connection:

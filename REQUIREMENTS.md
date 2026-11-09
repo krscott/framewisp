@@ -236,6 +236,13 @@ investigate or ask; never invent a rationale.
   Rationale: Agents in different environments should produce the same videos by
   default, including the text framewisp draws on them.
 
+- **R-REC-24** [test] Console panel text stays inside the panel at every
+  accepted position and size. A line longer than the panel wraps instead of
+  running past its edge.
+
+  Rationale: Agents read the panel to see app output. Text cut off at the edge
+  hides that output without any sign.
+
 ## Lifetime and recovery (LIFE)
 
 - **R-LIFE-1** [test] Stopping a session ends every app descendant, including

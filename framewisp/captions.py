@@ -29,7 +29,7 @@ from framewisp.console import ConsoleCapture, console_frames
 from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
-from framewisp.layout import VideoLayout
+from framewisp.layout import CONSOLE_FONT_SIZE, VideoLayout
 from framewisp.pings import PING_STYLE, Hold, Ping, ping_text, pings_for_clip
 from framewisp.processes import run_owned
 
@@ -332,7 +332,7 @@ WrapStyle: 2
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
 Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{margin_left},{margin_right},{margin_bottom}
-Style: Console,DejaVu Sans Mono,18,&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
+Style: Console,DejaVu Sans Mono,{CONSOLE_FONT_SIZE},&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
 {PING_STYLE}
 
 [Events]
@@ -416,9 +416,13 @@ def render_recording(
                     stopped=stopped,
                     panel=panel,
                 ):
-                    text = frame.text.translate(
-                        str.maketrans("\\{}", "＼｛｝")
-                    ).replace("\n", r"\N")
+                    # Libass drops a line's leading spaces, which would shift the
+                    # `|` after a short timestamp. Hard spaces keep the columns.
+                    text = (
+                        frame.text.translate(str.maketrans("\\{}", "＼｛｝"))
+                        .replace(" ", r"\h")
+                        .replace("\n", r"\N")
+                    )
                     script.write(
                         f"Dialogue: 0,{ass_time(frame.start)},{ass_time(frame.end)},Console,{position}{text}\n"
                     )

@@ -17,20 +17,23 @@ DEFAULT_CONSOLE_SIZE = 640
 # after capture. FFmpeg requires (width + 128) * (height + 128) below MAX_FRAME_CELLS.
 MAX_VIDEO_DIMENSION = 16384
 MAX_FRAME_CELLS = 2**28
+# Console text is always DejaVu Sans Mono at this size (R-REC-23). Libass makes
+# each line CONSOLE_FONT_SIZE pixels tall and each cell 9.30 pixels wide.
+CONSOLE_FONT_SIZE = 18
 MIN_TEXT_COLUMNS = 20
 MIN_TEXT_ROWS = 3
-MIN_PANEL_WIDTH = 390
-MIN_PANEL_HEIGHT = 136
+MIN_PANEL_WIDTH = 312
+MIN_PANEL_HEIGHT = 118
 
 
 def text_columns(panel_width: int) -> int:
     """Columns after the side padding and the `seconds | ` line prefix."""
-    return (panel_width - 32) * 10 // 119 - 10
+    return (panel_width - 32) * 100 // 931 - 10
 
 
 def text_rows(panel_height: int) -> int:
     """Rows below the panel title."""
-    return (panel_height - 64) // 24
+    return (panel_height - 64) // CONSOLE_FONT_SIZE
 
 
 @dataclass(frozen=True)

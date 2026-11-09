@@ -1052,8 +1052,16 @@ before final recording rendering, and bounded on shutdown if a pipe writer remai
 The renderer streams the snapshot into bounded text state, strips split ANSI CSI
 and OSC sequences, replaces lines after carriage returns, and handles backspaces,
 tabs, wide characters, wrapping, and a limited scrollback. The panel's width sets
-the wrap column and its height sets the rows kept: `(height - 64) // 24` rows and
-`(width - 32) * 10 // 119 - 10` columns, which is 41 columns in a 640-pixel panel.
+the wrap column and its height sets the rows kept: `(height - 64) // 18` rows and
+`(width - 32) * 100 // 931 - 10` columns, which is 55 columns in a 640-pixel panel.
+The fixed font (R-REC-23) makes these constants exact rather than estimates:
+DejaVu Sans Mono 18 under libass draws 18-pixel lines and 9.30-pixel cells, and
+the CJK and emoji fallbacks stay within their two cells. The 16-pixel side padding,
+32-pixel title band, 16-pixel bottom padding and 10-cell `seconds | ` prefix
+surround the text, so text stays inside every accepted panel (R-REC-24). A
+timestamp of 10000 seconds or more is one cell wider than the prefix and runs into
+the right padding. Spaces render as ASS hard spaces, because libass drops a line's
+leading spaces and would shift the `|` after a shorter timestamp.
 Line timestamps are seconds relative to clip origin; negative values identify
 pre-clip context. Output received at or after the stop request is excluded. Updates
 coalesce to at most one per 30 fps frame. This is plain text rendering, without
@@ -1073,9 +1081,9 @@ A panel must be encodable and readable (R-REC-16):
 
 - `--console-size` is even. Yuv420p needs an even video, and `pad` rounds an odd
   offset down, which would shift the GUI off its overlays.
-- The panel has at least 20 text columns and 3 text rows, so at least 390 pixels wide
-  and 136 tall. This includes the dimension that follows the GUI, so a default panel
-  on a display under 136 pixels tall is rejected, naming the display size.
+- The panel has at least 20 text columns and 3 text rows, so at least 312 pixels wide
+  and 118 tall. This includes the dimension that follows the GUI, so a default panel
+  on a display under 118 pixels tall is rejected, naming the display size.
 - Neither video dimension exceeds 16384 pixels, the libx264 limit, and
   `(width + 128) * (height + 128)` stays below 2^28, FFmpeg's frame size limit.
   Measured with the pinned FFmpeg, 16384x16128 and 16258x16254 encode, while

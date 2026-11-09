@@ -84,8 +84,8 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
         pytest.param(
             ["--console-size", "9" * 4299 + "8"], "at most 16384", id="unformattable"
         ),
-        (["--console-size", "388"], "at least 390"),
-        (["--console-position", "top", "--console-size", "134"], "at least 136"),
+        (["--console-size", "310"], "at least 312"),
+        (["--console-position", "top", "--console-size", "116"], "at least 118"),
     ],
 )
 @pytest.mark.parametrize("action", ["run", "record-start"])
