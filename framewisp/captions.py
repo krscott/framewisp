@@ -1,5 +1,6 @@
 """Input action records and text rendered into completed recordings."""
 
+import fcntl
 import json
 import os
 import re
@@ -171,6 +172,26 @@ class InputResult:
     error: str | None = None
 
 
+def _discard_unfinished_tail(output: BinaryIO) -> None:
+    """A newline commits a record, even when its JSON is malformed."""
+    end = output.seek(0, os.SEEK_END)
+    if not end:
+        return
+    output.seek(end - 1)
+    if output.read(1) == b"\n":
+        return
+    position = end - 1
+    while position:
+        start = max(0, position - 8192)
+        output.seek(start)
+        newline = output.read(position - start).rfind(b"\n")
+        if newline >= 0:
+            output.truncate(start + newline + 1)
+            return
+        position = start
+    output.truncate(0)
+
+
 @contextmanager
 def log_input(
     session: Path,
@@ -196,8 +217,13 @@ def log_input(
             "error": result.error,
             **point,
         }
-        with (session / "inputs.jsonl").open("a", encoding="utf-8") as output:
-            output.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        record = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+        with (session / "inputs.jsonl").open("a+b") as output:
+            # Attached CLI clients can append concurrently. Closing flushes the
+            # buffered record before releasing this descriptor's file lock.
+            fcntl.flock(output, fcntl.LOCK_EX)
+            _discard_unfinished_tail(output)
+            output.write(record)
 
     result = InputResult(ping=lambda x, y: append("ping", x=x, y=y))
     append("start")

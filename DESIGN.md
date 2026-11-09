@@ -905,6 +905,17 @@ whenever the clip needs one of those readers. The reader splits bytes on `\n`
 alone: retained text can hold characters such as U+2028 that text-mode line
 splitting would break on.
 
+Before each input event append, the writer opens `inputs.jsonl` in binary
+append/read mode and takes an exclusive flock on that descriptor. It checks the
+last byte and, if no newline ends the file, scans backward in bounded chunks to
+truncate only the suffix after the last newline (or the whole file if none
+exists). Valid JSON without a newline is also uncommitted and discarded.
+Complete records, including malformed JSON, stay unchanged (R-LOG-7, R-LOG-8).
+The descriptor stays locked through the buffered append and close, which flushes
+before releasing the lock. This serializes repair and append across attached
+CLI clients without a separate lock file; headless inputs already share one
+worker. Readers retain their existing handling of in-progress trailing writes.
+
 By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
 Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit
 the key and retain only modifiers. Ctrl/Alt shortcuts and named
