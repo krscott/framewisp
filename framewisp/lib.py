@@ -696,6 +696,15 @@ def session_command(
             "This runner does not support console panel options. Restart the session "
             "with this version of framewisp."
         )
+    if (
+        console is not None
+        and "cell_scale" in console.parameters()
+        and state.get("console_cell_scale") is not True
+    ):
+        raise SessionError(
+            "This runner does not support --console-cell-scale. Restart the session "
+            "with this version of framewisp."
+        )
     if compact and state.get("compact_recording") is not True:
         raise SessionError(
             "This runner does not support compact recordings. Restart the session "
@@ -1104,6 +1113,7 @@ def _run_session(
                         {
                             "control_protocol": 1,
                             "console_panels": True,
+                            "console_cell_scale": True,
                             "compact_recording": True,
                             "click_pings_recording": True,
                             "caption_modes": True,

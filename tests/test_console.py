@@ -159,7 +159,9 @@ def test_clip_has_context_coalesces_bursts_and_excludes_later_output(
             ]
         )
     )
-    frames = list(console_frames(log, origin=10, stopped=12, panel=DEFAULT_PANEL))
+    frames = list(
+        console_frames(log, origin=10, stopped=12, panel=DEFAULT_PANEL, cell_scale=1)
+    )
     assert len(frames) == 3
     assert frames[0].start == 0
     assert frames[0].text == "  -2.00 | setup"

@@ -45,6 +45,8 @@ def framewisp(session: Path, *arguments: str) -> subprocess.CompletedProcess[str
         ["run", "--console-position", "top"],
         ["record-start", "--console-position", "left", "clip.mp4"],
         ["record-start", "--console-size", "640", "clip.mp4"],
+        ["run", "--record", "clip.mp4", "--console-cell-scale", "1.1"],
+        ["record-start", "--console-cell-scale", "1.1", "clip.mp4"],
     ],
 )
 def test_console_options_require_console(tmp_path: Path, command: list[str]) -> None:
@@ -56,7 +58,10 @@ def test_console_options_require_console(tmp_path: Path, command: list[str]) -> 
         *tail,
     )
     assert result.returncode == 2
-    assert "--console-position and --console-size require --console" in result.stderr
+    assert (
+        "--console-position, --console-size and --console-cell-scale require --console"
+        in result.stderr
+    )
     assert not session.exists()
     assert not (tmp_path / "clip.mp4").exists()
 
@@ -86,6 +91,14 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
         ),
         (["--console-size", "310"], "at least 312"),
         (["--console-position", "top", "--console-size", "116"], "at least 118"),
+        (["--console-cell-scale", "many"], "--console-cell-scale"),
+        (["--console-cell-scale", "0.99"], "at least 1"),
+        (["--console-cell-scale", "nan"], "finite number"),
+        (["--console-cell-scale", "inf"], "finite number"),
+        (
+            ["--console-size", "338", "--console-cell-scale", "1.1"],
+            "at --console-cell-scale 1.1; a right panel needs at least 340",
+        ),
     ],
 )
 @pytest.mark.parametrize("action", ["run", "record-start"])
@@ -238,12 +251,42 @@ def test_console_rejects_unsupported_runner_before_connecting(
     assert result.returncode == 1
     assert "does not support console panel options. Restart" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+# R-REC-25
+def test_cell_scale_rejects_unsupported_runner_before_connecting(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "session.json").write_text(
+        json.dumps(
+            {"control_protocol": 1, "caption_modes": True, "console_panels": True}
+        )
+    )
+    destination = tmp_path / "clip.mp4"
+    result = framewisp(
+        tmp_path,
+        "record-start",
+        "--console",
+        "--console-cell-scale",
+        "1.1",
+        str(destination),
+    )
+    assert result.returncode == 1
+    assert "does not support --console-cell-scale. Restart" in result.stderr
+    assert "Traceback" not in result.stderr
     assert not destination.exists()
 
 
 @pytest.mark.parametrize(
     ("panel", "expected"),
-    [(None, None), (ConsolePanel("top", 200), {"position": "top", "size": 200})],
+    [
+        (None, None),
+        (ConsolePanel("top", 200), {"position": "top", "size": 200}),
+        (
+            ConsolePanel("top", 200, 1.5),
+            {"position": "top", "size": 200, "cell_scale": 1.5},
+        ),
+    ],
 )
 def test_record_start_sends_console_only_for_a_panel(
     panel: ConsolePanel | None, expected: dict[str, object] | None
@@ -266,6 +309,7 @@ def test_record_start_sends_console_only_for_a_panel(
                     "caption_modes": True,
                     "click_pings_recording": True,
                     "console_panels": True,
+                    "console_cell_scale": True,
                     "runtime_directory": directory,
                 }
             )

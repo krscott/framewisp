@@ -5,37 +5,66 @@ rectangles of a `VideoLayout`, so each overlay and FFmpeg's `pad` agree for ever
 position.
 """
 
+import math
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Literal, cast, get_args
 
 ConsolePosition = Literal["left", "right", "top", "bottom"]
 CONSOLE_POSITIONS: tuple[ConsolePosition, ...] = get_args(ConsolePosition)
 DEFAULT_CONSOLE_POSITION: ConsolePosition = "right"
 DEFAULT_CONSOLE_SIZE = 640
+DEFAULT_CELL_SCALE = 1.0
 
 # libx264 and FFmpeg refuse anything larger, which would otherwise surface only
 # after capture. FFmpeg requires (width + 128) * (height + 128) below MAX_FRAME_CELLS.
 MAX_VIDEO_DIMENSION = 16384
 MAX_FRAME_CELLS = 2**28
 # Console text is always DejaVu Sans Mono at this size (R-REC-23). Libass draws
-# its lines CONSOLE_FONT_SIZE pixels apart and its cells 9.30 pixels wide.
+# its ASCII lines CONSOLE_FONT_SIZE pixels apart and its cells 9.30 pixels wide.
 CONSOLE_FONT_SIZE = 18
 # Hundredths of a pixel, rounded up so a long line can't outgrow its columns.
 CELL_WIDTH_HUNDREDTHS = 931
 MIN_TEXT_COLUMNS = 20
 MIN_TEXT_ROWS = 3
-MIN_PANEL_WIDTH = 312
-MIN_PANEL_HEIGHT = 118
+# Side padding, and the title band plus bottom padding, around the text.
+TEXT_SIDES = 32
+TEXT_ENDS = 64
+# Cells for the `seconds | ` line prefix.
+PREFIX_CELLS = 10
 
 
-def text_columns(panel_width: int) -> int:
+def _exact(cell_scale: float) -> Fraction:
+    """The decimal the caller wrote, so sizes don't depend on float rounding."""
+    return Fraction(str(cell_scale))
+
+
+def text_columns(panel_width: int, cell_scale: float) -> int:
     """Columns after the side padding and the `seconds | ` line prefix."""
-    return (panel_width - 32) * 100 // CELL_WIDTH_HUNDREDTHS - 10
+    cell = CELL_WIDTH_HUNDREDTHS * _exact(cell_scale)
+    return math.floor((panel_width - TEXT_SIDES) * 100 / cell) - PREFIX_CELLS
 
 
-def text_rows(panel_height: int) -> int:
+def text_rows(panel_height: int, cell_scale: float) -> int:
     """Rows below the panel title."""
-    return (panel_height - 64) // CONSOLE_FONT_SIZE
+    row = CONSOLE_FONT_SIZE * _exact(cell_scale)
+    return math.floor((panel_height - TEXT_ENDS) / row)
+
+
+def min_panel_width(cell_scale: float) -> int:
+    """The narrowest panel with MIN_TEXT_COLUMNS columns."""
+    cells = (MIN_TEXT_COLUMNS + PREFIX_CELLS) * CELL_WIDTH_HUNDREDTHS
+    return TEXT_SIDES + math.ceil(cells * _exact(cell_scale) / 100)
+
+
+def min_panel_height(cell_scale: float) -> int:
+    """The shortest panel with MIN_TEXT_ROWS rows."""
+    rows = MIN_TEXT_ROWS * CONSOLE_FONT_SIZE
+    return TEXT_ENDS + math.ceil(rows * _exact(cell_scale))
+
+
+def scale_text(cell_scale: float) -> str:
+    return f"{cell_scale:.15g}"
 
 
 @dataclass(frozen=True)
@@ -44,6 +73,7 @@ class ConsolePanel:
 
     position: ConsolePosition = DEFAULT_CONSOLE_POSITION
     size: int = DEFAULT_CONSOLE_SIZE
+    cell_scale: float = DEFAULT_CELL_SCALE
 
     def __post_init__(self) -> None:
         if self.position not in CONSOLE_POSITIONS:
@@ -64,17 +94,31 @@ class ConsolePanel:
                 f"--console-size must be even so the video can be encoded; "
                 f"use {self.size + 1} instead of {self.size}."
             )
+        if (
+            type(self.cell_scale) not in (int, float)
+            or not math.isfinite(self.cell_scale)
+            or self.cell_scale < 1
+        ):
+            raise ValueError(
+                "--console-cell-scale must be a finite number of at least 1."
+            )
+        scale = f"at --console-cell-scale {scale_text(self.cell_scale)}"
         if self.position in ("left", "right"):
-            if self.size < MIN_PANEL_WIDTH:
+            needed = min_panel_width(self.cell_scale)
+            if self.size < needed:
                 raise ValueError(
                     f"--console-size {self.size} is too narrow for {MIN_TEXT_COLUMNS} text "
-                    f"columns; a {self.position} panel needs at least {MIN_PANEL_WIDTH}."
+                    f"columns {scale}; a {self.position} panel needs at least "
+                    f"{needed + needed % 2}."
                 )
-        elif self.size < MIN_PANEL_HEIGHT:
-            raise ValueError(
-                f"--console-size {self.size} is too short for {MIN_TEXT_ROWS} text "
-                f"rows; a {self.position} panel needs at least {MIN_PANEL_HEIGHT}."
-            )
+        else:
+            needed = min_panel_height(self.cell_scale)
+            if self.size < needed:
+                raise ValueError(
+                    f"--console-size {self.size} is too short for {MIN_TEXT_ROWS} text "
+                    f"rows {scale}; a {self.position} panel needs at least "
+                    f"{needed + needed % 2}."
+                )
 
     @staticmethod
     def parse(raw: object) -> "ConsolePanel | None":
@@ -85,15 +129,30 @@ class ConsolePanel:
                 "console must be null or an object with position and size."
             )
         settings = cast(dict[str, object], raw)
-        if settings.keys() != {"position", "size"}:
-            raise ValueError("console requires only position and size.")
+        if (
+            not {"position", "size"}
+            <= settings.keys()
+            <= {
+                "position",
+                "size",
+                "cell_scale",
+            }
+        ):
+            raise ValueError(
+                "console requires position and size, and allows only cell_scale."
+            )
         return ConsolePanel(
             position=cast(ConsolePosition, settings["position"]),
             size=cast(int, settings["size"]),
+            cell_scale=cast(float, settings.get("cell_scale", DEFAULT_CELL_SCALE)),
         )
 
     def parameters(self) -> dict[str, object]:
-        return {"position": self.position, "size": self.size}
+        """Omit the default scale, which an older runner would reject."""
+        parameters: dict[str, object] = {"position": self.position, "size": self.size}
+        if self.cell_scale != DEFAULT_CELL_SCALE:
+            parameters["cell_scale"] = self.cell_scale
+        return parameters
 
 
 @dataclass(frozen=True)
@@ -123,6 +182,7 @@ class VideoLayout:
     height: int
     gui: Rect
     panel: Rect | None = None
+    cell_scale: float = DEFAULT_CELL_SCALE
 
 
 def plain_layout(display: tuple[int, int]) -> VideoLayout:
@@ -140,17 +200,22 @@ def video_layout(
     beside = console.position in ("left", "right")
     panel_width = console.size if beside else width
     panel_height = height if beside else console.size
-    if panel_height < MIN_PANEL_HEIGHT:
+    scale = f"at --console-cell-scale {scale_text(console.cell_scale)}"
+    needed = min_panel_height(console.cell_scale)
+    if panel_height < needed:
         return (
-            f"A console panel needs a display at least {MIN_PANEL_HEIGHT} pixels tall "
-            f"for {MIN_TEXT_ROWS} text rows, but this display is {width}x{height}. "
-            "Use a taller display, or --console-position top or bottom."
+            f"A console panel needs a display at least {needed} pixels tall "
+            f"for {MIN_TEXT_ROWS} text rows {scale}, but this display is "
+            f"{width}x{height}. Use a taller display, a smaller --console-cell-scale, "
+            "or --console-position top or bottom."
         )
-    if panel_width < MIN_PANEL_WIDTH:
+    needed = min_panel_width(console.cell_scale)
+    if panel_width < needed:
         return (
-            f"A console panel needs a display at least {MIN_PANEL_WIDTH} pixels wide "
-            f"for {MIN_TEXT_COLUMNS} text columns, but this display is {width}x{height}. "
-            "Use a wider display, or --console-position left or right."
+            f"A console panel needs a display at least {needed} pixels wide "
+            f"for {MIN_TEXT_COLUMNS} text columns {scale}, but this display is "
+            f"{width}x{height}. Use a wider display, a smaller --console-cell-scale, "
+            "or --console-position left or right."
         )
     video_width = width + panel_width if beside else width
     video_height = height if beside else height + panel_height
@@ -181,4 +246,5 @@ def video_layout(
             panel_width,
             panel_height,
         ),
+        console.cell_scale,
     )

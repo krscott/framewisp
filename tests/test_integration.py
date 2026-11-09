@@ -2210,7 +2210,10 @@ def test_rejected_console_panel_leaves_the_app_running(
         assert not rejected.exists()
     for value, message in (
         (True, "console must be null or an object"),
-        ({"position": "left"}, "console requires only position and size"),
+        (
+            {"position": "left"},
+            "console requires position and size, and allows only cell_scale",
+        ),
         ({"position": "up", "size": 640}, "console position must be one of"),
         ({"position": "left", "size": 641}, "must be even"),
         ({"position": "left", "size": True}, "positive even"),

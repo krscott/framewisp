@@ -414,6 +414,7 @@ def render_recording(
                     origin=origin,
                     stopped=stopped,
                     panel=panel,
+                    cell_scale=layout.cell_scale,
                 ):
                     # Libass drops a line's leading spaces, which would shift the
                     # `|` after a short timestamp. Hard spaces keep the columns.

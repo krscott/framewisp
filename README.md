@@ -220,10 +220,10 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `run [--retain-input-content] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--retain-input-content] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -642,10 +642,16 @@ framewisp demo record-stop
 
 `--console-position` takes `left`, `right`, `top`, or `bottom`. `--console-size`
 sets the panel's width for `left` and `right` and its height for `top` and `bottom`;
-the other dimension follows the GUI. Both options require `--console` and can differ
-per clip. The size must be even, and the panel must hold at least 20 text columns and
-3 text rows, so at least 312 pixels wide and 118 tall, including the dimension that
-follows the GUI. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
+the other dimension follows the GUI. The size must be even, and the panel must hold
+at least 20 text columns and 3 text rows, so at least 312 pixels wide and 118 tall,
+including the dimension that follows the GUI.
+Printable ASCII always fits its cells. Some other scripts draw larger than the
+console font: Thai, Devanagari and Vietnamese rows are taller, and Tamil letters are
+wider. `--console-cell-scale FACTOR` (default 1, at least 1) makes framewisp assume
+each text cell is FACTOR times larger in both directions, so fewer rows and columns
+fit and the minimum panel size grows by the same factor. About 1.1 suits Thai,
+Devanagari and Vietnamese, and 1.5 suits Tamil. The `--console-*` options require
+`--console` and can differ per clip. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
 `record-start` leaves the app running. Sessions started by an older framewisp version
 reject `--console`; restart the session to use it.
 
