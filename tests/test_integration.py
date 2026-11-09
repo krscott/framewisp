@@ -2210,15 +2210,23 @@ def test_rejected_console_panel_leaves_the_app_running(
         assert not rejected.exists()
     for value, message in (
         (True, "console must be null or an object"),
+        ({"position": "left"}, "console requires only position, size and cell_scale"),
         (
-            {"position": "left"},
-            "console requires position and size, and allows only cell_scale",
+            {"position": "up", "size": 640, "cell_scale": 1},
+            "console position must be one of",
         ),
-        ({"position": "up", "size": 640}, "console position must be one of"),
-        ({"position": "left", "size": 641}, "must be even"),
-        ({"position": "left", "size": True}, "positive even"),
-        ({"position": "left", "size": 2}, "at least 312"),
-        ({"position": "left", "size": int("9" * 4300)}, "at most 16384"),
+        ({"position": "left", "size": 641, "cell_scale": 1}, "must be even"),
+        ({"position": "left", "size": True, "cell_scale": 1}, "positive even"),
+        ({"position": "left", "size": 2, "cell_scale": 1}, "at least 312"),
+        (
+            {"position": "left", "size": 338, "cell_scale": 1.1},
+            "at --console-cell-scale 1.1",
+        ),
+        ({"position": "left", "size": 640, "cell_scale": 0}, "from 1 to 58"),
+        (
+            {"position": "left", "size": int("9" * 4300), "cell_scale": 1},
+            "at most 16384",
+        ),
     ):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(demo.runtime / "control.sock"))

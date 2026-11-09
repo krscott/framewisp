@@ -361,7 +361,14 @@ def test_frame_size_limit_matches_ffmpeg(
     ("raw", "expected"),
     [
         (None, None),
-        ({"position": "top", "size": 200}, ConsolePanel("top", 200)),
+        (
+            {"position": "top", "size": 200, "cell_scale": 1.0},
+            ConsolePanel("top", 200),
+        ),
+        (
+            {"position": "left", "size": 640, "cell_scale": 1.5},
+            ConsolePanel("left", 640, 1.5),
+        ),
     ],
 )
 def test_request_value_round_trips(raw: object, expected: ConsolePanel | None) -> None:
@@ -376,9 +383,15 @@ def test_request_value_round_trips(raw: object, expected: ConsolePanel | None) -
         True,
         "right",
         {"position": "left"},
-        {"position": "left", "size": 640, "extra": 1},
-        {"position": "left", "size": 16386},
-        pytest.param({"position": "left", "size": 10**4400}, id="unformattable"),
+        {"position": "left", "size": 640},
+        {"position": "left", "size": 640, "cell_scale": 1, "extra": 1},
+        {"position": "left", "size": 16386, "cell_scale": 1},
+        pytest.param(
+            {"position": "left", "size": 10**4400, "cell_scale": 1}, id="unformattable"
+        ),
+        pytest.param(
+            {"position": "left", "size": 640, "cell_scale": 10**400}, id="huge-scale"
+        ),
     ],
 )
 def test_request_value_rejects_other_shapes(raw: object) -> None:
@@ -582,8 +595,11 @@ def ink_rows(panel: Image.Image) -> list[tuple[int, int, int]]:
 
 
 # R-REC-24
+PRINTABLE_ASCII = "".join(map(chr, range(0x21, 0x7F)))
+
+
 # CJK and emoji go beyond R-REC-24's ASCII, but fit their two cells too.
-@pytest.mark.parametrize("fill", ["█", "M{}\\", "你😀"])
+@pytest.mark.parametrize("fill", ["█", PRINTABLE_ASCII, "你😀"])
 @pytest.mark.parametrize(
     ("display", "position", "pixels"),
     [
@@ -693,12 +709,14 @@ def test_cell_scale_shrinks_capacity_and_minimums() -> None:
             1.1,
             "at --console-cell-scale 1.1; a top panel needs at least 124",
         ),
-        ("right", 640, 0.9, "at least 1"),
-        ("right", 640, 0, "at least 1"),
-        ("right", 640, float("nan"), "finite number"),
-        ("right", 640, float("inf"), "finite number"),
-        ("right", 640, True, "finite number"),
-        ("right", 640, "1.1", "finite number"),
+        ("right", 640, 0.9, "from 1 to 58"),
+        ("right", 640, 0, "from 1 to 58"),
+        ("right", 640, float("nan"), "from 1 to 58"),
+        ("right", 640, float("inf"), "from 1 to 58"),
+        ("right", 640, 58.1, "from 1 to 58"),
+        pytest.param("right", 640, 10**400, "from 1 to 58", id="huge"),
+        ("right", 640, True, "from 1 to 58"),
+        ("right", 640, "1.1", "from 1 to 58"),
     ],
 )
 def test_panel_rejects_a_scale_without_room(
@@ -714,15 +732,27 @@ def test_layout_names_the_scale_when_the_display_is_too_small() -> None:
     assert isinstance(message, str)
     assert "at least 124 pixels tall" in message
     assert "--console-cell-scale 1.1" in message
+    # 121 pixels hold three rows at 1.05, but recordings need an even display.
+    message = video_layout((1280, 120), ConsolePanel("right", 640, 1.05))
+    assert isinstance(message, str) and "at least 122 pixels tall" in message
+    default = video_layout((1280, 116), ConsolePanel("right", 640))
+    assert isinstance(default, str) and "cell-scale" not in default
 
 
-# R-REC-25
-def test_panel_parameters_round_trip_the_scale() -> None:
-    for panel in (ConsolePanel("top", 200), ConsolePanel("left", 640, 1.5)):
-        assert ConsolePanel.parse(panel.parameters()) == panel
-    assert "cell_scale" not in ConsolePanel().parameters()
-    with pytest.raises(ValueError, match="allows only cell_scale"):
-        ConsolePanel.parse({"position": "top", "size": 200, "padding": 4})
+# R-REC-24
+def test_braces_and_backslashes_draw_as_one_cell(tmp_path: Path) -> None:
+    # A backslash before N, n or h, or a brace, would otherwise act as ASS syntax.
+    lines = ["M" * 24, r"{\pos(0,0)}\N\n\h\{x\}{}\\"[:24].ljust(24, "M")]
+    (tmp_path / "console.jsonl").write_text(
+        "".join(
+            json.dumps({"time": 10.1, "text": f"{line}\n"}) + "\n" for line in lines
+        )
+    )
+    layout = panel_layout(GUI_SIZE, "right", 640)
+    assert layout.panel is not None
+    bands = ink_rows(crop(render(tmp_path, "literal", layout), layout.panel))
+    assert len(bands) == 2
+    assert abs(bands[0][2] - bands[1][2]) <= 1
 
 
 def test_timestamps_of_any_width_keep_the_separator_aligned(tmp_path: Path) -> None:

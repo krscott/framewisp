@@ -691,19 +691,10 @@ def session_command(
             "This runner does not support caption modes. Restart the session "
             "with this version of framewisp."
         )
-    if console is not None and state.get("console_panels") is not True:
+    if console is not None and state.get("console_cell_scale") is not True:
         raise SessionError(
-            "This runner does not support console panel options. Restart the session "
-            "with this version of framewisp."
-        )
-    if (
-        console is not None
-        and "cell_scale" in console.parameters()
-        and state.get("console_cell_scale") is not True
-    ):
-        raise SessionError(
-            "This runner does not support --console-cell-scale. Restart the session "
-            "with this version of framewisp."
+            "This runner does not support these console panel options. Restart the "
+            "session with this version of framewisp."
         )
     if compact and state.get("compact_recording") is not True:
         raise SessionError(
@@ -1112,7 +1103,6 @@ def _run_session(
                     json.dumps(
                         {
                             "control_protocol": 1,
-                            "console_panels": True,
                             "console_cell_scale": True,
                             "compact_recording": True,
                             "click_pings_recording": True,

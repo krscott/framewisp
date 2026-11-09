@@ -690,10 +690,10 @@ at least 20 text columns and 3 text rows, so at least 312 pixels wide and 118 ta
 including the dimension that follows the GUI.
 Printable ASCII always fits its cells. Some other scripts draw larger than the
 console font: Thai, Devanagari and Vietnamese rows are taller, and Tamil letters are
-wider. `--console-cell-scale FACTOR` (default 1, at least 1) makes framewisp assume
+wider. `--console-cell-scale FACTOR` (default 1, from 1 to 58) makes framewisp assume
 each text cell is FACTOR times larger in both directions, so fewer rows and columns
 fit and the minimum panel size grows by the same factor. About 1.1 suits Thai,
-Devanagari and Vietnamese, and 1.5 suits Tamil. The `--console-*` options require
+Devanagari and Vietnamese, and 1.5 suits Tamil (3.5 for text with many ஔ). The `--console-*` options require
 `--console` and can differ per clip. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
 `record-start` leaves the app running. Sessions started by an older framewisp version
 reject `--console`; restart the session to use it.
@@ -876,9 +876,8 @@ arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
 and monochrome emoji. Captions, console panels and apps use the same
-[font file](#app-environment). Caption text uses fullwidth equivalents
-for braces and backslashes to prevent subtitle formatting;
-opted-in input logs preserve the original characters. Screenshots and recordings
+[font file](#app-environment). Caption and console text escapes braces and
+backslashes, so they draw as themselves and never act as subtitle formatting. Screenshots and recordings
 can still show secrets displayed by apps. Omitting input content does not redact
 screen content or provide a general app-log redaction guarantee. Shell history,
 batch files, application logs, and runtime input state are outside this policy.

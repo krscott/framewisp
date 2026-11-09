@@ -20,10 +20,6 @@ from typing import BinaryIO, Literal, TextIO
 
 from framewisp.layout import Rect, text_columns, text_rows
 
-# ASS reads braces and backslashes as formatting. Drawn text uses visible
-# fullwidth equivalents, which are also two cells wide.
-ASS_LITERALS = str.maketrans("\\{}", "＼｛｝")
-
 
 @dataclass
 class ConsoleCapture:
@@ -156,8 +152,6 @@ class ConsoleText:
                 )
                 self.feed(" " * (8 - width % 8), timestamp)
             elif not unicodedata.category(char).startswith("C"):
-                # Wrap by the width of what the panel draws.
-                char = char.translate(ASS_LITERALS)
                 if self.replacing:
                     self.current = ""
                     self.replacing = False

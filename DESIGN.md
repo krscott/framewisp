@@ -1035,15 +1035,13 @@ into a console panel. `--console-position` picks the video edge, default `right`
 (R-REC-12). `--console-size` sets the panel's width for `left` and `right` and its
 height for `top` and `bottom`, default 640 pixels (R-REC-13). The other panel
 dimension equals the matching GUI dimension. `run --console` without `--record` is
-invalid. The parser rejects either placement option without `--console`, on both
+invalid. The parser rejects any `--console-*` option without `--console`, on both
 commands, before it starts a session or clip. The control request's `console`
-value is absent, null, or an object with `position`, `size` and an optional
-`cell_scale`, so a position can't exist without a panel. The client sends
-`cell_scale` only when it isn't 1, and then requires the session metadata's
-`console_cell_scale: true`, so a default panel still works with an older runner.
+value is absent, null, or an object with exactly `position`, `size` and
+`cell_scale`, so a position can't exist without a panel.
 Console capture uses the same first-frame monotonic origin as input captions,
 including with `--captions none`. A lock protects sidecar snapshots during rendering.
-Session metadata advertises `console_panels: true`. Every `--console` request,
+Session metadata advertises `console_cell_scale: true`. Every `--console` request,
 including the default placement, requires this capability before connecting, because
 an older runner can't read the object. The error tells the user to restart the
 session. A clip without a panel omits `console`, because an older runner also rejects
@@ -1063,9 +1061,10 @@ cells, rounded up to 9.31. Text starts
 16 pixels in from the left and 48 down, below the title, and keeps 16 pixels of
 padding at the right and bottom (R-REC-24). Each line starts with a 7-character
 timestamp and ` | `, so 10 cells are reserved; times from 1000 seconds before the
-clip or 10000 after drop their decimals to keep that width. Braces and
-backslashes become fullwidth forms before wrapping, so they count as the two cells
-they draw. Spaces render as ASS hard spaces, because libass drops a line's leading
+clip or 10000 after drop their decimals, and clamp to -999999 and 9999999, to keep
+that width. Captions and console text escape braces as `\{` and `\}`, and follow
+each backslash with a word joiner so it can't start `\N`, `\n` or `\h`; all three
+then draw as themselves, one cell wide. Spaces render as ASS hard spaces, because libass drops a line's leading
 spaces and would shift the `|` after a shorter timestamp. Printable ASCII stays
 inside the panel (R-REC-24), and CJK and emoji fallbacks happen to fit their two
 cells. Other fallback fonts are not measured: Thai, Devanagari and Vietnamese lines
@@ -1094,7 +1093,8 @@ A panel must be encodable and readable (R-REC-16):
   and 118 tall at the default cell scale. Both minimums grow with the scale, and
   errors name it. This includes the dimension that follows the GUI, so a default
   panel on a display under 118 pixels tall is rejected, naming the display size.
-- `--console-cell-scale` is a finite number of at least 1.
+- `--console-cell-scale` is a number from 1 to 58. Above about 58.5 even the
+  narrowest panel with 20 columns is wider than 16384 pixels.
 - Neither video dimension exceeds 16384 pixels, the libx264 limit, and
   `(width + 128) * (height + 128)` stays below 2^28, FFmpeg's frame size limit.
   Measured with the pinned FFmpeg, 16384x16128 and 16258x16254 encode, while
