@@ -12,11 +12,13 @@ import shlex
 import signal
 import socket
 import stat
+import subprocess
 import sys
 import time
 import traceback
 import uuid
-from contextlib import suppress
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from threading import TIMEOUT_MAX, Event, Lock, Thread
 from types import FrameType
@@ -38,6 +40,11 @@ from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
+from framewisp.release_guard import (
+    finish_release_guard,
+    start_release_guard,
+    x11_desktop,
+)
 from framewisp.tray import UNAVAILABLE, SharingIndicator
 
 
@@ -147,7 +154,8 @@ class AttachedInput:
                 try:
                     self.portal.input(method, "iu", value, 0)
                 except GLib.Error:
-                    # Revoking the portal also removes its input devices.
+                    # A closed portal refuses input. Wayland compositors then
+                    # remove its devices; on X11 the release guard frees them.
                     pass
         self.buttons.clear()
         self.keys.clear()
@@ -253,7 +261,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         descriptor = portal.capture_fd()
         try:
             write_png(
-                f"pipewiresrc fd={descriptor} path={portal.node} num-buffers=1",
+                f"pipewiresrc fd={descriptor} path={portal.node}",
                 output,
                 stop,
                 log,
@@ -272,45 +280,99 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         raise ValueError(f"Could not write the screenshot: {error}") from None
 
 
+# Mutter can hand a new PipeWire connection a frame left from an earlier one
+# before its current frames, and sets no timestamps to tell them apart.
+FRAME_SETTLE = 0.1
+CAPTURE_TIMEOUT = 10
+CAPTURE_CANCELLED = "Attached session disconnected; capture cancelled."
+
+
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
-    """Write one frame of a GStreamer source to a descriptor."""
+    """Write the newest frame a GStreamer source delivers to a descriptor."""
     Gst.init(None)
-    pipeline: Gst.Element | None = None
+    frame = newest_frame(source, stop, log)
+    encoder = Gst.parse_launch(
+        "appsrc name=frame ! videoconvert ! pngenc snapshot=true ! fdsink name=sink"
+    )
+    assert isinstance(encoder, Gst.Bin)
+    sink = encoder.get_by_name("sink")
+    source_element = encoder.get_by_name("frame")
+    assert sink is not None and source_element is not None
+    sink.set_property("fd", output)
+    with playing(encoder):
+        source_element.emit("push-sample", frame)
+        source_element.emit("end-of-stream")
+        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        while not finished(encoder, sink, stop, log, deadline):
+            pass
+
+
+def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
+    """Return the newest frame seen within FRAME_SETTLE of the first one."""
+    pipeline = Gst.parse_launch(
+        # Raw caps keep frames in system memory, as videoconvert needs.
+        f"{source} ! appsink name=frames caps=video/x-raw sync=false"
+        " max-buffers=1 drop=true"
+    )
+    assert isinstance(pipeline, Gst.Bin)
+    sink = pipeline.get_by_name("frames")
+    assert sink is not None
+    with playing(pipeline):
+        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        while (frame := sink.emit("try-pull-sample", 0)) is None:
+            if finished(pipeline, None, stop, log, deadline):
+                frame = sink.emit("try-pull-sample", 0)
+                if frame is None:
+                    raise RuntimeError("Desktop capture ended without a frame.")
+                break
+        if stop.wait(FRAME_SETTLE):
+            raise InterruptedError(CAPTURE_CANCELLED)
+        frame = sink.emit("try-pull-sample", 0) or frame
+        assert isinstance(frame, Gst.Sample)
+        # Stopping the source may release the memory behind its buffers.
+        buffer = frame.get_buffer()
+        assert buffer is not None
+        return Gst.Sample.new(buffer.copy_deep(), frame.get_caps(), None, None)
+
+
+@contextmanager
+def playing(pipeline: Gst.Element) -> Generator[None]:
     try:
-        pipeline = Gst.parse_launch(
-            f"{source} ! videoconvert ! pngenc snapshot=true ! fdsink name=sink"
-        )
-        assert isinstance(pipeline, Gst.Bin)
-        sink = pipeline.get_by_name("sink")
-        assert sink is not None
-        sink.set_property("fd", output)
-        bus = pipeline.get_bus()
-        assert bus is not None
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("Could not start desktop capture.")
-        deadline = time.monotonic() + 10
-        while not stop.is_set():
-            message = bus.timed_pop_filtered(
-                50 * Gst.MSECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
-            )
-            if message is not None:
-                if message.type == Gst.MessageType.ERROR:
-                    error, detail = message.parse_error()
-                    if message.src == sink:
-                        # A full disk fails this command, not the attachment, and
-                        # the log may be on that disk.
-                        raise ValueError(
-                            f"Could not write the screenshot: {error.message}"
-                        )
-                    log.write_text(f"{error}\n{detail}\n")
-                    raise RuntimeError(f"Desktop capture failed. See {log}")
-                return
-            if time.monotonic() >= deadline:
-                raise RuntimeError("Desktop capture timed out.")
-        raise InterruptedError("Attached session disconnected; capture cancelled.")
+        yield
     finally:
-        if pipeline is not None:
-            pipeline.set_state(Gst.State.NULL)
+        pipeline.set_state(Gst.State.NULL)
+
+
+def finished(
+    pipeline: Gst.Element,
+    sink: Gst.Element | None,
+    stop: Event,
+    log: Path,
+    deadline: float,
+) -> bool:
+    """Wait briefly for end of stream. Raise on failure, timeout, or stop."""
+    if stop.is_set():
+        raise InterruptedError(CAPTURE_CANCELLED)
+    if time.monotonic() >= deadline:
+        raise RuntimeError("Desktop capture timed out.")
+    bus = pipeline.get_bus()
+    assert bus is not None
+    message = bus.timed_pop_filtered(
+        50 * Gst.MSECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
+    )
+    if message is None:
+        return False
+    if message.type == Gst.MessageType.ERROR:
+        error, detail = message.parse_error()
+        if sink is not None and message.src == sink:
+            # A full disk fails this command, not the attachment, and the log
+            # may be on that disk.
+            raise ValueError(f"Could not write the screenshot: {error.message}")
+        log.write_text(f"{error}\n{detail}\n")
+        raise RuntimeError(f"Desktop capture failed. See {log}")
+    return True
 
 
 def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
@@ -368,6 +430,12 @@ def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
         "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
         flush=True,
     )
+    if x11_desktop():
+        print(
+            "This is an X11 desktop: programs running as you can already read the screen\n"
+            "and send input without the desktop dialog. Approving it does not limit them.",
+            flush=True,
+        )
     try:
         confirmation = input(
             "Type ATTACH to confirm the bindings are configured and you understand this access: "
@@ -417,6 +485,7 @@ def _run_attachment(
     portal: DesktopPortal | None = None
     inputs: AttachedInput | None = None
     indicator: SharingIndicator | None = None
+    guard: subprocess.Popen[bytes] | None = None
     attachment = uuid.uuid4().hex
     state = session / "session.json"
     owns_state = False
@@ -539,6 +608,7 @@ def _run_attachment(
                         {"session": str(session), "attachment": attachment},
                     )
                     (session / "inputs.jsonl").write_text("", encoding="utf-8")
+                    guard = start_release_guard(stop)
                     portal = DesktopPortal(stop)
                     inputs = AttachedInput(portal, stop)
                     server = Thread(
@@ -566,6 +636,10 @@ def _run_attachment(
                                 raise RuntimeError(
                                     "The attach terminal is no longer in the foreground; disconnecting."
                                 )
+                            if guard is not None and guard.poll() is not None:
+                                raise RuntimeError(
+                                    "The X11 input release helper exited; disconnecting."
+                                )
                             dispatch_events()
                     finally:
                         stop.set()
@@ -580,6 +654,8 @@ def _run_attachment(
                 stop.set()
                 if portal is not None:
                     portal.close()
+                if guard is not None:
+                    finish_release_guard(guard)
                 if owns_state:
                     state.unlink(missing_ok=True)
                     owns_state = False

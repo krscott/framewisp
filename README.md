@@ -240,7 +240,8 @@ session-independent.
 
 The automated tests cover the bundled demo on Wayland and Xwayland. Swell Foop 50.0 and
 KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below).
-Native X11 desktop attachment and GPU-dependent apps are outside this MVP.
+Attaching to an X11 desktop without RemoteDesktop and ScreenCast portals, such as
+most standalone window managers, and GPU-dependent apps are outside this MVP.
 
 Clipboard forwarding between VNC clients and the session is disabled. Applications
 can still use Ctrl+C/Ctrl+V and primary selection. Framewisp's Nix package patches
@@ -294,7 +295,8 @@ directly to use these controls on your desktop.
 ## Attach to an existing desktop
 
 Use this when an app is already running on your desktop and you want an agent to
-inspect its current state. The initial target is COSMIC on Wayland. Your desktop
+inspect its current state. Tested desktops are COSMIC on Wayland and GNOME 42 on
+Xorg (X11); see [verification](docs/desktop-sharing-tray.md). Your desktop
 must provide the RemoteDesktop and ScreenCast portals; framewisp supplies its own
 capture tools through the Nix package.
 
@@ -328,6 +330,25 @@ entries in `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` ar
 
 Close Settings before editing that file. Add the entries inside its existing
 outer braces, keeping your other bindings.
+
+GNOME binds both chords to `cycle-panels` by default. Clear those defaults and add
+the bindings. This replaces your custom-shortcut list, so first check that
+`gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings`
+is empty, or add these paths to the list it prints:
+
+```sh
+wm=org.gnome.desktop.wm.keybindings
+keys=org.gnome.settings-daemon.plugins.media-keys
+path=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
+gsettings set $wm cycle-panels "[]"
+gsettings set $wm cycle-panels-backward "[]"
+gsettings set $keys custom-keybindings "['$path/fw-detach/', '$path/fw-detach-shift/']"
+for entry in "fw-detach <Control><Alt>Escape" "fw-detach-shift <Shift><Control><Alt>Escape"; do
+  gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" name "${entry%% *}"
+  gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" command "framewisp --detach"
+  gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" binding "${entry#* }"
+done
+```
 
 Sharing starts only from an interactive terminal on the user's desktop
 (R-ATTACH-1):
@@ -386,6 +407,28 @@ after half a second. It uses Linux 6.5 or newer to identify the socket owner saf
 Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
 open in its current state. Reconnecting requires running `attach` and approving
 the dialog again. Test your binding before handing control to an agent.
+
+While the agent holds Shift, Ctrl+C in the attach terminal arrives as
+Ctrl+Shift+C, which many terminals treat as copy. Use the Shift shortcut or the
+tray item instead.
+
+### X11 desktops
+
+On X11 the portal dialog asks for consent but is not a permission boundary. Any
+program running as you can read the screen and send input through the X display
+without it. GNOME on Xorg shows no screen-sharing indicator of its own, so the
+framewisp tray item is the visible sign of sharing. Its dialog leaves remote
+interaction off until you switch it on; attach fails without it.
+
+GNOME's X11 backend leaves keys and buttons held when sharing ends. Attach
+therefore starts a release helper that has no screen or portal access. When the
+attach process exits, however it exits, the helper releases every key and button
+held by the X server's test input device, which only injected input uses. Your
+physical keyboard and mouse are unaffected. Attach refuses to start on X11
+without `DISPLAY` or a working `xdotool`; the Nix package provides `xdotool`.
+
+Whether a Wayland desktop attachment covers X11 apps running through Xwayland
+has not been verified yet; see [verification](docs/desktop-sharing-tray.md).
 
 Attached sessions support screenshots and input commands, including input logs.
 Keyboard shortcuts currently assume a US keyboard layout.

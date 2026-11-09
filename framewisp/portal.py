@@ -179,7 +179,10 @@ class DesktopPortal:
         )
         result = self.request(REMOTE, "Start", "(osa{sv})", (self.session, ""), {})
         if result.get("devices") != 3:
-            raise RuntimeError("Attach requires both keyboard and pointer permission.")
+            raise RuntimeError(
+                "Attach requires both keyboard and pointer permission. "
+                "Allow remote interaction in the desktop dialog and attach again."
+            )
         streams = cast(list[tuple[int, dict[str, object]]], result.get("streams", []))
         if len(streams) != 1:
             raise RuntimeError("Attach requires exactly one shared monitor.")

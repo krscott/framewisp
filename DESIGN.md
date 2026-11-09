@@ -1116,7 +1116,8 @@ by another program under the same UID.
 RemoteDesktop session, select keyboard and pointer devices, select one monitor
 through ScreenCast, and request consent with Start. Every attachment requests fresh
 permission. Closing the private bus connection revokes all its portal sessions;
-process death also closes that connection. No access-owning child processes exist.
+process death also closes that connection. No access-owning child processes exist;
+the X11 release guard below holds no portal or capture access.
 SIGINT, SIGTERM, SIGHUP, and SIGTSTP request shutdown. Loss of terminal foreground
 ownership or the portal's Closed signal also stops access.
 
@@ -1161,8 +1162,30 @@ thread accepts requests; workers serialize actions with a lock. Before portal
 consent they reject input. Paced actions and queued workers check a shared stop
 Event. Unexpected worker errors stop access and print a traceback. Shutdown closes
 the portal before bounded waits for workers, then removes state under the ownership
-lock. Held buttons and keys release during action cleanup; on connection loss the
-compositor removes the virtual input devices and releases their held inputs.
+lock. Held buttons and keys release during action cleanup. On Wayland, connection
+loss makes the compositor remove the virtual input devices and their held inputs.
+
+Mutter's X11 backend sends portal input as XTEST events on its own X connection,
+which stays open, so closing a session leaves held keys and buttons down. XTEST
+state belongs to the device, so any X client can release it. On X11 desktops,
+detected by `XDG_SESSION_TYPE` when it is `x11` or `wayland` and otherwise by
+a missing `WAYLAND_DISPLAY`, attach
+starts `release_guard.py`'s bash helper after taking the desktop lock and before
+opening the portal. It runs in a new session, so terminal signals and hangup miss
+it. It runs one `xdotool keyup` of Escape and keycodes 10 to 255 plus `mouseup` of
+buttons 1 to 3, then blocks reading the owner's pipe. Attach fails unless that
+first release succeeds within five seconds, and refuses X11 without `DISPLAY`.
+Any owner exit, including SIGKILL, closes the pipe. The helper then releases,
+waits 500 ms for presses the owner sent just before dying, releases again, and
+exits. Normal shutdown closes the pipe after the portal and does not wait, so
+`framewisp --detach` sees the owner exit within its SIGKILL deadline. If the
+helper exits early, the owner stops access and starts the same final release
+itself in a new session. Xorg drops releases for keys and buttons the XTEST device does not
+hold, and XTEST releases never change physical devices' state. The helper can
+release keys another XTEST client holds. The attach prompt states that, on X11,
+other programs running as the user can capture and inject without the portal.
+The test suite runs the release against Xvfb while another client holds keys
+and buttons, as mutter does.
 
 `framewisp --detach` connects to a separate detach.sock, checks its peer UID, and
 uses Linux SO_PEERPIDFD (6.5+) to obtain a stable handle to the socket owner. It
@@ -1176,10 +1199,14 @@ Pointer coordinates use screenshot pixels and the portal stream node. Portal
 Notify methods deliver absolute motion, buttons, wheel steps, and keyboard
 keycodes for held keys and shortcuts, with keysyms for literal text. Keycode
 names currently assume the tested desktop's US layout. Each screenshot opens a PipeWire remote file descriptor through the
-portal and passes it to an in-process one-frame GStreamer pipewiresrc pipeline.
-videoconvert and pngenc write the PNG. Cancellation tears down the pipeline; process
-death closes every capture descriptor. A ten-second limit reports capture failures
-with capture.log. Nix supplies GStreamer and the
+portal and passes it to an in-process GStreamer pipewiresrc pipeline. Mutter can
+deliver a frame left from an earlier connection before current ones and sets no
+timestamps, so an appsink limited to raw system-memory video keeps only the newest
+buffer and is read again 100 ms
+after the first frame arrives (R-ATTACH-7). A deep copy of that frame goes through
+a second appsrc, videoconvert, and pngenc pipeline. Cancellation tears down the
+pipelines; process death closes every capture descriptor. Ten-second limits for the
+first frame and for encoding report capture failures with capture.log. Nix supplies GStreamer and the
 PipeWire, base, and good plugins in both the installed wrapper and dev shell.
 
 The user configures a desktop binding for `framewisp --detach`. COSMIC on
