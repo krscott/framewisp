@@ -240,8 +240,12 @@ investigate or ask; never invent a rationale.
 
 - **R-LIFE-1** [test] Stopping a session ends every app descendant, including
   detached and double-forked descendants.
-- **R-LIFE-2** [test] After a normal stop, no session process, private socket,
-  or runtime directory remains.
+- **R-LIFE-2** [test] After a normal stop, or when the app fails to start, no
+  session process, private socket, or runtime directory remains.
+
+  Rationale: Agents often launch apps that fail, and leftovers from repeated
+  failed starts would build up as stray processes and X displays.
+
 - **R-LIFE-3** [test] After the app exits, later session commands report its
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
