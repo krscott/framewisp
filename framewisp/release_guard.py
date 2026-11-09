@@ -3,6 +3,7 @@
 import os
 import select
 import subprocess
+import sys
 import time
 from threading import Event
 
@@ -85,8 +86,15 @@ def finish_release_guard(guard: subprocess.Popen[bytes]) -> None:
     guard.stdin.close()
     if guard.poll() is not None:
         # The guard died early, so nothing would release mutter's held input.
-        subprocess.Popen(
-            ["xdotool", *RELEASE, "sleep", str(LATE_PRESS), *RELEASE],
-            stdout=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        try:
+            subprocess.Popen(
+                ["xdotool", *RELEASE, "sleep", str(LATE_PRESS), *RELEASE],
+                stdout=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as error:
+            print(
+                f"Could not release X11 input: {error}. Press and release "
+                "Shift, Ctrl, Alt, and each mouse button to clear held input.",
+                file=sys.stderr,
+            )

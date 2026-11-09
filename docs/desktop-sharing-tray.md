@@ -50,7 +50,7 @@ type ATTACH, and approve sharing for one monitor. Never automate user consent.
    forced owner death, and portal revocation. Confirm each removes the item.
 5. Verify emergency detach during held-modifier input and after suspending the
    owner with SIGSTOP. Confirm access ends and the icon disappears.
-   On X11, after each stop in steps 3 to 5, check that
+   On X11, one second after each stop in steps 3 to 5, check that
    `xinput query-state "Virtual core XTEST keyboard"` and the matching
    `pointer` device report nothing `down`.
 6. Disable the compatible tray host, then attach again. Confirm the terminal
