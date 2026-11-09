@@ -9,6 +9,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, suppress
@@ -2866,6 +2867,21 @@ def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Option: False\n" in log.read_text())
 
 
+def runtime_processes(runtime: Path) -> list[int]:
+    """Find processes started with `runtime` as their XDG_RUNTIME_DIR."""
+    marker = b"XDG_RUNTIME_DIR=" + os.fsencode(runtime)
+    found: list[int] = []
+    for path in Path("/proc").glob("[0-9]*/environ"):
+        try:
+            environment = path.read_bytes().split(b"\0")
+        except OSError:
+            continue  # Other system processes can exit during enumeration.
+        if marker in environment:
+            found.append(int(path.parent.name))
+    return found
+
+
+# R-LIFE-2
 @pytest.mark.integration
 @pytest.mark.parametrize("missing_executable", [False, True])
 def test_x11_failed_app_startup_cleans_up(
@@ -2895,9 +2911,19 @@ def test_x11_failed_app_startup_cleans_up(
         )
         assert result.returncode == (1 if missing_executable else 7), result.stderr
         assert not (directory / "session.json").exists()
+        # The runtime directory is named after the session directory's identity.
+        # Every session process inherits it, so leftovers keep it in their environ.
+        info = directory.stat()
+        runtime = Path(tempfile.gettempdir()) / (
+            f"framewisp-{os.getuid()}-{info.st_dev:x}-{info.st_ino:x}"
+        )
+        assert not runtime.exists()
+        assert not runtime_processes(runtime)
         if not missing_executable:
             started = json.loads((directory / "app.log").read_text())
-            assert not Path(started["runtime"]).exists()
+            # The app saw the same runtime, so the missing-executable case checks
+            # the right path too.
+            assert Path(started["runtime"]) == runtime
             # Sway takes the lowest free X display number, so a concurrent
             # session may already own a new socket at this path.
             socket_path = Path("/tmp/.X11-unix") / f"X{started['display'][1:]}"
