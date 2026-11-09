@@ -12,6 +12,7 @@ from framewisp.captions import (
     CAPTION_MODES,
     DEFAULT_CAPTIONS,
     CaptionMode,
+    log_input,
     render_recording,
     subtitle_script,
 )
@@ -697,3 +698,39 @@ def test_unfinished_last_line_renders_with_every_reader(
     render(raw_video, log, **reader)
     assert raw_video.read_bytes() != before
     assert frames(raw_video, 0, 0)
+
+
+# R-LOG-7
+@pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
+@pytest.mark.parametrize(
+    "tail",
+    [UNFINISHED, b'{"text":"\xe6', COMPLETE_RECORDS.split(b"\n")[-2]],
+    ids=["json-fragment", "split-utf8", "json-without-newline"],
+)
+def test_append_after_interrupted_write_renders_with_every_reader(
+    raw_video: Path, log: Path, reader: dict[str, object], tail: bytes
+) -> None:
+    (log.parent / "activity.jsonl").write_text("")
+    log.write_bytes(COMPLETE_RECORDS + tail)
+    with log_input(log.parent, "key", {"chord": "Ctrl+s"}) as result:
+        result.returncode = 0
+    assert log.read_bytes().startswith(COMPLETE_RECORDS)
+    render(raw_video, log, **reader)
+    assert frames(raw_video, 0, 0)
+
+
+# R-LOG-8, R-REC-10
+@pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
+def test_append_preserves_complete_corruption_and_render_failure(
+    raw_video: Path, log: Path, reader: dict[str, object]
+) -> None:
+    before = raw_video.read_bytes()
+    (log.parent / "activity.jsonl").write_text("")
+    corrupt = COMPLETE_RECORDS + b"not json\n"
+    log.write_bytes(corrupt + UNFINISHED)
+    with log_input(log.parent, "key", {"chord": "Ctrl+s"}):
+        pass
+    assert log.read_bytes().startswith(corrupt)
+    with pytest.raises(RuntimeError) as failure:
+        render(raw_video, log, **reader)
+    assert_raw_clip_survived(raw_video, before, str(failure.value))

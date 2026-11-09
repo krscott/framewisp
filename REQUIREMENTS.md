@@ -167,7 +167,11 @@ investigate or ask; never invent a rationale.
 - **R-LOG-6** [retired] Framewisp rejects `--captions` combined with `--no-captions`
   before it starts a session or a clip.
 - **R-LOG-7** [test] An incomplete last line in `inputs.jsonl`, as left by an
-  interrupted write, does not fail recording rendering.
+  interrupted write, does not fail recording rendering, including after later
+  inputs are appended.
+
+  Rationale: Recording remains usable when input logging resumes after an
+  interrupted write.
 - **R-LOG-8** [test] A newline-terminated line in `inputs.jsonl` that is not
   valid JSON fails any recording rendering that reads the log (R-REC-10).
 

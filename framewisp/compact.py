@@ -1,5 +1,6 @@
 """Command-based recording cuts on the original monotonic timeline."""
 
+import fcntl
 import json
 import math
 import tempfile
@@ -50,7 +51,11 @@ def activity_events(log: Path) -> list[ActivityEvent]:
     # the unfinished trailing line; a complete start without an end stays active.
     # Split on the one line end writers use: splitlines would also break a line
     # at a stray carriage return and hide its first half as unfinished.
-    *complete, _unfinished = log.read_bytes().split(b"\n")
+    with log.open("rb") as source:
+        # Tail repair truncates and replaces bytes. Keep one snapshot across reads.
+        fcntl.flock(source, fcntl.LOCK_SH)
+        snapshot = source.read()
+    *complete, _unfinished = snapshot.split(b"\n")
     return [json.loads(line) for line in complete]
 
 
