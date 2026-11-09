@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from threading import Event, Timer
 from typing import cast
@@ -38,6 +39,12 @@ from framewisp.ownership import (
     write_journal,
 )
 from framewisp.portal import DesktopPortal
+from framewisp.release_guard import (
+    LATE_PRESS,
+    RELEASE,
+    finish_release_guard,
+    start_release_guard,
+)
 
 
 @pytest.fixture
@@ -251,7 +258,47 @@ def wait_file(path: Path) -> None:
 def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="fw-attach-", dir="/tmp") as directory:
         monkeypatch.setenv("XDG_RUNTIME_DIR", directory)
+        # Never send X11 releases to the developer's real display.
+        monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+        monkeypatch.setenv("WAYLAND_DISPLAY", "framewisp-test-unused")
         yield Path(directory)
+
+
+@pytest.fixture
+def x11_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Make attach treat the desktop as X11, with an xdotool that logs releases."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "releases"
+    xdotool = tools / "xdotool"
+    xdotool.write_text(
+        f'#!/bin/sh\n[ -e "{tmp_path}/xdotool-fails" ] && exit 1\n'
+        # Take as long as the real final release does.
+        f'case " $* " in *" sleep "*) sleep {LATE_PRESS};; esac\n'
+        f'echo "$*" >> "{log}"\n'
+    )
+    xdotool.chmod(0o755)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.delenv("WAYLAND_DISPLAY")
+    monkeypatch.setenv("DISPLAY", ":framewisp-test")
+    monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+    return log
+
+
+STARTUP_RELEASE = " ".join(RELEASE)
+FINAL_RELEASE = " ".join([*RELEASE, "sleep", str(LATE_PRESS), *RELEASE])
+
+
+def releases(log: Path) -> list[str]:
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def wait_releases(log: Path, count: int) -> list[str]:
+    deadline = time.monotonic() + 5
+    while len(releases(log)) < count:
+        assert time.monotonic() < deadline, f"Expected {count} releases"
+        time.sleep(0.01)
+    return releases(log)
 
 
 # R-ATTACH-1
@@ -520,6 +567,184 @@ def test_global_detach_kills_suspended_owner_and_recovers(
         replacement.wait(timeout=5)
 
 
+# R-INPUT-5
+def test_x11_stop_releases_held_input(
+    tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    # The guard proves it can release before the portal opens.
+    assert releases(x11_desktop) == [STARTUP_RELEASE]
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    assert detach_desktop() == 0
+    # The owner must not wait out the release past detach's SIGKILL deadline.
+    assert attach_process.wait(timeout=5) == 0
+    assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
+
+
+# R-INPUT-5
+def test_x11_release_survives_killing_the_owner_job(
+    tmp_path: Path, x11_desktop: Path
+) -> None:
+    # Ctrl+C and terminal hangup reach the whole foreground job, and SIGKILL
+    # allows no cleanup. The guard runs in its own session.
+    owner = subprocess.Popen(
+        [sys.executable, "-c", _SERVER, str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        wait_file(tmp_path / "waiting")
+        (tmp_path / "approve").touch()
+        assert owner.stdout is not None
+        while "Attached:" not in owner.stdout.readline():
+            assert owner.poll() is None
+        os.killpg(owner.pid, signal.SIGKILL)
+        assert owner.wait(timeout=5) == -signal.SIGKILL
+        assert wait_releases(x11_desktop, 2)[1] == FINAL_RELEASE
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=5)
+
+
+# R-INPUT-5
+@pytest.mark.parametrize("problem", ["xdotool fails", "no DISPLAY"])
+def test_x11_attach_refuses_without_release(
+    tmp_path: Path,
+    x11_desktop: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    problem: str,
+) -> None:
+    if problem == "no DISPLAY":
+        monkeypatch.delenv("DISPLAY")
+    else:
+        (tmp_path / "xdotool-fails").touch()
+
+    def no_portal(stop: Event) -> None:
+        raise AssertionError("The portal opened without X11 input release.")
+
+    monkeypatch.setattr(attach, "DesktopPortal", no_portal)
+    assert run_attachment(tmp_path / "session", None) == 1
+    error = capsys.readouterr().err
+    assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
+
+
+def children(pid: int, name: str) -> list[int]:
+    found: list[int] = []
+    for stat_file in Path("/proc").glob("[0-9]*/stat"):
+        with suppress(OSError):
+            command, fields = stat_file.read_text().rsplit(")", 1)
+            # The state, then the parent PID, follow the command name.
+            if int(fields.split()[1]) == pid and command.endswith(f"({name}"):
+                found.append(int(stat_file.parent.name))
+    return found
+
+
+# R-INPUT-5
+def test_x11_attachment_stops_when_release_guard_dies(
+    tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    (guard,) = children(attach_process.pid, "bash")
+    os.kill(guard, signal.SIGKILL)
+    assert attach_process.wait(timeout=5) == 1
+    assert attach_process.stderr is not None
+    assert "release helper exited" in attach_process.stderr.read()
+    # The owner runs the final release the dead guard cannot.
+    assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
+
+
+@pytest.fixture
+def xvfb_display(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A private X server with Xorg's input handling and XTEST."""
+    read, write = os.pipe()
+    server = subprocess.Popen(
+        ["Xvfb", "-displayfd", str(write), "-nolisten", "tcp"],
+        pass_fds=[write],
+        stderr=subprocess.DEVNULL,
+    )
+    os.close(write)
+    try:
+        with os.fdopen(read) as numbers:
+            display = ":" + numbers.readline().strip()
+        assert display != ":", "Xvfb did not report its display"
+        monkeypatch.setenv("DISPLAY", display)
+        monkeypatch.delenv("XAUTHORITY", raising=False)
+        yield display
+    finally:
+        server.terminate()
+        server.wait(timeout=5)
+
+
+def held_xtest_input() -> list[str]:
+    held: list[str] = []
+    for device in ("keyboard", "pointer"):
+        state = subprocess.run(
+            ["xinput", "query-state", f"Virtual core XTEST {device}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        held += [line.strip() for line in state.splitlines() if "=down" in line]
+    return held
+
+
+# R-INPUT-5
+def test_release_frees_xtest_keys_and_buttons(xvfb_display: str) -> None:
+    # Like mutter, the client holding the input stays connected. Escape is
+    # keycode 9; high codes such as 200 carry keysyms the keymap lacks.
+    holder = subprocess.Popen(
+        ["xdotool", "keydown", "Escape", "keydown", "50", "keydown", "200"]
+        + ["mousedown", "1", "mousedown", "3", "sleep", "30"]
+    )
+    try:
+        expected = {"key[9]=down", "key[50]=down", "key[200]=down"}
+        expected |= {"button[1]=down", "button[3]=down"}
+        deadline = time.monotonic() + 5
+        while not expected <= set(held_xtest_input()):
+            assert holder.poll() is None
+            assert time.monotonic() < deadline, held_xtest_input()
+            time.sleep(0.01)
+        subprocess.run(["xdotool", *RELEASE], check=True)
+        assert held_xtest_input() == []
+    finally:
+        holder.kill()
+        holder.wait(timeout=5)
+
+
+# R-INPUT-5
+def test_guard_releases_presses_that_land_after_the_owner_exits(
+    xvfb_display: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    guard = start_release_guard(Event())
+    assert guard is not None
+    # A press the owner sent just before dying reaches X after the first release.
+    pressed = time.monotonic() + LATE_PRESS / 2
+    holder = subprocess.Popen(
+        ["xdotool", "sleep", str(LATE_PRESS / 2), "keydown", "50"]
+        + ["mousedown", "1", "sleep", "30"]
+    )
+    try:
+        finish_release_guard(guard)
+        assert guard.wait(timeout=5) == 0
+        # Look only once the late press has certainly landed.
+        time.sleep(max(0, pressed + 0.15 - time.monotonic()))
+        assert holder.poll() is None
+        assert held_xtest_input() == []
+    finally:
+        holder.kill()
+        holder.wait(timeout=5)
+
+
 def test_old_session_cannot_control_new_attachment(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
@@ -634,6 +859,21 @@ def test_screenshot_reaches_a_descriptor(tmp_path: Path) -> None:
             "videotestsrc num-buffers=1", output.fileno(), Event(), tmp_path / "log"
         )
     assert clip.read_bytes().startswith(b"\x89PNG")
+
+
+# R-ATTACH-7
+def test_screenshot_skips_a_leftover_first_frame(tmp_path: Path) -> None:
+    # Mutter can deliver an old frame first; the ball moves in every later frame.
+    caps = "video/x-raw,width=64,height=48,framerate=30/1"
+    first, newest = tmp_path / "first.png", tmp_path / "newest.png"
+    for path, source in [
+        (first, f"videotestsrc pattern=ball num-buffers=1 ! {caps}"),
+        (newest, f"videotestsrc pattern=ball is-live=true num-buffers=30 ! {caps}"),
+    ]:
+        with path.open("wb") as output:
+            write_png(source, output.fileno(), Event(), tmp_path / "log")
+    assert first.read_bytes().startswith(b"\x89PNG")
+    assert newest.read_bytes() != first.read_bytes()
 
 
 # R-CONTROL-2

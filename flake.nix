@@ -100,6 +100,8 @@
               pkgs.xwayland
               pkgs.xdotool
               pkgs.xmodmap
+              pkgs.xvfb # X11 release test
+              pkgs.xinput
               pkgs.ffmpeg
               pkgs.gst_all_1.gstreamer
               pkgs.qt6.qtdeclarative # Qt menu regression probe
