@@ -40,7 +40,11 @@ from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
-from framewisp.release_guard import finish_release_guard, start_release_guard
+from framewisp.release_guard import (
+    finish_release_guard,
+    start_release_guard,
+    x11_desktop,
+)
 from framewisp.tray import UNAVAILABLE, SharingIndicator
 
 
@@ -306,7 +310,9 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
 def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
     """Return the newest frame seen within FRAME_SETTLE of the first one."""
     pipeline = Gst.parse_launch(
-        f"{source} ! appsink name=frames sync=false max-buffers=1 drop=true"
+        # Raw caps keep frames in system memory, as videoconvert needs.
+        f"{source} ! appsink name=frames caps=video/x-raw sync=false"
+        " max-buffers=1 drop=true"
     )
     assert isinstance(pipeline, Gst.Bin)
     sink = pipeline.get_by_name("frames")
@@ -424,7 +430,7 @@ def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
         "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
         flush=True,
     )
-    if not os.environ.get("WAYLAND_DISPLAY"):
+    if x11_desktop():
         print(
             "This is an X11 desktop: programs running as you can already read the screen\n"
             "and send input without the desktop dialog. Approving it does not limit them.",
@@ -629,6 +635,10 @@ def _run_attachment(
                             ):
                                 raise RuntimeError(
                                     "The attach terminal is no longer in the foreground; disconnecting."
+                                )
+                            if guard is not None and guard.poll() is not None:
+                                raise RuntimeError(
+                                    "The X11 input release helper exited; disconnecting."
                                 )
                             dispatch_events()
                     finally:

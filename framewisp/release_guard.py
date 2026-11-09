@@ -7,14 +7,14 @@ import time
 from threading import Event
 
 # Mutter's X11 backend sends portal input as XTEST events on its own X
-# connection. Ending the portal session leaves held keys and buttons down, and
-# XTEST state outlives the process that pressed it. The X server ignores a
-# release for a key or button that the XTEST device does not hold, and XTEST
-# releases never change physical devices.
+# connection, which stays open. Ending the portal session therefore leaves held
+# keys and buttons down. Any X client can release them, because XTEST state
+# belongs to the device. The X server ignores a release for a key or button that
+# the XTEST device does not hold, and XTEST releases never change physical
+# devices.
 # xdotool reads a digit-led token that is not a keysym name as a keycode. "9"
 # names the digit, so Escape stands for keycode 9.
 RELEASE = [
-    "xdotool",
     "keyup",
     "--delay",
     "0",
@@ -22,18 +22,30 @@ RELEASE = [
     *map(str, range(10, 256)),
     *[word for button in "123" for word in ("mouseup", button)],
 ]
-# Releases once to prove it can, then again when the owner's pipe closes. A new
-# session keeps terminal signals, including hangup, away from it.
+# Seconds between the two final releases, for presses the owner sent just
+# before it died that the desktop has not yet applied.
+LATE_PRESS = 0.5
+# Releases once to prove it can. When the owner's pipe closes, it releases,
+# waits, and releases again. A new session keeps terminal signals, including
+# hangup, away from it.
 _GUARD = (
-    'release() { "$@" >/dev/null; }; release "$@" || exit 1; echo ready;'
-    ' while read -r _; do :; done; release "$@"'
+    'xdotool "$@" >/dev/null || exit 1; echo ready; while read -r _; do :; done;'
+    f' xdotool "$@" sleep {LATE_PRESS} "$@" >/dev/null'
 )
 READY_TIMEOUT = 5
 
 
+def x11_desktop() -> bool:
+    """Whether attach runs on X11, where the desktop leaves held input down."""
+    session = os.environ.get("XDG_SESSION_TYPE")
+    if session in {"x11", "wayland"}:
+        return session == "x11"
+    return not os.environ.get("WAYLAND_DISPLAY")
+
+
 def start_release_guard(stop: Event) -> subprocess.Popen[bytes] | None:
     """Start the X11 guard. Wayland compositors release input themselves."""
-    if os.environ.get("WAYLAND_DISPLAY"):
+    if not x11_desktop():
         return None
     if not os.environ.get("DISPLAY"):
         raise RuntimeError(
@@ -72,6 +84,6 @@ def finish_release_guard(guard: subprocess.Popen[bytes]) -> None:
     assert guard.stdin is not None
     guard.stdin.close()
     try:
-        guard.wait(timeout=2)
+        guard.wait(timeout=LATE_PRESS + 2)
     except subprocess.TimeoutExpired:
         pass

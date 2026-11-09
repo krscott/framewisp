@@ -1166,20 +1166,24 @@ lock. Held buttons and keys release during action cleanup. On Wayland, connectio
 loss makes the compositor remove the virtual input devices and their held inputs.
 
 Mutter's X11 backend sends portal input as XTEST events on its own X connection,
-and closing a session releases nothing; XTEST state outlives the client that
-pressed it. When `WAYLAND_DISPLAY` is unset, attach treats the desktop as X11 and,
-after taking the desktop lock and before opening the portal, starts
-`release_guard.py`'s bash helper in a new session, so terminal signals and hangup
-miss it. It runs one `xdotool keyup` of Escape and keycodes 10 to 255 plus
-`mouseup` of buttons 1 to 3, then blocks reading the owner's pipe. Attach fails
-unless that first release succeeds within five seconds, and refuses X11 without
-`DISPLAY`. Any owner exit, including SIGKILL, closes the pipe, and the helper
-repeats the release once and exits. Normal shutdown closes the pipe after the
-portal and waits up to two seconds, so held input is free before `Detached`.
-Xorg drops releases for keys and buttons the XTEST device does not hold, and
-XTEST releases never change physical devices' state. The helper can release keys
-another XTEST client holds. The attach prompt states that, on X11, other programs
-running as the user can capture and inject without the portal.
+which stays open, so closing a session leaves held keys and buttons down. XTEST
+state belongs to the device, so any X client can release it. On X11 desktops,
+detected by `XDG_SESSION_TYPE` or else by a missing `WAYLAND_DISPLAY`, attach
+starts `release_guard.py`'s bash helper after taking the desktop lock and before
+opening the portal. It runs in a new session, so terminal signals and hangup miss
+it. It runs one `xdotool keyup` of Escape and keycodes 10 to 255 plus `mouseup` of
+buttons 1 to 3, then blocks reading the owner's pipe. Attach fails unless that
+first release succeeds within five seconds, and refuses X11 without `DISPLAY`.
+Any owner exit, including SIGKILL, closes the pipe. The helper then releases,
+waits 500 ms for presses the owner sent just before dying, releases again, and
+exits. Normal shutdown closes the pipe after the portal and waits for the helper,
+so held input is free before `Detached`. If the helper exits early, the owner
+stops access. Xorg drops releases for keys and buttons the XTEST device does not
+hold, and XTEST releases never change physical devices' state. The helper can
+release keys another XTEST client holds. The attach prompt states that, on X11,
+other programs running as the user can capture and inject without the portal.
+The test suite runs the release against Xvfb while another client holds keys
+and buttons, as mutter does.
 
 `framewisp --detach` connects to a separate detach.sock, checks its peer UID, and
 uses Linux SO_PEERPIDFD (6.5+) to obtain a stable handle to the socket owner. It
@@ -1195,7 +1199,8 @@ keycodes for held keys and shortcuts, with keysyms for literal text. Keycode
 names currently assume the tested desktop's US layout. Each screenshot opens a PipeWire remote file descriptor through the
 portal and passes it to an in-process GStreamer pipewiresrc pipeline. Mutter can
 deliver a frame left from an earlier connection before current ones and sets no
-timestamps, so an appsink that keeps only the newest buffer is read again 100 ms
+timestamps, so an appsink limited to raw system-memory video keeps only the newest
+buffer and is read again 100 ms
 after the first frame arrives (R-ATTACH-7). A deep copy of that frame goes through
 a second appsrc, videoconvert, and pngenc pipeline. Cancellation tears down the
 pipelines; process death closes every capture descriptor. Ten-second limits for the

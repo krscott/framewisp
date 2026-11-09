@@ -23,6 +23,8 @@
   xwayland,
   xdotool,
   xmodmap,
+  xvfb,
+  xinput,
   ffmpeg,
   gst_all_1,
   pipewire,
@@ -141,6 +143,10 @@ buildPythonPackage {
 
   nativeCheckInputs = [
     pytestCheckHook
+    # The X11 release test holds and releases XTEST input on a private Xvfb.
+    xvfb
+    xinput
+    xdotool
     pygobject-stubs
     pillow
     ffmpeg

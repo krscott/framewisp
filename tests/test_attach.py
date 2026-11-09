@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from threading import Event, Timer
 from typing import cast
@@ -38,7 +39,7 @@ from framewisp.ownership import (
     write_journal,
 )
 from framewisp.portal import DesktopPortal
-from framewisp.release_guard import RELEASE
+from framewisp.release_guard import LATE_PRESS, RELEASE
 
 
 @pytest.fixture
@@ -253,6 +254,7 @@ def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="fw-attach-", dir="/tmp") as directory:
         monkeypatch.setenv("XDG_RUNTIME_DIR", directory)
         # Never send X11 releases to the developer's real display.
+        monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         monkeypatch.setenv("WAYLAND_DISPLAY", "framewisp-test-unused")
         yield Path(directory)
 
@@ -269,10 +271,15 @@ def x11_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         f'echo "$*" >> "{log}"\n'
     )
     xdotool.chmod(0o755)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
     monkeypatch.delenv("WAYLAND_DISPLAY")
     monkeypatch.setenv("DISPLAY", ":framewisp-test")
     monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
     return log
+
+
+STARTUP_RELEASE = " ".join(RELEASE)
+FINAL_RELEASE = " ".join([*RELEASE, "sleep", str(LATE_PRESS), *RELEASE])
 
 
 def releases(log: Path) -> list[str]:
@@ -558,7 +565,7 @@ def test_x11_stop_releases_held_input(
     tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     # The guard proves it can release before the portal opens.
-    assert releases(x11_desktop) == [" ".join(RELEASE[1:])]
+    assert releases(x11_desktop) == [STARTUP_RELEASE]
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
     while "Attached:" not in attach_process.stdout.readline():
@@ -566,7 +573,7 @@ def test_x11_stop_releases_held_input(
     assert detach_desktop() == 0
     assert attach_process.wait(timeout=5) == 0
     # Normal shutdown waits for the release before it reports detachment.
-    assert releases(x11_desktop) == [" ".join(RELEASE[1:])] * 2
+    assert releases(x11_desktop) == [STARTUP_RELEASE, FINAL_RELEASE]
 
 
 # R-INPUT-5
@@ -590,13 +597,14 @@ def test_x11_release_survives_killing_the_owner_job(
             assert owner.poll() is None
         os.killpg(owner.pid, signal.SIGKILL)
         assert owner.wait(timeout=5) == -signal.SIGKILL
-        assert wait_releases(x11_desktop, 2)[1] == " ".join(RELEASE[1:])
+        assert wait_releases(x11_desktop, 2)[1] == FINAL_RELEASE
     finally:
         if owner.poll() is None:
             owner.kill()
         owner.wait(timeout=5)
 
 
+# R-INPUT-5
 @pytest.mark.parametrize("problem", ["xdotool fails", "no DISPLAY"])
 def test_x11_attach_refuses_without_release(
     tmp_path: Path,
@@ -617,6 +625,90 @@ def test_x11_attach_refuses_without_release(
     assert run_attachment(tmp_path / "session", None) == 1
     error = capsys.readouterr().err
     assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
+
+
+def children(pid: int, name: str) -> list[int]:
+    found: list[int] = []
+    for stat_file in Path("/proc").glob("[0-9]*/stat"):
+        with suppress(OSError):
+            command, fields = stat_file.read_text().rsplit(")", 1)
+            # The state, then the parent PID, follow the command name.
+            if int(fields.split()[1]) == pid and command.endswith(f"({name}"):
+                found.append(int(stat_file.parent.name))
+    return found
+
+
+# R-INPUT-5
+def test_x11_attachment_stops_when_release_guard_dies(
+    tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    (guard,) = children(attach_process.pid, "bash")
+    os.kill(guard, signal.SIGKILL)
+    assert attach_process.wait(timeout=5) == 1
+    assert attach_process.stderr is not None
+    assert "release helper exited" in attach_process.stderr.read()
+
+
+@pytest.fixture
+def xvfb_display(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A private X server with Xorg's input handling and XTEST."""
+    read, write = os.pipe()
+    server = subprocess.Popen(
+        ["Xvfb", "-displayfd", str(write), "-nolisten", "tcp"],
+        pass_fds=[write],
+        stderr=subprocess.DEVNULL,
+    )
+    os.close(write)
+    try:
+        with os.fdopen(read) as numbers:
+            display = ":" + numbers.readline().strip()
+        assert display != ":", "Xvfb did not report its display"
+        monkeypatch.setenv("DISPLAY", display)
+        monkeypatch.delenv("XAUTHORITY", raising=False)
+        yield display
+    finally:
+        server.terminate()
+        server.wait(timeout=5)
+
+
+def held_xtest_input() -> list[str]:
+    held: list[str] = []
+    for device in ("keyboard", "pointer"):
+        state = subprocess.run(
+            ["xinput", "query-state", f"Virtual core XTEST {device}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        held += [line.strip() for line in state.splitlines() if "=down" in line]
+    return held
+
+
+# R-INPUT-5
+def test_release_frees_xtest_keys_and_buttons(xvfb_display: str) -> None:
+    # Like mutter, the client holding the input stays connected. Escape is
+    # keycode 9; high codes such as 200 carry keysyms the keymap lacks.
+    holder = subprocess.Popen(
+        ["xdotool", "keydown", "Escape", "keydown", "50", "keydown", "200"]
+        + ["mousedown", "1", "mousedown", "3", "sleep", "30"]
+    )
+    try:
+        expected = {"key[9]=down", "key[50]=down", "key[200]=down"}
+        expected |= {"button[1]=down", "button[3]=down"}
+        deadline = time.monotonic() + 5
+        while not expected <= set(held_xtest_input()):
+            assert holder.poll() is None
+            assert time.monotonic() < deadline, held_xtest_input()
+            time.sleep(0.01)
+        subprocess.run(["xdotool", *RELEASE], check=True)
+        assert held_xtest_input() == []
+    finally:
+        holder.kill()
+        holder.wait(timeout=5)
 
 
 def test_old_session_cannot_control_new_attachment(
