@@ -101,6 +101,23 @@ def test_text_bounds_long_lines_and_scrollback() -> None:
     assert len(state.lines) <= 2
 
 
+# R-REC-24
+def test_text_wraps_braces_by_their_drawn_width() -> None:
+    state = ConsoleText(rows=3, columns=4)
+    state.feed("{}\\\n", 1)
+    assert [text for _, text in state.lines] == ["｛｝", "＼"]
+
+
+# R-REC-24
+@pytest.mark.parametrize(
+    "seconds", [0, -9.5, 9999.99, -999.99, -1000, 10000, -999999, -(10**9), 10**9]
+)
+def test_timestamps_fit_the_reserved_prefix(seconds: float) -> None:
+    state = ConsoleText(rows=1, columns=4)
+    state.feed("x\n", seconds)
+    assert state.screen(0).index(" | ") == 7
+
+
 @pytest.mark.parametrize(
     "text,expected",
     [

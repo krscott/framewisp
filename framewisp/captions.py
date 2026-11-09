@@ -25,7 +25,7 @@ from framewisp.compact import (
     recording_duration,
     retained_frames,
 )
-from framewisp.console import ConsoleCapture, console_frames
+from framewisp.console import ASS_LITERALS, ConsoleCapture, console_frames
 from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
@@ -339,9 +339,8 @@ Style: Console,DejaVu Sans Mono,{CONSOLE_FONT_SIZE},&H00EEEEEE,&H00000000,1,0,0,
 Format: Layer, Start, End, Style, Text
 """
     for caption in captions:
-        # ASS interprets braces and backslashes as formatting. Use visible fullwidth
-        # equivalents in captions; opted-in input logs retain the original text.
-        text = caption.text.translate(str.maketrans("\\{}", "＼｛｝"))
+        # Opted-in input logs retain the original text.
+        text = caption.text.translate(ASS_LITERALS)
         # A caption is one line, which can be wider than a narrow GUI.
         script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{{{gui.clip}}}{text}\n"
     for ping in pings:
@@ -418,11 +417,7 @@ def render_recording(
                 ):
                     # Libass drops a line's leading spaces, which would shift the
                     # `|` after a short timestamp. Hard spaces keep the columns.
-                    text = (
-                        frame.text.translate(str.maketrans("\\{}", "＼｛｝"))
-                        .replace(" ", r"\h")
-                        .replace("\n", r"\N")
-                    )
+                    text = frame.text.replace(" ", r"\h").replace("\n", r"\N")
                     script.write(
                         f"Dialogue: 0,{ass_time(frame.start)},{ass_time(frame.end)},Console,{position}{text}\n"
                     )

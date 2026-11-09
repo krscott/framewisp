@@ -1054,14 +1054,17 @@ and OSC sequences, replaces lines after carriage returns, and handles backspaces
 tabs, wide characters, wrapping, and a limited scrollback. The panel's width sets
 the wrap column and its height sets the rows kept: `(height - 64) // 18` rows and
 `(width - 32) * 100 // 931 - 10` columns, which is 55 columns in a 640-pixel panel.
-The fixed font (R-REC-23) makes these constants exact rather than estimates:
-DejaVu Sans Mono 18 under libass draws 18-pixel lines and 9.30-pixel cells, and
-the CJK and emoji fallbacks stay within their two cells. The 16-pixel side padding,
-32-pixel title band, 16-pixel bottom padding and 10-cell `seconds | ` prefix
-surround the text, so text stays inside every accepted panel (R-REC-24). A
-timestamp of 10000 seconds or more is one cell wider than the prefix and runs into
-the right padding. Spaces render as ASS hard spaces, because libass drops a line's
-leading spaces and would shift the `|` after a shorter timestamp.
+The fixed font (R-REC-23) lets these use measured metrics: libass draws DejaVu Sans
+Mono 18 with 18-pixel lines and 9.30-pixel cells, rounded up to 9.31. Text starts
+16 pixels in from the left and 48 down, below the title, and keeps 16 pixels of
+padding at the right and bottom (R-REC-24). Each line starts with a 7-character
+timestamp and ` | `, so 10 cells are reserved; times from 1000 seconds before the
+clip or 10000 after drop their decimals to keep that width. Braces and
+backslashes become fullwidth forms before wrapping, so they count as the two cells
+they draw. Spaces render as ASS hard spaces, because libass drops a line's leading
+spaces and would shift the `|` after a shorter timestamp. CJK and emoji fallbacks
+stay within their two cells. Glyphs from other fallback fonts, such as Tamil or
+Devanagari, can draw wider than a cell or make a line slightly taller.
 Line timestamps are seconds relative to clip origin; negative values identify
 pre-clip context. Output received at or after the stop request is excluded. Updates
 coalesce to at most one per 30 fps frame. This is plain text rendering, without

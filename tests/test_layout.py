@@ -580,7 +580,7 @@ def ink_rows(panel: Image.Image) -> list[tuple[int, int, int]]:
 
 
 # R-REC-24
-@pytest.mark.parametrize("fill", ["█", "你😀"])
+@pytest.mark.parametrize("fill", ["█", "你😀", "{}\\"])
 @pytest.mark.parametrize(
     ("display", "position", "pixels"),
     [
@@ -599,9 +599,10 @@ def test_filled_panel_text_stays_inside_the_panel(
     layout = panel_layout(display, position, pixels)
     assert layout.panel is not None
     columns, rows = text_columns(layout.panel.width), text_rows(layout.panel.height)
-    # Lines three panels long wrap; `-990.00` is the widest prefix the panel reserves.
+    # Lines three panels long wrap. Output from long before the clip has the
+    # widest timestamps.
     (tmp_path / "console.jsonl").write_text(
-        json.dumps({"time": -980.0, "text": f"{fill * columns * 3}\n" * rows}) + "\n"
+        json.dumps({"time": -100000.0, "text": f"{fill * columns * 3}\n" * rows}) + "\n"
     )
     panel = crop(render(tmp_path, "filled", layout, display=display), layout.panel)
     background = Image.new("RGB", panel.size, PANEL_COLOUR)
@@ -611,6 +612,7 @@ def test_filled_panel_text_stays_inside_the_panel(
     assert text is not None
     left, top, right, bottom = text[0], text[1] + 44, text[2], text[3] + 44
     assert left >= 16 and right <= panel.width - 16
+    # Blocks ink a little past their 18-pixel line, into the bottom padding.
     assert bottom <= panel.height - 8
     if fill == "█":
         # Blocks fill their cells, so they show every row and leave less than a
