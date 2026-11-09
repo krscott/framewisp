@@ -2904,8 +2904,9 @@ def test_x11_failed_app_startup_cleans_up(
             try:
                 left = socket_path.stat()
             except FileNotFoundError:
-                continue
-            assert [left.st_ino, left.st_ctime_ns] != started["socket"], socket_path
+                pass
+            else:
+                assert [left.st_ino, left.st_ctime_ns] != started["socket"], socket_path
 
 
 @pytest.mark.integration

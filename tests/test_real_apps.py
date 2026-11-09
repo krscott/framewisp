@@ -174,6 +174,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
     with runner_log.open("w") as output:
         process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT)
     state: dict[str, Any] = {}
+    x11_socket: tuple[Path, list[int]] | None = None
     app: RealApp | None = None
     pids: set[int] = set()
     try:
@@ -186,6 +187,10 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
         state = json.loads((session / "session.json").read_text())
         app = RealApp(tmp_path, session, Path(state["runtime_directory"]))
         pids.update(state["processes"].values())
+        if state["x11_display"] is not None:
+            path = Path("/tmp/.X11-unix") / f"X{state['x11_display'][1:]}"
+            started = path.stat()
+            x11_socket = (path, [started.st_ino, started.st_ctime_ns])
 
         def visible() -> bool:
             tree = sway_tree(app.runtime)
@@ -228,10 +233,16 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
             assert not (session / "session.json").exists()
             for pid in pids:
                 wait_until(lambda: not Path(f"/proc/{pid}").exists())
-            if state["x11_display"] is not None:
-                assert not (
-                    Path("/tmp/.X11-unix") / f"X{state['x11_display'][1:]}"
-                ).exists()
+            if x11_socket is not None:
+                # Sway takes the lowest free X display number, so a concurrent
+                # session may already own a new socket at this path.
+                path, identity = x11_socket
+                try:
+                    left = path.stat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    assert [left.st_ino, left.st_ctime_ns] != identity, path
             (tmp_path / "cleanup.json").write_text(
                 json.dumps({"pids": sorted(pids), "runtime_removed": True})
             )
