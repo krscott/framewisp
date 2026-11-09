@@ -1168,7 +1168,8 @@ loss makes the compositor remove the virtual input devices and their held inputs
 Mutter's X11 backend sends portal input as XTEST events on its own X connection,
 which stays open, so closing a session leaves held keys and buttons down. XTEST
 state belongs to the device, so any X client can release it. On X11 desktops,
-detected by `XDG_SESSION_TYPE` or else by a missing `WAYLAND_DISPLAY`, attach
+detected by `XDG_SESSION_TYPE` when it is `x11` or `wayland` and otherwise by
+a missing `WAYLAND_DISPLAY`, attach
 starts `release_guard.py`'s bash helper after taking the desktop lock and before
 opening the portal. It runs in a new session, so terminal signals and hangup miss
 it. It runs one `xdotool keyup` of Escape and keycodes 10 to 255 plus `mouseup` of
@@ -1176,9 +1177,10 @@ buttons 1 to 3, then blocks reading the owner's pipe. Attach fails unless that
 first release succeeds within five seconds, and refuses X11 without `DISPLAY`.
 Any owner exit, including SIGKILL, closes the pipe. The helper then releases,
 waits 500 ms for presses the owner sent just before dying, releases again, and
-exits. Normal shutdown closes the pipe after the portal and waits for the helper,
-so held input is free before `Detached`. If the helper exits early, the owner
-stops access. Xorg drops releases for keys and buttons the XTEST device does not
+exits. Normal shutdown closes the pipe after the portal and does not wait, so
+`framewisp --detach` sees the owner exit within its SIGKILL deadline. If the
+helper exits early, the owner stops access and starts the same final release
+itself in a new session. Xorg drops releases for keys and buttons the XTEST device does not
 hold, and XTEST releases never change physical devices' state. The helper can
 release keys another XTEST client holds. The attach prompt states that, on X11,
 other programs running as the user can capture and inject without the portal.

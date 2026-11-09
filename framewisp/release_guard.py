@@ -80,10 +80,13 @@ def start_release_guard(stop: Event) -> subprocess.Popen[bytes] | None:
 
 
 def finish_release_guard(guard: subprocess.Popen[bytes]) -> None:
-    """Release held input now. The guard finishes alone if this times out."""
+    """Release held input without waiting, so detach's SIGKILL deadline holds."""
     assert guard.stdin is not None
     guard.stdin.close()
-    try:
-        guard.wait(timeout=LATE_PRESS + 2)
-    except subprocess.TimeoutExpired:
-        pass
+    if guard.poll() is not None:
+        # The guard died early, so nothing would release mutter's held input.
+        subprocess.Popen(
+            ["xdotool", *RELEASE, "sleep", str(LATE_PRESS), *RELEASE],
+            stdout=subprocess.DEVNULL,
+            start_new_session=True,
+        )

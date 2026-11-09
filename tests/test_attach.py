@@ -39,7 +39,12 @@ from framewisp.ownership import (
     write_journal,
 )
 from framewisp.portal import DesktopPortal
-from framewisp.release_guard import LATE_PRESS, RELEASE
+from framewisp.release_guard import (
+    LATE_PRESS,
+    RELEASE,
+    finish_release_guard,
+    start_release_guard,
+)
 
 
 @pytest.fixture
@@ -268,6 +273,8 @@ def x11_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     xdotool = tools / "xdotool"
     xdotool.write_text(
         f'#!/bin/sh\n[ -e "{tmp_path}/xdotool-fails" ] && exit 1\n'
+        # Take as long as the real final release does.
+        f'case " $* " in *" sleep "*) sleep {LATE_PRESS};; esac\n'
         f'echo "$*" >> "{log}"\n'
     )
     xdotool.chmod(0o755)
@@ -571,9 +578,9 @@ def test_x11_stop_releases_held_input(
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
     assert detach_desktop() == 0
+    # The owner must not wait out the release past detach's SIGKILL deadline.
     assert attach_process.wait(timeout=5) == 0
-    # Normal shutdown waits for the release before it reports detachment.
-    assert releases(x11_desktop) == [STARTUP_RELEASE, FINAL_RELEASE]
+    assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 
 
 # R-INPUT-5
@@ -651,6 +658,8 @@ def test_x11_attachment_stops_when_release_guard_dies(
     assert attach_process.wait(timeout=5) == 1
     assert attach_process.stderr is not None
     assert "release helper exited" in attach_process.stderr.read()
+    # The owner runs the final release the dead guard cannot.
+    assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 
 
 @pytest.fixture
@@ -705,6 +714,31 @@ def test_release_frees_xtest_keys_and_buttons(xvfb_display: str) -> None:
             assert time.monotonic() < deadline, held_xtest_input()
             time.sleep(0.01)
         subprocess.run(["xdotool", *RELEASE], check=True)
+        assert held_xtest_input() == []
+    finally:
+        holder.kill()
+        holder.wait(timeout=5)
+
+
+# R-INPUT-5
+def test_guard_releases_presses_that_land_after_the_owner_exits(
+    xvfb_display: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    guard = start_release_guard(Event())
+    assert guard is not None
+    # A press the owner sent just before dying reaches X after the first release.
+    pressed = time.monotonic() + LATE_PRESS / 2
+    holder = subprocess.Popen(
+        ["xdotool", "sleep", str(LATE_PRESS / 2), "keydown", "50"]
+        + ["mousedown", "1", "sleep", "30"]
+    )
+    try:
+        finish_release_guard(guard)
+        assert guard.wait(timeout=5) == 0
+        # Look only once the late press has certainly landed.
+        time.sleep(max(0, pressed + 0.15 - time.monotonic()))
+        assert holder.poll() is None
         assert held_xtest_input() == []
     finally:
         holder.kill()
