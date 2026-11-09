@@ -293,6 +293,11 @@ investigate or ask; never invent a rationale.
 
   Rationale: The host decides what appears on screen, so only a check on a real
   desktop proves that the user can see the item.
+- **R-ATTACH-7** [test] An attached screenshot never shows a frame from before
+  the screenshot command started.
+
+  Rationale: Agents act on screenshots. A stale frame makes input that already
+  finished look ignored.
 
 ## Control requests (CONTROL)
 

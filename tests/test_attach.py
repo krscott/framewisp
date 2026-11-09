@@ -38,6 +38,7 @@ from framewisp.ownership import (
     write_journal,
 )
 from framewisp.portal import DesktopPortal
+from framewisp.release_guard import RELEASE
 
 
 @pytest.fixture
@@ -251,7 +252,39 @@ def wait_file(path: Path) -> None:
 def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="fw-attach-", dir="/tmp") as directory:
         monkeypatch.setenv("XDG_RUNTIME_DIR", directory)
+        # Never send X11 releases to the developer's real display.
+        monkeypatch.setenv("WAYLAND_DISPLAY", "framewisp-test-unused")
         yield Path(directory)
+
+
+@pytest.fixture
+def x11_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Make attach treat the desktop as X11, with an xdotool that logs releases."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "releases"
+    xdotool = tools / "xdotool"
+    xdotool.write_text(
+        f'#!/bin/sh\n[ -e "{tmp_path}/xdotool-fails" ] && exit 1\n'
+        f'echo "$*" >> "{log}"\n'
+    )
+    xdotool.chmod(0o755)
+    monkeypatch.delenv("WAYLAND_DISPLAY")
+    monkeypatch.setenv("DISPLAY", ":framewisp-test")
+    monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+    return log
+
+
+def releases(log: Path) -> list[str]:
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def wait_releases(log: Path, count: int) -> list[str]:
+    deadline = time.monotonic() + 5
+    while len(releases(log)) < count:
+        assert time.monotonic() < deadline, f"Expected {count} releases"
+        time.sleep(0.01)
+    return releases(log)
 
 
 # R-ATTACH-1
@@ -520,6 +553,72 @@ def test_global_detach_kills_suspended_owner_and_recovers(
         replacement.wait(timeout=5)
 
 
+# R-INPUT-5
+def test_x11_stop_releases_held_input(
+    tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    # The guard proves it can release before the portal opens.
+    assert releases(x11_desktop) == [" ".join(RELEASE[1:])]
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    assert detach_desktop() == 0
+    assert attach_process.wait(timeout=5) == 0
+    # Normal shutdown waits for the release before it reports detachment.
+    assert releases(x11_desktop) == [" ".join(RELEASE[1:])] * 2
+
+
+# R-INPUT-5
+def test_x11_release_survives_killing_the_owner_job(
+    tmp_path: Path, x11_desktop: Path
+) -> None:
+    # Ctrl+C and terminal hangup reach the whole foreground job, and SIGKILL
+    # allows no cleanup. The guard runs in its own session.
+    owner = subprocess.Popen(
+        [sys.executable, "-c", _SERVER, str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        wait_file(tmp_path / "waiting")
+        (tmp_path / "approve").touch()
+        assert owner.stdout is not None
+        while "Attached:" not in owner.stdout.readline():
+            assert owner.poll() is None
+        os.killpg(owner.pid, signal.SIGKILL)
+        assert owner.wait(timeout=5) == -signal.SIGKILL
+        assert wait_releases(x11_desktop, 2)[1] == " ".join(RELEASE[1:])
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=5)
+
+
+@pytest.mark.parametrize("problem", ["xdotool fails", "no DISPLAY"])
+def test_x11_attach_refuses_without_release(
+    tmp_path: Path,
+    x11_desktop: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    problem: str,
+) -> None:
+    if problem == "no DISPLAY":
+        monkeypatch.delenv("DISPLAY")
+    else:
+        (tmp_path / "xdotool-fails").touch()
+
+    def no_portal(stop: Event) -> None:
+        raise AssertionError("The portal opened without X11 input release.")
+
+    monkeypatch.setattr(attach, "DesktopPortal", no_portal)
+    assert run_attachment(tmp_path / "session", None) == 1
+    error = capsys.readouterr().err
+    assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
+
+
 def test_old_session_cannot_control_new_attachment(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
@@ -634,6 +733,21 @@ def test_screenshot_reaches_a_descriptor(tmp_path: Path) -> None:
             "videotestsrc num-buffers=1", output.fileno(), Event(), tmp_path / "log"
         )
     assert clip.read_bytes().startswith(b"\x89PNG")
+
+
+# R-ATTACH-7
+def test_screenshot_skips_a_leftover_first_frame(tmp_path: Path) -> None:
+    # Mutter can deliver an old frame first; the ball moves in every later frame.
+    caps = "video/x-raw,width=64,height=48,framerate=30/1"
+    first, newest = tmp_path / "first.png", tmp_path / "newest.png"
+    for path, source in [
+        (first, f"videotestsrc pattern=ball num-buffers=1 ! {caps}"),
+        (newest, f"videotestsrc pattern=ball is-live=true num-buffers=30 ! {caps}"),
+    ]:
+        with path.open("wb") as output:
+            write_png(source, output.fileno(), Event(), tmp_path / "log")
+    assert first.read_bytes().startswith(b"\x89PNG")
+    assert newest.read_bytes() != first.read_bytes()
 
 
 # R-CONTROL-2

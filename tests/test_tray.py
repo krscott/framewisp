@@ -500,6 +500,8 @@ def start_owner(
 
     with tempfile.TemporaryDirectory(prefix="fw-tray-", dir="/tmp") as runtime:
         monkeypatch.setenv("XDG_RUNTIME_DIR", runtime)
+        # Never send X11 releases to the developer's real display.
+        monkeypatch.setenv("WAYLAND_DISPLAY", "framewisp-test-unused")
         try:
             yield start
         finally:

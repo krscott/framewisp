@@ -24,7 +24,6 @@ a stand-in portal and a fake watcher to check its item, stop menu, and missing-h
 diagnostic. Attachment tests cover emergency detach,
 suspended owners, terminal loss, exit signals, and cancellation.
 
-Visual desktop acceptance has not been performed in the implementation environment.
 Do not treat protocol tests as desktop acceptance. Record desktop, portal, and
 GNOME extension versions when running the following checks on each desktop.
 
@@ -32,7 +31,8 @@ GNOME extension versions when running the following checks on each desktop.
 | --- | --- | --- | --- |
 | KDE Plasma | Not tested | Not applicable | Pending |
 | COSMIC | Not recorded | Not applicable | Visual check passed; tray stop button works. Other live checks pending |
-| GNOME | Not tested | Not tested | Pending |
+| GNOME (Xorg) | 42.9 on Ubuntu 22.04; xdg-desktop-portal 1.14.4, -gnome 42.1 | Ubuntu AppIndicators 42 | Visual check passed; tray stop works. Every input command and screenshot freshness passed. Held Shift and button released after `--detach`, SIGKILL of a suspended owner, and terminal loss. Shortcuts and installed package pending |
+| GNOME (Wayland) | Not tested | Not tested | Pending |
 
 ## Live checks
 
@@ -50,7 +50,15 @@ type ATTACH, and approve sharing for one monitor. Never automate user consent.
    forced owner death, and portal revocation. Confirm each removes the item.
 5. Verify emergency detach during held-modifier input and after suspending the
    owner with SIGSTOP. Confirm access ends and the icon disappears.
+   On X11, after each stop in steps 3 to 5, check that
+   `xinput query-state "Virtual core XTEST keyboard"` and the matching
+   `pointer` device report nothing `down`.
 6. Disable the compatible tray host, then attach again. Confirm the terminal
    diagnostic explains `framewisp --detach` and Ctrl+C, and both still work.
 7. Repeat with the installed Nix package and with `nix develop`. Record the package
    revision and required desktop setup alongside the version results.
+8. Drag a window with `framewisp SESSION drag`, then take a screenshot at once.
+   Confirm it shows the new position (R-ATTACH-7). Repeat a few times.
+9. On a Wayland desktop, run an X11 app such as `GDK_BACKEND=x11 framewisp-demo`.
+   Confirm screenshots show it and input reaches it through Xwayland. Not yet
+   checked on any desktop.

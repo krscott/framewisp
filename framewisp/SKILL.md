@@ -92,7 +92,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
-| `attach [--retain-input-content]` | User-only: share an existing Wayland desktop through its permission dialog. See the attachment instructions below. |
+| `attach [--retain-input-content]` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the attachment instructions below. |
 
 Standalone commands take no SESSION: `framewisp --detach` stops the active
 desktop attachment, leaving the user's apps running; `framewisp --agent-skill`
