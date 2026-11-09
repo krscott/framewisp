@@ -112,8 +112,8 @@ def test_recording_rejects_invalid_panels_before_any_clip(
     [
         (["--height", "100"], ["1280x100", "taller"]),
         (
-            ["--width", "320", "--height", "240", "--console-position", "bottom"],
-            ["320x240", "wider"],
+            ["--width", "310", "--height", "240", "--console-position", "bottom"],
+            ["310x240", "wider"],
         ),
         (["--console-size", "16000"], ["17280x720", "smaller --console-size"]),
     ],
