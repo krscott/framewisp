@@ -689,7 +689,7 @@ with `meta.mainProgram` selecting the CLI for `nix run`. NixOS and Home Manager
 can install the same package onto PATH. No system service is required.
 
 The development shell additionally supplies FFmpeg for test decoding and the
-Python development tools. The `package-1` through `package-8` checks run the
+Python development tools. The installed-package shards run the
 integration tests against the built package with an empty environment and only the package
 FFmpeg, and the Qt QML regression runner on PATH. Python dependencies are also declared
 in `pyproject.toml` and `default.nix`. The demo uses a plain GTK window and GLib
@@ -1453,18 +1453,21 @@ PNG capture alone never set batch `verified` to true (R-CHECK-3).
 ## Continuous integration
 
 GitHub Actions runs formatting and development-shell quality checks alongside
-one library test job and eight installed-package test shards on standard Ubuntu
-runners. The `library` check is the package build with its test phase, which runs
-the unit tests serially. Each shard builds the package without that phase, then
-runs its assigned GUI cases serially. `nix flake check` runs all nine checks; a
-single check can be run with `nix build -L .#checks.x86_64-linux.library` or
-`package-1` through `package-8`.
+two library test shards and twelve installed-package test shards on standard Ubuntu
+runners. Each library shard builds the package and runs its assigned unit cases
+serially. The `library` check depends on both library shards. Each package shard
+builds the package without its test phase, then runs its assigned GUI cases
+serially. Default package builds still run the full unit suite. `nix flake check`
+runs the aggregate and all fourteen shards. Individual checks are available as
+`checks.x86_64-linux.library`, `library-1` through `library-2`, and `package-1`
+through `package-12`.
 
 `nix/package-check.nix` runs installed-package tests in an empty environment with
 explicit GTK, Qt, recording, and Python dependencies. `tests/conftest.py` assigns
 collected cases by their collection index modulo the shard count. Every runner
 must collect the same cases in the same order. The default shard count of one
-selects every case for ordinary pytest invocations. CI uses all eight groups.
+selects every case for ordinary pytest invocations. Both CI matrices use this
+collector, with their own shard counts.
 
 Library and installed-package checks print the slowest test durations in their logs.
 Successful package checks publish JUnit reports. Failed installed-package checks

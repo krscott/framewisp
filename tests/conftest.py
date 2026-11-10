@@ -1,4 +1,4 @@
-"""Split installed-package tests between isolated CI runners."""
+"""Split tests between isolated CI runners."""
 
 from typing import cast
 

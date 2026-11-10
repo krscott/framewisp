@@ -59,7 +59,7 @@ affected module in `pyproject.toml`.
 | Format | `nix run .#format` (CI fails if this changes files) |
 
 `tests/test_python_environment.py` runs only in the installed-package checks,
-which split cases across eight shards. Run `nix flake check` when changing how
+which split cases across twelve shards. Run `nix flake check` when changing how
 framewisp or its target apps get their environment.
 The installed-package checks also run `test_integration.py`,
 `test_app_environment.py` and `test_unresponsive_app.py` without the `framewisp`

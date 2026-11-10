@@ -5,7 +5,7 @@
 }:
 assert shards > 0 && shard >= 1 && shard <= shards;
 let
-  # The `library` check runs the package's own test phase once for all shards.
+  # The library checks run the package's test phase across separate shards.
   framewisp = pkgs.framewisp.overridePythonAttrs (_: {
     doCheck = false;
   });
