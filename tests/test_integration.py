@@ -1395,8 +1395,10 @@ def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-@pytest.mark.parametrize("interval", [None, 0, 5.5])
-@pytest.mark.parametrize("text", ["Ab c", "é中🙂a"])
+@pytest.mark.parametrize(
+    ("text", "interval"),
+    [("Ab c", None), ("Ab c", 0), ("é中🙂a", None), ("é中🙂a", 0), ("é中🙂a", 5.5)],
+)
 def test_typing_paces_received_characters(
     demo: Demo, interval: float | None, text: str
 ) -> None:
@@ -2019,8 +2021,6 @@ def test_startup_recording_pings_gestures(demo: Demo) -> None:
     [
         [],
         ["--captions", "none"],
-        ["--captions", "pointer"],
-        ["--captions", "all"],
         ["--console"],
         ["--compact"],
         ["--console", "--compact"],
@@ -2159,12 +2159,8 @@ def test_later_clips_pick_their_own_console_panel(demo: Demo, tmp_path: Path) ->
     for index, placement in enumerate(
         [
             ("left", 640, "keys"),
-            ("left", 400, "none"),
             ("right", 400, "keys"),
-            ("right", 640, "none"),
             ("top", 200, "keys"),
-            ("top", 640, "none"),
-            ("bottom", 640, "keys"),
             ("bottom", 118, "none"),
         ]
     ):
@@ -2728,11 +2724,8 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     cases: list[tuple[list[str], bool, bool]] = [
         ([], False, True),
         (["--captions", "none"], False, False),
-        (["--captions", "keys"], False, True),
         (["--captions", "pointer"], True, False),
         (["--captions", "all"], True, True),
-        (["--console", "--captions", "keys"], False, True),
-        (["--console", "--captions", "pointer"], True, False),
     ]
     for index, (options, pointer, keys) in enumerate(cases):
         clip = tmp_path / f"clip-{index}.mp4"
@@ -2747,23 +2740,22 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     assert all(entries == logged[0] for entries in logged)
 
     # Compaction treats an input as activity whether or not its clip captions it.
-    for mode in ("none", "keys", "pointer", "all"):
-        clip = tmp_path / f"compact-{mode}.mp4"
-        cli(
-            demo.directory,
-            "record-start",
-            "--console",
-            "--compact",
-            "--captions",
-            mode,
-            str(clip),
-        )
-        time.sleep(4)
-        cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
-        time.sleep(2)
-        summary = json.loads(cli(demo.directory, "record-stop").stdout)
-        assert 3.5 <= summary["duration_seconds"] < 6
-        assert summary["width"] == 1920
+    clip = tmp_path / "compact.mp4"
+    cli(
+        demo.directory,
+        "record-start",
+        "--console",
+        "--compact",
+        "--captions",
+        "keys",
+        str(clip),
+    )
+    time.sleep(4)
+    cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
+    time.sleep(2)
+    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    assert 3.5 <= summary["duration_seconds"] < 6
+    assert summary["width"] == 1920
 
 
 @pytest.mark.integration

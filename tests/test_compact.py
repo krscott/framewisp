@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -173,9 +174,9 @@ def frame(path: Path, second: float, region: str) -> bytes:
     ).stdout
 
 
-@pytest.fixture
-def raw_video(tmp_path: Path) -> Path:
-    video = tmp_path / "clip with spaces.mp4"
+@pytest.fixture(scope="module")
+def video_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    video = tmp_path_factory.mktemp("compact-video") / "source.mp4"
     subprocess.run(
         [
             "ffmpeg",
@@ -198,6 +199,13 @@ def raw_video(tmp_path: Path) -> Path:
         check=True,
         timeout=15,
     )
+    return video
+
+
+@pytest.fixture
+def raw_video(tmp_path: Path, video_seed: Path) -> Path:
+    video = tmp_path / "clip with spaces.mp4"
+    shutil.copyfile(video_seed, video)
     return video
 
 
