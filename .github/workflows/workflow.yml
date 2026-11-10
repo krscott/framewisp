@@ -68,8 +68,13 @@ jobs:
         nix flake show '.?submodules=1'
 
   library:
+    name: library (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
     - uses: actions/checkout@v5
     - uses: cachix/install-nix-action@v31
@@ -77,16 +82,18 @@ jobs:
         github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build package and run library tests
-      run: nix build -L ".#checks.x86_64-linux.library"
+      env:
+        SHARD: ${{ matrix.shard }}
+      run: nix build -L ".#checks.x86_64-linux.library-$SHARD"
 
   package:
-    name: package (${{ matrix.shard }}/8)
+    name: package (${{ matrix.shard }}/12)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
     - uses: actions/checkout@v5
     - uses: cachix/install-nix-action@v31

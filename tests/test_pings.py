@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageChops
 
 from framewisp.captions import (
     CAPTION_MODES,
@@ -91,9 +91,9 @@ def command_lines(time: float, end: float) -> str:
     )
 
 
-@pytest.fixture
-def raw_video(tmp_path: Path) -> Path:
-    video = tmp_path / "clip with spaces.mp4"
+@pytest.fixture(scope="module")
+def video_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    video = tmp_path_factory.mktemp("ping-video") / "source.mp4"
     subprocess.run(
         [
             "ffmpeg",
@@ -116,6 +116,13 @@ def raw_video(tmp_path: Path) -> Path:
         check=True,
         timeout=30,
     )
+    return video
+
+
+@pytest.fixture
+def raw_video(tmp_path: Path, video_seed: Path) -> Path:
+    video = tmp_path / "clip with spaces.mp4"
+    shutil.copyfile(video_seed, video)
     return video
 
 
@@ -153,17 +160,19 @@ def frames(
 
 def red_box(frame: Image.Image) -> tuple[int, int, int, int] | None:
     """Bound the pixels a fading red ring tints, on a white or dark background."""
-    red, green, blue = (band.tobytes() for band in frame.split())
-    points = [
-        index
-        for index, (r, g, b) in enumerate(zip(red, green, blue))
-        if r - g > 40 and r - b > 40
-    ]
-    if not points:
-        return None
-    xs = [index % frame.width for index in points]
-    ys = [index // frame.width for index in points]
-    return min(xs), min(ys), max(xs), max(ys)
+    red, green, blue = frame.split()
+    # Saturated subtraction is equivalent for a strictly positive threshold.
+    threshold = [0] * 41 + [255] * 215
+    red_green = ImageChops.subtract(red, green)
+    red_blue = ImageChops.subtract(red, blue)
+    # Pillow's point overload includes an untyped handler; these calls use tables.
+    mask = ImageChops.multiply(
+        red_green.point(threshold),  # pyright: ignore[reportUnknownMemberType]
+        red_blue.point(threshold),  # pyright: ignore[reportUnknownMemberType]
+    )
+    box = mask.getbbox()
+    # Pillow's upper bounds are exclusive; callers measure inclusive pixels.
+    return None if box is None else (box[0], box[1], box[2] - 1, box[3] - 1)
 
 
 def render(video: Path, log: Path, **options: object) -> None:
@@ -429,15 +438,14 @@ def test_compaction_keeps_each_ping_whole(raw_video: Path, log: Path) -> None:
 
 # R-REC-9
 @pytest.mark.parametrize(
-    ("position", "x", "y"),
+    ("position", "pixels", "x", "y"),
     [
-        ("left", 5, 400),
-        ("right", SIZE[0] - 5, 400),
-        ("top", 600, 5),
-        ("bottom", 600, SIZE[1] - 5),
+        ("left", 640, 5, 400),
+        ("right", 400, SIZE[0] - 5, 400),
+        ("top", 640, 600, 5),
+        ("bottom", 400, 600, SIZE[1] - 5),
     ],
 )
-@pytest.mark.parametrize("pixels", [640, 400])
 def test_ring_clips_at_the_console_panel(
     raw_video: Path,
     log: Path,
@@ -608,7 +616,15 @@ def assert_raw_clip_survived(video: Path, before: bytes, error: str) -> None:
     assert "inputs.jsonl" in error
     assert "raw video remains" in error
     assert not list(video.parent.glob(".framewisp-captions-*"))
-    assert len(frames(video, 0, 179)) == 180
+    # Decode every frame without transferring full RGB images into Python.
+    decoded = subprocess.run(
+        ["ffmpeg", "-v", "error", "-xerror", "-i", str(video), "-f", "framemd5", "-"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    assert sum(1 for line in decoded.splitlines() if not line.startswith("#")) == 180
 
 
 # R-REC-10

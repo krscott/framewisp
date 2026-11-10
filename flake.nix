@@ -25,6 +25,20 @@
           overlays = [ localOverlay ];
         };
 
+        libraryShards = 2;
+        packageShards = 12;
+        libraryChecks = builtins.listToAttrs (
+          map (shard: {
+            name = "library-${toString shard}";
+            value = pkgs.framewisp.overridePythonAttrs (old: {
+              pytestFlags = (old.pytestFlags or [ ]) ++ [
+                "--test-shards=${toString libraryShards}"
+                "--test-shard=${toString shard}"
+              ];
+            });
+          }) (pkgs.lib.range 1 libraryShards)
+        );
+
         pythonDev = pkgs.python3.pkgs.framewisp.pythonModule.withPackages (
           ps:
           with ps;
@@ -61,18 +75,22 @@
           default = pkgs.framewisp;
         };
 
-        checks = {
-          library = pkgs.framewisp;
-        }
-        // builtins.listToAttrs (
-          map (shard: {
-            name = "package-${toString shard}";
-            value = import ./nix/package-check.nix {
-              inherit pkgs shard;
-              shards = 8;
-            };
-          }) (pkgs.lib.range 1 8)
-        );
+        checks =
+          libraryChecks
+          // {
+            library = pkgs.linkFarm "framewisp-library-tests" (
+              pkgs.lib.mapAttrsToList (name: path: { inherit name path; }) libraryChecks
+            );
+          }
+          // builtins.listToAttrs (
+            map (shard: {
+              name = "package-${toString shard}";
+              value = import ./nix/package-check.nix {
+                inherit pkgs shard;
+                shards = packageShards;
+              };
+            }) (pkgs.lib.range 1 packageShards)
+          );
 
         devShells = {
           default = pkgs.mkShell {

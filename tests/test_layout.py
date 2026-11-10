@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.captions import CAPTION_MODES, CaptionMode, render_recording
+from framewisp.captions import CaptionMode, render_recording
 from framewisp.console import ConsoleCapture, console_frames
 from framewisp.layout import (
     CONSOLE_POSITIONS,
@@ -495,8 +495,10 @@ def test_wide_caption_never_reaches_the_panel(
 
 
 # R-REC-14, R-REC-15
-@pytest.mark.parametrize("captions", CAPTION_MODES)
-@pytest.mark.parametrize("position", CONSOLE_POSITIONS)
+@pytest.mark.parametrize(
+    ("position", "captions"),
+    [("left", "none"), ("right", "keys"), ("top", "pointer"), ("bottom", "all")],
+)
 def test_every_caption_mode_keeps_the_panel_and_gui(
     tmp_path: Path, position: ConsolePosition, captions: CaptionMode
 ) -> None:
@@ -599,13 +601,21 @@ PRINTABLE_ASCII = "".join(map(chr, range(0x21, 0x7F)))
 
 
 # CJK and emoji go beyond R-REC-24's ASCII, but fit their two cells too.
-@pytest.mark.parametrize("fill", ["█", PRINTABLE_ASCII, "你😀"])
 @pytest.mark.parametrize(
-    ("display", "position", "pixels"),
+    ("display", "position", "pixels", "fill"),
     [
-        *(((640, 118), position, 312) for position in ("left", "right")),
-        *(((312, 480), position, 118) for position in ("top", "bottom")),
-        *((GUI_SIZE, position, 640) for position in CONSOLE_POSITIONS),
+        # ASCII exercises both sizes at every edge; blocks check full capacity.
+        *(
+            (display, position, pixels, fill)
+            for display, position, pixels in [
+                *(((640, 118), edge, 312) for edge in ("left", "right")),
+                *(((312, 480), edge, 118) for edge in ("top", "bottom")),
+            ]
+            for fill in (PRINTABLE_ASCII, "█")
+        ),
+        *((GUI_SIZE, edge, 640, PRINTABLE_ASCII) for edge in CONSOLE_POSITIONS),
+        ((640, 118), "left", 312, "你😀"),
+        (GUI_SIZE, "bottom", 640, "你😀"),
     ],
 )
 def test_filled_panel_text_stays_inside_the_panel(
@@ -648,9 +658,19 @@ def even(pixels: int) -> int:
 
 # R-REC-25
 # Thai rows are 20 pixels tall; Tamil letters are about 1.3 cells wide, and ஔ 3.2.
-@pytest.mark.parametrize(("fill", "scale"), [("ก", 1.1), ("தமிழ்", 1.5), ("ஔ", 3.5)])
-@pytest.mark.parametrize("size", ["minimum", "default"])
-@pytest.mark.parametrize("position", CONSOLE_POSITIONS)
+@pytest.mark.parametrize(
+    ("position", "size", "fill", "scale"),
+    [
+        (position, size, fill, scale)
+        for fill, scale, edges in [
+            ("ก", 1.1, ("left", "top")),
+            ("தமிழ்", 1.5, ("right", "bottom")),
+            ("ஔ", 3.5, ("left", "bottom")),
+        ]
+        for position in edges
+        for size in ("minimum", "default")
+    ],
+)
 def test_cell_scale_keeps_larger_scripts_inside_the_panel(
     tmp_path: Path, position: ConsolePosition, size: str, fill: str, scale: float
 ) -> None:

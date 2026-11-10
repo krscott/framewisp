@@ -162,6 +162,7 @@ buildPythonPackage {
 
   # Skip integration tests during build (they require the installed executable)
   disabledTestMarks = [ "integration" ];
+  pytestFlags = [ "--durations=30" ];
 
   # pythonImportsCheck = [ "framewisp" ];
 
