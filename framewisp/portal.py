@@ -117,9 +117,10 @@ class DesktopPortal:
             None,
         )
 
-    def open(self) -> None:
+    def open(self, *, observe_only: bool = False) -> None:
+        interface = SCREENCAST if observe_only else REMOTE
         result = self.request(
-            REMOTE,
+            interface,
             "CreateSession",
             "(a{sv})",
             (),
@@ -152,16 +153,17 @@ class DesktopPortal:
             closed,
             None,
         )
-        self.request(
-            REMOTE,
-            "SelectDevices",
-            "(oa{sv})",
-            (self.session,),
-            {
-                "types": GLib.Variant("u", 3),
-                "persist_mode": GLib.Variant("u", 0),
-            },
-        )
+        if not observe_only:
+            self.request(
+                REMOTE,
+                "SelectDevices",
+                "(oa{sv})",
+                (self.session,),
+                {
+                    "types": GLib.Variant("u", 3),
+                    "persist_mode": GLib.Variant("u", 0),
+                },
+            )
         self.request(
             SCREENCAST,
             "SelectSources",
@@ -174,11 +176,15 @@ class DesktopPortal:
             },
         )
         print(
-            "Approve keyboard/pointer access and select one monitor in the desktop dialog.",
+            (
+                "Select one monitor to record in the desktop dialog."
+                if observe_only
+                else "Approve keyboard/pointer access and select one monitor in the desktop dialog."
+            ),
             flush=True,
         )
-        result = self.request(REMOTE, "Start", "(osa{sv})", (self.session, ""), {})
-        if result.get("devices") != 3:
+        result = self.request(interface, "Start", "(osa{sv})", (self.session, ""), {})
+        if not observe_only and result.get("devices") != 3:
             raise RuntimeError(
                 "Attach requires both keyboard and pointer permission. "
                 "Allow remote interaction in the desktop dialog and attach again."
@@ -187,11 +193,12 @@ class DesktopPortal:
         if len(streams) != 1:
             raise RuntimeError("Attach requires exactly one shared monitor.")
         self.node, properties = streams[0]
-        self.size = cast(tuple[int, int], properties["size"])
+        self.size = cast(tuple[int, int], properties.get("size", (0, 0)))
         # COSMIC creates its EI devices on the first Notify call. Zero motion
         # starts that handshake without changing the pointer's position.
-        self.input("NotifyPointerMotion", "dd", 0.0, 0.0)
-        if self.stop.wait(0.1):
+        if not observe_only:
+            self.input("NotifyPointerMotion", "dd", 0.0, 0.0)
+        if not observe_only and self.stop.wait(0.1):
             raise InterruptedError("Attach stopped during input setup.")
 
     def input(self, method: str, signature: str, *values: object) -> None:

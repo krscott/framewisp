@@ -48,6 +48,48 @@ Subagents, model selection, and classifier workflows are host capabilities;
 Framewisp supplies the session commands. Delegation is an option, not a measured
 speed guarantee.
 
+## Learn from a human demonstration
+
+Ask the user to run `framewisp SESSION teach DIRECTORY --goal 'TASK'` in a
+foreground desktop terminal. DIRECTORY must be new and its parent must exist.
+The user reads the capture notice, types `ATTACH`, and approves one monitor in
+the screen-sharing dialog. Do not allocate a PTY or bypass interactive consent.
+Teaching requests screen access only. Input commands are rejected until the
+teaching session ends; normal control requires a separate `attach` confirmation.
+
+While the user demonstrates, `framewisp SESSION teach-note 'EXPLANATION'` adds a
+timestamped note. Explain shortcuts, decisions, variable inputs, and expected
+outcomes that may not be evident visually. Notes must be nonblank and at most
+8000 characters. The user stops with Ctrl+C, the sharing indicator, or
+`framewisp --detach`; applications stay running. Screen content and notes are
+unredacted. No audio, physical key events, or clipboard contents are recorded.
+
+Read DIRECTORY/lesson.json for the goal and status, then timeline.jsonl for
+`frame` entries (`time`, relative PNG `path`) and `note` entries (`time`, `text`).
+Times are seconds on the capture timeline. PNGs sample roughly once per second;
+fast interactions may only appear in demonstration.webm. Inspect selected PNGs
+with your image tool. For a closer look, extract a video frame to a new path:
+
+```sh
+ffmpeg -i DIRECTORY/demonstration.webm -ss 4.5 -frames:v 1 -n /tmp/lesson-detail.png
+```
+
+FFmpeg is on PATH in the development shell; elsewhere install it separately if
+needed. `complete` means capture finalized successfully, not that the procedure
+has been learned or validated. `failed` names an error; `recording` after the
+owner exits means interrupted capture. Treat either as partial evidence. Images
+and notes are available during recording, but do not assume the video is finished.
+
+Derive a procedure describing starting state, variable inputs, control labels,
+decisions, expected outcomes, and recovery or stop conditions. Prefer meaning and
+visible landmarks over recorded coordinates. Distinguish observed actions from
+inferences; ask about hidden shortcuts, missing steps, or ambiguous intent. A
+single demonstration establishes one example, not every branch of the task.
+With the user's authorization for the target app and data, test a fresh example
+using the normal framewisp commands and verify its result. Save the reusable
+procedure where the user requests only after identifying remaining uncertainty;
+do not label the task learned merely because capture completed.
+
 ## Command reference
 
 Use `framewisp SESSION COMMAND ...`, where SESSION is normally a bare name such
@@ -78,6 +120,8 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
+| `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory, with silent video and sampled PNGs. User starts it interactively; observation only. |
+| `teach-note TEXT` | Add an explanation to the active teaching session. |
 | `run [--retain-input-content] [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, `--captions`, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |

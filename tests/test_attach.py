@@ -207,6 +207,7 @@ def test_stale_attach_socket(
 
 
 _SERVER = """
+import os
 import sys
 import time
 from pathlib import Path
@@ -222,7 +223,9 @@ class Portal:
         self.node = 1
         self.closed = False
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    def open(self):
+    def open(self, **options):
+        if (root / 'teach').exists():
+            assert options == {'observe_only': True}
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
             if self.stop.wait(.01):
@@ -232,6 +235,8 @@ class Portal:
             raise RuntimeError('injected portal failure')
         with (root / 'events').open('a') as out:
             out.write(repr((method, values)) + '\\n')
+    def capture_fd(self):
+        return os.open('/dev/null', os.O_RDONLY)
     def close(self):
         if not self.closed:
             self.closed = True
@@ -239,11 +244,18 @@ class Portal:
             time.sleep(.1)
             (root / 'closed').touch()
 attach.DesktopPortal = Portal
+lesson = None
+if (root / 'teach').exists():
+    from framewisp.teaching import Teaching
+    class TestTeaching(Teaching):
+        def start(self, source):
+            super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240')
+    lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     raise SystemExit(attach.attach_session(root / 'session'))
-raise SystemExit(attach.run_attachment(root / 'session', None, retain_input_content=(root / 'retain').exists()))
+raise SystemExit(attach.run_attachment(root / 'session', None, retain_input_content=(root / 'retain').exists(), teaching=lesson))
 """
 
 
@@ -367,6 +379,8 @@ def attach_process(
 ) -> Iterator[subprocess.Popen[str]]:
     if getattr(request, "param", False):
         (tmp_path / "retain").touch()
+    if getattr(request, "param", None) == "teaching":
+        (tmp_path / "teach").touch()
     process = subprocess.Popen(
         [sys.executable, "-c", _SERVER, str(tmp_path)],
         stdout=subprocess.PIPE,
@@ -421,6 +435,51 @@ def test_attached_cli_input_retention(
     raw = (session / "inputs.jsonl").read_text()
     assert ('"text": "secret"' in raw) is retain
     assert attach_process.wait(timeout=5) == 1
+
+
+# R-TEACH-1, R-TEACH-3
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+@pytest.mark.parametrize("stop_signal", [signal.SIGINT, signal.SIGTERM])
+def test_teaching_owner_records_notes_rejects_input_and_finalizes(
+    tmp_path: Path, attach_process: subprocess.Popen[str], stop_signal: int
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    session = tmp_path / "session"
+    note = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(session),
+            "teach-note",
+            "This is the expected outcome",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert note.returncode == 0, note.stderr
+    assert request_attached(session, "click", {"x": 20, "y": 20}) == 1
+    assert (
+        request_attached(
+            session, "screenshot", {"path": str(tmp_path / "lesson/demonstration.webm")}
+        )
+        == 1
+    )
+    assert not (tmp_path / "events").exists()
+    attach_process.send_signal(stop_signal)
+    assert attach_process.wait(timeout=5) == 0
+    assert attach_process.stderr is not None
+    assert "Partial demonstration" not in attach_process.stderr.read()
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "complete"
+    assert (
+        "This is the expected outcome"
+        in (tmp_path / "lesson/timeline.jsonl").read_text()
+    )
+    assert (tmp_path / "closed").exists()
+    assert not (session / "session.json").exists()
 
 
 def test_pending_consent_reserves_session(
