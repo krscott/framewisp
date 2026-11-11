@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
@@ -342,10 +343,23 @@ def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
             GSETTINGS_BACKEND="memory",
         )
         environment.pop("XAUTHORITY", None)
+        bus_config = tmp_path / "bus.conf"
+        bus_config.write_text(
+            "<busconfig><type>session</type><auth>EXTERNAL</auth><listen>unix:tmpdir=/tmp</listen>"
+            '<policy context="default"><allow send_destination="*"/>'
+            '<allow receive_sender="*"/><allow own="*"/></policy></busconfig>'
+        )
         log = tmp_path / "demo.log"
         with log.open("wb") as output:
             app = subprocess.Popen(
-                ["dbus-run-session", "--", sys.executable, "-m", "framewisp.demo"],
+                [
+                    "dbus-run-session",
+                    f"--config-file={bus_config}",
+                    "--",
+                    sys.executable,
+                    "-m",
+                    "framewisp.demo",
+                ],
                 env=environment,
                 stdout=output,
                 stderr=output,
@@ -360,7 +374,8 @@ def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
     finally:
         os.close(read)
         if app is not None:
-            os.killpg(app.pid, signal.SIGTERM)
+            with suppress(ProcessLookupError):
+                os.killpg(app.pid, signal.SIGTERM)
             app.wait(timeout=5)
         server.terminate()
         server.wait(timeout=5)
