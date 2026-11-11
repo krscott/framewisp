@@ -1271,10 +1271,13 @@ unchanged.
 
 `teaching.py` creates a new private output directory with an atomic mkdir
 (R-TEACH-2). After portal approval it opens one PipeWire connection, owned by the
-attach process. A GStreamer tee writes a silent VP8 WebM with an embedded cursor
-and samples PNGs at one per second. Both use capture presentation timestamps.
-The main loop drains a bounded appsink and writes images and timestamped entries
-to `timeline.jsonl`. These images are observations, not a complete input trace;
+attach process. GStreamer's live `imagefreeze` repeats the latest capture at
+15 fps, including unchanged screens; an upstream EOS probe still detects lost
+capture. A tee writes a silent VP8 WebM with an embedded cursor and samples PNGs
+at one per second. Both use the clocked stream's presentation timestamps.
+The main loop reads at most one observation per iteration from a bounded appsink
+and writes images and timestamped entries to `timeline.jsonl`. Teaching announces
+readiness only after saving its first observation. These images are observations, not a complete input trace;
 fast interactions may only appear in the video. No physical keystrokes,
 clipboard, accessibility data, or audio are captured.
 
@@ -1287,7 +1290,9 @@ streamable output to retain decodable clusters without a final seek. Notes use
 pipeline running time in seconds; frame entries use buffer running time.
 `teach-note TEXT` appends under the attachment's existing request lock.
 
-Shutdown stops capture before closing the portal and bounds encoder finalization.
+Shutdown sends EOS directly to `imagefreeze` (which otherwise holds its last
+image after input EOS), stops capture before closing the portal, and bounds
+encoder finalization.
 Already saved files remain on failure. A rejected destination does not remove
 anything. Images, notes, and video are intentionally unredacted, and the consent
 text makes this explicit. The bundled agent guide explains how to study the

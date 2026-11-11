@@ -71,10 +71,12 @@ fast interactions may only appear in demonstration.webm. Inspect selected PNGs
 with your image tool. For a closer look, extract a video frame to a new path:
 
 ```sh
-ffmpeg -i DIRECTORY/demonstration.webm -ss 4.5 -frames:v 1 -n /tmp/lesson-detail.png
+ffmpeg -copyts -i DIRECTORY/demonstration.webm -ss 4.5 -frames:v 1 -n /tmp/lesson-detail.png
 ```
 
-FFmpeg is on PATH in the development shell; elsewhere install it separately if
+`-copyts` preserves the capture timeline, including a delay before the first
+frame, so `-ss` accepts the times in timeline.jsonl. FFmpeg is on PATH in the
+development shell; elsewhere install it separately if
 needed. `complete` means capture finalized successfully, not that the procedure
 has been learned or validated. `failed` names an error; `recording` after the
 owner exits means interrupted capture. Treat either as partial evidence. Images

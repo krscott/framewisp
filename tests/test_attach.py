@@ -249,7 +249,7 @@ if (root / 'teach').exists():
     from framewisp.teaching import Teaching
     class TestTeaching(Teaching):
         def start(self, source):
-            super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240')
+            super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240 ! identity sleep-time=100000')
     lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
 if len(sys.argv) > 2:
     import fcntl, termios
@@ -444,7 +444,10 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
     tmp_path: Path, attach_process: subprocess.Popen[str], stop_signal: int
 ) -> None:
     (tmp_path / "approve").touch()
-    wait_file(tmp_path / "lesson/frames/000000.png")
+    assert attach_process.stdout is not None
+    while "Attached:" not in attach_process.stdout.readline():
+        assert attach_process.poll() is None
+    assert (tmp_path / "lesson/frames/000000.png").exists()
     session = tmp_path / "session"
     note = subprocess.run(
         [

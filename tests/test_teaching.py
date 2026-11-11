@@ -197,6 +197,97 @@ def test_capture_failure_preserves_partial_evidence(teaching: Teaching) -> None:
     assert "Keep this evidence" in (teaching.directory / "timeline.jsonl").read_text()
 
 
+def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
+    teaching: Teaching,
+) -> None:
+    from gi.repository import Gst
+
+    teaching.start(
+        "appsrc name=source is-live=true format=time caps=video/x-raw,format=RGB,width=160,height=120,framerate=0/1"
+    )
+    assert teaching.pipeline is not None
+    source = teaching.pipeline.get_by_name("source")
+    assert source is not None
+    # Portal startup can delay the first image; keep capture timestamps intact.
+    time.sleep(0.4)
+    buffer = Gst.Buffer.new_allocate(None, 160 * 120 * 3, None)
+    assert buffer is not None
+    buffer.fill(0, bytes([255, 0, 0]) * (160 * 120))
+    buffer.pts = 0
+    assert source.emit("push-buffer", buffer) == Gst.FlowReturn.OK
+    observe(teaching, 2)
+    teaching.note("This unchanged screen is the final result")
+    time.sleep(0.2)
+    teaching.close()
+    entries = [
+        json.loads(line)
+        for line in (teaching.directory / "timeline.jsonl").read_text().splitlines()
+    ]
+    note_time = next(entry["time"] for entry in entries if entry["type"] == "note")
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_frames",
+            "-of",
+            "json",
+            str(teaching.directory / "demonstration.webm"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    frames = json.loads(probe.stdout)["frames"]
+    end = float(frames[-1]["best_effort_timestamp_time"]) + float(
+        frames[-1]["duration_time"]
+    )
+    assert end >= note_time - 0.07
+    assert len(frames) > 1
+    detail = teaching.directory / "detail.png"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-copyts",
+            "-i",
+            str(teaching.directory / "demonstration.webm"),
+            "-ss",
+            str(note_time),
+            "-frames:v",
+            "1",
+            "-n",
+            str(detail),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    with Image.open(detail) as image:
+        pixel = image.convert("RGB").getpixel((80, 60))
+        assert isinstance(pixel, tuple)
+        red, green, blue = pixel
+        assert red > 200 and green < 20 and blue < 20
+
+
+def test_source_ending_is_a_failure_even_when_a_last_image_remains(
+    teaching: Teaching,
+) -> None:
+    teaching.start(
+        "videotestsrc is-live=true num-buffers=30 ! video/x-raw,width=160,height=120,framerate=30/1"
+    )
+    with pytest.raises(RuntimeError, match="ended unexpectedly"):
+        observe(teaching, 4)
+    with pytest.raises(RuntimeError, match="Partial demonstration"):
+        teaching.close()
+    assert (
+        json.loads((teaching.directory / "lesson.json").read_text())["status"]
+        == "failed"
+    )
+
+
 def test_teach_requires_user_terminal_and_reports_the_right_command(
     tmp_path: Path,
 ) -> None:

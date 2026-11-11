@@ -220,6 +220,8 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
+| `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory; screen-only access. |
+| `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--retain-input-content] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |

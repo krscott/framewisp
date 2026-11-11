@@ -546,6 +546,14 @@ def _run_attachment(
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
 
+    def announce_ready() -> None:
+        assert portal is not None
+        ready.set()
+        print(
+            f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+            flush=True,
+        )
+
     previous = {
         sig: signal.signal(sig, request_stop)
         for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGTSTP)
@@ -568,7 +576,9 @@ def _run_attachment(
                     line, attachment, teaching=teaching is not None
                 )
                 if not ready.is_set():
-                    raise ValueError("Attach is waiting for desktop permission.")
+                    raise ValueError(
+                        "Attach is waiting for desktop permission or the first teaching frame."
+                    )
                 if (
                     teaching is not None
                     and isinstance(request, Path)
@@ -705,11 +715,8 @@ def _run_attachment(
                         except GLib.Error:
                             indicator.close()
                             print(UNAVAILABLE, file=sys.stderr, flush=True)
-                        ready.set()
-                        print(
-                            f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
-                            flush=True,
-                        )
+                        if teaching is None:
+                            announce_ready()
                         while not stop.wait(0.02):
                             if terminal is not None and not foreground_terminal(
                                 terminal
@@ -725,6 +732,8 @@ def _run_attachment(
                             if teaching is not None:
                                 with lock:
                                     teaching.poll()
+                                    if not ready.is_set() and teaching.count:
+                                        announce_ready()
                     finally:
                         stop.set()
                         if indicator is not None:
