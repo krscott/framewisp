@@ -220,6 +220,8 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
+| `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory; screen-only access. |
+| `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--retain-input-content] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
 | `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
@@ -291,6 +293,43 @@ Use `--duration` for paced drags, `--interval` for paced typing, and screenshot
 `--delay` when a tooltip or scroll animation needs time. The demo logs resulting
 widget state to `app.log`; screenshots show the same values. Run `framewisp-demo`
 directly to use these controls on your desktop.
+
+## Teach an agent by demonstration
+
+To show an agent a task in an app on your normal desktop, run this yourself in a
+desktop terminal:
+
+```sh
+framewisp lesson teach ./customer-lesson --goal 'Update a customer and verify the saved changes'
+```
+
+Choose a new output directory. Read the instructions, type `ATTACH`, and select
+one monitor in the desktop sharing dialog. Teaching requests screen access only;
+agent mouse and keyboard commands are disabled. Perform the task normally, then
+stop with Ctrl+C in the teaching terminal. Your apps keep running. The sharing
+indicator and `framewisp --detach` can also stop capture.
+
+You or the agent can add explanations from another terminal while recording:
+
+```sh
+framewisp lesson teach-note 'The customer name is an input; verify the saved address before finishing.'
+```
+
+The output contains `lesson.json` with the goal and completion status,
+`demonstration.webm` with the silent video and cursor, `frames/` with roughly
+one PNG per second, and `timeline.jsonl` mapping images and notes to capture
+times in seconds. The agent can study the PNGs directly, even while recording,
+and extract additional frames from the video for fast interactions. Notes,
+images, and video are unredacted. Teaching does not capture physical key events,
+audio, or clipboard contents; explain shortcuts and choices in notes.
+
+Ask the agent to turn the demonstration into a procedure with variable inputs
+and outcome checks, clarify uncertain steps, and try it on a fresh example.
+Framewisp supplies the evidence; your agent writes the procedure. A `recording`
+status after the process exits means capture was interrupted; `failed` includes
+an error. Saved partial evidence remains available. See the
+[agent guide](framewisp/SKILL.md#learn-from-a-human-demonstration) for the full
+workflow.
 
 ## Attach to an existing desktop
 

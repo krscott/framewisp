@@ -1259,6 +1259,47 @@ COSMIC matches the current modifier combination, including injected modifiers.
 A Ctrl+Alt+Escape binding alone did not stop a Shift-drag. The user must also bind
 Ctrl+Alt+Shift+Escape to the same detach command.
 
+## Teaching demonstrations
+
+`teach DIRECTORY --goal TEXT` uses the attached-session owner, terminal consent,
+desktop lease, sharing indicator, and emergency detach. It creates a ScreenCast
+session rather than a RemoteDesktop session; it never initializes input devices
+or an X11 release guard. Its request handler accepts screenshots and `teach-note`
+only (R-TEACH-1). Teaching uses the same foreground-terminal and exact `ATTACH`
+confirmation as attachment. Normal `attach` and its recording restrictions are
+unchanged.
+
+`teaching.py` creates a new private output directory with an atomic mkdir
+(R-TEACH-2). After portal approval it opens one PipeWire connection, owned by the
+attach process. GStreamer's live `imagefreeze` repeats the latest capture at
+15 fps, including unchanged screens; an upstream EOS probe still detects lost
+capture. A tee writes a silent VP8 WebM with an embedded cursor and samples PNGs
+at one per second. Both use the clocked stream's presentation timestamps.
+The main loop reads at most one observation per iteration from a bounded appsink
+and writes images and timestamped entries to `timeline.jsonl`. Teaching announces
+readiness only after saving its first observation. These images are observations, not a complete input trace;
+fast interactions may only appear in the video. No physical keystrokes,
+clipboard, accessibility data, or audio are captured.
+
+The bundle's versioned `lesson.json` names `demonstration.webm`,
+`timeline.jsonl`, and the goal. Status starts as `recording`, becomes `complete`
+only after at least one video frame and successful EOS finalization, and becomes
+`failed` on capture or output failure (R-TEACH-3, R-TEACH-4). Abrupt process death
+can leave `recording`; consumers must treat that as interrupted. WebM uses
+streamable output to retain decodable clusters without a final seek. Notes use
+pipeline running time in seconds; frame entries use buffer running time.
+`teach-note TEXT` appends under the attachment's existing request lock.
+
+Shutdown sends EOS directly to `imagefreeze` (which otherwise holds its last
+image after input EOS), stops capture before closing the portal, and bounds
+encoder finalization.
+Already saved files remain on failure. A rejected destination does not remove
+anything. Images, notes, and video are intentionally unredacted, and the consent
+text makes this explicit. The bundled agent guide explains how to study the
+timeline, inspect additional video frames, clarify uncertainty, derive a procedure
+with variable inputs and outcome checks, and validate it in a fresh example.
+Framewisp does not call a model or generate a procedure itself.
+
 ## Structured UI inspection
 
 `inspect --json` is a read-only AT-SPI prototype for headless sessions. Every

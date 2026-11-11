@@ -45,6 +45,7 @@ from framewisp.release_guard import (
     start_release_guard,
     x11_desktop,
 )
+from framewisp.teaching import Teaching
 from framewisp.tray import UNAVAILABLE, SharingIndicator
 
 
@@ -375,7 +376,9 @@ def finished(
     return True
 
 
-def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
+def parse_attached_request(
+    line: bytes, attachment: str, *, teaching: bool = False
+) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     command = parse_command(line)
     if command.get("attachment") != attachment:
@@ -385,12 +388,25 @@ def parse_attached_request(line: bytes, attachment: str) -> InputAction | Path:
     action = command.get("action")
     if not isinstance(action, str):
         raise ValueError("action must be a string.")
+    if teaching and action not in {"screenshot", "teach-note"}:
+        raise ValueError(
+            "Teaching is observation-only; input and recording commands are disabled."
+        )
     if action.startswith("record-"):
         raise ValueError("Recording attached sessions is not supported yet.")
     raw = command.get("parameters")
     if not isinstance(raw, dict):
         raise ValueError("Input requires an action and parameters object.")
     parameters = cast(dict[str, object], raw)
+    if action == "teach-note":
+        if not teaching:
+            raise ValueError("teach-note requires a teaching session.")
+        text = parameters.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > 8000:
+            raise ValueError(
+                "teach-note requires nonblank text of at most 8000 characters."
+            )
+        return text
     if action != "screenshot":
         defaults: dict[str, object] = {"modifier": []}
         return InputAction.parse(action, defaults | parameters)
@@ -407,29 +423,49 @@ def foreground_terminal(descriptor: int) -> bool:
         return False
 
 
-def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
+def attach_session(
+    session: Path,
+    *,
+    retain_input_content: bool = False,
+    teaching: Teaching | None = None,
+) -> int:
     if (
         not sys.stdin.isatty()
         or not sys.stdout.isatty()
         or not foreground_terminal(sys.stdin.fileno())
     ):
+        command = (
+            f"teach {shlex.quote(str(teaching.directory))} --goal {shlex.quote(teaching.goal)}"
+            if teaching is not None
+            else "attach"
+        )
         print(
             "Desktop attachment must be started by the user in a foreground interactive terminal.\n"
             "Agents: do not allocate a PTY or bypass this check. Ask the user to run:\n"
-            f"  framewisp {shlex.quote(str(session))} attach\n"
+            f"  framewisp {shlex.quote(str(session))} {command}\n"
             "in another desktop terminal, read the instructions, and approve sharing.",
             file=sys.stderr,
         )
         return 1
-    print(
-        "This shares a monitor and gives agent commands keyboard and pointer control of your live desktop.\n"
-        "Input can reach any focused app. Keep this terminal open; do not background or suspend this command.\n"
-        "Before continuing, bind BOTH Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape to:\n"
-        "  framewisp --detach\n"
-        "The second binding is needed when the agent holds Shift. Test your bindings.\n"
-        "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
-        flush=True,
-    )
+    if teaching is not None:
+        print(
+            "Teaching records your selected monitor and cursor, without keyboard or pointer control.\n"
+            "Video, sampled images, and notes are saved unredacted, including any visible secrets.\n"
+            f"Goal: {teaching.goal}\nOutput: {teaching.directory}\n"
+            "Keep this terminal open and in the foreground. Stop with Ctrl+C here,\n"
+            "the sharing indicator, or framewisp --detach. Your apps stay running.",
+            flush=True,
+        )
+    else:
+        print(
+            "This shares a monitor and gives agent commands keyboard and pointer control of your live desktop.\n"
+            "Input can reach any focused app. Keep this terminal open; do not background or suspend this command.\n"
+            "Before continuing, bind BOTH Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape to:\n"
+            "  framewisp --detach\n"
+            "The second binding is needed when the agent holds Shift. Test your bindings.\n"
+            "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
+            flush=True,
+        )
     if x11_desktop():
         print(
             "This is an X11 desktop: programs running as you can already read the screen\n"
@@ -438,7 +474,9 @@ def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
         )
     try:
         confirmation = input(
-            "Type ATTACH to confirm the bindings are configured and you understand this access: "
+            "Type ATTACH to confirm you understand and want to record this demonstration: "
+            if teaching is not None
+            else "Type ATTACH to confirm the bindings are configured and you understand this access: "
         )
     except (EOFError, KeyboardInterrupt):
         print("\nNot attached.")
@@ -453,12 +491,19 @@ def attach_session(session: Path, *, retain_input_content: bool = False) -> int:
         )
         return 1
     return run_attachment(
-        session, sys.stdin.fileno(), retain_input_content=retain_input_content
+        session,
+        sys.stdin.fileno(),
+        retain_input_content=retain_input_content,
+        teaching=teaching,
     )
 
 
 def run_attachment(
-    session: Path, terminal: int | None, *, retain_input_content: bool = False
+    session: Path,
+    terminal: int | None,
+    *,
+    retain_input_content: bool = False,
+    teaching: Teaching | None = None,
 ) -> int:
     """Reserve session metadata after the CLI completes interactive consent."""
     session = session.resolve()
@@ -467,7 +512,10 @@ def run_attachment(
         with session_lease(session):
             refuse_abandoned_ownership(session)
             return _run_attachment(
-                session, terminal, retain_input_content=retain_input_content
+                session,
+                terminal,
+                retain_input_content=retain_input_content,
+                teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
         print(f"Could not attach: {failure}", file=sys.stderr)
@@ -475,7 +523,11 @@ def run_attachment(
 
 
 def _run_attachment(
-    session: Path, terminal: int | None, *, retain_input_content: bool
+    session: Path,
+    terminal: int | None,
+    *,
+    retain_input_content: bool,
+    teaching: Teaching | None = None,
 ) -> int:
     """Own all desktop access. The CLI must complete interactive consent first."""
     stop, ready = Event(), Event()
@@ -489,9 +541,18 @@ def _run_attachment(
     attachment = uuid.uuid4().hex
     state = session / "session.json"
     owns_state = False
+    capture_descriptor: int | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
+
+    def announce_ready() -> None:
+        assert portal is not None
+        ready.set()
+        print(
+            f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+            flush=True,
+        )
 
     previous = {
         sig: signal.signal(sig, request_stop)
@@ -510,10 +571,22 @@ def _run_attachment(
                 except OSError:
                     pass
 
-            def parse(line: bytes) -> InputAction | Path:
-                request = parse_attached_request(line, attachment)
+            def parse(line: bytes) -> InputAction | Path | str:
+                request = parse_attached_request(
+                    line, attachment, teaching=teaching is not None
+                )
                 if not ready.is_set():
-                    raise ValueError("Attach is waiting for desktop permission.")
+                    raise ValueError(
+                        "Attach is waiting for desktop permission or the first teaching frame."
+                    )
+                if (
+                    teaching is not None
+                    and isinstance(request, Path)
+                    and request.is_relative_to(teaching.directory.resolve())
+                ):
+                    raise ValueError(
+                        "Screenshots cannot overwrite the active teaching bundle. Choose a path outside it."
+                    )
                 return request
 
             request = receive_request(
@@ -522,7 +595,11 @@ def _run_attachment(
             if request is None:
                 return
             status, error = 0, None
-            action = "screenshot" if isinstance(request, Path) else request.action
+            action = (
+                "screenshot"
+                if isinstance(request, Path)
+                else "teach-note" if isinstance(request, str) else request.action
+            )
             try:
                 while not lock.acquire(timeout=0.05):
                     inputs.wait()
@@ -530,6 +607,9 @@ def _run_attachment(
                     inputs.wait()
                     if isinstance(request, Path):
                         capture(portal, request, stop, session / "capture.log")
+                    elif isinstance(request, str):
+                        assert teaching is not None
+                        teaching.note(request)
                     else:
                         inputs.perform(
                             action, cast(InputParameters, request.parameters)
@@ -595,6 +675,9 @@ def _run_attachment(
                         state,
                         {
                             "kind": "attached",
+                            "teaching_directory": (
+                                str(teaching.directory) if teaching else None
+                            ),
                             "retain_input_content": retain_input_content,
                             "attachment": attachment,
                             "runtime_directory": str(directory),
@@ -608,7 +691,8 @@ def _run_attachment(
                         {"session": str(session), "attachment": attachment},
                     )
                     (session / "inputs.jsonl").write_text("", encoding="utf-8")
-                    guard = start_release_guard(stop)
+                    if teaching is None:
+                        guard = start_release_guard(stop)
                     portal = DesktopPortal(stop)
                     inputs = AttachedInput(portal, stop)
                     server = Thread(
@@ -616,7 +700,14 @@ def _run_attachment(
                     )
                     server.start()
                     try:
-                        portal.open()
+                        if teaching is None:
+                            portal.open()
+                        else:
+                            portal.open(observe_only=True)
+                            capture_descriptor = portal.capture_fd()
+                            teaching.start(
+                                f"pipewiresrc fd={capture_descriptor} path={portal.node}"
+                            )
                         inputs.wait()
                         indicator = SharingIndicator(portal.bus, stop)
                         try:
@@ -624,11 +715,8 @@ def _run_attachment(
                         except GLib.Error:
                             indicator.close()
                             print(UNAVAILABLE, file=sys.stderr, flush=True)
-                        ready.set()
-                        print(
-                            f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
-                            flush=True,
-                        )
+                        if teaching is None:
+                            announce_ready()
                         while not stop.wait(0.02):
                             if terminal is not None and not foreground_terminal(
                                 terminal
@@ -641,10 +729,31 @@ def _run_attachment(
                                     "The X11 input release helper exited; disconnecting."
                                 )
                             dispatch_events()
+                            if teaching is not None:
+                                with lock:
+                                    teaching.poll()
+                                    if not ready.is_set() and teaching.count:
+                                        announce_ready()
                     finally:
                         stop.set()
                         if indicator is not None:
                             indicator.close()
+                        if teaching is not None:
+                            failure = sys.exc_info()[1]
+                            try:
+                                teaching.close(
+                                    str(failure)
+                                    if failure
+                                    else str(failures[0]) if failures else None
+                                )
+                                if teaching.created:
+                                    print(
+                                        f"Demonstration saved: {teaching.directory}",
+                                        flush=True,
+                                    )
+                            except (OSError, RuntimeError, GLib.Error) as failure:
+                                failures.append(failure)
+                                print(str(failure), file=sys.stderr, flush=True)
                         portal.close()
                         server.join(timeout=0.2)
                         deadline = time.monotonic() + 0.2
@@ -668,6 +777,8 @@ def _run_attachment(
         stop.set()
         if portal is not None:
             portal.close()
+        if capture_descriptor is not None:
+            os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
         print("Detached. The app and desktop are still running.", flush=True)

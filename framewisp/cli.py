@@ -136,6 +136,17 @@ def main() -> None:
     attach = commands.add_parser(
         "attach", help="share an existing desktop through its permission dialog"
     )
+    teach = commands.add_parser(
+        "teach", help="record a screen-only teaching demonstration from your desktop"
+    )
+    teach.add_argument(
+        "directory", type=Path, help="new directory for the demonstration bundle"
+    )
+    teach.add_argument("--goal", required=True, help="what the agent should learn")
+    note = commands.add_parser(
+        "teach-note", help="add an explanation to an active demonstration"
+    )
+    note.add_argument("text", help="intent, variable inputs, or an expected result")
 
     run = commands.add_parser(
         "run", help="run an app until it exits or you interrupt it"
@@ -455,11 +466,22 @@ def main() -> None:
         if isinstance(layout, str):
             parser.error(layout)
     state_path = session / "session.json"
-    if args.action not in {"run", "attach", "recover"}:
+    if args.action == "teach":
+        if not args.goal.strip():
+            parser.error("--goal must not be blank")
+        args.directory = args.directory.absolute()
+        if args.directory.exists() or args.directory.is_symlink():
+            parser.error(
+                "Teaching requires a new output directory; choose a different path."
+            )
+    if args.action not in {"run", "attach", "teach", "recover"}:
         exit_message = recorded_app_exit(session)
         if exit_message is not None:
             parser.exit(1, exit_message + "\n")
-    if args.action not in {"run", "attach", "recover"} and not state_path.exists():
+    if (
+        args.action not in {"run", "attach", "teach", "recover"}
+        and not state_path.exists()
+    ):
         parser.exit(
             1,
             "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
@@ -491,11 +513,26 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             raise SessionError("batch supports headless sessions only.")
         batch: Batch = args.batch
         result = session_command(session, "batch", parameters=batch.parameters())
-    elif args.action == "attach":
+    elif args.action in {"attach", "teach"}:
         # Desktop portal imports are only needed by the foreground attach owner.
         from framewisp.attach import attach_session
 
-        result = attach_session(session, retain_input_content=args.retain_input_content)
+        if args.action == "teach":
+            from framewisp.teaching import Teaching
+
+            result = attach_session(
+                session, teaching=Teaching(args.directory, args.goal)
+            )
+        else:
+            result = attach_session(
+                session, retain_input_content=args.retain_input_content
+            )
+    elif args.action == "teach-note":
+        if not attached:
+            raise SessionError(
+                "teach-note requires a teaching session on your desktop."
+            )
+        result = request_attached(session, "teach-note", {"text": args.text})
     elif args.action == "recover":
         result = recover_session(session)
     elif args.action == "run":
