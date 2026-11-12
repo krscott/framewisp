@@ -732,7 +732,16 @@ def _run_attachment(
                                 break
                             if teaching is not None:
                                 if not teaching.poll():
-                                    dispatch_events()
+                                    # PipeWire EOS can precede the portal's Closed signal.
+                                    deadline = time.monotonic() + 0.25
+                                    while not portal.revoked:
+                                        dispatch_events()
+                                        if (
+                                            stop.is_set()
+                                            or time.monotonic() >= deadline
+                                        ):
+                                            break
+                                        stop.wait(0.01)
                                     if portal.revoked:
                                         break
                                     raise RuntimeError(

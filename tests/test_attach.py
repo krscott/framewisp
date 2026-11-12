@@ -259,13 +259,17 @@ if (root / 'teach').exists():
             super().close(*args, **kwargs)
     lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
 original_dispatch = attach.dispatch_events
+revoke_at = None
 def dispatch():
+    global revoke_at
     original_dispatch()
     if (root / 'source-end').exists():
         lesson.source_ended.set()
     if (root / 'revoke').exists():
         if (root / 'eos-first').exists() and not lesson.source_ended.is_set():
             lesson.source_ended.set()
+            revoke_at = time.monotonic() + .05
+        if revoke_at is not None and time.monotonic() < revoke_at:
             return
         active = Portal.active()
         active.revoked = True
@@ -589,6 +593,7 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
         assert results == [1]
 
 
+# R-TEACH-4
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
 def test_source_end_without_revocation_marks_teaching_failed(
     tmp_path: Path, attach_process: subprocess.Popen[str]
