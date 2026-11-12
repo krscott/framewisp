@@ -120,7 +120,8 @@ def test_existing_output_is_untouched(tmp_path: Path, kind: str) -> None:
 def observe(lesson: Teaching, count: int) -> None:
     deadline = time.monotonic() + 8
     while lesson.count < count:
-        lesson.poll()
+        if not lesson.poll():
+            raise RuntimeError("Teaching capture ended unexpectedly.")
         assert time.monotonic() < deadline, "No teaching observations arrived"
         time.sleep(0.02)
 
@@ -136,6 +137,8 @@ def test_bundle_has_playable_video_images_goal_and_timed_notes(
     teaching.note("Choose this customer; the name is a variable. ✓")
     observe(teaching, 3)
     teaching.close()
+    with pytest.raises(ValueError, match="notes are closed"):
+        teaching.note("Too late")
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
     assert manifest["status"] == "complete"
     assert manifest["goal"] == teaching.goal

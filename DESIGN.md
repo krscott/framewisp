@@ -1295,8 +1295,9 @@ image after input EOS), stops capture before closing the portal, and bounds
 encoder finalization.
 The desktop detach command allows three seconds for graceful shutdown before
 killing an unresponsive owner, including the encoder's one-second EOS budget.
-The main loop only takes the request lock when immediately available, so a slow
-screenshot cannot block desktop stop events or foreground checks. A desktop
+The teaching sampler does not take the screenshot request lock. Its own lock
+serializes notes, timeline writes, and finalization, so screenshots cannot block
+sampling, desktop stop events, or foreground checks. A desktop
 portal revocation ends teaching normally; an independent source failure still
 marks the evidence incomplete. Destination parent validation runs before consent.
 Already saved files remain on failure. A rejected destination does not remove

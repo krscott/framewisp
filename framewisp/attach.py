@@ -601,21 +601,23 @@ def _run_attachment(
                 else "teach-note" if isinstance(request, str) else request.action
             )
             try:
-                while not lock.acquire(timeout=0.05):
+                if isinstance(request, str):
                     inputs.wait()
-                try:
-                    inputs.wait()
-                    if isinstance(request, Path):
-                        capture(portal, request, stop, session / "capture.log")
-                    elif isinstance(request, str):
-                        assert teaching is not None
-                        teaching.note(request)
-                    else:
-                        inputs.perform(
-                            action, cast(InputParameters, request.parameters)
-                        )
-                finally:
-                    lock.release()
+                    assert teaching is not None
+                    teaching.note(request)
+                else:
+                    while not lock.acquire(timeout=0.05):
+                        inputs.wait()
+                    try:
+                        inputs.wait()
+                        if isinstance(request, Path):
+                            capture(portal, request, stop, session / "capture.log")
+                        else:
+                            inputs.perform(
+                                action, cast(InputParameters, request.parameters)
+                            )
+                    finally:
+                        lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
                 status, error = 1, input_error(
                     action, failure, retain_input_content=retain_input_content
@@ -728,13 +730,16 @@ def _run_attachment(
                             dispatch_events()
                             if stop.is_set():
                                 break
-                            if teaching is not None and lock.acquire(blocking=False):
-                                try:
-                                    teaching.poll()
-                                    if not ready.is_set() and teaching.count:
-                                        announce_ready()
-                                finally:
-                                    lock.release()
+                            if teaching is not None:
+                                if not teaching.poll():
+                                    dispatch_events()
+                                    if portal.revoked:
+                                        break
+                                    raise RuntimeError(
+                                        "Teaching capture ended unexpectedly."
+                                    )
+                                if not ready.is_set() and teaching.count:
+                                    announce_ready()
                     finally:
                         stop.set()
                         if indicator is not None:

@@ -5,7 +5,7 @@
 import json
 import time
 from pathlib import Path
-from threading import Event
+from threading import Event, RLock
 from typing import BinaryIO
 
 import gi
@@ -27,6 +27,8 @@ class Teaching:
         self.count = 0
         self.started = 0.0
         self.source_ended = Event()
+        self.lock = RLock()
+        self.closed = False
 
     def manifest(self, status: str, error: str | None = None) -> None:
         write_state(
@@ -82,16 +84,24 @@ class Teaching:
         return Gst.PadProbeReturn.OK
 
     def append(self, entry: dict[str, object]) -> None:
-        with (self.directory / "timeline.jsonl").open("a", encoding="utf-8") as output:
+        with (
+            self.lock,
+            (self.directory / "timeline.jsonl").open("a", encoding="utf-8") as output,
+        ):
             output.write(json.dumps(entry, ensure_ascii=False, allow_nan=False) + "\n")
 
     def note(self, text: str) -> None:
-        assert self.pipeline is not None
-        clock = self.pipeline.get_clock()
-        if clock is None:
-            raise ValueError("Teaching capture has not started yet. Try again shortly.")
-        elapsed = (clock.get_time() - self.pipeline.get_base_time()) / Gst.SECOND
-        self.append({"type": "note", "time": elapsed, "text": text})
+        with self.lock:
+            if self.closed:
+                raise ValueError("Teaching capture has stopped; notes are closed.")
+            assert self.pipeline is not None
+            clock = self.pipeline.get_clock()
+            if clock is None:
+                raise ValueError(
+                    "Teaching capture has not started yet. Try again shortly."
+                )
+            elapsed = (clock.get_time() - self.pipeline.get_base_time()) / Gst.SECOND
+            self.append({"type": "note", "time": elapsed, "text": text})
 
     def drain(self) -> bool:
         assert self.frames is not None
@@ -114,11 +124,11 @@ class Teaching:
             return True
         return False
 
-    def poll(self) -> None:
+    def poll(self) -> bool:
         assert self.pipeline is not None
         self.drain()
         if self.source_ended.is_set():
-            raise RuntimeError("Teaching capture ended unexpectedly.")
+            return False
         bus = self.pipeline.get_bus()
         assert bus is not None
         message = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
@@ -129,45 +139,48 @@ class Teaching:
             raise RuntimeError("Teaching capture ended unexpectedly.")
         if self.count == 0 and time.monotonic() - self.started > 10:
             raise RuntimeError("Teaching capture received no frame within 10 seconds.")
+        return True
 
     def close(self, error: str | None = None, *, revoked: bool = False) -> None:
         """Finalize within a bounded time, preserving partial evidence on failure."""
-        if not self.created:
-            return
-        if self.source_ended.is_set() and not revoked:
-            error = error or "Teaching capture ended unexpectedly."
-        try:
-            if self.pipeline is not None:
-                try:
-                    bus = self.pipeline.get_bus()
-                    assert bus is not None
-                    timeline = self.pipeline.get_by_name("timeline")
-                    assert timeline is not None
-                    # imagefreeze holds the last frame after input EOS. Direct EOS
-                    # stops its clocked output and lets the encoder finalize.
-                    timeline.send_event(Gst.Event.new_eos())
-                    message = bus.timed_pop_filtered(
-                        Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
-                    )
-                    while self.drain():
-                        pass
-                    if message is None:
-                        error = error or "Teaching video finalization timed out."
-                    elif message.type == Gst.MessageType.ERROR:
-                        failure, detail = message.parse_error()
-                        error = (
-                            error
-                            or f"Teaching video finalization failed: {failure}; {detail}"
+        with self.lock:
+            self.closed = True
+            if not self.created:
+                return
+            if self.source_ended.is_set() and not revoked:
+                error = error or "Teaching capture ended unexpectedly."
+            try:
+                if self.pipeline is not None:
+                    try:
+                        bus = self.pipeline.get_bus()
+                        assert bus is not None
+                        timeline = self.pipeline.get_by_name("timeline")
+                        assert timeline is not None
+                        # imagefreeze holds the last frame after input EOS. Direct EOS
+                        # stops its clocked output and lets the encoder finalize.
+                        timeline.send_event(Gst.Event.new_eos())
+                        message = bus.timed_pop_filtered(
+                            Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
                         )
-                finally:
-                    self.pipeline.set_state(Gst.State.NULL)
-            if self.count == 0:
-                error = error or "Teaching capture saved no observations."
-        except (OSError, RuntimeError, GLib.Error) as failure:
-            error = error or str(failure)
-        finally:
-            if self.video is not None:
-                self.video.close()
-        self.manifest("failed" if error else "complete", error)
-        if error is not None:
-            raise RuntimeError(f"{error} Partial demonstration: {self.directory}")
+                        while self.drain():
+                            pass
+                        if message is None:
+                            error = error or "Teaching video finalization timed out."
+                        elif message.type == Gst.MessageType.ERROR:
+                            failure, detail = message.parse_error()
+                            error = (
+                                error
+                                or f"Teaching video finalization failed: {failure}; {detail}"
+                            )
+                    finally:
+                        self.pipeline.set_state(Gst.State.NULL)
+                if self.count == 0:
+                    error = error or "Teaching capture saved no observations."
+            except (OSError, RuntimeError, GLib.Error) as failure:
+                error = error or str(failure)
+            finally:
+                if self.video is not None:
+                    self.video.close()
+            self.manifest("failed" if error else "complete", error)
+            if error is not None:
+                raise RuntimeError(f"{error} Partial demonstration: {self.directory}")

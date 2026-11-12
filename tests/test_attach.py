@@ -546,6 +546,21 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
         )
         worker.start()
         wait_file(tmp_path / "capturing")
+        note = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "framewisp",
+                str(tmp_path / "session"),
+                "teach-note",
+                "Sampling and notes continue during capture",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        assert note.returncode == 0, note.stderr
+        wait_file(tmp_path / "lesson/frames/000001.png")
     try:
         (tmp_path / "revoke").touch()
         assert attach_process.wait(timeout=2) == 0
@@ -680,7 +695,8 @@ def test_global_detach_kills_suspended_owner_and_recovers(
     attach_process.send_signal(signal.SIGSTOP)
     start = time.monotonic()
     assert detach_desktop() == 0
-    assert time.monotonic() - start < 3
+    # Three seconds for SIGTERM, then up to one second to confirm SIGKILL.
+    assert time.monotonic() - start < 5
     assert attach_process.wait(timeout=5) == -signal.SIGKILL
     # SIGKILL cannot remove files. The next owner must recover without trusting them.
     original = json.loads((tmp_path / "session/session.json").read_text())["attachment"]
