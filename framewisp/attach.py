@@ -675,9 +675,6 @@ def _run_attachment(
                         state,
                         {
                             "kind": "attached",
-                            "teaching_directory": (
-                                str(teaching.directory) if teaching else None
-                            ),
                             "retain_input_content": retain_input_content,
                             "attachment": attachment,
                             "runtime_directory": str(directory),
@@ -729,11 +726,15 @@ def _run_attachment(
                                     "The X11 input release helper exited; disconnecting."
                                 )
                             dispatch_events()
-                            if teaching is not None:
-                                with lock:
+                            if stop.is_set():
+                                break
+                            if teaching is not None and lock.acquire(blocking=False):
+                                try:
                                     teaching.poll()
                                     if not ready.is_set() and teaching.count:
                                         announce_ready()
+                                finally:
+                                    lock.release()
                     finally:
                         stop.set()
                         if indicator is not None:
@@ -742,9 +743,12 @@ def _run_attachment(
                             failure = sys.exc_info()[1]
                             try:
                                 teaching.close(
-                                    str(failure)
-                                    if failure
-                                    else str(failures[0]) if failures else None
+                                    (
+                                        str(failure)
+                                        if failure
+                                        else str(failures[0]) if failures else None
+                                    ),
+                                    revoked=portal.revoked,
                                 )
                                 if teaching.created:
                                     print(

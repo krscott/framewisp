@@ -93,7 +93,7 @@ class Teaching:
         elapsed = (clock.get_time() - self.pipeline.get_base_time()) / Gst.SECOND
         self.append({"type": "note", "time": elapsed, "text": text})
 
-    def drain(self) -> None:
+    def drain(self) -> bool:
         assert self.frames is not None
         # Process at most one observation so slow storage cannot starve stop checks.
         sample = self.frames.emit("try-pull-sample", 0)
@@ -111,6 +111,8 @@ class Teaching:
             )
             self.append({"type": "frame", "time": timestamp / Gst.SECOND, "path": path})
             self.count += 1
+            return True
+        return False
 
     def poll(self) -> None:
         assert self.pipeline is not None
@@ -128,16 +130,15 @@ class Teaching:
         if self.count == 0 and time.monotonic() - self.started > 10:
             raise RuntimeError("Teaching capture received no frame within 10 seconds.")
 
-    def close(self, error: str | None = None) -> None:
+    def close(self, error: str | None = None, *, revoked: bool = False) -> None:
         """Finalize within a bounded time, preserving partial evidence on failure."""
         if not self.created:
             return
-        if self.source_ended.is_set():
+        if self.source_ended.is_set() and not revoked:
             error = error or "Teaching capture ended unexpectedly."
         try:
             if self.pipeline is not None:
                 try:
-                    self.drain()
                     bus = self.pipeline.get_bus()
                     assert bus is not None
                     timeline = self.pipeline.get_by_name("timeline")
@@ -148,7 +149,8 @@ class Teaching:
                     message = bus.timed_pop_filtered(
                         Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
                     )
-                    self.drain()
+                    while self.drain():
+                        pass
                     if message is None:
                         error = error or "Teaching video finalization timed out."
                     elif message.type == Gst.MessageType.ERROR:

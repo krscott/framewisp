@@ -14,7 +14,7 @@ import time
 from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
-from threading import Event, Timer
+from threading import Event, Thread, Timer
 from typing import cast
 from unittest.mock import Mock
 
@@ -210,6 +210,7 @@ _SERVER = """
 import os
 import sys
 import time
+import weakref
 from pathlib import Path
 import framewisp.attach as attach
 from gi.repository import Gio
@@ -218,6 +219,8 @@ test_bus.up()
 root = Path(sys.argv[1])
 class Portal:
     def __init__(self, stop):
+        Portal.active = weakref.ref(self)
+        self.revoked = False
         self.stop = stop
         self.size = (800, 600)
         self.node = 1
@@ -250,7 +253,28 @@ if (root / 'teach').exists():
     class TestTeaching(Teaching):
         def start(self, source):
             super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240 ! identity sleep-time=100000')
+        def close(self, *args, **kwargs):
+            if (root / 'slow-close').exists():
+                time.sleep(.8)
+            super().close(*args, **kwargs)
     lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
+original_dispatch = attach.dispatch_events
+def dispatch():
+    original_dispatch()
+    if (root / 'revoke').exists():
+        active = Portal.active()
+        active.revoked = True
+        lesson.source_ended.set()
+        active.stop.set()
+attach.dispatch_events = dispatch
+original_capture = attach.capture
+def capture(portal, *args):
+    if not (root / 'slow-screenshot').exists():
+        return original_capture(portal, *args)
+    (root / 'capturing').touch()
+    portal.stop.wait(10)
+    raise InterruptedError('capture stopped')
+attach.capture = capture
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -377,7 +401,7 @@ def test_attach_refuses_desktop_directory_of_another_user(
 def attach_process(
     tmp_path: Path, request: pytest.FixtureRequest
 ) -> Iterator[subprocess.Popen[str]]:
-    if getattr(request, "param", False):
+    if getattr(request, "param", False) is True:
         (tmp_path / "retain").touch()
     if getattr(request, "param", None) == "teaching":
         (tmp_path / "teach").touch()
@@ -483,6 +507,60 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
     )
     assert (tmp_path / "closed").exists()
     assert not (session / "session.json").exists()
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_global_detach_allows_teaching_to_finalize(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    (tmp_path / "slow-close").touch()
+    assert detach_desktop() == 0
+    assert attach_process.wait(timeout=5) == 0
+    assert (
+        json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+        == "complete"
+    )
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+@pytest.mark.parametrize("screenshot", [False, True])
+def test_portal_revocation_finishes_teaching_even_during_screenshot(
+    tmp_path: Path, attach_process: subprocess.Popen[str], screenshot: bool
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    worker: Thread | None = None
+    results: list[int] = []
+    if screenshot:
+        (tmp_path / "slow-screenshot").touch()
+        worker = Thread(
+            target=lambda: results.append(
+                request_attached(
+                    tmp_path / "session",
+                    "screenshot",
+                    {"path": str(tmp_path / "capture.png")},
+                )
+            )
+        )
+        worker.start()
+        wait_file(tmp_path / "capturing")
+    try:
+        (tmp_path / "revoke").touch()
+        assert attach_process.wait(timeout=2) == 0
+        assert (
+            json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+            == "complete"
+        )
+    finally:
+        if worker is not None:
+            if attach_process.poll() is None:
+                attach_process.terminate()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+    if screenshot:
+        assert results == [1]
 
 
 def test_pending_consent_reserves_session(

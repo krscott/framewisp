@@ -23,6 +23,7 @@ def dispatch_events() -> None:
 
 class DesktopPortal:
     def __init__(self, stop: Event):
+        self.revoked = False
         self.stop = stop
         address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
         self.bus = Gio.DBusConnection.new_for_address_sync(
@@ -141,6 +142,7 @@ class DesktopPortal:
             parameters: GLib.Variant,
             data: object,
         ) -> None:
+            self.revoked = True
             self.stop.set()
 
         self.subscription = self.bus.signal_subscribe(

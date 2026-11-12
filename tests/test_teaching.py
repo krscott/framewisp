@@ -216,6 +216,12 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
     buffer.fill(0, bytes([255, 0, 0]) * (160 * 120))
     buffer.pts = 0
     assert source.emit("push-buffer", buffer) == Gst.FlowReturn.OK
+    observe(teaching, 1)
+    blue_buffer = Gst.Buffer.new_allocate(None, 160 * 120 * 3, None)
+    assert blue_buffer is not None
+    blue_buffer.fill(0, bytes([0, 0, 255]) * (160 * 120))
+    blue_buffer.pts = Gst.SECOND // 2
+    assert source.emit("push-buffer", blue_buffer) == Gst.FlowReturn.OK
     observe(teaching, 2)
     teaching.note("This unchanged screen is the final result")
     time.sleep(0.2)
@@ -270,7 +276,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
         pixel = image.convert("RGB").getpixel((80, 60))
         assert isinstance(pixel, tuple)
         red, green, blue = pixel
-        assert red > 200 and green < 20 and blue < 20
+        assert blue > 200 and green < 20 and red < 20
 
 
 def test_source_ending_is_a_failure_even_when_a_last_image_remains(
@@ -310,6 +316,41 @@ def test_teach_requires_user_terminal_and_reports_the_right_command(
     assert result.returncode == 1
     assert "teach" in result.stderr and "--goal" in result.stderr
     assert not (tmp_path / "lesson").exists()
+
+
+@pytest.mark.parametrize("parent_kind", ["missing", "file", "readonly"])
+def test_teach_rejects_invalid_parent_before_consent(
+    tmp_path: Path, parent_kind: str
+) -> None:
+    parent = tmp_path / "parent"
+    if parent_kind == "file":
+        parent.touch()
+    elif parent_kind == "readonly":
+        parent.mkdir(mode=0o500)
+        if os.access(parent, os.W_OK):
+            pytest.skip("Current user can write to a readonly directory")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "framewisp",
+                str(tmp_path / "session"),
+                "teach",
+                str(parent / "lesson"),
+                "--goal",
+                "Show task",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert result.returncode == 2
+        assert "existing writable directory" in result.stderr
+        assert "ATTACH" not in result.stdout
+    finally:
+        if parent_kind == "readonly":
+            parent.chmod(0o700)
 
 
 @pytest.fixture

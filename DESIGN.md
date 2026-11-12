@@ -1222,7 +1222,7 @@ and buttons, as mutter does.
 
 `framewisp --detach` connects to a separate detach.sock, checks its peer UID, and
 uses Linux SO_PEERPIDFD (6.5+) to obtain a stable handle to the socket owner. It
-sends SIGTERM and waits up to 500 ms, then SIGKILL if needed, and reports success
+sends SIGTERM and waits up to three seconds, then SIGKILL if needed, and reports success
 only after process exit. This avoids PID reuse and works when the owner is stopped
 or its command workers are blocked. The emergency socket never queues behind
 ordinary commands. Stale files after SIGKILL do not hold the kernel lock. Detach
@@ -1293,6 +1293,12 @@ pipeline running time in seconds; frame entries use buffer running time.
 Shutdown sends EOS directly to `imagefreeze` (which otherwise holds its last
 image after input EOS), stops capture before closing the portal, and bounds
 encoder finalization.
+The desktop detach command allows three seconds for graceful shutdown before
+killing an unresponsive owner, including the encoder's one-second EOS budget.
+The main loop only takes the request lock when immediately available, so a slow
+screenshot cannot block desktop stop events or foreground checks. A desktop
+portal revocation ends teaching normally; an independent source failure still
+marks the evidence incomplete. Destination parent validation runs before consent.
 Already saved files remain on failure. A rejected destination does not remove
 anything. Images, notes, and video are intentionally unredacted, and the consent
 text makes this explicit. The bundled agent guide explains how to study the

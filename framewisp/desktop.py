@@ -95,7 +95,7 @@ def detach_desktop() -> int:
             poll.register(process, select.POLLIN)
             try:
                 signal.pidfd_send_signal(process, signal.SIGTERM)
-                if not poll.poll(500):
+                if not poll.poll(3000):
                     # A stopped process or blocked main thread cannot run cleanup.
                     signal.pidfd_send_signal(process, signal.SIGKILL)
                     if not poll.poll(1000):
