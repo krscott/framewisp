@@ -324,7 +324,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
                 if frame is None:
-                    raise RuntimeError("Desktop capture ended without a frame.")
+                    raise ValueError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
             raise InterruptedError(CAPTURE_CANCELLED)
@@ -601,21 +601,23 @@ def _run_attachment(
                 else "teach-note" if isinstance(request, str) else request.action
             )
             try:
-                while not lock.acquire(timeout=0.05):
+                if isinstance(request, str):
                     inputs.wait()
-                try:
-                    inputs.wait()
-                    if isinstance(request, Path):
-                        capture(portal, request, stop, session / "capture.log")
-                    elif isinstance(request, str):
-                        assert teaching is not None
-                        teaching.note(request)
-                    else:
-                        inputs.perform(
-                            action, cast(InputParameters, request.parameters)
-                        )
-                finally:
-                    lock.release()
+                    assert teaching is not None
+                    teaching.note(request)
+                else:
+                    while not lock.acquire(timeout=0.05):
+                        inputs.wait()
+                    try:
+                        inputs.wait()
+                        if isinstance(request, Path):
+                            capture(portal, request, stop, session / "capture.log")
+                        else:
+                            inputs.perform(
+                                action, cast(InputParameters, request.parameters)
+                            )
+                    finally:
+                        lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
                 status, error = 1, input_error(
                     action, failure, retain_input_content=retain_input_content
@@ -675,9 +677,6 @@ def _run_attachment(
                         state,
                         {
                             "kind": "attached",
-                            "teaching_directory": (
-                                str(teaching.directory) if teaching else None
-                            ),
                             "retain_input_content": retain_input_content,
                             "attachment": attachment,
                             "runtime_directory": str(directory),
@@ -729,11 +728,27 @@ def _run_attachment(
                                     "The X11 input release helper exited; disconnecting."
                                 )
                             dispatch_events()
+                            if stop.is_set():
+                                break
                             if teaching is not None:
-                                with lock:
-                                    teaching.poll()
-                                    if not ready.is_set() and teaching.count:
-                                        announce_ready()
+                                if not teaching.poll():
+                                    # PipeWire EOS can precede the portal's Closed signal.
+                                    deadline = time.monotonic() + 0.25
+                                    while not portal.revoked:
+                                        dispatch_events()
+                                        if (
+                                            stop.is_set()
+                                            or time.monotonic() >= deadline
+                                        ):
+                                            break
+                                        stop.wait(0.01)
+                                    if portal.revoked:
+                                        break
+                                    raise RuntimeError(
+                                        "Teaching capture ended unexpectedly."
+                                    )
+                                if not ready.is_set() and teaching.count:
+                                    announce_ready()
                     finally:
                         stop.set()
                         if indicator is not None:
@@ -742,9 +757,12 @@ def _run_attachment(
                             failure = sys.exc_info()[1]
                             try:
                                 teaching.close(
-                                    str(failure)
-                                    if failure
-                                    else str(failures[0]) if failures else None
+                                    (
+                                        str(failure)
+                                        if failure
+                                        else str(failures[0]) if failures else None
+                                    ),
+                                    revoked=portal.revoked,
                                 )
                                 if teaching.created:
                                     print(

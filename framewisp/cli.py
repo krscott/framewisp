@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -473,6 +474,11 @@ def main() -> None:
         if args.directory.exists() or args.directory.is_symlink():
             parser.error(
                 "Teaching requires a new output directory; choose a different path."
+            )
+        parent = args.directory.parent
+        if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
+            parser.error(
+                f"Teaching output parent must be an existing writable directory: {parent}"
             )
     if args.action not in {"run", "attach", "teach", "recover"}:
         exit_message = recorded_app_exit(session)

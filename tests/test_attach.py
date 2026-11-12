@@ -14,7 +14,7 @@ import time
 from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
-from threading import Event, Timer
+from threading import Event, Thread, Timer
 from typing import cast
 from unittest.mock import Mock
 
@@ -210,6 +210,7 @@ _SERVER = """
 import os
 import sys
 import time
+import weakref
 from pathlib import Path
 import framewisp.attach as attach
 from gi.repository import Gio
@@ -218,6 +219,8 @@ test_bus.up()
 root = Path(sys.argv[1])
 class Portal:
     def __init__(self, stop):
+        Portal.active = weakref.ref(self)
+        self.revoked = False
         self.stop = stop
         self.size = (800, 600)
         self.node = 1
@@ -250,7 +253,43 @@ if (root / 'teach').exists():
     class TestTeaching(Teaching):
         def start(self, source):
             super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240 ! identity sleep-time=100000')
+        def close(self, *args, **kwargs):
+            if (root / 'slow-close').exists():
+                time.sleep(.8)
+            super().close(*args, **kwargs)
     lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
+original_dispatch = attach.dispatch_events
+revoke_at = None
+def dispatch():
+    global revoke_at
+    original_dispatch()
+    if (root / 'source-end').exists():
+        lesson.source_ended.set()
+    if (root / 'revoke').exists():
+        if (root / 'eos-first').exists() and not lesson.source_ended.is_set():
+            lesson.source_ended.set()
+            revoke_at = time.monotonic() + .05
+        if revoke_at is not None and time.monotonic() < revoke_at:
+            return
+        active = Portal.active()
+        active.revoked = True
+        lesson.source_ended.set()
+        active.stop.set()
+attach.dispatch_events = dispatch
+original_capture = attach.capture
+def capture(portal, *args):
+    global revoke_at
+    if (root / 'empty-screenshot').exists():
+        lesson.source_ended.set()
+        revoke_at = time.monotonic() + .1
+        (root / 'revoke').touch()
+        return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
+    if not (root / 'slow-screenshot').exists():
+        return original_capture(portal, *args)
+    (root / 'capturing').touch()
+    portal.stop.wait(10)
+    raise InterruptedError('capture stopped')
+attach.capture = capture
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -377,7 +416,7 @@ def test_attach_refuses_desktop_directory_of_another_user(
 def attach_process(
     tmp_path: Path, request: pytest.FixtureRequest
 ) -> Iterator[subprocess.Popen[str]]:
-    if getattr(request, "param", False):
+    if getattr(request, "param", False) is True:
         (tmp_path / "retain").touch()
     if getattr(request, "param", None) == "teaching":
         (tmp_path / "teach").touch()
@@ -483,6 +522,118 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
     )
     assert (tmp_path / "closed").exists()
     assert not (session / "session.json").exists()
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_global_detach_allows_teaching_to_finalize(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    (tmp_path / "slow-close").touch()
+    assert detach_desktop() == 0
+    assert attach_process.wait(timeout=5) == 0
+    assert (
+        json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+        == "complete"
+    )
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+@pytest.mark.parametrize("screenshot", [False, True])
+@pytest.mark.parametrize("eos_first", [False, True])
+def test_portal_revocation_finishes_teaching_even_during_screenshot(
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    screenshot: bool,
+    eos_first: bool,
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    worker: Thread | None = None
+    results: list[int] = []
+    if eos_first:
+        (tmp_path / "eos-first").touch()
+    if screenshot:
+        (tmp_path / "slow-screenshot").touch()
+        worker = Thread(
+            target=lambda: results.append(
+                request_attached(
+                    tmp_path / "session",
+                    "screenshot",
+                    {"path": str(tmp_path / "capture.png")},
+                )
+            )
+        )
+        worker.start()
+        wait_file(tmp_path / "capturing")
+        note = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "framewisp",
+                str(tmp_path / "session"),
+                "teach-note",
+                "Sampling and notes continue during capture",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        assert note.returncode == 0, note.stderr
+        wait_file(tmp_path / "lesson/frames/000001.png")
+    try:
+        (tmp_path / "revoke").touch()
+        assert attach_process.wait(timeout=2) == 0
+        assert (
+            json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+            == "complete"
+        )
+    finally:
+        if worker is not None:
+            if attach_process.poll() is None:
+                attach_process.terminate()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+    if screenshot:
+        assert results == [1]
+
+
+# R-TEACH-4
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_source_end_without_revocation_marks_teaching_failed(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    (tmp_path / "source-end").touch()
+    assert attach_process.wait(timeout=5) == 1
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "ended unexpectedly" in manifest["error"]
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_screenshot_eos_during_revocation_does_not_fail_teaching(
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    (tmp_path / "empty-screenshot").touch()
+    assert (
+        request_attached(
+            tmp_path / "session", "screenshot", {"path": str(tmp_path / "capture.png")}
+        )
+        == 1
+    )
+    assert "ended without a frame" in capsys.readouterr().err
+    assert attach_process.wait(timeout=5) == 0
+    assert (
+        json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+        == "complete"
+    )
 
 
 def test_pending_consent_reserves_session(
@@ -602,7 +753,8 @@ def test_global_detach_kills_suspended_owner_and_recovers(
     attach_process.send_signal(signal.SIGSTOP)
     start = time.monotonic()
     assert detach_desktop() == 0
-    assert time.monotonic() - start < 3
+    # Three seconds for SIGTERM, then up to one second to confirm SIGKILL.
+    assert time.monotonic() - start < 5
     assert attach_process.wait(timeout=5) == -signal.SIGKILL
     # SIGKILL cannot remove files. The next owner must recover without trusting them.
     original = json.loads((tmp_path / "session/session.json").read_text())["attachment"]

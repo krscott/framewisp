@@ -442,7 +442,8 @@ or screen can leave that terminal and the attach process running. Use `--detach`
 before disconnecting from a terminal multiplexer. If the attach
 process crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive attach process
-after half a second. It uses Linux 6.5 or newer to identify the socket owner safely.
+after three seconds. This allows teaching recordings to finalize. It uses Linux
+6.5 or newer to identify the socket owner safely.
 Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
 open in its current state. Reconnecting requires running `attach` and approving
 the dialog again. Test your binding before handing control to an agent.

@@ -60,7 +60,9 @@ teaching session ends; normal control requires a separate `attach` confirmation.
 While the user demonstrates, `framewisp SESSION teach-note 'EXPLANATION'` adds a
 timestamped note. Explain shortcuts, decisions, variable inputs, and expected
 outcomes that may not be evident visually. Notes must be nonblank and at most
-8000 characters. The user stops with Ctrl+C, the sharing indicator, or
+8000 characters. The agent can issue notes from its own shell so the user can
+keep focus on the app. Collect remaining clarifications after the demonstration
+and include them in the procedure. The user stops with Ctrl+C, the sharing indicator, or
 `framewisp --detach`; applications stay running. Screen content and notes are
 unredacted. No audio, physical key events, or clipboard contents are recorded.
 
