@@ -278,6 +278,12 @@ def dispatch():
 attach.dispatch_events = dispatch
 original_capture = attach.capture
 def capture(portal, *args):
+    global revoke_at
+    if (root / 'empty-screenshot').exists():
+        lesson.source_ended.set()
+        revoke_at = time.monotonic() + .1
+        (root / 'revoke').touch()
+        return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
     if not (root / 'slow-screenshot').exists():
         return original_capture(portal, *args)
     (root / 'capturing').touch()
@@ -605,6 +611,29 @@ def test_source_end_without_revocation_marks_teaching_failed(
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
     assert manifest["status"] == "failed"
     assert "ended unexpectedly" in manifest["error"]
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_screenshot_eos_during_revocation_does_not_fail_teaching(
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    (tmp_path / "empty-screenshot").touch()
+    assert (
+        request_attached(
+            tmp_path / "session", "screenshot", {"path": str(tmp_path / "capture.png")}
+        )
+        == 1
+    )
+    assert "ended without a frame" in capsys.readouterr().err
+    assert attach_process.wait(timeout=5) == 0
+    assert (
+        json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+        == "complete"
+    )
 
 
 def test_pending_consent_reserves_session(

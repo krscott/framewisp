@@ -324,7 +324,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
                 if frame is None:
-                    raise RuntimeError("Desktop capture ended without a frame.")
+                    raise ValueError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
             raise InterruptedError(CAPTURE_CANCELLED)

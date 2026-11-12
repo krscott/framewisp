@@ -1301,6 +1301,8 @@ sampling, desktop stop events, or foreground checks. A desktop
 portal revocation ends teaching normally; an independent source failure still
 marks the evidence incomplete. After source EOS, the owner dispatches portal
 events for up to 250 ms to allow the separate Closed notification to arrive.
+An individual screenshot that ends before receiving a frame fails that command;
+the teaching pipeline independently checks recording health.
 Destination parent validation runs before consent.
 Already saved files remain on failure. A rejected destination does not remove
 anything. Images, notes, and video are intentionally unredacted, and the consent
