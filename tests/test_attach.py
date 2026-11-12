@@ -261,7 +261,12 @@ if (root / 'teach').exists():
 original_dispatch = attach.dispatch_events
 def dispatch():
     original_dispatch()
+    if (root / 'source-end').exists():
+        lesson.source_ended.set()
     if (root / 'revoke').exists():
+        if (root / 'eos-first').exists() and not lesson.source_ended.is_set():
+            lesson.source_ended.set()
+            return
         active = Portal.active()
         active.revoked = True
         lesson.source_ended.set()
@@ -526,13 +531,19 @@ def test_global_detach_allows_teaching_to_finalize(
 
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
 @pytest.mark.parametrize("screenshot", [False, True])
+@pytest.mark.parametrize("eos_first", [False, True])
 def test_portal_revocation_finishes_teaching_even_during_screenshot(
-    tmp_path: Path, attach_process: subprocess.Popen[str], screenshot: bool
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    screenshot: bool,
+    eos_first: bool,
 ) -> None:
     (tmp_path / "approve").touch()
     wait_file(tmp_path / "lesson/frames/000000.png")
     worker: Thread | None = None
     results: list[int] = []
+    if eos_first:
+        (tmp_path / "eos-first").touch()
     if screenshot:
         (tmp_path / "slow-screenshot").touch()
         worker = Thread(
@@ -576,6 +587,19 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
             assert not worker.is_alive()
     if screenshot:
         assert results == [1]
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_source_end_without_revocation_marks_teaching_failed(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    wait_file(tmp_path / "lesson/frames/000000.png")
+    (tmp_path / "source-end").touch()
+    assert attach_process.wait(timeout=5) == 1
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "ended unexpectedly" in manifest["error"]
 
 
 def test_pending_consent_reserves_session(
