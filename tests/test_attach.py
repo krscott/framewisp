@@ -206,6 +206,22 @@ def test_stale_attach_socket(
     assert "disconnected" in capsys.readouterr().err
 
 
+def test_keyboard_input_requires_current_attachment_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "session.json").write_text(
+        json.dumps(
+            {
+                "kind": "attached",
+                "runtime_directory": str(tmp_path),
+                "attachment": "old",
+            }
+        )
+    )
+    assert request_attached(tmp_path, "key", {"chord": "Return", "private": True}) == 1
+    assert "older keyboard input policy" in capsys.readouterr().err
+
+
 _SERVER = """
 import os
 import sys

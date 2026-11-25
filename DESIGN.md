@@ -414,7 +414,11 @@ of `duration / steps` before each move. Zero duration sends one endpoint move
 without a pause. The default is 0.4 seconds. This is a straight path at a steady
 pace; it has no random variation or easing.
 
-`type --interval SECONDS TEXT` accepts characters satisfying Python's
+`key --private` and `type --private` mark a single keyboard action as private.
+The runner validates the optional `private` parameter as a boolean and accepts
+it on keyboard actions only, including batch steps (R-LOG-9).
+
+`type [--private] [--interval SECONDS] TEXT` accepts characters satisfying Python's
 `str.isprintable`, rejecting control and format characters before session access.
 For ASCII text it sends one VNC key press/release pair per character, with
 explicit pauses only between characters.
@@ -430,7 +434,7 @@ up to whole milliseconds. The subprocess timeout is fifteen seconds plus those
 intervals and wtype's 4 ms per-character key press/release time. No clipboard or
 input-method composition is involved.
 
-`key CHORD` accepts one letter, digit, ASCII punctuation symbol, or named key,
+`key [--private] CHORD` accepts one letter, digit, ASCII punctuation symbol, or named key,
 prefixed by zero or more `Ctrl+`, `Shift+`, or `Alt+` modifiers.
 Names are case-insensitive, and letter case does not imply Shift.
 Named keys are Space, Return, Tab, BackSpace, Escape,
@@ -893,7 +897,9 @@ worker and attached command clients use the same log writer. It omits typed
 text and literal keystrokes, including Shift-only printable keys and Space.
 It retains Ctrl/Alt chords and named non-printing keys. For a private keyboard
 action it keeps the privacy marker and omits the entire chord or text value.
-Keyboard failure reporting uses sanitized diagnostics in all modes.
+Keyboard failure reporting uses sanitized diagnostics in all modes. An attached
+client requires `input_caption_options: true` in the session metadata before
+sending keyboard input, so an older attachment requests a reconnect.
 
 Captions, pings, and compaction read `inputs.jsonl`, and compaction also reads
 `activity.jsonl`, all through `activity_events` in `compact.py`. A record is
