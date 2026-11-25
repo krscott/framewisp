@@ -854,8 +854,10 @@ Text captions are off by default. Select them independently for each clip with
 | `--key-captions all` | Key actions and typed text, including literal characters. |
 | `--key-captions non-text` | Ctrl/Alt shortcuts and named non-printing keys such as Return and arrows. |
 
-A clip can use both flags. With `--key-captions all`, literal input is only
-collected for the clip and abbreviated for display. To skip a particular
+A clip can use both flags. With `--key-captions all`, literal input is collected
+for the clip and abbreviated for display. Rendering writes it to a temporary
+subtitle file in the clip's private working directory. A forced kill during
+rendering can leave that file behind. To skip a particular
 keyboard caption and omit its value from the input log, use `key --private` or
 `type --private`. In a batch, set `"private": true` on the `key` or `type` step.
 Private inputs still count as activity and retain their timing and outcome.
@@ -887,10 +889,10 @@ framewisp demo record-start --no-click-pings /tmp/plain.mp4
 framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
 ```
 
-A clip with a click is encoded again to draw its pings, even when text captions are off. Add `--no-click-pings` to keep the recorder's output
-unprocessed when nothing else needs rendering. With a
-runner started by an older framewisp, `record-start` fails until you restart the
-session or pass `--no-click-pings`. `run --no-click-pings` requires `--record`.
+A clip with a click is encoded again to draw its pings, even when text captions
+are off. Add `--no-click-pings` to keep the recorder's output unprocessed when
+nothing else needs rendering. `run --no-click-pings` requires `--record`.
+Restart an older runner if `record-start` reports unsupported caption modes.
 
 Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.

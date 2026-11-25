@@ -26,7 +26,6 @@ def request_attached(session: Path, action: str, parameters: dict[str, object]) 
             print("This command requires an attached desktop session.", file=sys.stderr)
             return 1
         endpoint = Path(state["runtime_directory"]) / "control.sock"
-        attachment = state["attachment"]
         if action in {"key", "type"} and state.get("input_caption_options") is not True:
             print(
                 "This attachment uses an older keyboard input policy. Ask the user to reconnect.",
@@ -41,7 +40,7 @@ def request_attached(session: Path, action: str, parameters: dict[str, object]) 
                         {
                             "action": action,
                             "parameters": parameters,
-                            "attachment": attachment,
+                            "attachment": state["attachment"],
                         }
                     )
                     + "\n"

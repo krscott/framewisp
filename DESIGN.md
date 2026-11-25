@@ -900,9 +900,8 @@ Captions, pings, and compaction read `inputs.jsonl`, and compaction also reads
 complete once its newline is written, so the reader skips only the bytes after
 the last newline, which an interrupted write leaves behind (R-LOG-7). Every line
 before that must parse, so a malformed one fails rendering (R-LOG-8, R-REC-10)
-whenever the clip needs one of those readers. The reader splits bytes on `\n`
-alone: retained text can hold characters such as U+2028 that text-mode line
-splitting would break on.
+whenever the clip needs one of those readers. The reader uses only newline
+bytes as record boundaries.
 
 Before each input event append, the writer opens `inputs.jsonl` in binary
 append/read mode and takes an exclusive flock on that descriptor. It checks the
@@ -917,15 +916,9 @@ worker. Readers hold a shared flock on their reading descriptor through the
 whole byte snapshot, so repair cannot splice old tail bytes into a new record.
 They release the lock before parsing and still ignore an unfinished trailing line.
 
-By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
-Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit
-the key and retain only modifiers. Ctrl/Alt shortcuts and named
-navigation/control keys retain their chord. Captions use "Type text" and "Key"
-for omitted content, with any Shift modifier as a `Shift+` prefix. Opt-in preserves full text and chords. Text/key failures
-omit backend messages that can include literal or encoded input, while
-preserving exception types, cancellation, and exit codes. Unicode subprocess
-diagnostics omit arguments and stderr by default. Tracebacks retain stack
-locations without content-bearing exception messages.
+Keyboard failure diagnostics preserve exception types, cancellation, and exit
+codes. Unicode subprocess diagnostics omit arguments and stderr. Tracebacks
+retain stack locations while omitting content-bearing exception messages.
 
 Screenshots and recordings can still show secrets displayed by apps. This policy
 does not redact screen content or guarantee app-log redaction. Shell history, batch
@@ -954,8 +947,9 @@ Pointer mode `all` selects `move`, `click`, `drag`, and `scroll`; `modifiers`
 selects clicks and drags with a modifier. Keyboard mode `non-text` selects
 the shortcuts and named controls kept in the log. Keyboard mode `all` also
 uses bounded caption text kept in memory for that clip, indexed by input ID.
-A lock coordinates input start events and the clip's capture window. The
-renderer reads timing and outcomes from the log and filters starts against
+The input writer holds its file lock while a short caption lock coordinates
+the start timestamp with the clip's capture window. The renderer reads
+timing and outcomes from the log and filters starts against
 the first frame and stop time. Private keyboard actions are excluded at
 capture and caption selection. The input log is independent of the options
 (R-LOG-5), and compaction still counts all actions as activity.

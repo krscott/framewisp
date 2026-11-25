@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Generator, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
@@ -68,7 +68,8 @@ class CaptionCapture:
         try:
             yield texts
         finally:
-            self.stop()
+            if enabled:
+                self.stop()
 
     def stop(self) -> float:
         with self.lock:
@@ -230,37 +231,42 @@ def log_input(
     """Record command start/end and pointer pings; these are not app acknowledgements."""
     identifier = uuid.uuid4().hex
     retained = retained_parameters(action, parameters)
+    captures_literal = (
+        action in KEY_ACTIONS
+        and retained.get("private") is not True
+        and "chord" not in retained
+    )
+    capture = caption_capture if captures_literal else None
 
     def append(event: Literal["start", "ping", "end"], **point: int) -> None:
-        entry = {
-            "id": identifier,
-            "event": event,
-            "time": time.monotonic(),
-            "action": action,
-            "parameters": retained,
-            "returncode": result.returncode,
-            "error": result.error,
-            **point,
-        }
-        record = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+        timestamp = time.monotonic()
         with (session / "inputs.jsonl").open("a+b") as output:
             # Attached CLI clients can append concurrently. Closing flushes the
             # buffered record before releasing this descriptor's file lock.
             fcntl.flock(output, fcntl.LOCK_EX)
             _discard_unfinished_tail(output)
+            if event == "start" and capture is not None:
+                # The renderer's shared flock waits for this start to reach
+                # the log. The clip lock never spans file operations.
+                with capture.lock:
+                    timestamp = time.monotonic()
+                    if capture.texts is not None:
+                        capture.texts[identifier] = caption_text(action, parameters)
+            entry = {
+                "id": identifier,
+                "event": event,
+                "time": timestamp,
+                "action": action,
+                "parameters": retained,
+                "returncode": result.returncode,
+                "error": result.error,
+                **point,
+            }
+            record = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
             output.write(record)
 
     result = InputResult(ping=lambda x, y: append("ping", x=x, y=y))
-    with caption_capture.lock if caption_capture is not None else nullcontext():
-        append("start")
-        if (
-            caption_capture is not None
-            and caption_capture.texts is not None
-            and action in KEY_ACTIONS
-            and retained.get("private") is not True
-            and "chord" not in retained
-        ):
-            caption_capture.texts[identifier] = caption_text(action, parameters)
+    append("start")
     try:
         yield result
     except BaseException as error:

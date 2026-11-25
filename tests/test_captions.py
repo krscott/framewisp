@@ -480,6 +480,7 @@ def test_append_waits_for_live_writer_before_repairing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     log = tmp_path / "inputs.jsonl"
+    capture = CaptionCapture()
     waiting = Event()
     flock = fcntl.flock
 
@@ -496,10 +497,15 @@ def test_append_waits_for_live_writer_before_repairing(
     monkeypatch.setattr(fcntl, "flock", acquire)
 
     def append() -> None:
-        with log_input(tmp_path, "key", {"chord": "Ctrl+s"}) as result:
+        with log_input(
+            tmp_path, "key", {"chord": "s"}, caption_capture=capture
+        ) as result:
             result.returncode = 0
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with (
+        ThreadPoolExecutor(max_workers=2) as executor,
+        capture.clip(enabled=True) as literal_captions,
+    ):
         with log.open("ab") as live:
             flock(live, fcntl.LOCK_EX)
             fragment = b'{"id":"live","event":"start","time":1'
@@ -509,14 +515,17 @@ def test_append_waits_for_live_writer_before_repairing(
             try:
                 assert waiting.wait(timeout=5), "Appender did not contend on the lock"
                 assert log.read_bytes() == fragment
+                stopped = executor.submit(capture.stop).result(timeout=5)
             finally:
                 live.write(b"}\n")
                 # Close flushes the complete live record before releasing flock.
         task.result(timeout=5)
+        assert literal_captions == {}
     monkeypatch.setattr(fcntl, "flock", flock)
     events = activity_events(log)
     assert events[0]["id"] == "live"
     assert [event["event"] for event in events[1:]] == ["start", "end"]
+    assert events[1]["time"] >= stopped
 
 
 # R-LOG-7, R-LOG-8

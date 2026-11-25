@@ -348,13 +348,14 @@ def start_recording(
         str(clip),
     ]
     timed = captions.enabled or click_pings or layout.panel is not None or compact
+    capture_literals = captions.key == "all"
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     capturing = False
     try:
         active.unlink(missing_ok=True)
         active.symlink_to(clip)
         with (
-            caption_capture.clip(enabled=captions.key == "all") as literal_captions,
+            caption_capture.clip(enabled=capture_literals) as literal_captions,
             recorder_output(log) as output,
             managed_process(
                 command, log=log, env=recorder_env, output=output
@@ -385,7 +386,9 @@ def start_recording(
             try:
                 yield process
             finally:
-                stopped = caption_capture.stop()
+                stopped = (
+                    caption_capture.stop() if capture_literals else time.monotonic()
+                )
         if process.returncode != 0:
             raise log_failure(f"Recorder failed to finalize {destination}", log)
         failure = None
