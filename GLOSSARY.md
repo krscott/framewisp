@@ -114,7 +114,7 @@ observation.
 **Observation**:
 The result of one inspection query: the controls that matched and a status.
 An empty observation shows that the app exposes no matching control only when
-its status is complete.
+that status is `ok`.
 _Avoid_: snapshot, response; observation for a check's limits or a lesson's
 frames
 
@@ -169,7 +169,7 @@ not an overlay.
 _Avoid_: console, panel
 
 **Compaction**:
-Trimming from a clip the idle gaps between actions, checks, and batch
+Trimming from a clip the idle time outside actions, checks, and batch
 screenshots.
 
 ### Teaching
