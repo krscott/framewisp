@@ -35,7 +35,8 @@ class InputAction:
     def parse(action: object, raw: object) -> "InputAction":
         if not isinstance(raw, dict) or not isinstance(action, str):
             raise ValueError("Input requires an action and parameters object.")
-        p = cast(dict[str, object], raw)
+        supplied = cast(dict[str, object], raw)
+        p = supplied
         if action in {"move", "click", "drag", "scroll"}:
             p = {"move_duration": DEFAULT_MOVE_DURATION} | p
         if action not in ACTION_FIELDS or any(
@@ -94,4 +95,11 @@ class InputAction:
                 15 + max(0, length - 1) * interval + length * 0.004
             ):
                 raise ValueError("Typing interval or total duration is too large.")
+        if "private" in supplied:
+            private = supplied["private"]
+            if action not in {"key", "type"} or not isinstance(private, bool):
+                raise ValueError(
+                    "private must be a boolean and is only for key and type."
+                )
+            p["private"] = private
         return InputAction(action, p)

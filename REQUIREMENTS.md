@@ -157,13 +157,17 @@ investigate or ask; never invent a rationale.
 
 ## Input logs and captions (LOG)
 
-- **R-LOG-1** [test] By default, `inputs.jsonl` and captions omit typed text
-  and literal key characters.
+- **R-LOG-1** [test] `inputs.jsonl` always omits typed text and literal key
+  characters. Captions show those values only in clips with `--key-captions all`.
 - **R-LOG-2** [test] Captions appear only in recordings, never in screenshots.
 - **R-LOG-3** [test] Click pings appear only in recordings, never in screenshots.
-- **R-LOG-4** [test] By default, a recording captions only `key` and `type`
-  inputs.
-- **R-LOG-5** [test] The `--captions` option does not change `inputs.jsonl`.
+- **R-LOG-4** [test] Recordings have no text captions by default.
+  `--pointer-captions all` captions moves, clicks, drags, and scrolls.
+  `--pointer-captions modifiers` captions only clicks and drags with a modifier.
+  `--key-captions all` captions key and type actions.
+  `--key-captions non-text` captions Ctrl/Alt shortcuts and named non-printing
+  keys. The two options can be combined for a clip.
+- **R-LOG-5** [test] Recording caption options do not change `inputs.jsonl`.
 - **R-LOG-6** [retired] Framewisp rejects `--captions` combined with `--no-captions`
   before it starts a session or a clip.
 - **R-LOG-7** [test] An incomplete last line in `inputs.jsonl`, as left by an
@@ -174,6 +178,9 @@ investigate or ask; never invent a rationale.
   interrupted write.
 - **R-LOG-8** [test] A newline-terminated line in `inputs.jsonl` that is not
   valid JSON fails any recording rendering that reads the log (R-REC-10).
+- **R-LOG-9** [test] `key --private`, `type --private`, and a keyboard batch
+  action with `"private": true` suppress the action's caption in every mode.
+  The log keeps the action's timing and outcome and omits its key or text value.
 
 ## Recording (REC)
 
@@ -207,8 +214,7 @@ investigate or ask; never invent a rationale.
 - **R-REC-10** [test] When recording rendering fails, a playable MP4 of the raw
   capture remains. It is at the requested path, unless framewisp cannot publish
   it there (R-REC-18). The error names the MP4's path and `captions.log`.
-- **R-REC-11** [test] `--captions none` does not change click pings or hold
-  discs.
+- **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the video. The default is right.
 - **R-REC-13** [test] `--console-size` sets the panel width for `left` and

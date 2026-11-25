@@ -28,11 +28,22 @@ from framewisp.lib import (
 SECRET = "typed secret"
 
 
+@pytest.mark.parametrize("value", [None, 1, "true"])
+def test_private_input_requires_a_boolean(value: object) -> None:
+    with pytest.raises(ValueError, match="private must be a boolean"):
+        InputAction.parse("key", {"chord": "Return", "private": value})
+
+
+def test_pointer_input_rejects_keyboard_privacy_marker() -> None:
+    with pytest.raises(ValueError, match="only for key and type"):
+        InputAction.parse("move", {"x": 10, "y": 10, "private": True})
+
+
 @pytest.mark.parametrize("raw", [None, 1, "yes", {"before": 1, "after": 2}])
 def test_record_start_requires_a_boolean_compact(raw: object) -> None:
     with pytest.raises(ValueError, match="compact must be true or false"):
         RecordStart.parse(
-            {"destination": "/tmp/clip.mp4", "captions": "keys", "compact": raw}
+            {"destination": "/tmp/clip.mp4", "key_captions": "non-text", "compact": raw}
         )
 
 
@@ -85,7 +96,7 @@ def start_request(tmp_path: Path) -> dict[str, object]:
     return {
         "action": "record-start",
         "destination": str(tmp_path / "clip.mp4"),
-        "captions": "keys",
+        "key_captions": "non-text",
     }
 
 

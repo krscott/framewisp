@@ -414,7 +414,11 @@ of `duration / steps` before each move. Zero duration sends one endpoint move
 without a pause. The default is 0.4 seconds. This is a straight path at a steady
 pace; it has no random variation or easing.
 
-`type --interval SECONDS TEXT` accepts characters satisfying Python's
+`key --private` and `type --private` mark a single keyboard action as private.
+The runner validates the optional `private` parameter as a boolean and accepts
+it on keyboard actions only, including batch steps (R-LOG-9).
+
+`type [--private] [--interval SECONDS] TEXT` accepts characters satisfying Python's
 `str.isprintable`, rejecting control and format characters before session access.
 For ASCII text it sends one VNC key press/release pair per character, with
 explicit pauses only between characters.
@@ -430,7 +434,7 @@ up to whole milliseconds. The subprocess timeout is fifteen seconds plus those
 intervals and wtype's 4 ms per-character key press/release time. No clipboard or
 input-method composition is involved.
 
-`key CHORD` accepts one letter, digit, ASCII punctuation symbol, or named key,
+`key [--private] CHORD` accepts one letter, digit, ASCII punctuation symbol, or named key,
 prefixed by zero or more `Ctrl+`, `Shift+`, or `Alt+` modifiers.
 Names are case-insensitive, and letter case does not imply Shift.
 Named keys are Space, Return, Tab, BackSpace, Escape,
@@ -888,22 +892,22 @@ start event to `inputs.jsonl` when the action starts executing and an end event
 after cleanup, so queue time does not extend captions. Cancelled requests that
 never start do not produce captions. Attached sessions retain CLI-owned logging. Each JSONL event carries an ID,
 `event`, monotonic `time` in seconds, `action`, `parameters`, `returncode`, and
-`error`. A `ping` event also carries the display position `x` and `y`. Session
-metadata stores `retain_input_content`, default false. The
-`run/attach --retain-input-content` option sets it once for the session. The headless
-worker owns the policy for individual and batch actions; attached command clients
-read it from metadata. Recording captions use the retained parameters from the log,
-so all clips and caption modes follow the same policy. No command or batch
-parameter overrides it.
+`error`. A `ping` event also carries the display position `x` and `y`. The
+worker and attached command clients use the same log writer. It omits typed
+text and literal keystrokes, including Shift-only printable keys and Space.
+It retains Ctrl/Alt chords and named non-printing keys. For a private keyboard
+action it keeps the privacy marker and omits the entire chord or text value.
+Keyboard failure reporting uses sanitized diagnostics in all modes. An attached
+client requires `input_caption_options: true` in the session metadata before
+sending keyboard input, so an older attachment requests a reconnect.
 
 Captions, pings, and compaction read `inputs.jsonl`, and compaction also reads
 `activity.jsonl`, all through `activity_events` in `compact.py`. A record is
 complete once its newline is written, so the reader skips only the bytes after
 the last newline, which an interrupted write leaves behind (R-LOG-7). Every line
 before that must parse, so a malformed one fails rendering (R-LOG-8, R-REC-10)
-whenever the clip needs one of those readers. The reader splits bytes on `\n`
-alone: retained text can hold characters such as U+2028 that text-mode line
-splitting would break on.
+whenever the clip needs one of those readers. The reader uses only newline
+bytes as record boundaries.
 
 Before each input event append, the writer opens `inputs.jsonl` in binary
 append/read mode and takes an exclusive flock on that descriptor. It checks the
@@ -918,15 +922,9 @@ worker. Readers hold a shared flock on their reading descriptor through the
 whole byte snapshot, so repair cannot splice old tail bytes into a new record.
 They release the lock before parsing and still ignore an unfinished trailing line.
 
-By default, type parameters omit `text` while retaining `interval` (R-LOG-1).
-Literal key chords (letters, digits, punctuation, Space, optionally Shift) omit
-the key and retain only modifiers. Ctrl/Alt shortcuts and named
-navigation/control keys retain their chord. Captions use "Type text" and "Key"
-for omitted content, with any Shift modifier as a `Shift+` prefix. Opt-in preserves full text and chords. Text/key failures
-omit backend messages that can include literal or encoded input, while
-preserving exception types, cancellation, and exit codes. Unicode subprocess
-diagnostics omit arguments and stderr by default. Tracebacks retain stack
-locations without content-bearing exception messages.
+Keyboard failure diagnostics preserve exception types, cancellation, and exit
+codes. Unicode subprocess diagnostics omit arguments and stderr. Tracebacks
+retain stack locations while omitting content-bearing exception messages.
 
 Screenshots and recordings can still show secrets displayed by apps. This policy
 does not redact screen content or guarantee app-log redaction. Shell history, batch
@@ -937,7 +935,7 @@ failures, while unexpected exceptions retain their traceback. Normal
 nonzero returns are recorded as failures. Input logging is independent of
 recording. The runner truncates the log when creating a new session.
 
-For recordings with a caption mode other than `none`, click pings, a console
+For recordings with text captions, click pings, a console
 panel, or compaction, only wf-recorder receives `WAYLAND_DEBUG=client`.
 The first screencopy `ready` event in `recorder.log` supplies the first captured
 frame's timestamp. The pinned Sway backend uses the monotonic clock, and the
@@ -949,18 +947,23 @@ in `recorder.log`. A worker thread drains the pipe throughout capture and is joi
 after recorder shutdown. Startup waits for both the MP4 header and the retained
 origin before accepting captioned input. The log is replaced for each clip.
 
-`--captions` selects input kinds for one clip, and the session's retention policy
-decides what each caption shows. `keys`, the default, selects `key` and `type`
-(R-LOG-4). `pointer` selects `move`, `click`, `drag`, and `scroll`. `all` selects
-both, and `none` selects nothing. `run` requires `--record` with `--captions`.
-One table in `captions.py` maps each mode to its actions. The input log is written before and without reference to the mode
-(R-LOG-5), and compaction reads that unfiltered log, so an uncaptioned input
-still counts as activity. The runner rejects a `captions` request value that is
-not a mode. Session metadata advertises `caption_modes: true`, and `record-start`
-requires it before connecting, so an older runner reports a restart instead of a
-confusing validation error.
+`--pointer-captions` and `--key-captions` independently select text captions
+for one clip. With neither option, there are no text captions (R-LOG-4).
+Pointer mode `all` selects `move`, `click`, `drag`, and `scroll`; `modifiers`
+selects clicks and drags with a modifier. Keyboard mode `non-text` selects
+the shortcuts and named controls kept in the log. Keyboard mode `all` also
+uses bounded caption text kept in memory for that clip, indexed by input ID.
+The input writer holds its file lock while a short caption lock coordinates
+the start timestamp with the clip's capture window. The renderer reads
+timing and outcomes from the log and filters starts against
+the first frame and stop time. Private keyboard actions are excluded at
+capture and caption selection. The input log is independent of the options
+(R-LOG-5), and compaction still counts all actions as activity.
+`run` requires `--record` with either flag. Session metadata advertises
+`input_caption_options: true` so the CLI can reject unsafe requests to an
+older runner with a restart message.
 
-After recorder finalization, `captions.py` selects commands of the clip's mode
+After recorder finalization, `captions.py` selects commands of the clip's modes
 started between that origin and the stop request. Unselected commands are
 ignored before timing is computed. Commands that began before the clip are
 excluded, even if they finish during it. Each caption spans its command, or at
@@ -978,7 +981,7 @@ around `render_recording` turns every rendering failure, including malformed log
 and an unwritable `captions.log`, into one message naming the raw video, that log,
 and `inputs.jsonl` (R-REC-10). The rendered video
 preserves GUI dimensions, exactly 30 fps, full-range color, and no audio. `record-stop`
-waits for rendering, as does normal session cleanup. With `--captions none` and
+waits for rendering, as does normal session cleanup. With neither caption flag and
 `--no-click-pings`, timestamp extraction is skipped unless a console panel or
 compaction is requested. A clip with no captions or pings to show and neither of
 those keeps the recorder's MP4 without a rendering pass, so its frame rate is only
@@ -1053,7 +1056,7 @@ commands, before it starts a session or clip. The control request's `console`
 value is absent, null, or an object with exactly `position`, `size` and
 `cell_scale`, so a position can't exist without a panel.
 Console capture uses the same first-frame monotonic origin as input captions,
-including with `--captions none`. A lock protects sidecar snapshots during rendering.
+including when text captions are off. A lock protects sidecar snapshots during rendering.
 Session metadata advertises `console_cell_scale: true`. Every `--console` request,
 including the default placement, requires this capability before connecting, because
 an older runner can't read the object. The error tells the user to restart the

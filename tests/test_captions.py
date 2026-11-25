@@ -13,15 +13,11 @@ import pytest
 
 from framewisp.actions import ACTION_FIELDS
 from framewisp.captions import (
-    CAPTION_MODES,
-    CAPTIONED_ACTIONS,
-    DEFAULT_CAPTIONS,
     KEY_ACTIONS,
     POINTER_ACTIONS,
     Caption,
-    CaptionMode,
-    InputEvent,
-    caption_text,
+    CaptionCapture,
+    CaptionOptions,
     captions_for_clip,
     capture_origin,
     filter_recorder_output,
@@ -88,26 +84,22 @@ def test_pointer_failure_keeps_exception_type(tmp_path: Path) -> None:
 def test_input_error_keeps_structured_exit_code_only() -> None:
     text = "secret (exit 123456)"
     for error in [RuntimeError(text), SessionError(text)]:
-        assert "123456" not in input_error("type", error, retain_input_content=False)
+        assert "123456" not in input_error("type", error)
     assert (
-        input_error(
-            "type", SessionError(text, returncode=7), retain_input_content=False
-        )
+        input_error("type", SessionError(text, returncode=7))
         == "SessionError: input details omitted; exit 7"
     )
     assert (
         input_error(
             "type",
             SessionError(text, input_message="Display connection failed"),
-            retain_input_content=False,
         )
         == "SessionError: Display connection failed"
     )
 
 
-# R-LOG-1
-@pytest.mark.parametrize("retain", [False, True])
-@pytest.mark.parametrize("mode", ["keys", "all"])
+# R-LOG-1, R-LOG-9
+@pytest.mark.parametrize("private", [False, True])
 @pytest.mark.parametrize(
     "failure",
     [
@@ -118,38 +110,44 @@ def test_input_error_keeps_structured_exit_code_only() -> None:
     ],
 )
 def test_content_retention_and_captions(
-    tmp_path: Path, retain: bool, mode: CaptionMode, failure: BaseException | None
+    tmp_path: Path, private: bool, failure: BaseException | None
 ) -> None:
     text = "café 日本語 😀"
+    capture = CaptionCapture()
 
     def perform() -> None:
         with log_input(
             tmp_path,
             "type",
-            {"text": text, "interval": 0.1},
-            retain_input_content=retain,
+            {"text": text, "interval": 0.1, "private": private},
+            caption_capture=capture,
         ) as result:
             if failure is not None:
                 raise failure
             result.returncode = 0
 
-    if failure is None:
-        perform()
-    else:
-        with pytest.raises(type(failure)):
+    with capture.clip(enabled=True) as literal_captions:
+        if failure is None:
             perform()
+        else:
+            with pytest.raises(type(failure)):
+                perform()
     raw = (tmp_path / "inputs.jsonl").read_text()
     events = [json.loads(line) for line in raw.splitlines()]
-    assert (text in raw) is retain
+    assert text not in raw
     assert all(event["parameters"]["interval"] == 0.1 for event in events)
     captions = captions_for_clip(
         tmp_path / "inputs.jsonl",
         origin=events[0]["time"] - 0.1,
         stopped=events[-1]["time"] + 1,
-        captions=mode,
+        captions=CaptionOptions(key="all"),
+        literal_captions=literal_captions,
     )
-    assert (text in captions[0].text) is retain
-    assert ("(failed)" in captions[0].text) is (failure is not None)
+    if private:
+        assert literal_captions == {}
+        assert captions == []
+    else:
+        assert captions[0].text == f"Type: {text}" + (" (failed)" if failure else "")
     if isinstance(failure, subprocess.CalledProcessError):
         assert "7" in events[-1]["error"]
         assert events[-1]["returncode"] == 7
@@ -181,24 +179,43 @@ def test_content_retention_and_captions(
         ("Shift+Left", True),
     ],
 )
-@pytest.mark.parametrize("retain", [False, True])
-def test_literal_key_retention(chord: str, visible: bool, retain: bool) -> None:
-    p = retained_parameters("key", {"chord": chord}, retain_input_content=retain)
-    assert ("chord" in p) is (visible or retain)
-    event: InputEvent = {
-        "id": "test",
-        "event": "start",
-        "time": 1,
-        "action": "key",
-        "parameters": p,
-        "returncode": 0,
-        "error": None,
-    }
-    assert caption_text(event) == (
-        chord
-        if visible or retain
-        else ("Shift+Key" if chord.startswith("Shift") else "Key")
+def test_literal_key_retention(chord: str, visible: bool) -> None:
+    p = retained_parameters("key", {"chord": chord})
+    assert ("chord" in p) is visible
+
+
+# R-LOG-9
+@pytest.mark.parametrize(
+    "captions", [CaptionOptions(key="all"), CaptionOptions(key="non-text")]
+)
+def test_private_key_omits_shortcut_and_caption(
+    tmp_path: Path, captions: CaptionOptions
+) -> None:
+    capture = CaptionCapture()
+    log = tmp_path / "inputs.jsonl"
+    with capture.clip(enabled=True) as literal_captions:
+        with log_input(
+            tmp_path,
+            "key",
+            {"chord": "Ctrl+a", "private": True},
+            caption_capture=capture,
+        ) as result:
+            result.returncode = 0
+        with log_input(
+            tmp_path, "key", {"chord": "Return"}, caption_capture=capture
+        ) as result:
+            result.returncode = 0
+    events = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [event["parameters"] for event in events[:2]] == [{"private": True}] * 2
+    assert events[1]["returncode"] == 0
+    entries = captions_for_clip(
+        log,
+        origin=0,
+        stopped=time.monotonic() + 1,
+        captions=captions,
+        literal_captions=literal_captions,
     )
+    assert [entry.text for entry in entries] == ["Return"]
 
 
 # Named keys that do not type a character, so `key` may log them as shortcuts.
@@ -221,9 +238,9 @@ CONTROL_KEYS = {
 
 
 # R-LOG-1
-@pytest.mark.parametrize("mode", [DEFAULT_CAPTIONS, "all"])
+@pytest.mark.parametrize("mode", [CaptionOptions(), CaptionOptions(key="non-text")])
 def test_no_literal_character_reaches_a_default_caption(
-    tmp_path: Path, mode: CaptionMode
+    tmp_path: Path, mode: CaptionOptions
 ) -> None:
     names = [name for name, symbol in KEYS.items() if symbol not in CONTROL_KEYS]
     assert {"a", "7", "space", "comma", ",", "plus", "+"} <= set(names)
@@ -246,10 +263,7 @@ def test_no_literal_character_reaches_a_default_caption(
     captions = captions_for_clip(
         log, origin=0, stopped=time.monotonic() + 1, captions=mode
     )
-    expected = [
-        "Shift+Key" if chord.lower().startswith("shift+") else "Key" for chord in chords
-    ]
-    assert [caption.text for caption in captions] == [*expected, "Type text"]
+    assert captions == []
 
 
 def input_log(path: Path, *entries: tuple[str, dict[str, object], float]) -> Path:
@@ -259,7 +273,7 @@ def input_log(path: Path, *entries: tuple[str, dict[str, object], float]) -> Pat
         "".join(
             json.dumps(
                 {
-                    "id": index,
+                    "id": str(index),
                     "action": action,
                     "parameters": parameters,
                     "event": event,
@@ -277,35 +291,31 @@ def input_log(path: Path, *entries: tuple[str, dict[str, object], float]) -> Pat
 
 
 # R-LOG-4
+MOVE = "Move (1, 2)"
+TYPE = "Type: café"
+CLICK = "left click (3, 4)"
+DRAG = "Shift+left drag (5, 6) to (7, 8)"
+KEY = "Return"
+SCROLL = "Scroll up 1 at (9, 10)"
+
+
 @pytest.mark.parametrize(
     "mode,expected",
     [
-        ("none", []),
-        ("keys", ["Type text", "Return"]),
+        (CaptionOptions(), []),
+        (CaptionOptions(key="non-text"), [KEY]),
+        (CaptionOptions(key="all"), [TYPE, KEY]),
+        (CaptionOptions(pointer="all"), [MOVE, CLICK, DRAG, SCROLL]),
+        (CaptionOptions(pointer="modifiers"), [DRAG]),
         (
-            "pointer",
-            [
-                "Move (1, 2)",
-                "left click (3, 4)",
-                "left drag (5, 6) to (7, 8)",
-                "Scroll up 1 at (9, 10)",
-            ],
+            CaptionOptions(pointer="all", key="all"),
+            [MOVE, TYPE, CLICK, DRAG, KEY, SCROLL],
         ),
-        (
-            "all",
-            [
-                "Move (1, 2)",
-                "Type text",
-                "left click (3, 4)",
-                "left drag (5, 6) to (7, 8)",
-                "Return",
-                "Scroll up 1 at (9, 10)",
-            ],
-        ),
+        (CaptionOptions(pointer="modifiers", key="non-text"), [DRAG, KEY]),
     ],
 )
 def test_caption_mode_selects_input_kinds(
-    tmp_path: Path, mode: CaptionMode, expected: list[str]
+    tmp_path: Path, mode: CaptionOptions, expected: list[str]
 ) -> None:
     log = input_log(
         tmp_path,
@@ -314,27 +324,28 @@ def test_caption_mode_selects_input_kinds(
         ("click", {"x": 3, "y": 4, "button": "left", "count": 1}, 3),
         (
             "drag",
-            {"x1": 5, "y1": 6, "x2": 7, "y2": 8, "button": "left"},
+            {
+                "x1": 5,
+                "y1": 6,
+                "x2": 7,
+                "y2": 8,
+                "button": "left",
+                "modifier": ["shift"],
+            },
             4,
         ),
         ("key", {"chord": "Return"}, 5),
         ("scroll", {"x": 9, "y": 10, "direction": "up", "steps": 1}, 6),
     )
-    captions = captions_for_clip(log, origin=0, stopped=9, captions=mode)
+    captions = captions_for_clip(
+        log, origin=0, stopped=9, captions=mode, literal_captions={"1": TYPE}
+    )
     assert [caption.text for caption in captions] == expected
-
-
-# R-LOG-4
-def test_default_captions_are_keyboard_inputs_only() -> None:
-    assert DEFAULT_CAPTIONS == "keys"
-    assert CAPTIONED_ACTIONS[DEFAULT_CAPTIONS] == {"key", "type"}
 
 
 def test_every_input_action_has_exactly_one_caption_kind() -> None:
     assert KEY_ACTIONS | POINTER_ACTIONS == set(ACTION_FIELDS)
     assert not KEY_ACTIONS & POINTER_ACTIONS
-    assert CAPTIONED_ACTIONS["all"] == set(ACTION_FIELDS)
-    assert set(CAPTIONED_ACTIONS) == set(CAPTION_MODES)
 
 
 def test_caption_ends_at_next_captioned_input_only(tmp_path: Path) -> None:
@@ -345,16 +356,24 @@ def test_caption_ends_at_next_captioned_input_only(tmp_path: Path) -> None:
         ("key", {"chord": "Tab"}, 1.5),
         ("click", {"x": 1, "y": 2, "button": "left", "count": 1}, 1.6),
     )
-    first, second = captions_for_clip(log, origin=0, stopped=9, captions="keys")
+    first, second = captions_for_clip(
+        log, origin=0, stopped=9, captions=CaptionOptions(key="non-text")
+    )
     assert first.end == pytest.approx(1.5)
     assert second.end == pytest.approx(2.3)
-    assert captions_for_clip(log, origin=0, stopped=9, captions="all")[0].end == 1.1
+    assert (
+        captions_for_clip(
+            log, origin=0, stopped=9, captions=CaptionOptions(pointer="all", key="all")
+        )[0].end
+        == 1.1
+    )
 
 
 def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     tmp_path: Path,
 ) -> None:
     events: list[dict[str, object]] = []
+    literal_captions: dict[str, str] = {}
     for identifier, start, end, text in [
         ("setup", 9.0, 10.5, "not in clip"),
         ("paced", 10.2, 12.2, "café 日本語 😀"),
@@ -364,16 +383,23 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
         entry: dict[str, object] = dict(
             id=identifier,
             action="type",
-            parameters={"text": text},
+            parameters={"interval": 0},
             returncode=None,
             error=None,
         )
+        literal_captions[identifier] = f"Type: {text}"
         events.append(entry | {"event": "start", "time": start})
         if end is not None:
             events.append(entry | {"event": "end", "time": end, "returncode": 0})
     log = tmp_path / "inputs.jsonl"
     log.write_text("".join(json.dumps(event) + "\n" for event in events))
-    captions = captions_for_clip(log, origin=10.0, stopped=14.0, captions="keys")
+    captions = captions_for_clip(
+        log,
+        origin=10.0,
+        stopped=14.0,
+        captions=CaptionOptions(key="all"),
+        literal_captions=literal_captions,
+    )
     assert len(captions) == 2
     assert captions[0].start == pytest.approx(0.2)
     assert captions[0].end == pytest.approx(2.2)
@@ -381,7 +407,16 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     assert captions[1].start == pytest.approx(3.8)
     assert captions[1].end == 4.0
     assert captions[1].text == "Type: still typing"
-    assert captions_for_clip(log, origin=17.0, stopped=20.0, captions="keys") == []
+    assert (
+        captions_for_clip(
+            log,
+            origin=17.0,
+            stopped=20.0,
+            captions=CaptionOptions(key="all"),
+            literal_captions=literal_captions,
+        )
+        == []
+    )
 
 
 # R-LOG-7
@@ -389,18 +424,20 @@ def test_clip_excludes_setup_and_keeps_paced_and_unfinished_actions(
     "unfinished",
     [
         b'{"id": "next", "event": "st',
-        # The write stopped after the first byte of a retained "é".
+        # The write stopped after the first byte of a UTF-8 character.
         b'{"id": "next", "event": "start", "parameters": {"text": "caf\xc3',
         # Only the newline is missing, so the record is still unfinished.
         b'{"id": "next", "event": "start", "time": 2.0}',
     ],
 )
 def test_unfinished_last_line_is_ignored(tmp_path: Path, unfinished: bytes) -> None:
-    log = input_log(tmp_path, ("type", {}, 1.0))
+    log = input_log(tmp_path, ("key", {"chord": "Return"}, 1.0))
     with log.open("ab") as output:
         output.write(unfinished)
-    captions = captions_for_clip(log, origin=0, stopped=5, captions="keys")
-    assert captions == [Caption(1.0, 1.8, "Type text")]
+    captions = captions_for_clip(
+        log, origin=0, stopped=5, captions=CaptionOptions(key="non-text")
+    )
+    assert captions == [Caption(1.0, 1.8, "Return")]
 
 
 # R-LOG-7, R-LOG-8
@@ -443,6 +480,7 @@ def test_append_waits_for_live_writer_before_repairing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     log = tmp_path / "inputs.jsonl"
+    capture = CaptionCapture()
     waiting = Event()
     flock = fcntl.flock
 
@@ -459,10 +497,15 @@ def test_append_waits_for_live_writer_before_repairing(
     monkeypatch.setattr(fcntl, "flock", acquire)
 
     def append() -> None:
-        with log_input(tmp_path, "key", {"chord": "Ctrl+s"}) as result:
+        with log_input(
+            tmp_path, "key", {"chord": "s"}, caption_capture=capture
+        ) as result:
             result.returncode = 0
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with (
+        ThreadPoolExecutor(max_workers=2) as executor,
+        capture.clip(enabled=True) as literal_captions,
+    ):
         with log.open("ab") as live:
             flock(live, fcntl.LOCK_EX)
             fragment = b'{"id":"live","event":"start","time":1'
@@ -472,14 +515,17 @@ def test_append_waits_for_live_writer_before_repairing(
             try:
                 assert waiting.wait(timeout=5), "Appender did not contend on the lock"
                 assert log.read_bytes() == fragment
+                stopped = executor.submit(capture.stop).result(timeout=5)
             finally:
                 live.write(b"}\n")
                 # Close flushes the complete live record before releasing flock.
         task.result(timeout=5)
+        assert literal_captions == {}
     monkeypatch.setattr(fcntl, "flock", flock)
     events = activity_events(log)
     assert events[0]["id"] == "live"
     assert [event["event"] for event in events[1:]] == ["start", "end"]
+    assert events[1]["time"] >= stopped
 
 
 # R-LOG-7, R-LOG-8
@@ -525,21 +571,40 @@ def test_reader_snapshot_excludes_concurrent_tail_repair(
     assert [event["event"] for event in events[1:]] == ["start", "end"]
 
 
-def test_retained_line_separator_stays_inside_its_record(tmp_path: Path) -> None:
-    with log_input(
-        tmp_path,
-        "type",
-        {"text": "one\u2028two\x85three", "interval": 0},
-        retain_input_content=True,
-    ) as result:
-        result.returncode = 0
-    captions = captions_for_clip(
-        tmp_path / "inputs.jsonl",
-        origin=0,
-        stopped=time.monotonic() + 1,
-        captions="keys",
-    )
-    assert [caption.text for caption in captions] == ["Type: one\u2028two\x85three"]
+def test_literal_caption_content_stays_in_its_clip(tmp_path: Path) -> None:
+    capture = CaptionCapture()
+    log = tmp_path / "inputs.jsonl"
+    with capture.clip(enabled=True) as first:
+        with log_input(
+            tmp_path,
+            "type",
+            {"text": "café 日本語 😀", "interval": 0},
+            caption_capture=capture,
+        ) as result:
+            result.returncode = 0
+        with log_input(
+            tmp_path, "key", {"chord": "Shift+a"}, caption_capture=capture
+        ) as result:
+            result.returncode = 0
+        stopped = capture.stop()
+        with log_input(tmp_path, "key", {"chord": "7"}, caption_capture=capture):
+            pass
+    with capture.clip(enabled=True) as second:
+        with log_input(tmp_path, "key", {"chord": "Space"}, caption_capture=capture):
+            pass
+    assert list(first.values()) == ["Type: café 日本語 😀", "Shift+a"]
+    assert list(second.values()) == ["Space"]
+    assert [
+        entry.text
+        for entry in captions_for_clip(
+            log,
+            origin=0,
+            stopped=stopped,
+            captions=CaptionOptions(key="all"),
+            literal_captions=first,
+        )
+    ] == ["Type: café 日本語 😀", "Shift+a"]
+    assert "café" not in log.read_text()
 
 
 def test_caption_text_cannot_inject_ass_formatting() -> None:

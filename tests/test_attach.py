@@ -206,6 +206,22 @@ def test_stale_attach_socket(
     assert "disconnected" in capsys.readouterr().err
 
 
+def test_keyboard_input_requires_current_attachment_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "session.json").write_text(
+        json.dumps(
+            {
+                "kind": "attached",
+                "runtime_directory": str(tmp_path),
+                "attachment": "old",
+            }
+        )
+    )
+    assert request_attached(tmp_path, "key", {"chord": "Return", "private": True}) == 1
+    assert "older keyboard input policy" in capsys.readouterr().err
+
+
 _SERVER = """
 import os
 import sys
@@ -294,7 +310,7 @@ if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     raise SystemExit(attach.attach_session(root / 'session'))
-raise SystemExit(attach.run_attachment(root / 'session', None, retain_input_content=(root / 'retain').exists(), teaching=lesson))
+raise SystemExit(attach.run_attachment(root / 'session', None, teaching=lesson))
 """
 
 
@@ -416,8 +432,6 @@ def test_attach_refuses_desktop_directory_of_another_user(
 def attach_process(
     tmp_path: Path, request: pytest.FixtureRequest
 ) -> Iterator[subprocess.Popen[str]]:
-    if getattr(request, "param", False) is True:
-        (tmp_path / "retain").touch()
     if getattr(request, "param", None) == "teaching":
         (tmp_path / "teach").touch()
     process = subprocess.Popen(
@@ -435,7 +449,7 @@ def attach_process(
         process.wait(timeout=5)
 
 
-@pytest.mark.parametrize("attach_process", [False, True], indirect=True)
+# R-LOG-1, R-LOG-9
 def test_attached_cli_input_retention(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
@@ -444,11 +458,11 @@ def test_attached_cli_input_retention(
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
     session = tmp_path / "session"
-    retain = json.loads((session / "session.json").read_text())["retain_input_content"]
     for arguments in [
         ("type", "--interval", "0", "café 日本語 😀"),
         ("key", "Shift+a"),
         ("key", "Ctrl+a"),
+        ("key", "--private", "Ctrl+Shift+a"),
     ]:
         result = subprocess.run(
             [sys.executable, "-m", "framewisp", str(session), *arguments],
@@ -459,8 +473,10 @@ def test_attached_cli_input_retention(
         assert result.returncode == 0, result.stderr
     raw = (session / "inputs.jsonl").read_text()
     events = [json.loads(line) for line in raw.splitlines()]
-    assert ("café 日本語 😀" in raw) is retain
-    assert ("Shift+a" in raw) is retain
+    assert "café 日本語 😀" not in raw
+    assert "Shift+a" not in raw
+    assert "Ctrl+Shift+a" not in raw
+    assert events[-1]["parameters"] == {"private": True}
     assert "Ctrl+a" in raw
     assert all(event["returncode"] == 0 for event in events if event["event"] == "end")
     (tmp_path / "fail").touch()
@@ -472,7 +488,7 @@ def test_attached_cli_input_retention(
     )
     assert result.returncode == 1
     raw = (session / "inputs.jsonl").read_text()
-    assert ('"text": "secret"' in raw) is retain
+    assert "secret" not in raw
     assert attach_process.wait(timeout=5) == 1
 
 

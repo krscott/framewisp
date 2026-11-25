@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.captions import CaptionMode, render_recording
+from framewisp.captions import CaptionOptions, render_recording
 from framewisp.compact import (
     activity_events,
     compact_filter,
@@ -239,7 +239,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         origin=100,
         stopped=109,
         log=tmp_path / "render.log",
-        captions="keys" if overlays else "none",
+        captions=CaptionOptions(key="non-text" if overlays else None),
         console=ConsoleCapture(tmp_path),
         compact=True,
         layout=clip_layout(overlays),
@@ -286,10 +286,10 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
 @pytest.mark.parametrize(
     "captions,pointer_shown,key_shown",
     [
-        ("none", False, False),
-        ("keys", False, True),
-        ("pointer", True, False),
-        ("all", True, True),
+        (CaptionOptions(), False, False),
+        (CaptionOptions(key="non-text"), False, True),
+        (CaptionOptions(pointer="all"), True, False),
+        (CaptionOptions(pointer="all", key="non-text"), True, True),
     ],
 )
 @pytest.mark.parametrize("console", [False, True])
@@ -297,7 +297,7 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
     logs: tuple[Path, Path],
     tmp_path: Path,
     raw_video: Path,
-    captions: CaptionMode,
+    captions: CaptionOptions,
     pointer_shown: bool,
     key_shown: bool,
     console: bool,

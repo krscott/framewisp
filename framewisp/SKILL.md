@@ -126,7 +126,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | --- | --- |
 | `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory, with silent video and sampled PNGs. User starts it interactively; observation only. |
 | `teach-note TEXT` | Add an explanation to the active teaching session. |
-| `run [--retain-input-content] [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, `--captions`, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
+| `run [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, the caption flags, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
@@ -134,13 +134,13 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
 | `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration while holding the button: 0.4 seconds. |
 | `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
-| `type [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
-| `key CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
-| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
+| `type [--private] [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
+| `key [--private] CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
-| `attach [--retain-input-content]` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the attachment instructions below. |
+| `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the attachment instructions below. |
 
 Standalone commands take no SESSION: `framewisp --detach` stops the active
 desktop attachment, leaving the user's apps running; `framewisp --agent-skill`
@@ -507,24 +507,25 @@ finalized, so don't poll for it during recording. Framewisp records to a hidden
 writable and support hard links. If another file takes the output path first,
 framewisp leaves that file alone, ends the session with an error, and names the
 kept clip. After a killed runner, `recover` prints the interrupted clip's path as
-`interrupted_recording`. `--captions` selects what each clip captions: `keys`
-(`key` and `type`, the default), `pointer` (`move`, `click`, `drag`, and `scroll`),
-`all`, or `none`. Use `--captions all` to show pointer gestures. A red ring also
-marks each click and drag press, and a translucent disc follows each completed
-drag while its button is held, whatever the caption mode; `--no-click-pings`
-disables both for that clip. Pings appear only in recordings, not
-in screenshots or `inspect`. Wait about 0.5 seconds after a final click before
-`record-stop`, or its ring is cut short. Every input is
-still logged to `SESSION/inputs.jsonl`. Logs and captions omit typed text (including Unicode) and
-literal key events by default. Letter/digit/punctuation/Space keys with Shift alone are omitted;
-Ctrl/Alt shortcuts and named keys such as Return and arrows remain visible.
-Start `run` or user-owned `attach` with `--retain-input-content` only when full
-input retention is intended. That session-wide opt-in applies to individual inputs,
-batches, and every clip; `--captions` does not change logging policy.
-Input failure details can be omitted to avoid retaining text or encoded keys.
-Screenshots and recordings can still show secrets displayed by apps. This policy
-does not redact screens, app logs, shell history, batch files, or runtime input state.
-Review artifacts before sharing. Caption rendering adds time to stopping.
+`interrupted_recording`. Text captions are off by default. For a clip that needs
+them, use `--pointer-captions modifiers` for shortcuts such as Ctrl+Click or
+`--pointer-captions all` for every pointer action. Use `--key-captions non-text`
+for Ctrl/Alt shortcuts and named controls such as Return and arrows. Use
+`--key-captions all` when the clip should show literal keystrokes and typed text.
+The two flags can be combined.
+
+Use `type --private` or `key --private` on individual inputs whose values should
+be omitted from captions and input logs. For a batch, set `"private": true` on
+the keyboard step. Logs always omit literal input, including Unicode text and
+Shift-only printable keystrokes. Private actions also omit otherwise logged
+shortcuts and named keys. Review artifacts before sharing because apps can
+display or log the original input.
+
+A red ring marks each click and drag press, and a translucent disc follows each
+completed drag while its button is held. `--no-click-pings` disables both for the
+clip. Pings appear only in recordings. Wait about 0.5 seconds after a final
+click before `record-stop` to preserve the full ring animation. Rendering adds
+time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 `duration_seconds` is `null` for a clip with no measurable duration, and `width`
@@ -538,7 +539,7 @@ between commands during finalization. Each input keeps its full duration plus
 External sleeps can be cut. Delayed app responses, animations, and output in
 removed gaps can be omitted; use a batch wait or leave compaction off when those
 matter. Captions, click pings, and console output stay aligned with retained GUI
-frames; console timestamps keep original clip time. Compaction is per clip, works with `--captions` and `--console`, and leaves logs unchanged.
+frames; console timestamps keep original clip time. Compaction is per clip, works with captions and `--console`, and leaves logs unchanged.
 Timestamp-only check/capture spans live in `SESSION/activity.jsonl` without
 conditions or error text. The summary reports the compacted video's duration.
 
@@ -563,8 +564,7 @@ receives output, so buffered output can appear late. Output from separately
 activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the panel. Console text follows the app-log policy,
-so the input-content policy does not redact it. Every `--captions` value permits the
-console panel. Rendering waits until clip finalization; a failure preserves the
+so the input-content policy does not redact it. Rendering waits until clip finalization; a failure preserves the
 raw GUI video, reports `captions.log`, and stops the session.
 
 ## Share evidence on GitHub

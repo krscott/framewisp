@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.captions import CaptionMode, render_recording
+from framewisp.captions import CaptionOptions, render_recording
 from framewisp.console import ConsoleCapture, console_frames
 from framewisp.layout import (
     CONSOLE_POSITIONS,
@@ -120,7 +120,7 @@ def ink_box(
     return ImageChops.subtract(mask, Image.new("L", mask.size, TOLERANCE)).getbbox()
 
 
-def caption_events(text: str) -> str:
+def caption_events() -> str:
     return "".join(
         json.dumps(
             {
@@ -128,7 +128,7 @@ def caption_events(text: str) -> str:
                 "event": event,
                 "time": 10 + stamp,
                 "action": "type",
-                "parameters": {"text": text},
+                "parameters": {"interval": 0},
                 "returncode": 0,
                 "error": None,
             }
@@ -144,14 +144,14 @@ def render(
     layout: VideoLayout,
     *,
     display: tuple[int, int] = GUI_SIZE,
-    captions: CaptionMode = "none",
+    captions: CaptionOptions = CaptionOptions(),
     caption: str = "",
 ) -> Image.Image:
     """Render a two-second still clip and return a frame from while a caption shows."""
     video = tmp_path / f"{name}.mp4"
     source_video(video, display)
     inputs = tmp_path / f"{name}.jsonl"
-    inputs.write_text(caption_events(caption) if caption else "")
+    inputs.write_text(caption_events() if caption else "")
     console = tmp_path / "console.jsonl"
     if not console.exists():
         console.write_text("")
@@ -162,6 +162,7 @@ def render(
         stopped=12,
         log=tmp_path / "captions.log",
         captions=captions,
+        literal_captions={"typed": f"Type: {caption}"} if caption else None,
         click_pings=False,
         console=ConsoleCapture(tmp_path),
         layout=layout,
@@ -439,7 +440,13 @@ def test_caption_stays_centred_on_the_gui(
 ) -> None:
     layout = panel_layout(GUI_SIZE, position, pixels)
     assert layout.panel is not None
-    video = render(tmp_path, "captioned", layout, captions="keys", caption="centred")
+    video = render(
+        tmp_path,
+        "captioned",
+        layout,
+        captions=CaptionOptions(key="all"),
+        caption="centred",
+    )
     bare = render(tmp_path, "bare", layout)
     box = ink_box(crop(video, layout.gui), crop(bare, layout.gui))
     assert box is not None
@@ -456,9 +463,21 @@ def test_panel_height_does_not_resize_a_caption(
 ) -> None:
     layout = panel_layout(GUI_SIZE, position, 640)
     plain = plain_layout(GUI_SIZE)
-    video = render(tmp_path, "panel", layout, captions="keys", caption="same size")
+    video = render(
+        tmp_path,
+        "panel",
+        layout,
+        captions=CaptionOptions(key="all"),
+        caption="same size",
+    )
     bare = render(tmp_path, "bare", layout)
-    alone = render(tmp_path, "alone", plain, captions="keys", caption="same size")
+    alone = render(
+        tmp_path,
+        "alone",
+        plain,
+        captions=CaptionOptions(key="all"),
+        caption="same size",
+    )
     reference = render(tmp_path, "reference", plain)
     box = ink_box(crop(video, layout.gui), crop(bare, layout.gui))
     expected = ink_box(alone, reference)
@@ -483,7 +502,7 @@ def test_wide_caption_never_reaches_the_panel(
         "captioned",
         layout,
         display=display,
-        captions="keys",
+        captions=CaptionOptions(key="all"),
         caption="W" * 70,
     )
     bare = render(tmp_path, "bare", layout, display=display)
@@ -497,10 +516,15 @@ def test_wide_caption_never_reaches_the_panel(
 # R-REC-14, R-REC-15
 @pytest.mark.parametrize(
     ("position", "captions"),
-    [("left", "none"), ("right", "keys"), ("top", "pointer"), ("bottom", "all")],
+    [
+        ("left", CaptionOptions()),
+        ("right", CaptionOptions(key="all")),
+        ("top", CaptionOptions(pointer="all")),
+        ("bottom", CaptionOptions(pointer="modifiers", key="all")),
+    ],
 )
 def test_every_caption_mode_keeps_the_panel_and_gui(
-    tmp_path: Path, position: ConsolePosition, captions: CaptionMode
+    tmp_path: Path, position: ConsolePosition, captions: CaptionOptions
 ) -> None:
     (tmp_path / "console.jsonl").write_text(
         json.dumps({"time": 10.1, "text": "panel output\n"}) + "\n"
@@ -510,7 +534,7 @@ def test_every_caption_mode_keeps_the_panel_and_gui(
     video = render(tmp_path, "mode", layout, captions=captions, caption="typed")
     bare = render(tmp_path, "bare", layout)
     shown = ink_box(crop(video, layout.gui), crop(bare, layout.gui)) is not None
-    assert shown is (captions in {"keys", "all"})
+    assert shown is (captions.key == "all")
     assert difference(crop(video, layout.panel), crop(bare, layout.panel)) <= TOLERANCE
     panel = crop(video, layout.panel)
     output = ink_box(panel, Image.new("RGB", panel.size, PANEL_COLOUR))

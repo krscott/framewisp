@@ -15,7 +15,7 @@ from typing import Protocol, cast
 
 from framewisp.actions import InputAction
 from framewisp.batch import Batch
-from framewisp.captions import input_error, log_input
+from framewisp.captions import KEY_ACTIONS, CaptionCapture, input_error, log_input
 from framewisp.checks import Check, perform_check
 from framewisp.compact import log_activity
 from framewisp.connection import reply
@@ -49,7 +49,7 @@ class InputWorker:
         x11: bool,
         size: tuple[int, int],
         capture: Callable[[Path, Callable[[], bool]], int],
-        retain_input_content: bool = False,
+        caption_capture: CaptionCapture | None = None,
     ):
         self.session = session
         self.client = client
@@ -59,7 +59,7 @@ class InputWorker:
         self.pointer_primed = False
         self.pointer_position: tuple[int, int] | None = None
         self.capture = capture
-        self.retain_input_content = retain_input_content
+        self.caption_capture = caption_capture
         self.failure: str | None = None
         self.queue: Queue[tuple[socket.socket, InputAction | Batch]] = Queue(maxsize=32)
         self.thread = Thread(target=self.run, name="headless-input")
@@ -99,7 +99,6 @@ class InputWorker:
                     error = input_error(
                         "batch" if isinstance(action, Batch) else action.action,
                         failure,
-                        retain_input_content=self.retain_input_content,
                     )
                 except Exception as failure:
                     # An uncertain transport failure must never replay input or
@@ -109,7 +108,6 @@ class InputWorker:
                     detail = input_error(
                         "batch" if isinstance(action, Batch) else action.action,
                         failure,
-                        retain_input_content=self.retain_input_content,
                     )
                     traceback.print_exception(
                         RuntimeError(detail).with_traceback(failure.__traceback__)
@@ -199,20 +197,13 @@ class InputWorker:
                     else:
                         self.perform(connection, action)
                 except Exception as error:
-                    detail = input_error(
-                        action.action,
-                        error,
-                        retain_input_content=self.retain_input_content,
-                    )
+                    detail = input_error(action.action, error)
                     result.update(status="failed", error=detail)
                     data.update(
                         failed_index=index,
                         failed_phase="check" if isinstance(action, Check) else "action",
                     )
-                    if (
-                        action.action in {"type", "key"}
-                        and not self.retain_input_content
-                    ):
+                    if action.action in KEY_ACTIONS:
                         if isinstance(error, InterruptedError):
                             raise InterruptedError(detail) from None
                         if isinstance(error, SessionError):
@@ -301,7 +292,7 @@ class InputWorker:
             self.session,
             action.action,
             p,
-            retain_input_content=self.retain_input_content,
+            caption_capture=self.caption_capture,
         ) as logged:
 
             def ping() -> None:

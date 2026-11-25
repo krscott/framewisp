@@ -198,7 +198,7 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
 
 def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps({"control_protocol": 1, "caption_modes": True})
+        json.dumps({"control_protocol": 1, "input_caption_options": True})
     )
     result = subprocess.run(
         [
@@ -226,7 +226,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
 ) -> None:
     state: dict[str, object] = {
         "control_protocol": 1,
-        "caption_modes": True,
+        "input_caption_options": True,
         "console_recording": True,
     }
     if capability is not None:
@@ -285,7 +285,7 @@ def test_record_start_sends_console_only_for_a_panel(
             json.dumps(
                 {
                     "control_protocol": 1,
-                    "caption_modes": True,
+                    "input_caption_options": True,
                     "click_pings_recording": True,
                     "console_cell_scale": True,
                     "runtime_directory": directory,
@@ -313,7 +313,7 @@ def test_default_clip_rejects_runner_without_click_pings(
 ) -> None:
     state: dict[str, object] = {
         "control_protocol": 1,
-        "caption_modes": True,
+        "input_caption_options": True,
         "runtime_directory": str(tmp_path),
     }
     if capability is not None:
@@ -350,32 +350,34 @@ def test_default_clip_rejects_runner_without_click_pings(
 
 
 @pytest.mark.parametrize("capability", [None, False, 1])
+@pytest.mark.parametrize(
+    "arguments", [("record-start", "clip.mp4"), ("key", "--private", "Return")]
+)
 def test_caption_modes_reject_unsupported_runner_before_connecting(
-    tmp_path: Path, capability: object
+    tmp_path: Path, capability: object, arguments: tuple[str, ...]
 ) -> None:
-    state: dict[str, object] = {"control_protocol": 1}
+    state: dict[str, object] = {"control_protocol": 1, "persistent_input": True}
     if capability is not None:
-        state["caption_modes"] = capability
+        state["input_caption_options"] = capability
     (tmp_path / "session.json").write_text(json.dumps(state))
-    destination = tmp_path / "clip.mp4"
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "framewisp",
             str(tmp_path),
-            "record-start",
-            str(destination),
+            *arguments,
         ],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
         timeout=5,
     )
     assert result.returncode == 1
-    assert "does not support caption modes. Restart the session" in result.stderr
+    assert "caption modes or private input. Restart the session" in result.stderr
     assert "Traceback" not in result.stderr
-    assert not destination.exists()
+    assert not (tmp_path / "clip.mp4").exists()
 
 
 def test_run_no_click_pings_requires_record(tmp_path: Path) -> None:
@@ -400,8 +402,8 @@ def test_run_no_click_pings_requires_record(tmp_path: Path) -> None:
     assert not (tmp_path / "session").exists()
 
 
-@pytest.mark.parametrize("mode", ["all", "none"])
-def test_run_captions_requires_record(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("flag", ["--pointer-captions", "--key-captions"])
+def test_run_captions_requires_record(tmp_path: Path, flag: str) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -409,8 +411,8 @@ def test_run_captions_requires_record(tmp_path: Path, mode: str) -> None:
             "framewisp",
             str(tmp_path / "session"),
             "run",
-            "--captions",
-            mode,
+            flag,
+            "all",
             "--",
             "framewisp-demo",
         ],
@@ -420,17 +422,18 @@ def test_run_captions_requires_record(tmp_path: Path, mode: str) -> None:
         timeout=5,
     )
     assert result.returncode == 2
-    assert "--captions requires --record" in result.stderr
+    assert "--key-captions require --record" in result.stderr
     assert not (tmp_path / "session").exists()
 
 
 @pytest.mark.parametrize("action", ["run", "record-start"])
-def test_captions_rejects_unknown_mode(tmp_path: Path, action: str) -> None:
+@pytest.mark.parametrize("flag", ["--pointer-captions", "--key-captions"])
+def test_captions_rejects_unknown_mode(tmp_path: Path, action: str, flag: str) -> None:
     destination = tmp_path / "clip.mp4"
     arguments = (
-        ["--record", str(destination), "--captions", "mouse", "--", "framewisp-demo"]
+        ["--record", str(destination), flag, "mouse", "--", "framewisp-demo"]
         if action == "run"
-        else ["--captions", "mouse", str(destination)]
+        else [flag, "mouse", str(destination)]
     )
     result = subprocess.run(
         [
@@ -542,6 +545,29 @@ def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "--delay" in result.stderr
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("flag", ["--key-captions", "--pointer-captions"])
+def test_record_start_requires_an_explicit_caption_mode(
+    tmp_path: Path, flag: str
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path),
+            "record-start",
+            str(tmp_path / "clip.mp4"),
+            flag,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2
+    assert "expected one argument" in result.stderr
 
 
 # R-REC-1

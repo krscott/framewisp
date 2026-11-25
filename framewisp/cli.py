@@ -8,7 +8,7 @@ from pathlib import Path
 
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import CAPTION_MODES, DEFAULT_CAPTIONS, log_input
+from framewisp.captions import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions, log_input
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import request_attached
 from framewisp.desktop import detach_desktop
@@ -134,7 +134,7 @@ def main() -> None:
         help="JSON file with actions and optional capture",
     )
 
-    attach = commands.add_parser(
+    commands.add_parser(
         "attach", help="share an existing desktop through its permission dialog"
     )
     teach = commands.add_parser(
@@ -152,12 +152,6 @@ def main() -> None:
     run = commands.add_parser(
         "run", help="run an app until it exits or you interrupt it"
     )
-    for session_parser in (run, attach):
-        session_parser.add_argument(
-            "--retain-input-content",
-            action="store_true",
-            help="retain typed text and literal keys in input logs and captions for this entire session (default: omit); screen content is never redacted",
-        )
     run.add_argument(
         "--x11", action="store_true", help="run the app on a private Xwayland display"
     )
@@ -218,11 +212,15 @@ def main() -> None:
             metavar="FACTOR",
             help="assume each console text cell is FACTOR times the console font's cell, so fewer rows and columns fit; raise it, e.g. to 1.1, for scripts such as Thai or Devanagari that draw larger (default: 1; requires --console)",
         )
-        # None marks "not given", so run can require --record for it.
         recording_parser.add_argument(
-            "--captions",
-            choices=CAPTION_MODES,
-            help=f"inputs to caption: keys (key, type), pointer (move, click, drag, scroll), all, or none (default: {DEFAULT_CAPTIONS}; input logging stays enabled)",
+            "--pointer-captions",
+            choices=POINTER_CAPTIONS,
+            help="caption all pointer actions or only modified clicks and drags",
+        )
+        recording_parser.add_argument(
+            "--key-captions",
+            choices=KEY_CAPTIONS,
+            help="caption all keyboard input (including typed text) or only shortcuts and named non-printing keys",
         )
         recording_parser.add_argument(
             "--no-click-pings",
@@ -356,6 +354,13 @@ def main() -> None:
         metavar="CHORD",
         help="for example: Return, Ctrl+a, Ctrl+comma, Ctrl+Shift+z",
     )
+    for keyboard_parser in (typing, key):
+        keyboard_parser.add_argument(
+            "--private",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="omit this input's caption and log value",
+        )
 
     args = parser.parse_args()
     if getattr(args, "agent_skill", False):
@@ -417,11 +422,14 @@ def main() -> None:
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
     if args.action in {"run", "record-start"}:
-        if args.action == "run" and args.captions and args.record is None:
+        args.captions = CaptionOptions(
+            pointer=args.pointer_captions, key=args.key_captions
+        )
+        if args.action == "run" and args.captions.enabled and args.record is None:
             parser.error(
-                "--captions requires --record; use record-start for later clips"
+                "--pointer-captions and --key-captions require --record; "
+                "use record-start for later clips"
             )
-        args.captions = args.captions or DEFAULT_CAPTIONS
         placed = (
             args.console_position is not None
             or args.console_size is not None
@@ -530,9 +538,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 session, teaching=Teaching(args.directory, args.goal)
             )
         else:
-            result = attach_session(
-                session, retain_input_content=args.retain_input_content
-            )
+            result = attach_session(session)
     elif args.action == "teach-note":
         if not attached:
             raise SessionError(
@@ -555,7 +561,6 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             compact=args.compact,
             size=(args.width, args.height),
             x11=args.x11,
-            retain_input_content=args.retain_input_content,
             real_env=args.real_env,
         )
     elif args.action in {"record-start", "record-stop", "status", "stop"}:
@@ -570,7 +575,7 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 session,
                 args.action,
                 args.path if args.action == "record-start" else None,
-                captions=getattr(args, "captions", DEFAULT_CAPTIONS),
+                captions=getattr(args, "captions", CaptionOptions()),
                 click_pings=not getattr(args, "no_click_pings", False),
                 console=getattr(args, "console_panel", None),
                 compact=getattr(args, "compact", False),
@@ -605,18 +610,11 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
         parameters = {
             key: value
             for key, value in vars(args).items()
-            if key not in {"session", "action"}
+            if key not in {"session", "action", "detach"}
         }
         if attached:
             parameters.pop("move_duration", None)
-        if attached:
-            state = json.loads((session / "session.json").read_text())
-            with log_input(
-                session,
-                args.action,
-                parameters,
-                retain_input_content=state.get("retain_input_content") is True,
-            ) as action:
+            with log_input(session, args.action, parameters) as action:
                 result = request_attached(session, args.action, parameters)
                 action.returncode = result
         else:
