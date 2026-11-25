@@ -57,10 +57,9 @@ _Avoid_: X11 mode; backend for the processes that provide the display, or for
 the kind of session
 
 **Session command**:
-A CLI command that asks something of a live session, such as a click, a
-screenshot, or a stop. The commands that start a session or recover its
-directory are not session commands.
-_Avoid_: control request, action (for the name of a session command)
+A CLI command that asks something of the live session in the session directory
+it names, such as a click, a screenshot, or a stop.
+_Avoid_: control request
 
 ### Desktop sharing
 
@@ -113,8 +112,9 @@ Querying the app's controls in a headless session. Each query yields one
 observation.
 
 **Observation**:
-The result of one inspection query: its status and the controls that matched.
-Only a complete observation shows that the app exposes no matching control.
+The result of one inspection query: the controls that matched and a status.
+An empty observation shows that the app exposes no matching control only when
+its status is complete.
 _Avoid_: snapshot, response; observation for a check's limits or a lesson's
 frames
 
@@ -169,8 +169,8 @@ not an overlay.
 _Avoid_: console, panel
 
 **Compaction**:
-Trimming idle gaps from a clip. Actions, checks, and batch screenshots are kept
-whole.
+Trimming from a clip the idle gaps between actions, checks, and batch
+screenshots.
 
 ### Teaching
 
@@ -181,8 +181,7 @@ _Avoid_: demonstration, bundle, teaching recording, evidence
 
 **Frame**:
 One still of the display that a teaching session sampled and saved in a lesson.
-Elsewhere, "frame" keeps its usual meaning of one image in a video or capture
-stream.
+Elsewhere, "frame" keeps its usual video meaning.
 _Avoid_: observation, image
 
 ### Lifetime
@@ -192,8 +191,8 @@ The foreground process whose lifetime is the session.
 _Avoid_: owner, attach process, lifetime owner
 
 **Managed process**:
-A process of a headless session that must not outlive it, such as the app or a
-process that provides its display.
+A process that a headless session starts and is responsible for ending, such
+as the app or a process that provides its display.
 
 **Supervisor**:
 A helper that ends one managed process and all its descendants, even when the
@@ -201,13 +200,11 @@ runner has died.
 _Avoid_: subreaper (as its name), owner
 
 **Runtime directory**:
-A headless session's private temporary directory, removed by a normal stop or
-by recovery.
+A headless session's private temporary directory.
 _Avoid_: runtime (alone)
 
 **Session metadata**:
-The description of a live session that a session command reads to reach it. A
-normal stop removes it.
+The description of a live session that a session command reads to reach it.
 _Avoid_: state, session JSON
 
 **Session lock**:

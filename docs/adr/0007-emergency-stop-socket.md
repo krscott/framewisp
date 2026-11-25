@@ -1,9 +1,9 @@
 # The emergency stop has its own socket and takes a process handle from the kernel
 
-`framewisp --detach` ends a desktop share even when its runner is suspended or
-unresponsive. It connects to a socket that is separate from the command socket,
-checks that the peer is the same user, takes a pidfd for the runner with
-`SO_PEERPIDFD`, signals it, and waits for it to exit. A stop sent over the
+`framewisp --detach` must work when the runner of a desktop share is suspended
+or unresponsive. It connects to a socket that is separate from the command
+socket, checks that the peer is the same user, takes a pidfd for the runner
+with `SO_PEERPIDFD`, signals it, and waits for it to exit. A stop sent over the
 command socket was rejected because it can queue behind blocked workers or a
 stopped process. A PID read from a file was rejected because PIDs are reused.
 

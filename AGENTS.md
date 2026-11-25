@@ -105,7 +105,8 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 
 ## Command protocol
 
-A newer CLI must fail clearly when a session's older runner cannot do exactly
-what a session command asks. The runner advertises what it supports in session
-metadata (`session.json`), and the CLI checks that before it relies on anything
-newer. A session command that the older runner already rejects needs no check.
+When a change lets a newer CLI ask for something that a session's older runner
+would accept but not do, make the CLI refuse clearly: the runner advertises the
+feature in session metadata (`session.json`), and the CLI checks that before it
+relies on it. A session command that the older runner already rejects needs no
+check.

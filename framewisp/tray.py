@@ -57,7 +57,7 @@ def icon_pixmaps() -> GLib.Variant:
 
 
 class SharingIndicator:
-    """Register the sharing indicator with whichever tray watcher is running.
+    """Offer the sharing indicator to the desktop's tray when it has a host.
 
     Every call to the watcher is asynchronous, so an unresponsive watcher cannot
     block input cancellation or the foreground-terminal check.
