@@ -19,8 +19,8 @@ session and is reused by later ones.
 _Avoid_: session (for the directory), session path
 
 **Session name**:
-The short name a caller gives to select a session directory. Within one project
-it always selects the same directory.
+The short name a caller gives in place of a session directory's path. A project
+scopes it, so the same name in another project selects another directory.
 
 **Project**:
 The Git worktree, or the working directory outside Git, that scopes session
@@ -47,8 +47,8 @@ The small GTK program bundled with framewisp for trying it out and for tests.
 _Avoid_: demo (alone)
 
 **Display**:
-The screen a session sees and acts on: a headless session's own, or the user's
-desktop.
+The area a session sees and acts on: a headless session's own, or the one
+monitor of the desktop that the user shared.
 _Avoid_: output, screen
 
 **Backend**:
@@ -56,10 +56,16 @@ The display protocol the app speaks in a headless session: Wayland or X11.
 _Avoid_: X11 mode; backend for the processes that provide the display, or for
 the kind of session
 
+**Command**:
+One request a caller makes of a live session, such as a click, a screenshot, or
+a stop.
+_Avoid_: control request, control (for a command or the channel that carries
+it), action (for the name of a command)
+
 ### Desktop sharing
 
 **Desktop**:
-The user's own screen and input devices, as opposed to a headless session's
+The user's own monitors and input devices, as opposed to a headless session's
 display.
 _Avoid_: host desktop, real desktop
 
@@ -81,7 +87,7 @@ _Avoid_: tray item, tray icon
 **Action**:
 One input sent to the display: a pointer move, click, drag, scroll, typed text,
 or key.
-_Avoid_: action (for a check, or for the verb of a control request)
+_Avoid_: action (for a check, or for the name of a command)
 
 **Batch**:
 An ordered list of steps that runs as one unit, with no other input in between.
@@ -90,20 +96,26 @@ An ordered list of steps that runs as one unit, with no other input in between.
 One entry in a batch: an action or a check.
 _Avoid_: action (for any batch entry), entry
 
+**Control**:
+One element of the app's interface that the app exposes to accessibility tools,
+such as a button or a text field.
+_Avoid_: control (for a command or the channel that carries it)
+
 **Check**:
-A step that verifies, or waits for, the state of one accessible control.
+A step that verifies, or waits for, the state of one control.
 _Avoid_: conditional check, conditional wait
 
 **Condition**:
-What a check requires of one accessible control.
+What a check requires of one control.
 
 **Inspection**:
-Querying the app's accessible controls in a headless session. Each query yields
-one observation.
+Querying the app's controls in a headless session. Each query yields one
+observation.
 
 **Observation**:
-The result of one inspection query: the matching controls, and whether the
-whole of what the app exposes was read (complete) or not (partial).
+The result of one inspection query: the controls that matched, and whether
+everything the app exposes was read. Only a complete observation can show that
+a control is absent.
 _Avoid_: snapshot, response; observation for a check's limits or a lesson's
 frames
 
@@ -111,8 +123,8 @@ frames
 A session's record of the actions it sent.
 
 **Private input**:
-Typed text or a key that the caller marked to stay out of the input log and
-captions.
+Typed text or a key whose value the caller marked to keep out of the input log
+and captions. The log still records that the action happened.
 
 ### Recording
 
@@ -137,8 +149,8 @@ _Avoid_: output path, requested path
 Turning what was recorded into the finished clip at its destination.
 
 **Overlay**:
-Anything drawn onto a clip that the app did not display. The kinds are caption,
-click ping, and hold disc.
+Anything framewisp draws over the display area of a clip. The kinds are
+caption, click ping, and hold disc.
 _Avoid_: captions (for all overlays)
 
 **Caption**:
@@ -153,12 +165,13 @@ An overlay disc that follows the pointer while a drag holds its button.
 _Avoid_: disc
 
 **Console panel**:
-A strip beside the display in a clip that shows the app's output. It is not an
-overlay.
+A strip beside the display area of a clip that shows the app's output. It is
+not an overlay.
 _Avoid_: console, panel
 
 **Compaction**:
-Removing the stretches of a clip in which framewisp was not acting on the app.
+Removing the stretches of a clip in which no action, check, or batch screenshot
+was in progress.
 
 ### Teaching
 
@@ -168,7 +181,9 @@ task, frames, the goal, and notes.
 _Avoid_: demonstration, bundle, teaching recording, evidence
 
 **Frame**:
-One still image of the desktop saved in a lesson.
+One still of the desktop that a teaching session sampled and saved in a lesson.
+Within a clip or a lesson's video, "frame" keeps its usual meaning of one video
+frame.
 _Avoid_: observation, image
 
 ### Lifetime
@@ -178,21 +193,23 @@ The foreground process whose lifetime is the session.
 _Avoid_: owner, attach process, lifetime owner
 
 **Managed process**:
-A process a headless session starts and must end: the app and the processes
-that provide its display.
+A process of a headless session that must not outlive it: the app, the
+processes that provide its display, buses, and recording, and the helpers that
+finalize a clip.
 
 **Supervisor**:
 A helper that ends one managed process and all its descendants, even when the
 runner has died.
-_Avoid_: subreaper, owner
+_Avoid_: subreaper (as its name), owner
 
 **Runtime directory**:
-A session's private temporary directory, removed when the session stops.
+A headless session's private temporary directory. The session removes it when
+it stops, and recovery removes it after the runner died.
 _Avoid_: runtime (alone)
 
 **Session metadata**:
-The description of a live session that commands read to reach it. It exists
-only while the session does.
+The description of a live session that a caller reads in order to send it a
+command. The session removes it when it stops.
 _Avoid_: state, session JSON
 
 **Session lock**:
@@ -201,9 +218,10 @@ that outlived one.
 _Avoid_: lease, ownership lock, metadata lock
 
 **Recovery**:
-Making a session directory usable again after its runner died.
+Making a session directory usable again after the runner of a headless session
+died.
 
 **Recovery journal**:
-The record that recovery trusts to find and remove a dead session's runtime
-directory.
+A headless session's record of its runtime directory. Recovery removes only the
+runtime directory that the journal names.
 _Avoid_: ownership journal, ownership files

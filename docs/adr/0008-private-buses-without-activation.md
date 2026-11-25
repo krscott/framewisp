@@ -8,6 +8,6 @@ services from starting inside it.
 ## Consequences
 
 An app that needs service activation runs under its own nested
-`dbus-run-session`, as the README describes. That bus starts after any `env`
-on the app command, so its services see the variables the caller injected, and
-it belongs to the app's process tree, so stopping the session ends it.
+`dbus-run-session`, as the README describes. Its services see the variables
+that an `env` placed before `dbus-run-session` on the app command injects, and
+the bus belongs to the app's process tree, so stopping the session ends it.

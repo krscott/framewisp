@@ -186,8 +186,6 @@ class AttachedInput:
                 ):
                     raise ValueError("Drag endpoint is outside the shared monitor.")
                 self.button(p["button"], True)
-                # Pause after the press and before the release, so even a
-                # zero-duration move happens while the button is held.
                 self.wait(0.05)
                 count = max(1, math.ceil(p["duration"] * 60))
                 for step in range(1, count + 1):
@@ -383,8 +381,8 @@ def parse_attached_request(
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     command = parse_command(line)
-    # The control socket's path is the same for every attachment, so the token
-    # stops stale session metadata from directing input to a later one.
+    # Every desktop share uses the same socket path, so the token stops stale
+    # session metadata from directing input to a later share.
     if command.get("attachment") != attachment:
         raise ValueError(
             "Attached session is disconnected. Ask the user to attach again."
