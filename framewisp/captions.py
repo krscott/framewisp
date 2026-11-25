@@ -9,14 +9,14 @@ import tempfile
 import time
 import unicodedata
 import uuid
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from typing import BinaryIO, Literal, ParamSpec, cast, get_args
 
 from framewisp.compact import (
@@ -34,30 +34,59 @@ from framewisp.layout import CONSOLE_FONT_SIZE, VideoLayout
 from framewisp.pings import PING_STYLE, Hold, Ping, ping_text, pings_for_clip
 from framewisp.processes import run_owned
 
-CaptionMode = Literal["none", "keys", "pointer", "all"]
-CAPTION_MODES: tuple[CaptionMode, ...] = get_args(CaptionMode)
-DEFAULT_CAPTIONS: CaptionMode = "keys"
+KeyCaptions = Literal["all", "non-text"]
+PointerCaptions = Literal["all", "modifiers"]
+KEY_CAPTIONS: tuple[KeyCaptions, ...] = get_args(KeyCaptions)
+POINTER_CAPTIONS: tuple[PointerCaptions, ...] = get_args(PointerCaptions)
 KEY_ACTIONS = frozenset({"key", "type"})
 POINTER_ACTIONS = frozenset({"move", "click", "drag", "scroll"})
-CAPTIONED_ACTIONS: dict[CaptionMode, frozenset[str]] = {
-    "none": frozenset(),
-    "keys": KEY_ACTIONS,
-    "pointer": POINTER_ACTIONS,
-    "all": KEY_ACTIONS | POINTER_ACTIONS,
-}
+
+
+@dataclass(frozen=True)
+class CaptionOptions:
+    pointer: PointerCaptions | None = None
+    key: KeyCaptions | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.pointer is not None or self.key is not None
+
+
+class CaptionCapture:
+    """Coordinate clip boundaries with the worker writing input starts."""
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.texts: dict[str, str] | None = None
+
+    @contextmanager
+    def clip(self, *, enabled: bool) -> Generator[dict[str, str], None, None]:
+        texts: dict[str, str] = {}
+        if enabled:
+            with self.lock:
+                self.texts = texts
+        try:
+            yield texts
+        finally:
+            self.stop()
+
+    def stop(self) -> float:
+        with self.lock:
+            self.texts = None
+            return time.monotonic()
 
 
 def retained_parameters(
-    action: str, parameters: dict[str, object], *, retain_input_content: bool
+    action: str, parameters: dict[str, object]
 ) -> dict[str, object]:
     """Keep shortcuts and action metadata without retaining literal keystrokes."""
     p = parameters.copy()
-    if retain_input_content:
-        return p
     if action == "type":
         p.pop("text", None)
     elif action == "key":
         chord = cast(str, p.pop("chord"))
+        if p.get("private") is True:
+            return p
         parsed = parse_chord(chord)
         assert parsed is not None
         modifiers, key = parsed
@@ -71,11 +100,9 @@ def retained_parameters(
     return p
 
 
-def input_error(
-    action: str, error: BaseException, *, retain_input_content: bool
-) -> str:
+def input_error(action: str, error: BaseException) -> str:
     """Backend errors can include text, keysyms, or serialized subprocess arguments."""
-    if retain_input_content or action not in {"type", "key"}:
+    if action not in KEY_ACTIONS:
         return str(error)
     if isinstance(error, InterruptedError):
         return "Input cancelled; caller disconnected or session stopped."
@@ -198,13 +225,11 @@ def log_input(
     action: str,
     parameters: dict[str, object],
     *,
-    retain_input_content: bool = False,
+    caption_capture: CaptionCapture | None = None,
 ) -> Generator[InputResult, None, None]:
     """Record command start/end and pointer pings; these are not app acknowledgements."""
     identifier = uuid.uuid4().hex
-    parameters = retained_parameters(
-        action, parameters, retain_input_content=retain_input_content
-    )
+    retained = retained_parameters(action, parameters)
 
     def append(event: Literal["start", "ping", "end"], **point: int) -> None:
         entry = {
@@ -212,7 +237,7 @@ def log_input(
             "event": event,
             "time": time.monotonic(),
             "action": action,
-            "parameters": parameters,
+            "parameters": retained,
             "returncode": result.returncode,
             "error": result.error,
             **point,
@@ -226,7 +251,16 @@ def log_input(
             output.write(record)
 
     result = InputResult(ping=lambda x, y: append("ping", x=x, y=y))
-    append("start")
+    with caption_capture.lock if caption_capture is not None else nullcontext():
+        append("start")
+        if (
+            caption_capture is not None
+            and caption_capture.texts is not None
+            and action in KEY_ACTIONS
+            and retained.get("private") is not True
+            and "chord" not in retained
+        ):
+            caption_capture.texts[identifier] = caption_text(action, parameters)
     try:
         yield result
     except BaseException as error:
@@ -234,11 +268,9 @@ def log_input(
         returncode = getattr(error, "returncode", None)
         if isinstance(returncode, int):
             result.returncode = returncode
-        detail = input_error(action, error, retain_input_content=retain_input_content)
+        detail = input_error(action, error)
         result.error = (
-            f"{type(error).__name__}: {detail}"
-            if retain_input_content or action not in {"type", "key"}
-            else detail
+            f"{type(error).__name__}: {detail}" if action not in KEY_ACTIONS else detail
         )
         raise
     finally:
@@ -260,15 +292,13 @@ def capture_origin(log: Path) -> float:
     raise RuntimeError(f"Missing first-frame timestamp. See {log}")
 
 
-def caption_text(event: InputEvent) -> str:
-    p = event["parameters"]
-    action = event["action"]
+def caption_text(action: str, p: dict[str, object]) -> str:
     modifiers = cast(list[str], p.get("modifier", []))
     prefix = "".join(f"{str(modifier).title()}+" for modifier in modifiers)
     if action == "type":
-        text = f"Type: {p['text']}" if "text" in p else "Type text"
+        text = f"Type: {p['text']}"
     elif action == "key":
-        text = str(p["chord"]) if "chord" in p else f"{prefix}Key"
+        text = str(p["chord"])
     elif action == "drag":
         text = f"{prefix}{p['button']} drag ({p['x1']}, {p['y1']}) to ({p['x2']}, {p['y2']})"
     elif action == "click":
@@ -295,10 +325,38 @@ class Caption:
 
 
 def captions_for_clip(
-    log: Path, *, origin: float, stopped: float, captions: CaptionMode
+    log: Path,
+    *,
+    origin: float,
+    stopped: float,
+    captions: CaptionOptions,
+    literal_captions: Mapping[str, str] | None = None,
 ) -> list[Caption]:
     """Unselected actions never become captions, so they also never shorten one."""
-    selected = CAPTIONED_ACTIONS[captions]
+    literal: Mapping[str, str] = (
+        literal_captions if literal_captions is not None else {}
+    )
+
+    def selected(event: InputEvent) -> bool:
+        action, parameters = event["action"], event["parameters"]
+        if action in KEY_ACTIONS:
+            return (
+                captions.key is not None
+                and parameters.get("private") is not True
+                and (
+                    "chord" in parameters
+                    or (captions.key == "all" and event["id"] in literal)
+                )
+            )
+        return action in POINTER_ACTIONS and (
+            captions.pointer == "all"
+            or (
+                captions.pointer == "modifiers"
+                and action in {"click", "drag"}
+                and bool(parameters.get("modifier"))
+            )
+        )
+
     events = cast(list[InputEvent], activity_events(log))
     starts = sorted(
         (
@@ -306,7 +364,7 @@ def captions_for_clip(
             for event in events
             if event["event"] == "start"
             and origin <= event["time"] < stopped
-            and event["action"] in selected
+            and selected(event)
         ),
         key=lambda event: event["time"],
     )
@@ -316,7 +374,9 @@ def captions_for_clip(
         end = ends.get(event["id"])
         finished = end["time"] if end is not None else stopped
         limit = starts[index + 1]["time"] if index + 1 < len(starts) else stopped
-        text = caption_text(event)
+        text = literal.get(event["id"]) if captions.key == "all" else None
+        if text is None:
+            text = caption_text(event["action"], event["parameters"])
         if end is not None and (end["returncode"] != 0 or end["error"] is not None):
             text += " (failed)"
         entries.append(
@@ -411,7 +471,8 @@ def render_recording(
     origin: float,
     stopped: float,
     log: Path,
-    captions: CaptionMode = DEFAULT_CAPTIONS,
+    captions: CaptionOptions = CaptionOptions(),
+    literal_captions: Mapping[str, str] | None = None,
     click_pings: bool = True,
     console: ConsoleCapture,
     compact: bool = False,
@@ -419,8 +480,14 @@ def render_recording(
     env: dict[str, str],
 ) -> None:
     entries = (
-        captions_for_clip(input_log, origin=origin, stopped=stopped, captions=captions)
-        if captions != "none"
+        captions_for_clip(
+            input_log,
+            origin=origin,
+            stopped=stopped,
+            captions=captions,
+            literal_captions=literal_captions,
+        )
+        if captions.enabled
         else []
     )
     pings = (

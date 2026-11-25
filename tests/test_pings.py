@@ -9,9 +9,7 @@ import pytest
 from PIL import Image, ImageChops
 
 from framewisp.captions import (
-    CAPTION_MODES,
-    DEFAULT_CAPTIONS,
-    CaptionMode,
+    CaptionOptions,
     log_input,
     render_recording,
     subtitle_script,
@@ -213,7 +211,7 @@ def test_ring_is_centred_and_starts_within_the_tolerance(
     raw_video: Path, log: Path, second: float
 ) -> None:
     log.write_text(ping_line(second, 300, 200))
-    render(raw_video, log, captions="none")
+    render(raw_video, log, captions=CaptionOptions())
     decoded = frames(raw_video, 28, 50)
     shown = [
         (28 + index, box)
@@ -235,7 +233,7 @@ def test_ring_is_centred_and_starts_within_the_tolerance(
 # R-REC-5
 def test_double_click_draws_two_concurrent_rings(raw_video: Path, log: Path) -> None:
     log.write_text(ping_line(1, 300, 200) + ping_line(1.2, 300, 200))
-    render(raw_video, log, captions="none")
+    render(raw_video, log, captions=CaptionOptions())
     frame = frames(raw_video, 37, 37)[0]
     row = [frame.getpixel((x, 200)) for x in range(240, 301)]
     edges = [
@@ -297,7 +295,7 @@ def test_hold_disc_follows_the_pointer_and_fades_after_the_release(
     raw_video: Path, log: Path
 ) -> None:
     log.write_text(drag_lines(1, (300, 200), 2, (700, 200)))
-    render(raw_video, log, captions="none")
+    render(raw_video, log, captions=CaptionOptions())
     decoded = dict(zip(range(29, 77), frames(raw_video, 29, 76)))
     assert red_box(decoded[29]) is None
     # A filled disc, unlike the press ring, tints the pointer position at once.
@@ -319,7 +317,7 @@ def test_hold_from_before_the_clip_shows_from_its_first_frame(
     raw_video: Path, log: Path
 ) -> None:
     log.write_text(drag_lines(-1, (100, 200), 1, (500, 200)))
-    render(raw_video, log, captions="none")
+    render(raw_video, log, captions=CaptionOptions())
     decoded = frames(raw_video, 0, 15)
     assert_disc(decoded[0], 300, 200)
     assert_disc(decoded[15], 400, 200)
@@ -328,7 +326,7 @@ def test_hold_from_before_the_clip_shows_from_its_first_frame(
 # R-REC-5
 def test_instant_drag_fades_at_its_release_position(raw_video: Path, log: Path) -> None:
     log.write_text(drag_lines(1, (300, 200), 1, (500, 200)))
-    render(raw_video, log, captions="none")
+    render(raw_video, log, captions=CaptionOptions())
     # The press ring stays at x=300; crop it away to measure only the disc while
     # it is still clearly tinted.
     for frame in frames(raw_video, 33, 36):
@@ -374,7 +372,7 @@ def test_compaction_maps_pings_to_retained_frames(
     render(
         raw_video,
         log,
-        captions="none",
+        captions=CaptionOptions(),
         compact=True,
         layout=layout,
     )
@@ -411,7 +409,7 @@ def test_padding_retains_every_ping_frame(log: Path) -> None:
 def test_clip_end_cuts_a_late_ping_short(raw_video: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(5.7, 5.71) + ping_line(5.8, 300, 200))
-    render(raw_video, log, captions="none", compact=True)
+    render(raw_video, log, captions=CaptionOptions(), compact=True)
     shown = compacted_ring_frames(raw_video, size=SIZE)
     assert 4 <= len(shown) < 15
     assert (
@@ -427,7 +425,7 @@ def test_compaction_keeps_each_ping_whole(raw_video: Path, log: Path) -> None:
     render(
         raw_video,
         log,
-        captions="none",
+        captions=CaptionOptions(),
         compact=True,
     )
     shown = compacted_ring_frames(raw_video, size=SIZE)
@@ -459,7 +457,7 @@ def test_ring_clips_at_the_console_panel(
     log.write_text(ping_line(1, x, y) + ping_line(3, 600, 300))
     layout = panel_layout(position, pixels)
     assert layout.panel is not None
-    render(raw_video, log, captions="none", layout=layout)
+    render(raw_video, log, captions=CaptionOptions(), layout=layout)
     size = (layout.width, layout.height)
     edge = frames(raw_video, 36, 36, size=size)[0]
     inside = frames(raw_video, 96, 96, size=size)[0]
@@ -497,7 +495,7 @@ def test_compaction_keeps_the_hold_path_and_fade(
     )
     source = [frame for first, last in ranges for frame in range(first, last)]
     assert source[0] == 0 and 90 not in source[:30]  # The clip is cut before 3 s.
-    render(raw_video, log, captions="none", compact=True)
+    render(raw_video, log, captions=CaptionOptions(), compact=True)
     decoded = frames(raw_video, 0, len(source) - 1)
     for frame in range(108, 120):  # After the ring, until the release.
         assert_disc(decoded[source.index(frame)], 300 + 400 * (frame / 30 - 3), 200)
@@ -527,7 +525,7 @@ def test_hold_disc_clips_at_the_console_panel(
     log.write_text(drag_lines(1, (x, y), 2, (600, 300)))
     layout = panel_layout(position, 400)
     assert layout.panel is not None
-    render(raw_video, log, captions="none", layout=layout)
+    render(raw_video, log, captions=CaptionOptions(), layout=layout)
     gui, panel = layout.gui, layout.panel
     decoded = frames(raw_video, 30, 75, size=(layout.width, layout.height))
     for frame in decoded:
@@ -545,10 +543,18 @@ def test_hold_disc_clips_at_the_console_panel(
     )
 
 
+CAPTION_OPTIONS = [
+    CaptionOptions(),
+    CaptionOptions(key="all"),
+    CaptionOptions(pointer="all"),
+    CaptionOptions(pointer="modifiers", key="non-text"),
+]
+
+
 # R-REC-11
-@pytest.mark.parametrize("captions", CAPTION_MODES)
+@pytest.mark.parametrize("captions", CAPTION_OPTIONS)
 def test_pings_ignore_the_caption_mode(
-    raw_video: Path, log: Path, captions: CaptionMode
+    raw_video: Path, log: Path, captions: CaptionOptions
 ) -> None:
     log.write_text(
         command_lines(1, 1.1)
@@ -570,9 +576,9 @@ def test_default_mode_pings_a_clip_without_keyboard_input(
 
 
 # R-REC-7
-@pytest.mark.parametrize("captions", CAPTION_MODES)
+@pytest.mark.parametrize("captions", CAPTION_OPTIONS)
 def test_opt_out_applies_with_every_caption_mode(
-    raw_video: Path, log: Path, captions: CaptionMode
+    raw_video: Path, log: Path, captions: CaptionOptions
 ) -> None:
     log.write_text(
         command_lines(1, 1.1)
@@ -590,14 +596,14 @@ def test_disabled_pings_leave_the_raw_recording_untouched(
 ) -> None:
     before = raw_video.read_bytes()
     log.write_text(ping_line(1, 300, 200))
-    render(raw_video, log, captions="none", click_pings=False)
+    render(raw_video, log, captions=CaptionOptions(), click_pings=False)
     assert raw_video.read_bytes() == before
 
 
 def test_clip_without_presses_is_not_encoded_again(raw_video: Path, log: Path) -> None:
     before = raw_video.read_bytes()
     log.write_text("")
-    render(raw_video, log, captions="none")
+    render(raw_video, log, captions=CaptionOptions())
     assert raw_video.read_bytes() == before
 
 
@@ -628,13 +634,13 @@ def assert_raw_clip_survived(video: Path, before: bytes, error: str) -> None:
 
 
 # R-REC-10
-@pytest.mark.parametrize("captions", ["none", DEFAULT_CAPTIONS])
+@pytest.mark.parametrize("captions", [CaptionOptions(), CaptionOptions(key="non-text")])
 def test_failed_encoder_leaves_pings_only_clip_playable(
     raw_video: Path,
     log: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    captions: CaptionMode,
+    captions: CaptionOptions,
 ) -> None:
     before = raw_video.read_bytes()
     log.write_text(ping_line(1, 300, 200))
@@ -652,9 +658,9 @@ def test_failed_encoder_leaves_pings_only_clip_playable(
 
 
 # R-REC-10
-@pytest.mark.parametrize("captions", ["none", DEFAULT_CAPTIONS])
+@pytest.mark.parametrize("captions", [CaptionOptions(), CaptionOptions(key="non-text")])
 def test_malformed_log_leaves_pings_only_clip_playable(
-    raw_video: Path, log: Path, captions: CaptionMode
+    raw_video: Path, log: Path, captions: CaptionOptions
 ) -> None:
     before = raw_video.read_bytes()
     log.write_text("not json\n")
@@ -668,10 +674,10 @@ UNFINISHED = b'{"id": "unfini'
 
 # Each entry makes exactly one reader consume the log, so each is held to the rule.
 LOG_READERS = {
-    "captions": {"captions": "all", "click_pings": False},
-    "pings": {"captions": "none"},
+    "captions": {"captions": CaptionOptions(pointer="all"), "click_pings": False},
+    "pings": {"captions": CaptionOptions()},
     "compaction": {
-        "captions": "none",
+        "captions": CaptionOptions(),
         "click_pings": False,
         "compact": True,
     },

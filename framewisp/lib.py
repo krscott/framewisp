@@ -21,9 +21,10 @@ from typing import Any, Literal, cast, get_args
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import (
-    CAPTION_MODES,
-    DEFAULT_CAPTIONS,
-    CaptionMode,
+    KEY_CAPTIONS,
+    POINTER_CAPTIONS,
+    CaptionCapture,
+    CaptionOptions,
     capture_origin,
     recorder_output,
     render_recording,
@@ -314,7 +315,8 @@ def start_recording(
     log: Path,
     env: dict[str, str],
     stop: Event,
-    captions: CaptionMode,
+    captions: CaptionOptions,
+    caption_capture: CaptionCapture,
     click_pings: bool,
     console: ConsoleCapture,
     compact: bool = False,
@@ -345,13 +347,14 @@ def start_recording(
         "-f",
         str(clip),
     ]
-    timed = captions != "none" or click_pings or layout.panel is not None or compact
+    timed = captions.enabled or click_pings or layout.panel is not None or compact
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     capturing = False
     try:
         active.unlink(missing_ok=True)
         active.symlink_to(clip)
         with (
+            caption_capture.clip(enabled=captions.key == "all") as literal_captions,
             recorder_output(log) as output,
             managed_process(
                 command, log=log, env=recorder_env, output=output
@@ -382,7 +385,7 @@ def start_recording(
             try:
                 yield process
             finally:
-                stopped = time.monotonic()
+                stopped = caption_capture.stop()
         if process.returncode != 0:
             raise log_failure(f"Recorder failed to finalize {destination}", log)
         failure = None
@@ -396,6 +399,7 @@ def start_recording(
                     stopped=stopped,
                     log=log.parent / "captions.log",
                     captions=captions,
+                    literal_captions=literal_captions,
                     click_pings=click_pings,
                     console=console,
                     compact=compact,
@@ -600,6 +604,7 @@ class Recordings:
     stop_requested: Event
     size: tuple[int, int]
     console_capture: ConsoleCapture
+    caption_capture: CaptionCapture = field(default_factory=CaptionCapture)
     process: OwnedProcess | None = None
     resources: ExitStack = field(default_factory=ExitStack)
     destination: Path | None = None
@@ -609,7 +614,7 @@ class Recordings:
         self,
         destination: Path,
         *,
-        captions: CaptionMode = DEFAULT_CAPTIONS,
+        captions: CaptionOptions = CaptionOptions(),
         click_pings: bool = True,
         console: ConsolePanel | None = None,
         compact: bool = False,
@@ -632,6 +637,7 @@ class Recordings:
                     env=self.env,
                     stop=self.stop_requested,
                     captions=captions,
+                    caption_capture=self.caption_capture,
                     click_pings=click_pings,
                     console=self.console_capture,
                     compact=compact,
@@ -673,7 +679,7 @@ def session_command(
     action: str,
     destination: Path | None = None,
     *,
-    captions: CaptionMode = DEFAULT_CAPTIONS,
+    captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
     console: ConsolePanel | None = None,
     compact: bool = False,
@@ -686,10 +692,21 @@ def session_command(
             "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
             "with this version of framewisp."
         )
-    if action == "record-start" and state.get("caption_modes") is not True:
+    if parameters is not None and state.get("persistent_input") is not True:
         raise SessionError(
-            "This runner does not support caption modes. Restart the session "
-            "with this version of framewisp."
+            "This runner does not support persistent input. Restart the session with this version of framewisp."
+        )
+    if action == "batch" and state.get("batch_input") is not True:
+        raise SessionError(
+            "This runner does not support batches. Restart the session with this version of framewisp."
+        )
+    if (
+        action in {"record-start", "key", "type", "batch"}
+        and state.get("input_caption_options") is not True
+    ):
+        raise SessionError(
+            "This runner does not support this version's caption modes or private input. "
+            "Restart the session with this version of framewisp."
         )
     if console is not None and state.get("console_cell_scale") is not True:
         raise SessionError(
@@ -714,22 +731,15 @@ def session_command(
         "action": action,
         "session": str(session),
         "destination": str(destination.resolve()) if destination else None,
-        "captions": captions,
         "click_pings": click_pings,
         "compact": compact,
         "parameters": parameters,
     }
+    if action == "record-start":
+        request.update(pointer_captions=captions.pointer, key_captions=captions.key)
     # An older runner rejects this key even when it is null.
     if console is not None:
         request["console"] = console.parameters()
-    if parameters is not None and state.get("persistent_input") is not True:
-        raise SessionError(
-            "This runner does not support persistent input. Restart the session with this version of framewisp."
-        )
-    if action == "batch" and state.get("batch_input") is not True:
-        raise SessionError(
-            "This runner does not support batches. Restart the session with this version of framewisp."
-        )
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
         raise SessionError("Session request exceeds the 1 MiB limit.")
@@ -763,7 +773,7 @@ def session_command(
 @dataclass(frozen=True)
 class RecordStart:
     destination: Path
-    captions: CaptionMode
+    captions: CaptionOptions
     click_pings: bool
     console: ConsolePanel | None
     compact: bool
@@ -772,13 +782,18 @@ class RecordStart:
     def parse(command: dict[str, object]) -> "RecordStart":
         console = ConsolePanel.parse(command.get("console"))
         destination = command.get("destination")
-        captions = command.get("captions")
+        pointer_captions = command.get("pointer_captions")
+        key_captions = command.get("key_captions")
         click_pings = command.get("click_pings", True)
         compact = command.get("compact", False)
         if not isinstance(destination, str):
             raise ValueError("record-start requires a destination")
-        if captions not in CAPTION_MODES:
-            raise ValueError(f"captions must be one of {', '.join(CAPTION_MODES)}")
+        if pointer_captions is not None and pointer_captions not in POINTER_CAPTIONS:
+            raise ValueError(
+                f"pointer_captions must be one of {', '.join(POINTER_CAPTIONS)}"
+            )
+        if key_captions is not None and key_captions not in KEY_CAPTIONS:
+            raise ValueError(f"key_captions must be one of {', '.join(KEY_CAPTIONS)}")
         if not isinstance(click_pings, bool):
             raise ValueError("click_pings must be true or false")
         if not isinstance(compact, bool):
@@ -788,7 +803,10 @@ class RecordStart:
             raise ValueError("destination must be absolute in runner requests.")
         return RecordStart(
             resolved_request_path(path, "destination"),
-            captions,
+            CaptionOptions(
+                pointer=pointer_captions,
+                key=key_captions,
+            ),
             click_pings,
             console,
             compact,
@@ -910,13 +928,12 @@ def run_session(
     command: list[str],
     *,
     recording: Path | None = None,
-    captions: CaptionMode = DEFAULT_CAPTIONS,
+    captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
     console: ConsolePanel | None = None,
     compact: bool = False,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
-    retain_input_content: bool = False,
     real_env: bool = False,
 ) -> int:
     fonts = configured_fonts(os.environ)
@@ -947,7 +964,6 @@ def run_session(
             compact=compact,
             size=size,
             x11=x11,
-            retain_input_content=retain_input_content,
             fonts=fonts,
             real_env=real_env,
         )
@@ -959,13 +975,12 @@ def _run_session(
     *,
     lease: int,
     recording: Path | None,
-    captions: CaptionMode,
+    captions: CaptionOptions,
     click_pings: bool,
     console: ConsolePanel | None,
     compact: bool,
     size: tuple[int, int],
     x11: bool,
-    retain_input_content: bool,
     fonts: str,
     real_env: bool,
 ) -> int:
@@ -1086,7 +1101,7 @@ def _run_session(
                 stop,
                 x11=x11,
                 size=size,
-                retain_input_content=retain_input_content,
+                caption_capture=recordings.caption_capture,
                 capture=lambda path, cancelled: batch_screenshot(
                     recordings, path, cancelled
                 ),
@@ -1106,9 +1121,8 @@ def _run_session(
                             "console_cell_scale": True,
                             "compact_recording": True,
                             "click_pings_recording": True,
-                            "caption_modes": True,
+                            "input_caption_options": True,
                             "persistent_input": True,
-                            "retain_input_content": retain_input_content,
                             "inspection_protocol": 1,
                             "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
                             "batch_input": True,

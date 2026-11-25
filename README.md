@@ -222,10 +222,10 @@ session-independent.
 | --- | --- |
 | `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory; screen-only access. |
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
-| `run [--retain-input-content] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
-| `attach [--retain-input-content]` | Request capture and input access to your existing desktop; stay in the foreground. |
+| `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
-| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--captions MODE] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
+| `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
@@ -237,8 +237,8 @@ session-independent.
 | `scroll [--move-duration SECONDS] X Y DIRECTION [--steps N]` | Move to the pane, then send wheel steps; directions: up, down, left, right. |
 | `click [--move-duration SECONDS] [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
 | `drag [--move-duration SECONDS] [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Move to the start, then hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
-| `type [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
-| `key CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
+| `type [--private] [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
+| `key [--private] CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
 The automated tests cover the bundled demo on Wayland and Xwayland. Swell Foop 50.0 and
 KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below).
@@ -716,7 +716,7 @@ text panel, on the right and 640 pixels wide by default:
 ```sh
 framewisp demo run --record /tmp/startup.mp4 --console -- framewisp-demo
 # Or capture a later clip, with or without input captions:
-framewisp demo record-start --console --captions none /tmp/console.mp4
+framewisp demo record-start --console /tmp/console.mp4
 framewisp demo record-stop
 # Or place a 200-pixel panel under the GUI:
 framewisp demo record-start --console --console-position bottom --console-size 200 /tmp/below.mp4
@@ -839,45 +839,36 @@ record what framewisp attempted and whether the input command completed, not
 whether the app responded as intended. A start without an end indicates an
 unfinished command. Reusing a session directory starts a fresh log.
 
-Input logs and captions omit literal typed text by default, including Unicode and
-individual letter, digit, punctuation, Space, and Shift-only literal key events. Captions say
-"Type text" or "Key" (with any Shift modifier). Ctrl/Alt shortcuts and named keys
-such as Return and arrows remain visible. These describe shortcuts, not text entry.
-Input failure details that could contain text or encoded keys are omitted; error
-types, cancellation, and exit codes remain available.
+Input logs omit typed text and individual letter, digit, punctuation, and Space
+keystrokes, including with Shift alone. They retain Ctrl/Alt shortcuts and named
+keys such as Return and arrows. Keyboard failures preserve actionable errors
+and exit codes while omitting backend details that could expose input.
 
-To retain full input content for debugging or demonstrations, start the session
-with `run --retain-input-content` or `attach --retain-input-content`. This explicit
-opt-in applies to every individual input, batch action, and clip for that session.
-It cannot be changed by a batch file or `record-start`. Attached sessions log input
-but do not support recordings.
+Text captions are off by default. Select them independently for each clip with
+`run --record` or `record-start`:
 
-Recordings caption keyboard input by default. Choose what a clip captions with
-`--captions` on `run --record` or `record-start`:
-
-| Value | Captioned inputs |
+| Option | Captioned inputs |
 | --- | --- |
-| `keys` (default) | `key` and `type`. |
-| `pointer` | `move`, `click`, `drag`, and `scroll`. |
-| `all` | Keyboard and pointer inputs. |
-| `none` | Nothing. |
+| `--pointer-captions all` | Moves, clicks, drags, and scrolls. |
+| `--pointer-captions modifiers` | Clicks and drags with Ctrl, Alt, or Shift held. |
+| `--key-captions all` | Key actions and typed text, including literal characters. |
+| `--key-captions non-text` | Ctrl/Alt shortcuts and named non-printing keys such as Return and arrows. |
 
-Under the default, a clip with no keyboard input has no captions. Every value
-follows the input-content policy above, so a default `key` or `type` caption shows
-only what the log retained. `run` accepts `--captions` only with `--record`.
+A clip can use both flags. With `--key-captions all`, literal input is only
+collected for the clip and abbreviated for display. To skip a particular
+keyboard caption and omit its value from the input log, use `key --private` or
+`type --private`. In a batch, set `"private": true` on the `key` or `type` step.
+Private inputs still count as activity and retain their timing and outcome.
+Apps can still display or log the input. Attached sessions support input logging
+and private input but do not support recording.
 
 Captions stay visible during paced input and briefly after quick commands, until
-the next captioned input. Opted-in text is abbreviated in the video; the log
-keeps the full text. Inputs between clips are excluded from the next clip.
+the next captioned input. Inputs between clips are excluded from the next clip.
 Captions appear only in recordings, never in app screenshots (R-LOG-2).
 
-For example:
-
 ```sh
-# Show pointer gestures too:
-framewisp demo record-start --captions all /tmp/gestures.mp4
-# Or start the session with an uncaptioned recording:
-framewisp demo run --record /tmp/plain.mp4 --captions none -- framewisp-demo
+framewisp demo record-start --pointer-captions modifiers --key-captions non-text /tmp/gestures.mp4
+framewisp demo run --record /tmp/plain.mp4 -- framewisp-demo
 ```
 
 Click pings mark each pointer press in a recording: a red ring grows and fades
@@ -887,7 +878,7 @@ translucent red hold disc follows the pointer, then fades over half a second
 after the release. A cancelled drag shows only its press ring. Scrolls and moves
 get none.
 Clips with `run --record` and `record-start` show them by default, independently
-of `--captions`. Screenshots never include them (R-LOG-3), and `inspect` and
+of the caption flags. Screenshots never include them (R-LOG-3), and `inspect` and
 input coordinates are unaffected. Disable them for a clip with:
 
 ```sh
@@ -896,13 +887,12 @@ framewisp demo record-start --no-click-pings /tmp/plain.mp4
 framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
 ```
 
-A clip with a click is encoded again to draw its pings, even with `--captions none`
-or no keyboard input. Add `--no-click-pings` to keep the recorder's output
+A clip with a click is encoded again to draw its pings, even when text captions are off. Add `--no-click-pings` to keep the recorder's output
 unprocessed when nothing else needs rendering. With a
 runner started by an older framewisp, `record-start` fails until you restart the
 session or pass `--no-click-pings`. `run --no-click-pings` requires `--record`.
 
-Input logging remains enabled and follows the session retention policy. Captions are rendered into the video frames so
+Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for caption rendering to finish.
 This adds encoding time when stopping a captioned clip. If rendering fails, the

@@ -426,7 +426,6 @@ def foreground_terminal(descriptor: int) -> bool:
 def attach_session(
     session: Path,
     *,
-    retain_input_content: bool = False,
     teaching: Teaching | None = None,
 ) -> int:
     if (
@@ -493,7 +492,6 @@ def attach_session(
     return run_attachment(
         session,
         sys.stdin.fileno(),
-        retain_input_content=retain_input_content,
         teaching=teaching,
     )
 
@@ -502,7 +500,6 @@ def run_attachment(
     session: Path,
     terminal: int | None,
     *,
-    retain_input_content: bool = False,
     teaching: Teaching | None = None,
 ) -> int:
     """Reserve session metadata after the CLI completes interactive consent."""
@@ -514,7 +511,6 @@ def run_attachment(
             return _run_attachment(
                 session,
                 terminal,
-                retain_input_content=retain_input_content,
                 teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
@@ -526,7 +522,6 @@ def _run_attachment(
     session: Path,
     terminal: int | None,
     *,
-    retain_input_content: bool,
     teaching: Teaching | None = None,
 ) -> int:
     """Own all desktop access. The CLI must complete interactive consent first."""
@@ -619,13 +614,9 @@ def _run_attachment(
                     finally:
                         lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
-                status, error = 1, input_error(
-                    action, failure, retain_input_content=retain_input_content
-                )
+                status, error = 1, input_error(action, failure)
             except BaseException as failure:
-                status, error = 1, input_error(
-                    action, failure, retain_input_content=retain_input_content
-                )
+                status, error = 1, input_error(action, failure)
                 failures.append(failure)
                 stop.set()
                 portal.close()
@@ -677,7 +668,7 @@ def _run_attachment(
                         state,
                         {
                             "kind": "attached",
-                            "retain_input_content": retain_input_content,
+                            "input_caption_options": True,
                             "attachment": attachment,
                             "runtime_directory": str(directory),
                             "processes": {"attach": os.getpid()},
