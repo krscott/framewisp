@@ -2,7 +2,7 @@
 
 Each requirement captures valuable behaviour or an invariant users rely on,
 including latent durability, privacy, compatibility, and recoverability
-guarantees. `DESIGN.md` describes how the requirements are met.
+guarantees. `GLOSSARY.md` defines the terms.
 
 ## Format
 

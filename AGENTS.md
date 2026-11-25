@@ -79,16 +79,30 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 - Prefer composition over inheritance and keep data easy to inspect, test,
   and serialize.
 
-## Requirements and design documentation
+## Requirements, glossary and decisions
 
-`REQUIREMENTS.md` lists the observable behaviours and invariants framewisp must
-keep, by stable ID. Keep `DESIGN.md` current with the architecture that meets
-them. Together they should contain enough detail for an agent to reproduce the
-application.
+- `REQUIREMENTS.md` lists the observable behaviours and invariants framewisp
+  must keep, by stable ID.
+- `GLOSSARY.md` defines the domain terms. It is the naming authority for code,
+  the CLI, file formats and docs: use its terms and none of the words it lists
+  under _Avoid_. When a concept has no term, or a term no longer fits, change
+  the glossary in the same PR. Keep implementation detail out of it.
+  Existing code and docs still use some avoided words; issues #196 to #200
+  rename them. Use the glossary's terms in new work.
+  TODO: remove these two sentences once #196 to #200 are closed.
+- `docs/adr/` records decisions that are hard to reverse, surprising without
+  context, and the result of a real trade-off. Read the ADRs for an area before
+  changing it, and add one only when all three hold.
+- A reason that explains one piece of code belongs in a comment at that code.
 
 ## Change order
 
-- Work flows from `REQUIREMENTS.md` to `DESIGN.md` to code and tests. Start at the highest layer the change affects; most PRs change only design and code, or only code.
+- Work flows from `REQUIREMENTS.md` to code and tests. Start at the highest layer the change affects; most PRs change only code.
 - For a bug fix, check whether a requirement was missing or violated. Add one when it captures a valuable durable guarantee; an implementation defect does not automatically create a new product promise.
-- Any diff to `REQUIREMENTS.md` (addition, edit or retirement) needs explicit approval from a human reviewer. List every requirement ID, added, changed, or retired, near the top of the PR description. Don't merge until a human reviewer approves them.
 - Never renumber, reuse or delete a requirement ID; tag it `[retired]` instead. Tests covering a `[test]` requirement carry its ID in a comment.
+
+## Control protocol
+
+Each new control feature is advertised by a flag in session metadata
+(`session.json`), and the CLI checks that flag before it sends the request, so
+a newer CLI cannot silently ask an older runner for something it does not have.

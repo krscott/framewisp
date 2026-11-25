@@ -8,6 +8,11 @@ let
   };
 in
 {
+  # Adds --disable-clipboard, which turns off VNC clipboard forwarding and keeps
+  # keyboard and pointer input. A short-lived client can destroy its clipboard
+  # device while offers are pending; libwayland discards them and leaves gaps in
+  # its object map, so a later offer fails with an invalid object ID
+  # (https://github.com/krscott/framewisp/issues/30).
   wayvnc = prev.wayvnc.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
       ./patches/wayvnc-disable-clipboard.patch

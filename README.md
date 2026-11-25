@@ -31,9 +31,10 @@ use; the development shell also puts them on PATH. Mypy and Pyright check types;
 nixfmt format the source. Setuptools builds the Python package, and Just provides
 development command recipes.
 
-See [DESIGN.md](DESIGN.md) for how the components communicate and
-[flake.nix](flake.nix), [default.nix](default.nix), and
-[pyproject.toml](pyproject.toml) for dependency declarations.
+See [GLOSSARY.md](GLOSSARY.md) for framewisp's terms, [docs/adr](docs/adr) for
+the decisions behind its design, and [flake.nix](flake.nix),
+[default.nix](default.nix), and [pyproject.toml](pyproject.toml) for dependency
+declarations.
 
 ## Install or run with Nix
 
@@ -1319,8 +1320,7 @@ development-shell pytest pass checks basic input and screenshots on Wayland and
 X11, plus X11 connection diagnostics.
 The GUI passes report the 25 slowest test phases with `--durations=25`.
 
-See [DESIGN.md](DESIGN.md) for the implementation and
-[GitHub issues](https://github.com/krscott/framewisp/issues) for deferred work.
+See [GitHub issues](https://github.com/krscott/framewisp/issues) for deferred work.
 
 ## License
 

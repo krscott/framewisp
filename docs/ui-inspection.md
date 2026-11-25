@@ -2,8 +2,9 @@
 
 Issue [#56](https://github.com/krscott/framewisp/issues/56) adds read-only
 `inspect --json` observations. Inspection supplies observations for [conditional batch checks](conditional-checks.md).
-It does not add selectors for input. [DESIGN.md](../DESIGN.md#structured-ui-inspection) defines
-the response and its bounds.
+It does not add selectors for input. The
+[README](../README.md#inspect-accessible-controls) describes the response and
+its bounds.
 
 ## Toolkit coverage
 
@@ -151,8 +152,9 @@ input-command coordinates. The center of the latter is a pointer target without
 an image-based offset calculation. `display_bounds_reason` explains null results.
 The conversion uses the private compositor's client rectangle, PID, and exact
 window title. Ambiguous windows and window changes between the compositor
-snapshots produce no target. See [DESIGN.md](../DESIGN.md#structured-ui-inspection)
-for geometry checks and race limitations.
+snapshots produce no target. This detects a change between the two snapshots,
+not a window that moves away and back between them or changes after inspection.
+`framewisp/display_bounds.py` holds the geometry checks.
 
 Embedded dialogs can map through their enclosing accessible window. An untitled
 window requires a unique compositor window for its PID. Conversion also checks

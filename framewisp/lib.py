@@ -129,6 +129,8 @@ def session_environment_for_run(
         QT_QPA_PLATFORM="wayland",
         GSK_RENDERER="cairo",
     )
+    # Chromium starts its AT-SPI bridge on a headless host only when this is set.
+    # A caller's own value, such as 0, wins.
     env.setdefault("ACCESSIBILITY_ENABLED", "1")
     return env
 
@@ -258,7 +260,12 @@ def wait_for_x11(
 
 @contextmanager
 def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]:
-    """Own one input connection. Connection loss stops access without replay."""
+    """Own one input connection. Connection loss stops access without replay.
+
+    It lasts the whole session so the seat keeps its keyboard and pointer between
+    commands (R-INPUT-1). Qt dismisses an open context menu when the last input
+    client disconnects.
+    """
     # Only the runner needs Twisted; loading it in every control CLI adds latency.
     from vncdotool import api
     from vncdotool.client import VNCDoToolFactory
@@ -340,6 +347,8 @@ def start_recording(
         "libx264",
         "-x",
         "yuv420p",
+        # The recorder tags its H.264 as full-range, but its default conversion
+        # is limited-range, so white would decode as 235 instead of 255 (R-REC-4).
         "-F",
         "scale=out_range=full",
         "-m",
@@ -349,6 +358,8 @@ def start_recording(
     ]
     timed = captions.enabled or click_pings or layout.panel is not None or compact
     capture_literals = captions.key == "all"
+    # The recorder's protocol trace carries its first frame's timestamp, which is
+    # the clip's time origin.
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     capturing = False
     try:
@@ -1241,6 +1252,8 @@ def screenshot(
             "screenshot --json requires a file path; '-' writes PNG to stdout."
         )
     if str(destination) != "-":
+        # Read the destination from session metadata, not from the runner:
+        # record-stop renders in the control loop, so a request would wait for it.
         # A runner from an older framewisp publishes no recording key.
         recording = json.loads((session / "session.json").read_text()).get("recording")
         error = capture_path_error(
@@ -1278,6 +1291,8 @@ def screenshot(
         if region is not None:
             selector = ["-g", f"{x},{y} {width}x{height}"]
     started = time.monotonic()
+    # grim, not the VNC connection: framebuffer requests over VNC timed out with
+    # the pinned Sway, wayvnc and vncdotool while input worked. The cause is unknown.
     result = display_command(
         session,
         ["grim", "-t", "png", *selector, str(destination)],
