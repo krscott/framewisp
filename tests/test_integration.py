@@ -2085,7 +2085,7 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
 
 
 def exercise_console_clip(demo: Demo, tmp_path: Path) -> None:
-    """Click and press a key, leaving time for the caption to end."""
+    """Click and press a non-printing key, leaving time for its caption to end."""
     time.sleep(0.4)
     presses = sum(event["event"] == "press" for event in input_events(demo))
     cli(demo.directory, "click", "300", "200")
@@ -2094,7 +2094,7 @@ def exercise_console_clip(demo: Demo, tmp_path: Path) -> None:
     )
     press = [event for event in input_events(demo) if event["event"] == "press"][-1]
     assert (press["x"], press["y"]) == (300, 200)
-    cli(demo.directory, "key", "a")
+    cli(demo.directory, "key", "F8")
     shot = tmp_path / "console-clip.png"
     cli(demo.directory, "screenshot", str(shot))
     with Image.open(shot) as image:
