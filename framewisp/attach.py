@@ -381,8 +381,8 @@ def parse_attached_request(
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     command = parse_command(line)
-    # Every desktop share uses the same socket path, so the token stops stale
-    # session metadata from directing input to a later share.
+    # Successive desktop shares reuse one socket path, so the token stops stale
+    # session metadata from sending commands to a later share.
     if command.get("attachment") != attachment:
         raise ValueError(
             "Attached session is disconnected. Ask the user to attach again."

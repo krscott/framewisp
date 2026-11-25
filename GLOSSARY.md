@@ -19,8 +19,8 @@ session and is reused by later ones.
 _Avoid_: session (for the directory), session path
 
 **Session name**:
-The short name a caller gives in place of a session directory's path. A project
-scopes it, so the same name in another project selects another directory.
+The short name a caller gives in place of a session directory's path, scoped by
+the project.
 
 **Project**:
 The Git worktree, or the working directory outside Git, that scopes session
@@ -47,8 +47,8 @@ The small GTK program bundled with framewisp for trying it out and for tests.
 _Avoid_: demo (alone)
 
 **Display**:
-The area a session sees and acts on: a headless session's own, or the one
-monitor of the desktop that the user shared.
+The area a session can see: a headless session's own, or the one monitor of the
+desktop that the user shared.
 _Avoid_: output, screen
 
 **Backend**:
@@ -56,11 +56,11 @@ The display protocol the app speaks in a headless session: Wayland or X11.
 _Avoid_: X11 mode; backend for the processes that provide the display, or for
 the kind of session
 
-**Command**:
-One request a caller makes of a live session, such as a click, a screenshot, or
-a stop.
-_Avoid_: control request, control (for a command or the channel that carries
-it), action (for the name of a command)
+**Session command**:
+A CLI command that asks something of a live session, such as a click, a
+screenshot, or a stop. The commands that start a session or recover its
+directory are not session commands.
+_Avoid_: control request, action (for the name of a session command)
 
 ### Desktop sharing
 
@@ -87,7 +87,7 @@ _Avoid_: tray item, tray icon
 **Action**:
 One input sent to the display: a pointer move, click, drag, scroll, typed text,
 or key.
-_Avoid_: action (for a check, or for the name of a command)
+_Avoid_: action (for a check, or for the name of a session command)
 
 **Batch**:
 An ordered list of steps that runs as one unit, with no other input in between.
@@ -99,7 +99,7 @@ _Avoid_: action (for any batch entry), entry
 **Control**:
 One element of the app's interface that the app exposes to accessibility tools,
 such as a button or a text field.
-_Avoid_: control (for a command or the channel that carries it)
+_Avoid_: control (for a session command or the channel that carries it)
 
 **Check**:
 A step that verifies, or waits for, the state of one control.
@@ -113,9 +113,8 @@ Querying the app's controls in a headless session. Each query yields one
 observation.
 
 **Observation**:
-The result of one inspection query: the controls that matched, and whether
-everything the app exposes was read. Only a complete observation can show that
-a control is absent.
+The result of one inspection query: its status and the controls that matched.
+Only a complete observation shows that the app exposes no matching control.
 _Avoid_: snapshot, response; observation for a check's limits or a lesson's
 frames
 
@@ -123,8 +122,8 @@ frames
 A session's record of the actions it sent.
 
 **Private input**:
-Typed text or a key whose value the caller marked to keep out of the input log
-and captions. The log still records that the action happened.
+Typed text or a key that the caller marked so that it gets no caption and the
+input log omits its value.
 
 ### Recording
 
@@ -170,8 +169,8 @@ not an overlay.
 _Avoid_: console, panel
 
 **Compaction**:
-Removing the stretches of a clip in which no action, check, or batch screenshot
-was in progress.
+Trimming idle gaps from a clip. Actions, checks, and batch screenshots are kept
+whole.
 
 ### Teaching
 
@@ -181,9 +180,9 @@ task, frames, the goal, and notes.
 _Avoid_: demonstration, bundle, teaching recording, evidence
 
 **Frame**:
-One still of the desktop that a teaching session sampled and saved in a lesson.
-Within a clip or a lesson's video, "frame" keeps its usual meaning of one video
-frame.
+One still of the display that a teaching session sampled and saved in a lesson.
+Elsewhere, "frame" keeps its usual meaning of one image in a video or capture
+stream.
 _Avoid_: observation, image
 
 ### Lifetime
@@ -193,9 +192,8 @@ The foreground process whose lifetime is the session.
 _Avoid_: owner, attach process, lifetime owner
 
 **Managed process**:
-A process of a headless session that must not outlive it: the app, the
-processes that provide its display, buses, and recording, and the helpers that
-finalize a clip.
+A process of a headless session that must not outlive it, such as the app or a
+process that provides its display.
 
 **Supervisor**:
 A helper that ends one managed process and all its descendants, even when the
@@ -203,13 +201,13 @@ runner has died.
 _Avoid_: subreaper (as its name), owner
 
 **Runtime directory**:
-A headless session's private temporary directory. The session removes it when
-it stops, and recovery removes it after the runner died.
+A headless session's private temporary directory, removed by a normal stop or
+by recovery.
 _Avoid_: runtime (alone)
 
 **Session metadata**:
-The description of a live session that a caller reads in order to send it a
-command. The session removes it when it stops.
+The description of a live session that a session command reads to reach it. A
+normal stop removes it.
 _Avoid_: state, session JSON
 
 **Session lock**:
@@ -222,6 +220,6 @@ Making a session directory usable again after the runner of a headless session
 died.
 
 **Recovery journal**:
-A headless session's record of its runtime directory. Recovery removes only the
-runtime directory that the journal names.
+The record a headless session keeps so that recovery can tell which runtime
+directory was its own.
 _Avoid_: ownership journal, ownership files

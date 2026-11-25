@@ -1255,8 +1255,9 @@ def screenshot(
         )
     if str(destination) != "-":
         # Read the active clip's destination from session metadata, not from the
-        # runner: record-stop renders in the control loop, so a request would wait
-        # for it. A runner from an older framewisp publishes no recording key.
+        # runner: record-stop renders in the runner's command loop, so a command
+        # would wait for it. A runner from an older framewisp publishes no
+        # recording key.
         recording = json.loads((session / "session.json").read_text()).get("recording")
         error = capture_path_error(
             destination, Path(recording) if isinstance(recording, str) else None

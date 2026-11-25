@@ -105,8 +105,7 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 
 ## Command protocol
 
-A newer CLI must not silently get less than it asked for from an older runner.
-When an older runner would accept a command and skip a new part of it, add a
-flag for that part to session metadata (`session.json`) and make the CLI check
-the flag before it sends the command. A command that an older runner rejects
-needs no flag.
+A newer CLI must fail clearly when a session's older runner cannot do exactly
+what a session command asks. The runner advertises what it supports in session
+metadata (`session.json`), and the CLI checks that before it relies on anything
+newer. A session command that the older runner already rejects needs no check.

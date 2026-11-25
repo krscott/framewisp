@@ -4,10 +4,9 @@
 which the runner and every supervisor hold. It removes a runtime directory only
 when the recovery journal names it; the journal records the device and inode of
 the session directory, the lock, and the runtime directory. It never signals a
-PID read
-from a file and never uses session metadata to authorise cleanup, because PIDs
-are reused and metadata can be copied into another directory (R-LIFE-5,
-R-LIFE-6).
+PID read from a file and never uses session metadata to authorise cleanup,
+because PIDs are reused and metadata can be copied into another directory
+(R-LIFE-5, R-LIFE-6).
 
 ## Consequences
 

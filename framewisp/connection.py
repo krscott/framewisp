@@ -130,10 +130,9 @@ def resolved_request_path(path: Path, field: str) -> Path:
 def capture_path_error(destination: Path, recording: Path | None) -> str | None:
     """Refuse the active recording's destination, which is no file until published.
 
-    The check is not atomic with the write. A file written before the clip is
-    published stops the clip taking its destination (R-REC-18). A screenshot
-    that passes the check and is written after the clip is published replaces
-    the clip.
+    The check protects only an unpublished clip, and it is not atomic with the
+    write: a file that lands first stops the clip taking its destination
+    (R-REC-18).
     """
     try:
         path = resolved_request_path(destination, "path")
