@@ -10,33 +10,33 @@ from framewisp.console import ConsoleCapture, console_frames
 from framewisp.finalization import CaptionOptions, render_clip
 from framewisp.layout import (
     CONSOLE_POSITIONS,
+    MAX_CLIP_DIMENSION,
     MAX_FRAME_CELLS,
-    MAX_VIDEO_DIMENSION,
+    ClipLayout,
     ConsolePanel,
     ConsolePosition,
     Rect,
-    VideoLayout,
-    min_panel_height,
-    min_panel_width,
+    clip_layout,
+    min_console_panel_height,
+    min_console_panel_width,
     plain_layout,
     text_columns,
     text_rows,
-    video_layout,
 )
 from framewisp.lib import clip_summary
 
 GUI_SIZE = (640, 480)
 GUI_COLOUR = 0x2060A0
-PANEL_COLOUR = (0x16, 0x1B, 0x22)
+CONSOLE_PANEL_COLOUR = (0x16, 0x1B, 0x22)
 # H.264 moves flat colours and sharp edges by less than this after a second encode.
 TOLERANCE = 28
 
 
-def panel_layout(
+def console_panel_layout(
     display: tuple[int, int], position: ConsolePosition, pixels: int
-) -> VideoLayout:
-    layout = video_layout(display, ConsolePanel(position, pixels))
-    assert isinstance(layout, VideoLayout)
+) -> ClipLayout:
+    layout = clip_layout(display, ConsolePanel(position, pixels))
+    assert isinstance(layout, ClipLayout)
     return layout
 
 
@@ -78,7 +78,7 @@ def source_video(path: Path, size: tuple[int, int]) -> None:
     )
 
 
-def frame(video: Path, size: tuple[int, int], second: float = 0.5) -> Image.Image:
+def frame(clip: Path, size: tuple[int, int], second: float = 0.5) -> Image.Image:
     data = subprocess.run(
         [
             "ffmpeg",
@@ -87,7 +87,7 @@ def frame(video: Path, size: tuple[int, int], second: float = 0.5) -> Image.Imag
             "-ss",
             str(second),
             "-i",
-            str(video),
+            str(clip),
             "-frames:v",
             "1",
             "-pix_fmt",
@@ -141,22 +141,22 @@ def caption_events() -> str:
 def render(
     tmp_path: Path,
     name: str,
-    layout: VideoLayout,
+    layout: ClipLayout,
     *,
     display: tuple[int, int] = GUI_SIZE,
     captions: CaptionOptions = CaptionOptions(),
     caption: str = "",
 ) -> Image.Image:
     """Render a two-second still clip and return a frame from while a caption shows."""
-    video = tmp_path / f"{name}.mp4"
-    source_video(video, display)
+    clip = tmp_path / f"{name}.mp4"
+    source_video(clip, display)
     inputs = tmp_path / f"{name}.jsonl"
     inputs.write_text(caption_events() if caption else "")
     console = tmp_path / "console.jsonl"
     if not console.exists():
         console.write_text("")
     render_clip(
-        video,
+        clip,
         input_log=inputs,
         origin=10,
         stopped=12,
@@ -168,14 +168,14 @@ def render(
         layout=layout,
         env=dict(os.environ),
     )
-    summary = clip_summary(video, env=dict(os.environ))
+    summary = clip_summary(clip, env=dict(os.environ))
     assert (summary["width"], summary["height"]) == (layout.width, layout.height)
-    return frame(video, (layout.width, layout.height))
+    return frame(clip, (layout.width, layout.height))
 
 
 # R-REC-12, R-REC-13
 @pytest.mark.parametrize(
-    ("position", "pixels", "video", "gui", "panel"),
+    ("position", "pixels", "clip", "gui", "console_panel"),
     [
         ("right", 640, (1280, 480), Rect(0, 0, 640, 480), Rect(640, 0, 640, 480)),
         ("right", 400, (1040, 480), Rect(0, 0, 640, 480), Rect(640, 0, 400, 480)),
@@ -187,30 +187,30 @@ def render(
         ("bottom", 200, (640, 680), Rect(0, 0, 640, 480), Rect(0, 480, 640, 200)),
     ],
 )
-def test_layout_places_panel_and_gui(
+def test_layout_places_console_panel_and_gui(
     position: ConsolePosition,
     pixels: int,
-    video: tuple[int, int],
+    clip: tuple[int, int],
     gui: Rect,
-    panel: Rect,
+    console_panel: Rect,
 ) -> None:
-    layout = panel_layout(GUI_SIZE, position, pixels)
-    assert (layout.width, layout.height) == video
+    layout = console_panel_layout(GUI_SIZE, position, pixels)
+    assert (layout.width, layout.height) == clip
     assert layout.gui == gui
-    assert layout.panel == panel
+    assert layout.console_panel == console_panel
 
 
 # R-REC-12, R-REC-13
-def test_console_panel_defaults_to_a_wide_right_panel() -> None:
+def test_console_panel_defaults_to_640_pixels_on_the_right() -> None:
     assert ConsolePanel() == ConsolePanel("right", 640)
 
 
-def test_layout_without_a_panel_fills_the_video_with_the_gui() -> None:
-    assert video_layout(GUI_SIZE, None) == plain_layout(GUI_SIZE)
-    assert plain_layout(GUI_SIZE) == VideoLayout(640, 480, Rect(0, 0, 640, 480))
+def test_layout_without_a_console_panel_fills_the_clip_with_the_gui() -> None:
+    assert clip_layout(GUI_SIZE, None) == plain_layout(GUI_SIZE)
+    assert plain_layout(GUI_SIZE) == ClipLayout(640, 480, Rect(0, 0, 640, 480))
 
 
-def test_default_panel_keeps_its_text_capacity() -> None:
+def test_default_console_panel_keeps_its_text_capacity() -> None:
     assert (text_columns(640, 1), text_rows(720, 1)) == (55, 36)
 
 
@@ -233,7 +233,7 @@ def test_default_panel_keeps_its_text_capacity() -> None:
         ("middle", 640, "must be one of"),
     ],
 )
-def test_panel_rejects_invalid_values(
+def test_console_panel_rejects_invalid_values(
     position: ConsolePosition, size: int, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
@@ -244,16 +244,16 @@ def test_panel_rejects_invalid_values(
 @pytest.mark.parametrize(
     ("position", "size"), [("left", 312), ("right", 312), ("top", 118), ("bottom", 118)]
 )
-def test_smallest_panel_has_the_minimum_text_capacity(
+def test_smallest_console_panel_has_the_minimum_text_capacity(
     position: ConsolePosition, size: int
 ) -> None:
-    panel = panel_layout((312, 118), position, size).panel
-    assert panel is not None
-    assert text_columns(panel.width, 1) == 20
-    assert text_rows(panel.height, 1) == 3
+    console_panel = console_panel_layout((312, 118), position, size).console_panel
+    assert console_panel is not None
+    assert text_columns(console_panel.width, 1) == 20
+    assert text_rows(console_panel.height, 1) == 3
     # The minimums are the smallest sizes that hold that much text.
-    assert text_columns(panel.width - 1, 1) == 19
-    assert text_rows(panel.height - 1, 1) == 2
+    assert text_columns(console_panel.width - 1, 1) == 19
+    assert text_rows(console_panel.height - 1, 1) == 2
 
 
 # R-REC-16
@@ -272,23 +272,23 @@ def test_layout_names_the_display_when_the_following_dimension_is_too_small(
     size: int,
     named: list[str],
 ) -> None:
-    error = video_layout(display, ConsolePanel(position, size))
+    error = clip_layout(display, ConsolePanel(position, size))
     assert isinstance(error, str)
     assert all(text in error for text in named), error
 
 
 # R-REC-16
 @pytest.mark.parametrize("position", CONSOLE_POSITIONS)
-def test_layout_keeps_the_video_within_the_encoder_limit(
+def test_layout_keeps_the_clip_within_the_encoder_limit(
     position: ConsolePosition,
 ) -> None:
-    fitting = MAX_VIDEO_DIMENSION - 640
+    fitting = MAX_CLIP_DIMENSION - 640
     assert isinstance(
-        video_layout((640, 640), ConsolePanel(position, fitting)), VideoLayout
+        clip_layout((640, 640), ConsolePanel(position, fitting)), ClipLayout
     )
-    error = video_layout((640, 640), ConsolePanel(position, fitting + 2))
+    error = clip_layout((640, 640), ConsolePanel(position, fitting + 2))
     assert isinstance(error, str)
-    assert str(MAX_VIDEO_DIMENSION) in error
+    assert str(MAX_CLIP_DIMENSION) in error
     assert "--console-size" in error
 
 
@@ -302,13 +302,11 @@ def test_layout_keeps_the_video_within_the_encoder_limit(
         ((8192, 16384), "right", 7936),
     ],
 )
-def test_layout_keeps_the_video_within_the_frame_size_limit(
+def test_layout_keeps_the_clip_within_the_frame_size_limit(
     display: tuple[int, int], position: ConsolePosition, fitting: int
 ) -> None:
-    assert isinstance(
-        video_layout(display, ConsolePanel(position, fitting)), VideoLayout
-    )
-    error = video_layout(display, ConsolePanel(position, fitting + 2))
+    assert isinstance(clip_layout(display, ConsolePanel(position, fitting)), ClipLayout)
+    error = clip_layout(display, ConsolePanel(position, fitting + 2))
     assert isinstance(error, str)
     assert "frame size limit" in error
     assert "--console-size" in error
@@ -414,21 +412,21 @@ PLACEMENTS: list[tuple[ConsolePosition, int]] = [
 
 # R-REC-12, R-REC-13, R-REC-14
 @pytest.mark.parametrize(("position", "pixels"), PLACEMENTS)
-def test_panel_extends_the_video_around_an_unchanged_gui(
+def test_console_panel_extends_the_clip_around_an_unchanged_gui(
     tmp_path: Path, position: ConsolePosition, pixels: int
 ) -> None:
     plain = tmp_path / "plain.mp4"
     source_video(plain, GUI_SIZE)
     original = frame(plain, GUI_SIZE)
-    layout = panel_layout(GUI_SIZE, position, pixels)
-    assert layout.panel is not None
-    video = render(tmp_path, "panel", layout)
-    assert difference(crop(video, layout.gui), original) <= TOLERANCE
-    panel = crop(video, layout.panel)
-    background = Image.new("RGB", panel.size, PANEL_COLOUR)
-    title = ink_box(panel, background)
+    layout = console_panel_layout(GUI_SIZE, position, pixels)
+    assert layout.console_panel is not None
+    clip_frame = render(tmp_path, "console_panel", layout)
+    assert difference(crop(clip_frame, layout.gui), original) <= TOLERANCE
+    console_panel = crop(clip_frame, layout.console_panel)
+    background = Image.new("RGB", console_panel.size, CONSOLE_PANEL_COLOUR)
+    title = ink_box(console_panel, background)
     assert title is not None
-    # Only the title is drawn, at the panel's own top left.
+    # Only the title is drawn, at the console panel's own top left.
     assert 14 <= title[0] <= 20 and 14 <= title[1] <= 24
     assert title[3] <= 44
 
@@ -438,9 +436,9 @@ def test_panel_extends_the_video_around_an_unchanged_gui(
 def test_caption_stays_centred_on_the_gui(
     tmp_path: Path, position: ConsolePosition, pixels: int
 ) -> None:
-    layout = panel_layout(GUI_SIZE, position, pixels)
-    assert layout.panel is not None
-    video = render(
+    layout = console_panel_layout(GUI_SIZE, position, pixels)
+    assert layout.console_panel is not None
+    clip_frame = render(
         tmp_path,
         "captioned",
         layout,
@@ -448,24 +446,29 @@ def test_caption_stays_centred_on_the_gui(
         caption="centred",
     )
     bare = render(tmp_path, "bare", layout)
-    box = ink_box(crop(video, layout.gui), crop(bare, layout.gui))
+    box = ink_box(crop(clip_frame, layout.gui), crop(bare, layout.gui))
     assert box is not None
     assert (box[0] + box[2]) / 2 == pytest.approx(GUI_SIZE[0] / 2, abs=3)
-    # The caption sits at the bottom of the GUI, not of the extended video.
+    # The caption sits at the bottom of the GUI, not of the extended clip.
     assert GUI_SIZE[1] - 60 <= box[3] <= GUI_SIZE[1]
-    assert difference(crop(video, layout.panel), crop(bare, layout.panel)) <= TOLERANCE
+    assert (
+        difference(
+            crop(clip_frame, layout.console_panel), crop(bare, layout.console_panel)
+        )
+        <= TOLERANCE
+    )
 
 
 # R-REC-15
 @pytest.mark.parametrize("position", ["top", "bottom"])
-def test_panel_height_does_not_resize_a_caption(
+def test_console_panel_height_does_not_resize_a_caption(
     tmp_path: Path, position: ConsolePosition
 ) -> None:
-    layout = panel_layout(GUI_SIZE, position, 640)
+    layout = console_panel_layout(GUI_SIZE, position, 640)
     plain = plain_layout(GUI_SIZE)
-    video = render(
+    clip_frame = render(
         tmp_path,
-        "panel",
+        "console_panel",
         layout,
         captions=CaptionOptions(key="all"),
         caption="same size",
@@ -479,7 +482,7 @@ def test_panel_height_does_not_resize_a_caption(
         caption="same size",
     )
     reference = render(tmp_path, "reference", plain)
-    box = ink_box(crop(video, layout.gui), crop(bare, layout.gui))
+    box = ink_box(crop(clip_frame, layout.gui), crop(bare, layout.gui))
     expected = ink_box(alone, reference)
     assert box is not None and expected is not None
     assert box[2] - box[0] == pytest.approx(expected[2] - expected[0], abs=2)
@@ -491,13 +494,13 @@ def test_panel_height_does_not_resize_a_caption(
     ("position", "pixels"),
     [("left", 640), ("right", 640), ("top", 200), ("bottom", 200)],
 )
-def test_wide_caption_never_reaches_the_panel(
+def test_wide_caption_never_reaches_the_console_panel(
     tmp_path: Path, position: ConsolePosition, pixels: int
 ) -> None:
     display = (400, 1000)
-    layout = panel_layout(display, position, pixels)
-    assert layout.panel is not None
-    video = render(
+    layout = console_panel_layout(display, position, pixels)
+    assert layout.console_panel is not None
+    clip_frame = render(
         tmp_path,
         "captioned",
         layout,
@@ -506,11 +509,16 @@ def test_wide_caption_never_reaches_the_panel(
         caption="W" * 70,
     )
     bare = render(tmp_path, "bare", layout, display=display)
-    box = ink_box(crop(video, layout.gui), crop(bare, layout.gui))
+    box = ink_box(crop(clip_frame, layout.gui), crop(bare, layout.gui))
     assert box is not None
     # The caption is wider than the GUI, so the clip decides where it stops.
     assert box[0] == 0 and box[2] == display[0]
-    assert difference(crop(video, layout.panel), crop(bare, layout.panel)) <= TOLERANCE
+    assert (
+        difference(
+            crop(clip_frame, layout.console_panel), crop(bare, layout.console_panel)
+        )
+        <= TOLERANCE
+    )
 
 
 # R-REC-14, R-REC-15
@@ -523,29 +531,42 @@ def test_wide_caption_never_reaches_the_panel(
         ("bottom", CaptionOptions(pointer="modifiers", key="all")),
     ],
 )
-def test_every_caption_mode_keeps_the_panel_and_gui(
+def test_every_caption_mode_keeps_the_console_panel_and_gui(
     tmp_path: Path, position: ConsolePosition, captions: CaptionOptions
 ) -> None:
     (tmp_path / "console.jsonl").write_text(
-        json.dumps({"time": 10.1, "text": "panel output\n"}) + "\n"
+        json.dumps({"time": 10.1, "text": "console panel output\n"}) + "\n"
     )
-    layout = panel_layout(GUI_SIZE, position, 400)
-    assert layout.panel is not None
-    video = render(tmp_path, "mode", layout, captions=captions, caption="typed")
+    layout = console_panel_layout(GUI_SIZE, position, 400)
+    assert layout.console_panel is not None
+    clip_frame = render(tmp_path, "mode", layout, captions=captions, caption="typed")
     bare = render(tmp_path, "bare", layout)
-    shown = ink_box(crop(video, layout.gui), crop(bare, layout.gui)) is not None
+    shown = ink_box(crop(clip_frame, layout.gui), crop(bare, layout.gui)) is not None
     assert shown is (captions.key == "all")
-    assert difference(crop(video, layout.panel), crop(bare, layout.panel)) <= TOLERANCE
-    panel = crop(video, layout.panel)
-    output = ink_box(panel, Image.new("RGB", panel.size, PANEL_COLOUR))
+    assert (
+        difference(
+            crop(clip_frame, layout.console_panel), crop(bare, layout.console_panel)
+        )
+        <= TOLERANCE
+    )
+    console_panel = crop(clip_frame, layout.console_panel)
+    output = ink_box(
+        console_panel, Image.new("RGB", console_panel.size, CONSOLE_PANEL_COLOUR)
+    )
     assert output is not None and output[3] > 48
 
 
-def test_text_wraps_to_the_panel_and_keeps_the_newest_rows(tmp_path: Path) -> None:
+def test_text_wraps_to_the_console_panel_and_keeps_the_newest_rows(
+    tmp_path: Path,
+) -> None:
     log = tmp_path / "console.jsonl"
     log.write_text(json.dumps({"time": 10.1, "text": "x" * 100 + "\nlast\n"}) + "\n")
-    panel = Rect(0, 0, 312, 118)
-    frames = list(console_frames(log, origin=10, stopped=12, panel=panel, cell_scale=1))
+    console_panel = Rect(0, 0, 312, 118)
+    frames = list(
+        console_frames(
+            log, origin=10, stopped=12, console_panel=console_panel, cell_scale=1
+        )
+    )
     lines = frames[-1].text.split("\n")
     assert len(lines) == 3
     assert [line.split(" | ")[1] for line in lines] == ["x" * 20, "x" * 20, "last"]
@@ -553,7 +574,7 @@ def test_text_wraps_to_the_panel_and_keeps_the_newest_rows(tmp_path: Path) -> No
 
 @pytest.mark.parametrize(("height", "rows"), [(118, 3), (136, 4), (200, 7)])
 @pytest.mark.parametrize("position", ["top", "bottom"])
-def test_short_panel_draws_only_the_rows_that_fit(
+def test_short_console_panel_draws_only_the_rows_that_fit(
     tmp_path: Path, position: ConsolePosition, height: int, rows: int
 ) -> None:
     (tmp_path / "console.jsonl").write_text(
@@ -562,12 +583,12 @@ def test_short_panel_draws_only_the_rows_that_fit(
             for index in range(10)
         )
     )
-    layout = panel_layout(GUI_SIZE, position, height)
-    assert layout.panel is not None
-    video = render(tmp_path, "rows", layout)
-    panel = crop(video, layout.panel)
-    background = Image.new("RGB", panel.size, PANEL_COLOUR)
-    mask = ImageChops.difference(panel, background).convert("L")
+    layout = console_panel_layout(GUI_SIZE, position, height)
+    assert layout.console_panel is not None
+    clip_frame = render(tmp_path, "rows", layout)
+    console_panel = crop(clip_frame, layout.console_panel)
+    background = Image.new("RGB", console_panel.size, CONSOLE_PANEL_COLOUR)
+    mask = ImageChops.difference(console_panel, background).convert("L")
     inked = [
         max(mask.crop((0, y, mask.width, y + 1)).tobytes()) > TOLERANCE
         for y in range(44, mask.height)
@@ -579,32 +600,34 @@ def test_short_panel_draws_only_the_rows_that_fit(
 @pytest.mark.parametrize(
     ("first", "second", "pixels"), [("top", "bottom", 200), ("left", "right", 400)]
 )
-def test_panel_text_does_not_depend_on_the_edge(
+def test_console_panel_text_does_not_depend_on_the_edge(
     tmp_path: Path, first: ConsolePosition, second: ConsolePosition, pixels: int
 ) -> None:
     (tmp_path / "console.jsonl").write_text(
         json.dumps({"time": 10.1, "text": "M" * 100 + "\n"}) + "\n"
     )
-    panels: list[Image.Image] = []
+    console_panels: list[Image.Image] = []
     for position in (first, second):
-        layout = panel_layout(GUI_SIZE, position, pixels)
-        assert layout.panel is not None
-        panels.append(crop(render(tmp_path, position, layout), layout.panel))
-    assert difference(*panels) <= TOLERANCE
-    background = Image.new("RGB", panels[0].size, PANEL_COLOUR)
-    box = ink_box(panels[0], background)
+        layout = console_panel_layout(GUI_SIZE, position, pixels)
+        assert layout.console_panel is not None
+        console_panels.append(
+            crop(render(tmp_path, position, layout), layout.console_panel)
+        )
+    assert difference(*console_panels) <= TOLERANCE
+    background = Image.new("RGB", console_panels[0].size, CONSOLE_PANEL_COLOUR)
+    box = ink_box(console_panels[0], background)
     assert box is not None
-    # Wrapping keeps text inside the panel instead of running into its clip.
-    assert box[2] < panels[0].width - 16
+    # Wrapping keeps text inside the console panel instead of running into its clip.
+    assert box[2] < console_panels[0].width - 16
 
 
-def ink_rows(panel: Image.Image) -> list[tuple[int, int, int]]:
+def ink_rows(console_panel: Image.Image) -> list[tuple[int, int, int]]:
     """Each band of inked rows below the title, with its rightmost inked column."""
     mask = ImageChops.subtract(
         ImageChops.difference(
-            panel, Image.new("RGB", panel.size, PANEL_COLOUR)
+            console_panel, Image.new("RGB", console_panel.size, CONSOLE_PANEL_COLOUR)
         ).convert("L"),
-        Image.new("L", panel.size, TOLERANCE),
+        Image.new("L", console_panel.size, TOLERANCE),
     )
     bands: list[tuple[int, int, int]] = []
     start = None
@@ -642,38 +665,41 @@ PRINTABLE_ASCII = "".join(map(chr, range(0x21, 0x7F)))
         (GUI_SIZE, "bottom", 640, "你😀"),
     ],
 )
-def test_filled_panel_text_stays_inside_the_panel(
+def test_filled_console_panel_text_stays_inside_the_console_panel(
     tmp_path: Path,
     display: tuple[int, int],
     position: ConsolePosition,
     pixels: int,
     fill: str,
 ) -> None:
-    layout = panel_layout(display, position, pixels)
-    assert layout.panel is not None
-    columns = text_columns(layout.panel.width, 1)
-    rows = text_rows(layout.panel.height, 1)
-    # Lines three panels long wrap. Output from long before the clip has the
+    layout = console_panel_layout(display, position, pixels)
+    assert layout.console_panel is not None
+    columns = text_columns(layout.console_panel.width, 1)
+    rows = text_rows(layout.console_panel.height, 1)
+    # Lines three console panels long wrap. Output from long before the clip has the
     # widest timestamps.
     (tmp_path / "console.jsonl").write_text(
         json.dumps({"time": -100000.0, "text": f"{fill * columns * 3}\n" * rows}) + "\n"
     )
-    panel = crop(render(tmp_path, "filled", layout, display=display), layout.panel)
-    background = Image.new("RGB", panel.size, PANEL_COLOUR)
+    console_panel = crop(
+        render(tmp_path, "filled", layout, display=display), layout.console_panel
+    )
+    background = Image.new("RGB", console_panel.size, CONSOLE_PANEL_COLOUR)
     text = ink_box(
-        panel.crop((0, 44, *panel.size)), background.crop((0, 44, *panel.size))
+        console_panel.crop((0, 44, *console_panel.size)),
+        background.crop((0, 44, *console_panel.size)),
     )
     assert text is not None
     left, top, right, bottom = text[0], text[1] + 44, text[2], text[3] + 44
-    assert left >= 16 and right <= panel.width - 16
+    assert left >= 16 and right <= console_panel.width - 16
     # Blocks ink a little past their 18-pixel line, into the bottom padding.
-    assert bottom <= panel.height - 8
+    assert bottom <= console_panel.height - 8
     if fill == "█":
         # Blocks fill their cells, so they show every row and leave less than a
         # spare cell or row.
         assert round((bottom - top) / 18) == rows
-        assert right > panel.width - 16 - 10
-        assert bottom > panel.height - 16 - 18
+        assert right > console_panel.width - 16 - 10
+        assert bottom > console_panel.height - 16 - 18
 
 
 def even(pixels: int) -> int:
@@ -695,44 +721,46 @@ def even(pixels: int) -> int:
         for size in ("minimum", "default")
     ],
 )
-def test_cell_scale_keeps_larger_scripts_inside_the_panel(
+def test_cell_scale_keeps_larger_scripts_inside_the_console_panel(
     tmp_path: Path, position: ConsolePosition, size: str, fill: str, scale: float
 ) -> None:
     beside = position in ("left", "right")
     if size == "default":
         display, pixels = (1280, 720), 640
-        if beside and pixels < min_panel_width(scale):
+        if beside and pixels < min_console_panel_width(scale):
             with pytest.raises(ValueError, match=f"--console-cell-scale {scale}"):
                 ConsolePanel(position, pixels, scale)
             return
     elif beside:
-        display = (640, even(min_panel_height(scale)))
-        pixels = even(min_panel_width(scale))
+        display = (640, even(min_console_panel_height(scale)))
+        pixels = even(min_console_panel_width(scale))
     else:
-        display = (even(min_panel_width(scale)), 480)
-        pixels = even(min_panel_height(scale))
-    layout = video_layout(display, ConsolePanel(position, pixels, scale))
-    assert isinstance(layout, VideoLayout) and layout.panel is not None
-    columns = text_columns(layout.panel.width, scale)
-    rows = text_rows(layout.panel.height, scale)
+        display = (even(min_console_panel_width(scale)), 480)
+        pixels = even(min_console_panel_height(scale))
+    layout = clip_layout(display, ConsolePanel(position, pixels, scale))
+    assert isinstance(layout, ClipLayout) and layout.console_panel is not None
+    columns = text_columns(layout.console_panel.width, scale)
+    rows = text_rows(layout.console_panel.height, scale)
     (tmp_path / "console.jsonl").write_text(
         json.dumps({"time": 10.1, "text": f"{fill * columns * 3}\n" * rows}) + "\n"
     )
-    panel = crop(render(tmp_path, "scaled", layout, display=display), layout.panel)
-    bands = ink_rows(panel)
-    # Every row shows, and no ink reaches the panel's clipped edges.
+    console_panel = crop(
+        render(tmp_path, "scaled", layout, display=display), layout.console_panel
+    )
+    bands = ink_rows(console_panel)
+    # Every row shows, and no ink reaches the console panel's clipped edges.
     assert len(bands) == rows
-    assert bands[-1][1] < panel.height
-    assert max(right for _, _, right in bands) < panel.width
+    assert bands[-1][1] < console_panel.height
+    assert max(right for _, _, right in bands) < console_panel.width
 
 
 # R-REC-25
 def test_cell_scale_shrinks_capacity_and_minimums() -> None:
     assert (text_columns(640, 1.1), text_rows(720, 1.1)) == (49, 33)
-    assert (min_panel_width(1), min_panel_height(1)) == (312, 118)
-    assert (min_panel_width(1.1), min_panel_height(1.1)) == (340, 124)
+    assert (min_console_panel_width(1), min_console_panel_height(1)) == (312, 118)
+    assert (min_console_panel_width(1.1), min_console_panel_height(1.1)) == (340, 124)
     for scale in (1, 1.1, 1.25, 2.5, 3.7):
-        width, height = min_panel_width(scale), min_panel_height(scale)
+        width, height = min_console_panel_width(scale), min_console_panel_height(scale)
         assert text_columns(width, scale) == 20 > text_columns(width - 1, scale)
         assert text_rows(height, scale) == 3 > text_rows(height - 1, scale)
 
@@ -763,7 +791,7 @@ def test_cell_scale_shrinks_capacity_and_minimums() -> None:
         ("right", 640, "1.1", "from 1 to 58"),
     ],
 )
-def test_panel_rejects_a_scale_without_room(
+def test_console_panel_rejects_a_scale_without_room(
     position: ConsolePosition, size: int, scale: float, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
@@ -772,14 +800,14 @@ def test_panel_rejects_a_scale_without_room(
 
 # R-REC-16, R-REC-25
 def test_layout_names_the_scale_when_the_display_is_too_small() -> None:
-    message = video_layout((1280, 122), ConsolePanel("right", 640, 1.1))
+    message = clip_layout((1280, 122), ConsolePanel("right", 640, 1.1))
     assert isinstance(message, str)
     assert "at least 124 pixels tall" in message
     assert "--console-cell-scale 1.1" in message
     # 121 pixels hold three rows at 1.05, but clips need an even display.
-    message = video_layout((1280, 120), ConsolePanel("right", 640, 1.05))
+    message = clip_layout((1280, 120), ConsolePanel("right", 640, 1.05))
     assert isinstance(message, str) and "at least 122 pixels tall" in message
-    default = video_layout((1280, 116), ConsolePanel("right", 640))
+    default = clip_layout((1280, 116), ConsolePanel("right", 640))
     assert isinstance(default, str) and "cell-scale" not in default
 
 
@@ -793,9 +821,9 @@ def test_braces_and_backslashes_draw_as_one_cell(tmp_path: Path) -> None:
             json.dumps({"time": 10.1, "text": f"{line}\n"}) + "\n" for line in lines
         )
     )
-    layout = panel_layout(GUI_SIZE, "right", 640)
-    assert layout.panel is not None
-    bands = ink_rows(crop(render(tmp_path, "literal", layout), layout.panel))
+    layout = console_panel_layout(GUI_SIZE, "right", 640)
+    assert layout.console_panel is not None
+    bands = ink_rows(crop(render(tmp_path, "literal", layout), layout.console_panel))
     assert len(bands) == len(lines)
     rights = [right for _, _, right in bands]
     assert max(rights) - min(rights) <= 1
@@ -809,8 +837,8 @@ def test_timestamps_of_any_width_keep_the_separator_aligned(tmp_path: Path) -> N
             for offset in (-100.5, -10.5, -9.5, 0.5)
         )
     )
-    layout = panel_layout(GUI_SIZE, "right", 640)
-    assert layout.panel is not None
-    bands = ink_rows(crop(render(tmp_path, "aligned", layout), layout.panel))
+    layout = console_panel_layout(GUI_SIZE, "right", 640)
+    assert layout.console_panel is not None
+    bands = ink_rows(crop(render(tmp_path, "aligned", layout), layout.console_panel))
     assert len(bands) == 4
     assert max(r for _, _, r in bands) - min(r for _, _, r in bands) <= 1

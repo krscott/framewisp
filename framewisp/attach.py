@@ -41,7 +41,7 @@ from framewisp.connection import (
     session_kind,
     teaching_refusal,
 )
-from framewisp.desktop import lock_desktop, write_json
+from framewisp.desktop import STOP_SOCKET, lock_desktop, write_json
 from framewisp.input_log import input_error
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.portal import DesktopPortal, dispatch_events
@@ -550,8 +550,9 @@ def _share_desktop(
     def announce_ready() -> None:
         assert portal is not None
         ready.set()
+        label = "Teaching session ready" if teaching is not None else "Attached"
         print(
-            f"Attached: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
+            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
             flush=True,
         )
 
@@ -670,7 +671,7 @@ def _share_desktop(
                 ):
                     command_socket = str(directory / "command.sock")
                     listener.bind(command_socket)
-                    emergency.bind(str(directory / "stop-sharing.sock"))
+                    emergency.bind(str(directory / STOP_SOCKET))
                     listener.listen(32)
                     emergency.listen(32)
                     write_json(
@@ -695,9 +696,9 @@ def _share_desktop(
                     server.start()
                     try:
                         if teaching is None:
-                            portal.open()
+                            portal.open(allow_input=True)
                         else:
-                            portal.open(screen_only=True)
+                            portal.open(allow_input=False)
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"

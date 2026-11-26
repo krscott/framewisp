@@ -54,7 +54,7 @@ from framewisp.finalization import (
 from framewisp.input_log import CaptionCapture
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
-from framewisp.layout import ConsolePanel, VideoLayout, video_layout
+from framewisp.layout import ClipLayout, ConsolePanel, clip_layout
 from framewisp.processes import ManagedProcess, managed_process, run_managed
 from framewisp.recorder import recorder_output
 from framewisp.recovery import (
@@ -333,7 +333,7 @@ def start_recording(
     click_pings: bool,
     console: ConsoleCapture,
     compact: bool = False,
-    layout: VideoLayout,
+    layout: ClipLayout,
 ) -> Generator[ManagedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive.
 
@@ -362,7 +362,9 @@ def start_recording(
         "-f",
         str(clip),
     ]
-    timed = captions.enabled or click_pings or layout.panel is not None or compact
+    timed = (
+        captions.enabled or click_pings or layout.console_panel is not None or compact
+    )
     capture_literals = captions.key == "all"
     # The recorder's protocol trace carries its first frame's timestamp, which is
     # the clip's time origin.
@@ -646,7 +648,7 @@ class Clips:
             return "A recording is already active. Use record-stop first."
         if any(dimension % 2 for dimension in self.size):
             return "Recording requires even display width and height."
-        layout = video_layout(self.size, console)
+        layout = clip_layout(self.size, console)
         if isinstance(layout, str):
             return layout
         try:

@@ -118,8 +118,8 @@ class DesktopPortal:
             None,
         )
 
-    def open(self, *, screen_only: bool = False) -> None:
-        interface = SCREENCAST if screen_only else REMOTE
+    def open(self, *, allow_input: bool) -> None:
+        interface = REMOTE if allow_input else SCREENCAST
         result = self.request(
             interface,
             "CreateSession",
@@ -155,7 +155,7 @@ class DesktopPortal:
             closed,
             None,
         )
-        if not screen_only:
+        if allow_input:
             self.request(
                 REMOTE,
                 "SelectDevices",
@@ -179,14 +179,14 @@ class DesktopPortal:
         )
         print(
             (
-                "Select one monitor to record in the desktop dialog."
-                if screen_only
-                else "Approve keyboard/pointer access and select one monitor in the desktop dialog."
+                "Approve keyboard/pointer access and select one monitor in the desktop dialog."
+                if allow_input
+                else "Select one monitor to record in the desktop dialog."
             ),
             flush=True,
         )
         result = self.request(interface, "Start", "(osa{sv})", (self.session, ""), {})
-        if not screen_only and result.get("devices") != 3:
+        if allow_input and result.get("devices") != 3:
             raise RuntimeError(
                 "Attach requires both keyboard and pointer permission. "
                 "Allow remote interaction in the desktop dialog and attach again."
@@ -198,9 +198,9 @@ class DesktopPortal:
         self.size = cast(tuple[int, int], properties.get("size", (0, 0)))
         # COSMIC creates its EI devices on the first Notify call. Zero motion
         # starts that handshake without changing the pointer's position.
-        if not screen_only:
+        if allow_input:
             self.input("NotifyPointerMotion", "dd", 0.0, 0.0)
-        if not screen_only and self.stop.wait(0.1):
+        if allow_input and self.stop.wait(0.1):
             raise InterruptedError("Attach stopped during input setup.")
 
     def input(self, method: str, signature: str, *values: object) -> None:

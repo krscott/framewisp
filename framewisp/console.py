@@ -198,12 +198,12 @@ class ConsoleFrame:
 
 
 def console_frames(
-    log: Path, *, origin: float, stopped: float, panel: Rect, cell_scale: float
+    log: Path, *, origin: float, stopped: float, console_panel: Rect, cell_scale: float
 ) -> Generator[ConsoleFrame, None, None]:
     """Keep pre-clip context and coalesce bursts to at most one update per frame."""
     state = ConsoleText(
-        rows=text_rows(panel.height, cell_scale),
-        columns=text_columns(panel.width, cell_scale),
+        rows=text_rows(console_panel.height, cell_scale),
+        columns=text_columns(console_panel.width, cell_scale),
     )
     start = 0.0
     screen = ""

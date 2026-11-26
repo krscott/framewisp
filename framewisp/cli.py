@@ -29,7 +29,7 @@ from framewisp.layout import (
     DEFAULT_CONSOLE_POSITION,
     DEFAULT_CONSOLE_SIZE,
     ConsolePanel,
-    video_layout,
+    clip_layout,
 )
 from framewisp.lib import (
     key_commands,
@@ -147,7 +147,8 @@ def main() -> None:
         "attach", help="share an existing desktop through its permission dialog"
     )
     teach = commands.add_parser(
-        "teach", help="capture a screen-only lesson from your desktop"
+        "teach",
+        help="capture a lesson from your desktop without keyboard or pointer access",
     )
     teach.add_argument("directory", type=Path, help="new directory for the lesson")
     teach.add_argument("--goal", required=True, help="what the agent should learn")
@@ -485,7 +486,7 @@ def main() -> None:
             parser.error("run requires an app command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
-        layout = video_layout((args.width, args.height), args.console_panel)
+        layout = clip_layout((args.width, args.height), args.console_panel)
         if isinstance(layout, str):
             parser.error(layout)
     metadata_path = session_dir / "session.json"

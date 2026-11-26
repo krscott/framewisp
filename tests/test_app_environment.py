@@ -132,7 +132,8 @@ def test_gtk_app_ignores_conflicting_caller(
                     report.exists()
                     and "Session ready:" in log.read_text()
                     and (
-                        not demo or "Demo ready" in (directory / "app.log").read_text()
+                        not demo
+                        or "Demo app ready" in (directory / "app.log").read_text()
                     )
                 )
 
@@ -618,7 +619,7 @@ print(json.dumps(dict(os.environ)))
 
 
 CAPTION_REGION = (0, 0, 1280, 720)
-# Skip the panel title and each line's timestamp, which depends on app startup.
+# Skip the console panel title and each line's timestamp, which depends on app startup.
 CONSOLE_TEXT_REGION = (1400, 48, 1920, 720)
 
 

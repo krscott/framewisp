@@ -1,4 +1,4 @@
-"""A lesson produced from a screen-only capture stream."""
+"""A lesson produced from a capture stream of the shared display."""
 
 # pyright: reportMissingModuleSource=false
 

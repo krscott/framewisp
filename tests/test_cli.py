@@ -134,7 +134,7 @@ def test_recording_rejects_invalid_console_panels_before_any_clip(
         (["--console-size", "16000"], ["17280x720", "smaller --console-size"]),
     ],
 )
-def test_run_rejects_a_panel_the_display_cannot_hold(
+def test_run_rejects_a_console_panel_the_display_cannot_hold(
     tmp_path: Path, options: list[str], named: list[str]
 ) -> None:
     session_dir = tmp_path / "session"
@@ -200,7 +200,7 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("panel", "expected"),
+    ("console_panel", "expected"),
     [
         (None, None),
         (
@@ -214,7 +214,7 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
     ],
 )
 def test_record_start_sends_console_panel(
-    panel: ConsolePanel | None, expected: dict[str, object] | None
+    console_panel: ConsolePanel | None, expected: dict[str, object] | None
 ) -> None:
     received: list[dict[str, object]] = []
 
@@ -236,7 +236,10 @@ def test_record_start_sends_console_panel(
             thread = threading.Thread(target=runner, args=(server,), daemon=True)
             thread.start()
             result = session_command(
-                session_dir, "record-start", session_dir / "clip.mp4", console=panel
+                session_dir,
+                "record-start",
+                session_dir / "clip.mp4",
+                console=console_panel,
             )
             thread.join(timeout=5)
     assert result == 0

@@ -17,7 +17,7 @@ from framewisp.compact import (
 from framewisp.console import ConsoleCapture, console_frames
 from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.input_log import KEY_ACTIONS, InputEvent, caption_text
-from framewisp.layout import CONSOLE_FONT_SIZE, VideoLayout
+from framewisp.layout import CONSOLE_FONT_SIZE, ClipLayout
 from framewisp.pointer_overlays import (
     POINTER_STYLE,
     ClickPing,
@@ -151,10 +151,10 @@ def subtitle_script(
     captions: list[Caption],
     *,
     pointer_overlays: Iterable[ClickPing | HoldDisc] = (),
-    layout: VideoLayout,
+    layout: ClipLayout,
 ) -> str:
     gui = layout.gui
-    # Overlays follow the GUI, so a top or bottom panel doesn't resize them.
+    # Overlays follow the GUI, so a top or bottom console panel doesn't resize them.
     scale = gui.height / 720
     side_margin = 24 * gui.width / 1280
     margin_left = gui.x + side_margin
@@ -218,7 +218,7 @@ def render_clip(
     click_pings: bool = True,
     console: ConsoleCapture,
     compact: bool = False,
-    layout: VideoLayout,
+    layout: ClipLayout,
     env: dict[str, str],
 ) -> None:
     entries = (
@@ -237,8 +237,8 @@ def render_clip(
         if click_pings
         else []
     )
-    panel = layout.panel
-    if not entries and not overlays and panel is None and not compact:
+    console_panel = layout.console_panel
+    if not entries and not overlays and console_panel is None and not compact:
         return
     with tempfile.TemporaryDirectory(
         prefix=".framewisp-finalization-", dir=clip.parent
@@ -248,19 +248,19 @@ def render_clip(
             script.write(
                 subtitle_script(entries, pointer_overlays=overlays, layout=layout)
             )
-            if panel is not None:
+            if console_panel is not None:
                 console.snapshot(work / "console.jsonl")
-                position = f"{{\\pos({panel.x + 16},{panel.y + 16}){panel.clip}}}"
+                position = f"{{\\pos({console_panel.x + 16},{console_panel.y + 16}){console_panel.clip}}}"
                 script.write(
                     f"Dialogue: 0,0:00:00.00,{ass_time(stopped - origin)},Console,"
                     f"{position}Console (stdout + stderr)\n"
                 )
-                position = f"{{\\pos({panel.x + 16},{panel.y + 48}){panel.clip}}}"
+                position = f"{{\\pos({console_panel.x + 16},{console_panel.y + 48}){console_panel.clip}}}"
                 for frame in console_frames(
                     work / "console.jsonl",
                     origin=origin,
                     stopped=stopped,
-                    panel=panel,
+                    console_panel=console_panel,
                     cell_scale=layout.cell_scale,
                 ):
                     # Libass drops a line's leading spaces, which would shift the
@@ -270,7 +270,7 @@ def render_clip(
                         f"Dialogue: 0,{ass_time(frame.start)},{ass_time(frame.end)},Console,{position}{text}\n"
                     )
         filters: list[str] = []
-        if panel is not None:
+        if console_panel is not None:
             filters.append(
                 f"pad={layout.width}:{layout.height}:{layout.gui.x}:{layout.gui.y}"
                 ":color=0x161b22"
@@ -292,6 +292,7 @@ def render_clip(
             raise RuntimeError("FRAMEWISP_FONTCONFIG_FILE does not name a file.")
         # A long clip can have more cut ranges than fit in an exec argument.
         (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
+        rendered = work / "rendered.mp4"
         result = run_managed(
             [
                 "ffmpeg",
@@ -315,7 +316,7 @@ def render_clip(
                 "-an",
                 "-movflags",
                 "+faststart",
-                "captioned.mp4",
+                str(rendered),
             ],
             log=log,
             env=fixed_fonts(env, fonts=fonts),
@@ -323,4 +324,4 @@ def render_clip(
         )
         if result:
             raise RuntimeError(f"FFmpeg exited with status {result}.")
-        (work / "captioned.mp4").replace(clip)
+        rendered.replace(clip)

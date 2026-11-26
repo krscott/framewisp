@@ -31,7 +31,7 @@ GNOME extension versions when running the following checks on each desktop.
 | --- | --- | --- | --- |
 | KDE Plasma | Not tested | Not applicable | Pending |
 | COSMIC | Not recorded | Not applicable | Visual check passed; the indicator's stop button works. Other live checks pending |
-| GNOME (Xorg) | 42.9 on Ubuntu 22.04; xdg-desktop-portal 1.14.4, -gnome 42.1 | Ubuntu AppIndicators 42 | Visual check passed; the indicator's stop works. Every input command and screenshot freshness passed. Held Shift and button released after `--stop-sharing`, SIGKILL of a suspended runner, and terminal loss. Shortcuts and installed package pending |
+| GNOME (Xorg) | 42.9 on Ubuntu 22.04; xdg-desktop-portal 1.14.4, -gnome 42.1 | Ubuntu AppIndicators 42 | Visual check passed; the indicator's stop works. Every input command and screenshot freshness passed. Held Shift and button released after an emergency stop, SIGKILL of a suspended runner, and terminal loss. Shortcuts and installed package pending |
 | GNOME (Wayland) | Not tested | Not tested | Pending |
 
 ## Live checks

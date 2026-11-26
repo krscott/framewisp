@@ -54,9 +54,9 @@ Ask the user to run `framewisp SESSION teach DIRECTORY --goal 'TASK'` in a
 foreground desktop terminal. DIRECTORY must be new and its parent must exist.
 The user reads the capture notice, types `ATTACH`, and approves one monitor in
 the screen-sharing dialog. Do not allocate a PTY or bypass interactive consent.
-Teaching requests screen access only. A teaching session refuses every command
-except `screenshot` and `teach-note`; normal control requires a separate `attach`
-confirmation.
+Teaching requests no keyboard or pointer access. A teaching session refuses every
+command except `screenshot` and `teach-note`; normal control requires a separate
+`attach` confirmation. Wait for `Teaching session ready:` before sending commands.
 
 While the user performs the task, `framewisp SESSION teach-note 'EXPLANATION'` adds a
 timestamped note. Explain shortcuts, decisions, variable inputs, and expected
@@ -110,8 +110,8 @@ Explicit paths such as `/tmp/framewisp-demo`, `./browser`, and `sessions/browser
 retain their behavior. Bare names never fall back to a legacy directory. Empty
 names and `.`/`..` are invalid; names must fit in 255 bytes. Agents in the same
 project must choose distinct names. Keep launch and session commands in the same
-project (the same working directory outside Git). `Session ready:` and `Attached:`
-print the resolved directory; use that explicit path from another project or an
+project (the same working directory outside Git). `Session ready:`, `Attached:` and
+`Teaching session ready:` print the resolved directory; use that explicit path from another project or an
 environment with a different `TMPDIR`. Bare names under different temporary
 directories select different session directories. A headless session's runtime
 directory, which holds its sockets, is also in this temporary directory. If startup
@@ -565,9 +565,10 @@ receives output, so buffered output can appear late. Output from separately
 activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the console panel. Console text follows the app-log policy,
-so the input-content policy does not redact it. Finalization draws the console panel when the clip stops. If it fails, the
-raw video remains, the error names its path and `finalization.log`, and the
-session stops.
+so the input-content policy does not redact it. Finalization draws the console panel when the clip stops. If drawing fails, the
+raw GUI video remains and the error names its path and `finalization.log`. If
+publishing the clip fails, the error names where the finished clip is. Either
+failure stops the session.
 
 ## Share evidence on GitHub
 

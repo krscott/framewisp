@@ -13,11 +13,11 @@ from framewisp.console import ConsoleCapture
 from framewisp.finalization import CaptionOptions, render_clip, subtitle_script
 from framewisp.input_log import log_input
 from framewisp.layout import (
+    ClipLayout,
     ConsolePanel,
     ConsolePosition,
-    VideoLayout,
+    clip_layout,
     plain_layout,
-    video_layout,
 )
 from framewisp.pointer_overlays import (
     CLICK_PING_SECONDS,
@@ -32,9 +32,9 @@ ORIGIN = 100.0
 STOPPED = 106.0
 
 
-def panel_layout(position: ConsolePosition, pixels: int = 640) -> VideoLayout:
-    layout = video_layout(SIZE, ConsolePanel(position, pixels))
-    assert isinstance(layout, VideoLayout)
+def console_panel_layout(position: ConsolePosition, pixels: int = 640) -> ClipLayout:
+    layout = clip_layout(SIZE, ConsolePanel(position, pixels))
+    assert isinstance(layout, ClipLayout)
     return layout
 
 
@@ -378,7 +378,7 @@ def test_compaction_maps_click_pings_to_retained_frames(
     (tmp_path / "console.jsonl").write_text("")
     (tmp_path / "activity.jsonl").write_text("")
     log.write_text(command_lines(4, 4.3) + button_line(4.25, 600, 300))
-    layout = plain_layout(SIZE) if position is None else panel_layout(position)
+    layout = plain_layout(SIZE) if position is None else console_panel_layout(position)
     ranges = retained_frames(
         (log, tmp_path / "activity.jsonl"),
         origin=ORIGIN,
@@ -467,15 +467,27 @@ def test_click_ping_clips_at_the_console_panel(
 ) -> None:
     (tmp_path / "console.jsonl").write_text("")
     log.write_text(button_line(1, x, y) + button_line(3, 600, 300))
-    layout = panel_layout(position, pixels)
-    assert layout.panel is not None
+    layout = console_panel_layout(position, pixels)
+    assert layout.console_panel is not None
     render(raw_video, log, captions=CaptionOptions(), layout=layout)
     size = (layout.width, layout.height)
     edge = frames(raw_video, 36, 36, size=size)[0]
     inside = frames(raw_video, 96, 96, size=size)[0]
-    gui, panel = layout.gui, layout.panel
+    gui, console_panel = layout.gui, layout.console_panel
     assert red_box(edge.crop((gui.x, gui.y, gui.right, gui.bottom))) is not None
-    assert red_box(edge.crop((panel.x, panel.y, panel.right, panel.bottom))) is None
+    assert (
+        red_box(
+            edge.crop(
+                (
+                    console_panel.x,
+                    console_panel.y,
+                    console_panel.right,
+                    console_panel.bottom,
+                )
+            )
+        )
+        is None
+    )
     # The click ping reaches the shared edge, so the clip sits on it rather than inside it.
     box = red_box(edge)
     assert box is not None
@@ -537,14 +549,24 @@ def test_hold_disc_clips_at_the_console_panel(
 ) -> None:
     (tmp_path / "console.jsonl").write_text("")
     log.write_text(drag_lines(1, (x, y), 2, (600, 300)))
-    layout = panel_layout(position, 400)
-    assert layout.panel is not None
+    layout = console_panel_layout(position, 400)
+    assert layout.console_panel is not None
     render(raw_video, log, captions=CaptionOptions(), layout=layout)
-    gui, panel = layout.gui, layout.panel
+    gui, console_panel = layout.gui, layout.console_panel
     decoded = frames(raw_video, 30, 75, size=(layout.width, layout.height))
     for frame in decoded:
         assert (
-            red_box(frame.crop((panel.x, panel.y, panel.right, panel.bottom))) is None
+            red_box(
+                frame.crop(
+                    (
+                        console_panel.x,
+                        console_panel.y,
+                        console_panel.right,
+                        console_panel.bottom,
+                    )
+                )
+            )
+            is None
         )
     # The hold disc starts against the shared edge, then leaves it.
     assert red_box(decoded[1].crop((gui.x, gui.y, gui.right, gui.bottom))) is not None

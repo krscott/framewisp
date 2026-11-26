@@ -130,7 +130,7 @@ about 15.5 seconds despite the large difference in response size.
 The [checks](checks.md) use this coverage for positive
 text/state assertions. They re-run bounded queries, reject ambiguity, and only
 accept complete observations. No persistent object handles are needed. Each
-observation opens and closes a private connection. Traversal dominates larger
+query opens and closes a private connection. Traversal dominates larger
 trees, so a 50 ms polling pause does not promise 50 ms detection or subsecond
 workflows. The small delayed-response probe measures the combined input/check
 path separately from the larger demo app's traversal cost.

@@ -465,13 +465,13 @@ def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_for_demo_frame(demo, tmp_path / "before.png")
-    video = tmp_path / "compact console.mp4"
+    clip = tmp_path / "compact console.mp4"
     cli(
         demo.directory,
         "record-start",
         "--compact",
         "--console",
-        str(video),
+        str(clip),
     )
     time.sleep(5)
     failure = tmp_path / "failure.png"
@@ -509,7 +509,7 @@ def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     activity = (demo.directory / "activity.jsonl").read_text()
     assert "secret condition" not in activity
     assert len(activity.splitlines()) == 4
-    clip_frames(video, size=(1920, 720))
+    clip_frames(clip, size=(1920, 720))
     assert json.loads(cli(demo.directory, "status").stdout)["app"]["running"]
 
     # A later ordinary clip must not inherit compaction from the previous clip.
@@ -782,7 +782,7 @@ def paused_render(
                     return False  # Other processes can exit during enumeration.
                 return (
                     argv[0].endswith(b"ffmpeg")
-                    and b"captioned.mp4" in argv
+                    and any(arg.endswith(b"/rendered.mp4") for arg in argv)
                     and private_clip(tmp_path)
                     == Path(os.fsdecode(argv[argv.index(b"-i") + 1]))
                 )
@@ -880,14 +880,14 @@ def test_recover_waits_for_render_of_killed_runner(tmp_path: Path) -> None:
 def test_recording_starts_before_app_and_clip_finalizes_on_app_exit(
     tmp_path: Path,
 ) -> None:
-    video = tmp_path / "quick.mp4"
+    clip = tmp_path / "quick.mp4"
     result = subprocess.run(
         [
             "framewisp",
             str(tmp_path / "session"),
             "run",
             "--record",
-            str(video),
+            str(clip),
             "--",
             sys.executable,
             "-c",
@@ -896,7 +896,7 @@ def test_recording_starts_before_app_and_clip_finalizes_on_app_exit(
             "assert clip.stat().st_size > 0; "
             "assert not Path(sys.argv[2]).exists()",
             str(tmp_path),
-            str(video),
+            str(clip),
         ],
         capture_output=True,
         text=True,
@@ -904,7 +904,7 @@ def test_recording_starts_before_app_and_clip_finalizes_on_app_exit(
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
-    clip_frames(video)
+    clip_frames(clip)
     assert not private_directories(tmp_path)
 
 
@@ -1834,7 +1834,7 @@ def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
     assert demo.process.poll() is None
 
 
-def video_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
+def clip_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
     return subprocess.run(
         [
             "ffmpeg",
@@ -1861,7 +1861,7 @@ def video_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
 
 
 def caption_patches(path: Path) -> list[bytes]:
-    """Return the caption area of the video, sampled five times per second."""
+    """Return the caption area of the clip, sampled five times per second."""
     data = subprocess.run(
         [
             "ffmpeg",
@@ -1978,7 +1978,7 @@ GESTURE_BUTTONS = [
 
 
 def assert_click_pings_mark_gestures(
-    demo: Demo, video: Path, *, timed: bool = True
+    demo: Demo, clip: Path, *, timed: bool = True
 ) -> None:
     buttons = logged_buttons(demo)[-len(GESTURE_BUTTONS) :]
     assert [(action, x, y) for action, _, x, y in buttons] == GESTURE_BUTTONS
@@ -1986,19 +1986,19 @@ def assert_click_pings_mark_gestures(
     *presses, release = buttons
     # The drag's hold disc stops at its release and fades there; the translucent
     # fill stays visible for fewer frames than a click ping.
-    hold_discs = pointer_overlay_frames(video, release[2], release[3])
+    hold_discs = pointer_overlay_frames(clip, release[2], release[3])
     assert (
         len(hold_discs) >= 3
     ), f"no hold disc at drag release ({release[2]}, {release[3]})"
     if timed:
         assert abs(hold_discs[0] / 30 - (release[1] - origin)) <= 0.05
     for action, moment, x, y in presses:
-        click_pings = pointer_overlay_frames(video, x, y)
+        click_pings = pointer_overlay_frames(clip, x, y)
         assert len(click_pings) >= 8, f"no click ping for {action} at ({x}, {y})"
         if timed:
             # A drag's translucent hold disc leaves the crop over a few frames and
             # skews the click ping's bounds. Only its early stroke is this red.
-            opaque = pointer_overlay_frames(video, x, y, contrast=120)
+            opaque = pointer_overlay_frames(clip, x, y, contrast=120)
             first = min(when for _, when, px, py in buttons if (px, py) == (x, y))
             assert abs(opaque[0] / 30 - (first - origin)) <= 0.05
             assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in opaque)
@@ -2131,8 +2131,8 @@ def check_console_clip(
         for event in reversed(clip_inputs(demo, 0))
         if event["event"] == "start" and event["action"] == "key"
     )
-    shown = video_patch(clip, pressed + 0.4, gui_x, gui_y)
-    ended = video_patch(clip, pressed + 1.1, gui_x, gui_y)
+    shown = clip_patch(clip, pressed + 0.4, gui_x, gui_y)
+    ended = clip_patch(clip, pressed + 1.1, gui_x, gui_y)
     assert caption_differs(shown, ended) is (captions == "non-text")
 
 
@@ -2141,7 +2141,7 @@ def check_console_clip(
 @pytest.mark.parametrize(
     ("demo", "placement"), CONSOLE_STARTS.items(), indirect=["demo"]
 )
-def test_startup_clip_extends_the_video_around_the_gui(
+def test_startup_console_panel_extends_the_clip_around_the_gui(
     demo: Demo, tmp_path: Path, placement: tuple[str, int, str]
 ) -> None:
     assert demo.clip is not None
@@ -2631,12 +2631,10 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             )
             second = typed["time"] - origin + 0.4
             assert (
-                max(
-                    abs(a - b) for a, b in zip(video_patch(clip, 0), patch, strict=True)
-                )
+                max(abs(a - b) for a, b in zip(clip_patch(clip, 0), patch, strict=True))
                 <= 3
             )
-            changed = video_patch(clip, second)
+            changed = clip_patch(clip, second)
             assert (
                 sum(abs(a - b) > 20 for a, b in zip(changed, patch, strict=True)) > 1000
             )
@@ -2644,7 +2642,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             assert (
                 max(
                     abs(a - b)
-                    for a, b in zip(video_patch(clip, 0.8), patch, strict=True)
+                    for a, b in zip(clip_patch(clip, 0.8), patch, strict=True)
                 )
                 <= 3
             )
@@ -2698,14 +2696,14 @@ def check_clip_captions(
             )
             for action in ("move", "click", "key")
         )
-        idle = video_patch(clip, moved - 0.15)
-        assert caption_differs(video_patch(clip, moved + 0.4), idle) is (
+        idle = clip_patch(clip, moved - 0.15)
+        assert caption_differs(clip_patch(clip, moved + 0.4), idle) is (
             pointer == "all"
         )
-        assert caption_differs(video_patch(clip, clicked + 0.4), idle) is (
+        assert caption_differs(clip_patch(clip, clicked + 0.4), idle) is (
             pointer is not None
         )
-        assert caption_differs(video_patch(clip, pressed + 0.4), idle) is keys
+        assert caption_differs(clip_patch(clip, pressed + 0.4), idle) is keys
     else:
         # The app paints once at startup,
         # so a caption would make the patch change again after it first settles.
@@ -2832,7 +2830,7 @@ def test_runner_rejects_invalid_caption_mode(
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
-    wait_until(lambda: "Demo ready" in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text())
     cli(demo.directory, "click", "120", "100")
     cli(demo.directory, "type", "alpha beta")
     cli(demo.directory, "click", "80", "100", "--count", "2")
@@ -2851,7 +2849,7 @@ def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
     log = demo.directory / "app.log"
-    wait_until(lambda: "Demo ready" in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text())
     cli(demo.directory, "click", "54", "266")
     wait_until(lambda: "Option: True" in log.read_text())
     cli(demo.directory, "drag", "147", "382", "350", "382", "--duration", "0.4")
@@ -2903,7 +2901,7 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
-    wait_until(lambda: "Demo ready" in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text())
     cli(demo.directory, "move", "1100", "600")
     cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
     cli(demo.directory, "move", "150", "266")
@@ -3442,7 +3440,7 @@ def exported_tree(demo: Demo) -> None:
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     button = inspect(demo, "--role", "button", "--name", "Apply text")
     assert button["status"] == "ok", button
     assert button["match_count"] == 1
@@ -3481,7 +3479,7 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     # GTK exposes both the button and its child label with the same name.
     duplicates = inspect(demo, "--name", "Apply text")
     assert duplicates["status"] == "ok", duplicates
@@ -3518,7 +3516,7 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     assert inspect(demo, "--name", "Apply text")["status"] == "ok"
     metadata = json.loads((demo.directory / "session.json").read_text())
     pid = metadata["processes"]["app"]
@@ -3599,7 +3597,7 @@ def test_inspection_private_buses_and_unsupported_apps(
         metadata = json.loads((second / "session.json").read_text())
         assert metadata["accessibility_bus"] != first["accessibility_bus"]
         if app == "framewisp-demo":
-            wait_until(lambda: "Demo ready" in (second / "app.log").read_text())
+            wait_until(lambda: "Demo app ready" in (second / "app.log").read_text())
             wait_for_control(second, "Apply text")
             cli(second, "type", "--interval", "0", "Second session only")
             result = json.loads(
@@ -3634,7 +3632,7 @@ def test_inspection_private_buses_and_unsupported_apps(
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "ready.png"))
     plan = tmp_path / "batch.json"
     screenshot_path = tmp_path / "result.png"
@@ -3724,7 +3722,7 @@ def test_batch_validates_later_steps_and_screenshot_before_input(demo: Demo) -> 
 def test_batch_no_interleaving_through_final_screenshot(
     demo: Demo, tmp_path: Path
 ) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     cli(demo.directory, "click", "120", "100")
     with input_request(
         demo,
@@ -4116,7 +4114,7 @@ def test_recording_keeps_file_created_before_recorder_opens(
 # R-REC-1, R-REC-18
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_finalizing_keeps_video_moved_onto_destination(
+def test_finalizing_keeps_a_file_moved_onto_the_destination(
     demo: Demo, tmp_path: Path
 ) -> None:
     first = tmp_path / "first.mp4"
@@ -4343,7 +4341,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     plan = tmp_path / "inspect-batch.json"
     plan.write_text(
         json.dumps(
@@ -5009,9 +5007,9 @@ def test_inspect_display_bounds_activate_offset_controls(
 ) -> None:
     log = demo.directory / "app.log"
     qt = "Coordinates probe ready"
-    wait_until(lambda: "Demo ready" in log.read_text() or qt in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text() or qt in log.read_text())
     is_qt = qt in log.read_text()
-    title = "Coordinates dialog" if is_qt else "Framewisp demo"
+    title = "Coordinates dialog" if is_qt else "Framewisp demo app"
     name = "Activate dialog" if is_qt else "Apply text"
     metadata = json.loads((demo.directory / "session.json").read_text())
 
