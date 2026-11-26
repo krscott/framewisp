@@ -45,8 +45,8 @@ investigate or ask; never invent a rationale.
   (R-ENV-4, R-ENV-6). Variables from framewisp's Nix wrapper do not reach the
   app.
 
-  Rationale: Agents in different environments should produce the same images
-  and videos by default, so the caller's environment is sanitized first and
+  Rationale: Agents in different environments should produce the same screenshots
+  and clips by default, so the caller's environment is sanitized first and
   calling agents inject changes as needed. Lookup paths and app-specific
   variables stay because apps need them to start and configure themselves.
 
@@ -60,8 +60,8 @@ investigate or ask; never invent a rationale.
   state, show the same pixels when their callers differ in locale, time zone,
   fonts, toolkit theme, scale, desktop identity, or home directory.
 
-  Rationale: Agents in different environments should produce the same images and
-  videos by default, without knowing about an option.
+  Rationale: Agents in different environments should produce the same screenshots and
+  clips by default, without knowing about an option.
 
 - **R-ENV-5** [test] A variable set or removed on the app command, as in
   `run -- env NAME=value app` or `run -- env -u NAME app`, takes effect in the
@@ -218,12 +218,12 @@ investigate or ask; never invent a rationale.
   `finalization.log`.
 - **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
-  right, top, or bottom edge of the video. The default is right.
+  right, top, or bottom edge of the clip. The default is right.
 - **R-REC-13** [test] `--console-size` sets the console panel width for `left`
   and `right`, and its height for `top` and `bottom`. The default is 640
   pixels.
 - **R-REC-14** [test] A console panel does not scale or crop the GUI in the
-  video. It does not change input coordinates or screenshots.
+  clip. It does not change input coordinates or screenshots.
 - **R-REC-15** [test] With `--console`, a caption stays centred on the GUI. It
   never draws on the console panel.
 - **R-REC-16** [test] Framewisp rejects a console panel that it cannot encode or
@@ -246,7 +246,7 @@ investigate or ask; never invent a rationale.
   font file. The caller's home directory and user font configuration do not
   change them.
 
-  Rationale: Agents in different environments should produce the same videos by
+  Rationale: Agents in different environments should produce the same clips by
   default, including the text framewisp draws on them.
 
 - **R-REC-24** [test] Printable ASCII text in a console panel stays inside the

@@ -43,7 +43,7 @@ a screenshot. They run on Wayland and Xwayland. Additional tests cover duplicate
 names, complete missing matches, all traversal caps, 1024-character truncation,
 a paused app (SIGSTOP), fresh queries after state changes, and Qt
 coverage. A D-Bus I/O test removes an object between enumeration and its read
-and requires a partial response.
+and requires a partial observation.
 
 Two simultaneous headless sessions start with deliberately conflicting inherited
 bus addresses. Inspection stays within each session, and stopping one removes
@@ -203,7 +203,7 @@ rendered window before input: runner readiness and even a mapped window can
 precede the first useful frame.
 
 Writer's first-run welcome required three Next clicks despite
-`--nofirststartwizard`. The run clicked into the document, typed
+`--nofirststartwizard`. The test clicked into the document, typed
 `Framewisp compatibility café`, replaced it with `Verified Writer café`, and
 verified that exact paragraph through a check. Both backends needed
 `max_nodes=4096`, `max_depth=32`, and a 10-second query/check budget.

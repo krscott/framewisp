@@ -207,7 +207,7 @@ Apps started with `run` run as the invoking user, with the file and account acce
 allowed by the surrounding environment. The private display does not restrict
 that access.
 
-By default, `run` sanitizes the app's environment so images and videos match
+By default, `run` sanitizes the app's environment so screenshots and clips match
 across agents.
 The app gets a disposable `HOME`, XDG directories and `TMPDIR`, which are deleted
 when the session stops, plus fixed fonts, theme, scale, `C.UTF-8` locale and
@@ -238,7 +238,7 @@ its writes and any settings or data you change there remain after the session;
 ask before changing them. If the user already has the app open, that copy may
 take over the launch or the app may refuse to start; ask the user to close it,
 or point the app at a separate profile. Use it only for that kind of debugging,
-because its images and videos can differ between hosts. To show a difference,
+because its screenshots and clips can differ between hosts. To show a difference,
 compare it with a default run of the same app.
 
 Start the demo app on a private display in a terminal or background tool session.
@@ -543,19 +543,19 @@ removed gaps can be omitted; use a batch wait or leave compaction off when those
 matter. Captions, click pings, and console output stay aligned with retained GUI
 frames; console timestamps keep original clip time. Compaction is per clip, works with captions and `--console`, and leaves logs unchanged.
 Timestamp-only check and screenshot spans live in `SESSION/activity.jsonl` without
-conditions or error text. The summary reports the compacted video's duration.
+conditions or error text. The summary reports the compacted clip's duration.
 
 Use `run --record FILE --console` or `record-start --console FILE` to add a
 console panel, a scrolling strip of the launched app's combined stdout/stderr, on the right and
 640 pixels wide by default. `--console-position left|right|top|bottom` picks the
-video edge. `--console-size PIXELS` sets the console panel's width for left or right and its
+clip edge. `--console-size PIXELS` sets the console panel's width for left or right and its
 height for top or bottom; the other dimension follows the GUI. The size must be even,
 and the console panel needs at least 312 pixels of width and 118 of height, including the
 dimension that follows the GUI. If the app prints scripts that draw larger than
 ASCII, such as Thai, Devanagari or Vietnamese (taller rows) or Tamil (wider
 letters), and the console panel's last row or line ends look cut off, add
 `--console-cell-scale 1.1` (Tamil: 1.5, or 3.5 for text with many ஔ). It trades
-rows and columns for room, and raises the minimum console panel size by the same factor. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
+rows and columns for room, and raises the minimum console panel size by the same factor. Each clip dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
 A rejected `record-start` leaves the app running.
 The GUI and screenshots keep their original dimensions. Console panel lines show seconds
 relative to the clip; negative timestamps identify earlier output kept for context.
@@ -565,8 +565,8 @@ receives output, so buffered output can appear late. Output from separately
 activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the console panel. Console text follows the app-log policy,
-so the input-content policy does not redact it. Finalization draws the panel when the clip stops. If it fails, the
-raw GUI video remains, the error names its path and `finalization.log`, and the
+so the input-content policy does not redact it. Finalization draws the console panel when the clip stops. If it fails, the
+raw video remains, the error names its path and `finalization.log`, and the
 session stops.
 
 ## Share evidence on GitHub

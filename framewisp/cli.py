@@ -212,7 +212,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--console-position",
             choices=CONSOLE_POSITIONS,
-            help=f"video edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
+            help=f"clip edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
         )
         recording_parser.add_argument(
             "--console-size",

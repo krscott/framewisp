@@ -89,7 +89,7 @@ class ConsolePanel:
         if self.size % 2:
             # Yuv420p video needs even dimensions, and `pad` rounds odd offsets down.
             raise ValueError(
-                f"--console-size must be even so the video can be encoded; "
+                f"--console-size must be even so the clip can be encoded; "
                 f"use {self.size + 1} instead of {self.size}."
             )
         # Comparing rejects NaN and infinity without converting a huge integer.
@@ -217,13 +217,13 @@ def video_layout(
     video_height = height if beside else height + panel_height
     if max(video_width, video_height) > MAX_VIDEO_DIMENSION:
         return (
-            f"A {console.size}-pixel {console.position} console panel makes the video "
+            f"A {console.size}-pixel {console.position} console panel makes the clip "
             f"{video_width}x{video_height}, over the {MAX_VIDEO_DIMENSION}-pixel limit "
             f"of the encoder. Use a smaller --console-size."
         )
     if (video_width + 128) * (video_height + 128) >= MAX_FRAME_CELLS:
         return (
-            f"A {console.size}-pixel {console.position} console panel makes the video "
+            f"A {console.size}-pixel {console.position} console panel makes the clip "
             f"{video_width}x{video_height}, over FFmpeg's frame size limit. "
             "Use a smaller --console-size."
         )
