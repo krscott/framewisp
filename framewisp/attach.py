@@ -635,13 +635,16 @@ def _share_desktop(
                 status, error = 1, input_error(command, failure)
             except BaseException as failure:
                 status, error = 1, input_error(command, failure)
-                # Record the redacted error: the raw one can include typed text.
-                failures.append(RuntimeError(error))
-                stop.set()
-                portal.close()
-                traceback.print_exception(
-                    RuntimeError(error).with_traceback(failure.__traceback__)
-                )
+                # After a stop, the error comes from shutdown closing the portal
+                # under this request, which is cancelled rather than failed.
+                if not stop.is_set():
+                    # Record the redacted error: the raw one can include typed text.
+                    failures.append(RuntimeError(error))
+                    stop.set()
+                    portal.close()
+                    traceback.print_exception(
+                        RuntimeError(error).with_traceback(failure.__traceback__)
+                    )
             answer(status, error)
 
     def serve(listener: socket.socket, emergency: socket.socket) -> None:

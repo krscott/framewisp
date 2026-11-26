@@ -335,7 +335,9 @@ def stale_desktop_session(session_dir: Path) -> str:
     return (
         f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
-        f"Start it again with attach or teach, or delete its metadata:\n  {metadata}"
+        "Start it again with attach or teach "
+        "(for teach, with a new lesson directory), "
+        f"or delete its metadata:\n  {metadata}"
     ) + kept_clip_note(session_dir)
 
 
