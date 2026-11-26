@@ -594,10 +594,10 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
             timeout=15,
         )
         assert result.returncode == 1
+        assert "another version" not in result.stderr
         assert str(session_dir) in result.stderr
         assert str(tmp_path) in result.stderr
         assert "sandbox" in result.stderr
-        assert "another version" not in result.stderr
         assert "Traceback" not in result.stderr
 
 

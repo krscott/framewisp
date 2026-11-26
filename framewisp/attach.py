@@ -653,7 +653,10 @@ def _run_attachment(
             try:
                 session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if state.exists():
-                    existing: object = json.loads(state.read_text())
+                    try:
+                        existing: object = json.loads(state.read_text())
+                    except ValueError:
+                        existing = None
                     if not isinstance(existing, dict) or (
                         cast(dict[str, object], existing).get("kind") != "attached"
                     ):

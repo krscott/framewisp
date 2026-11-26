@@ -367,7 +367,7 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
 
 # R-CONTROL-3
 @pytest.mark.parametrize(
-    "state",
+    "metadata",
     [
         {},
         {"command_protocol": COMMAND_PROTOCOL - 1},
@@ -390,11 +390,11 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
     ],
 )
 def test_session_commands_refuse_another_command_protocol(
-    tmp_path: Path, state: dict[str, object], arguments: tuple[str, ...]
+    tmp_path: Path, metadata: dict[str, object], arguments: tuple[str, ...]
 ) -> None:
     # The metadata names no socket or display, so a command that went on to use
     # the session would fail in another way.
-    (tmp_path / "session.json").write_text(json.dumps(state))
+    (tmp_path / "session.json").write_text(json.dumps(metadata))
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path), *arguments],
         cwd=tmp_path,
@@ -405,7 +405,8 @@ def test_session_commands_refuse_another_command_protocol(
     )
     assert result.returncode == 1
     assert "another version of framewisp" in result.stderr
-    assert "start the session again" in result.stderr
+    assert ("Ask the user" in result.stderr) is (metadata.get("kind") == "attached")
+    assert "again with this version" in result.stderr
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "capture.png").exists()
 

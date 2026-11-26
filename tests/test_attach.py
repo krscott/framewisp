@@ -850,16 +850,16 @@ def test_x11_attach_refuses_without_release(
     assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
 
 
-@pytest.mark.parametrize("state", ["[]", "null", "{}", '{"kind": "other"}'])
-def test_attachment_refuses_metadata_of_another_session(
+@pytest.mark.parametrize("metadata", ["", "{", "[]", "null", "{}", '{"kind": "other"}'])
+def test_attach_refuses_metadata_of_another_session(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    state: str,
+    metadata: str,
 ) -> None:
     session_dir = tmp_path / "session"
     session_dir.mkdir()
-    (session_dir / "session.json").write_text(state)
+    (session_dir / "session.json").write_text(metadata)
 
     def no_portal(stop: Event) -> None:
         raise AssertionError("The portal opened over another session's metadata.")
@@ -867,7 +867,7 @@ def test_attachment_refuses_metadata_of_another_session(
     monkeypatch.setattr(attach, "DesktopPortal", no_portal)
     assert run_attachment(session_dir, None) == 1
     assert "belongs to another session" in capsys.readouterr().err
-    assert (session_dir / "session.json").read_text() == state
+    assert (session_dir / "session.json").read_text() == metadata
 
 
 def children(pid: int, name: str) -> list[int]:

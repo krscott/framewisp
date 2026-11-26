@@ -491,7 +491,7 @@ def main() -> None:
     attached = False
     if args.action not in {"run", "attach", "teach", "recover"}:
         if args.action == "screenshot" and args.delay:
-            # Wait first, so that the checks below see the session that is captured.
+            # Wait first, so that the checks below see the session the screenshot shows.
             time.sleep(args.delay)
         exit_message = recorded_app_exit(session_dir)
         if exit_message is not None:
@@ -515,17 +515,19 @@ def main() -> None:
                 if protocol is None
                 else f"command protocol {protocol!r}"
             )
-            ending = (
-                "Ask the user to end it with Ctrl+C or framewisp --detach"
+            remedy = (
+                "Ask the user to end it with Ctrl+C or framewisp --detach, then to "
+                "start it again with this version."
                 if attached
-                else "Stop its runner with Ctrl+C or SIGTERM, or run recover if "
-                "the runner has died"
+                else "Stop its runner with Ctrl+C or SIGTERM, or run framewisp "
+                "SESSION recover if the runner has died, then start the session "
+                "again with this version."
             )
             parser.exit(
                 1,
                 f"Session {session_dir} was started by another version of framewisp: "
                 f"it publishes {published} and this version uses {COMMAND_PROTOCOL}. "
-                f"{ending}, then start the session again with this version.\n",
+                f"{remedy}\n",
             )
     try:
         result = dispatch(session_dir, args, attached=attached)
