@@ -42,7 +42,7 @@ from framewisp.connection import (
     session_kind,
     teaching_refusal,
 )
-from framewisp.desktop import lock_desktop, write_state
+from framewisp.desktop import STOP_SOCKET, lock_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
@@ -668,7 +668,7 @@ def _share_desktop(
                 ):
                     command_socket = str(directory / "command.sock")
                     listener.bind(command_socket)
-                    emergency.bind(str(directory / "stop-sharing.sock"))
+                    emergency.bind(str(directory / STOP_SOCKET))
                     listener.listen(32)
                     emergency.listen(32)
                     write_state(
