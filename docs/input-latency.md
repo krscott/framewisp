@@ -5,8 +5,8 @@
 Measured September 20, 2026 UTC against baseline `d20cd47`, with the same
 bundled demo app, 1280x720 Pixman display, complete CLI launches, input logging
 enabled, and no recording. Each warm result uses 40 wall-clock samples after
-one warm-up per action. p95 uses the nearest-rank method. Host and exact
-backend versions are included with the [raw samples in PR #59](https://github.com/krscott/framewisp/pull/59#issuecomment-5751288124).
+one warm-up per action. p95 uses the nearest-rank method. Host, compositor and
+input tool versions are included with the [raw samples in PR #59](https://github.com/krscott/framewisp/pull/59#issuecomment-5751288124).
 
 | Wayland operation | Before p50 / p95 (ms) | Persistent p50 / p95 (ms) | Median speedup |
 | --- | ---: | ---: | ---: |

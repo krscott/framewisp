@@ -293,8 +293,8 @@ investigate or ask; never invent a rationale.
   session command that uses the command socket sends such a request when it is
   run from a copy of that session's metadata in another directory.
 - **R-LIFE-7** [test] When recovery cannot verify the session lock, the recovery
-  journal, or the runtime directory, it removes nothing and its error gives
-  manual cleanup steps.
+  journal, or the runtime directory, or cannot confirm that every supervisor
+  finished cleanup, it removes nothing and its error gives manual cleanup steps.
 
 ## Desktop shares (ATTACH)
 
