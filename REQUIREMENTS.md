@@ -231,8 +231,9 @@ investigate or ask; never invent a rationale.
   that cannot show readable text, before it starts a clip.
 - **R-REC-17** [test] A rejected console panel leaves the app running.
 - **R-REC-18** [test] When a file takes a clip destination before the clip is
-  finalized, the finished clip remains at another path, and the error
-  names that path.
+  finalized, framewisp leaves that file intact. The rendered clip remains at
+  another path, or the raw MP4 does if rendering failed (R-REC-10), and the
+  error names that path.
 - **R-REC-19** [test] Framewisp rejects a clip destination on a filesystem
   without hard links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports

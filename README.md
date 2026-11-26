@@ -702,8 +702,9 @@ on a filesystem with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exF
 when the clip starts (R-REC-19).
 
 If another file appears at the clip destination during a clip, framewisp leaves that
-file alone, reports the path of the finished clip in the hidden directory, and
-ends the session like any other finalization failure (R-REC-18). If the recorder
+file intact, keeps the rendered clip in the hidden directory, or the raw MP4 if
+rendering failed (R-REC-10), reports the kept path, and ends the session like any
+other finalization failure (R-REC-18). If the recorder
 fails to finalize, the incomplete clip also stays there, and the error names it.
 
 The session runner owns the recorder and finalizes

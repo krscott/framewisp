@@ -76,7 +76,7 @@ class ConsolePanel:
     def __post_init__(self) -> None:
         if self.position not in CONSOLE_POSITIONS:
             raise ValueError(
-                f"console position must be one of {', '.join(CONSOLE_POSITIONS)}."
+                f"console_panel position must be one of {', '.join(CONSOLE_POSITIONS)}."
             )
         if type(self.size) is not int or self.size <= 0:
             raise ValueError("--console-size must be a positive even integer.")
@@ -129,11 +129,13 @@ class ConsolePanel:
             return None
         if not isinstance(raw, dict):
             raise ValueError(
-                "console must be null or an object with position, size and cell_scale."
+                "console_panel must be null or an object with position, size and cell_scale."
             )
         settings = cast(dict[str, object], raw)
         if settings.keys() != {"position", "size", "cell_scale"}:
-            raise ValueError("console requires only position, size and cell_scale.")
+            raise ValueError(
+                "console_panel requires only position, size and cell_scale."
+            )
         return ConsolePanel(
             position=cast(ConsolePosition, settings["position"]),
             size=cast(int, settings["size"]),
@@ -184,32 +186,32 @@ def plain_layout(display: tuple[int, int]) -> ClipLayout:
 
 
 def clip_layout(
-    display: tuple[int, int], console: ConsolePanel | None
+    display: tuple[int, int], console_panel: ConsolePanel | None
 ) -> ClipLayout | str:
     """Lay out a clip, or say why this display can't show the requested console panel."""
-    if console is None:
+    if console_panel is None:
         return plain_layout(display)
     width, height = display
-    beside = console.position in ("left", "right")
-    console_panel_width = console.size if beside else width
-    console_panel_height = height if beside else console.size
-    smaller = ", a smaller --console-cell-scale," if console.scale_note else ""
+    beside = console_panel.position in ("left", "right")
+    console_panel_width = console_panel.size if beside else width
+    console_panel_height = height if beside else console_panel.size
+    smaller = ", a smaller --console-cell-scale," if console_panel.scale_note else ""
     # Clips need an even display, so name an even minimum.
-    needed = min_console_panel_height(console.cell_scale)
+    needed = min_console_panel_height(console_panel.cell_scale)
     needed += needed % 2
     if console_panel_height < needed:
         return (
             f"A console panel needs a display at least {needed} pixels tall "
-            f"for {MIN_TEXT_ROWS} text rows{console.scale_note}, but this display "
+            f"for {MIN_TEXT_ROWS} text rows{console_panel.scale_note}, but this display "
             f"is {width}x{height}. Use a taller display{smaller} or "
             "--console-position top or bottom."
         )
-    needed = min_console_panel_width(console.cell_scale)
+    needed = min_console_panel_width(console_panel.cell_scale)
     needed += needed % 2
     if console_panel_width < needed:
         return (
             f"A console panel needs a display at least {needed} pixels wide "
-            f"for {MIN_TEXT_COLUMNS} text columns{console.scale_note}, but this "
+            f"for {MIN_TEXT_COLUMNS} text columns{console_panel.scale_note}, but this "
             f"display is {width}x{height}. Use a wider display{smaller} or "
             "--console-position left or right."
         )
@@ -217,13 +219,13 @@ def clip_layout(
     clip_height = height if beside else height + console_panel_height
     if max(clip_width, clip_height) > MAX_CLIP_DIMENSION:
         return (
-            f"A {console.size}-pixel {console.position} console panel makes the clip "
+            f"A {console_panel.size}-pixel {console_panel.position} console panel makes the clip "
             f"{clip_width}x{clip_height}, over the {MAX_CLIP_DIMENSION}-pixel limit "
             f"of the encoder. Use a smaller --console-size."
         )
     if (clip_width + 128) * (clip_height + 128) >= MAX_FRAME_CELLS:
         return (
-            f"A {console.size}-pixel {console.position} console panel makes the clip "
+            f"A {console_panel.size}-pixel {console_panel.position} console panel makes the clip "
             f"{clip_width}x{clip_height}, over FFmpeg's frame size limit. "
             "Use a smaller --console-size."
         )
@@ -231,16 +233,16 @@ def clip_layout(
         clip_width,
         clip_height,
         Rect(
-            console_panel_width if console.position == "left" else 0,
-            console_panel_height if console.position == "top" else 0,
+            console_panel_width if console_panel.position == "left" else 0,
+            console_panel_height if console_panel.position == "top" else 0,
             width,
             height,
         ),
         Rect(
-            width if console.position == "right" else 0,
-            height if console.position == "bottom" else 0,
+            width if console_panel.position == "right" else 0,
+            height if console_panel.position == "bottom" else 0,
             console_panel_width,
             console_panel_height,
         ),
-        console.cell_scale,
+        console_panel.cell_scale,
     )

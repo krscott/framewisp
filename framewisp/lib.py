@@ -638,14 +638,14 @@ class Recording:
         *,
         captions: CaptionOptions = CaptionOptions(),
         click_pings: bool = True,
-        console: ConsolePanel | None = None,
+        console_panel: ConsolePanel | None = None,
         compact: bool = False,
     ) -> str | None:
         if self.process is not None:
             return "A recording is already active. Use record-stop first."
         if any(dimension % 2 for dimension in self.size):
             return "Recording requires even display width and height."
-        layout = clip_layout(self.size, console)
+        layout = clip_layout(self.size, console_panel)
         if isinstance(layout, str):
             return layout
         try:
@@ -703,7 +703,7 @@ def session_command(
     *,
     captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
-    console: ConsolePanel | None = None,
+    console_panel: ConsolePanel | None = None,
     compact: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> int:
@@ -716,7 +716,9 @@ def session_command(
         ),
         "click_pings": click_pings,
         "compact": compact,
-        "console": console.parameters() if console is not None else None,
+        "console_panel": (
+            console_panel.parameters() if console_panel is not None else None
+        ),
         "parameters": parameters,
     }
     if command == "record-start":
@@ -756,12 +758,12 @@ class RecordStart:
     clip_destination: Path
     captions: CaptionOptions
     click_pings: bool
-    console: ConsolePanel | None
+    console_panel: ConsolePanel | None
     compact: bool
 
     @staticmethod
     def parse(fields: dict[str, object]) -> "RecordStart":
-        console = ConsolePanel.parse(fields.get("console"))
+        console_panel = ConsolePanel.parse(fields.get("console_panel"))
         clip_destination = fields.get("clip_destination")
         pointer_captions = fields.get("pointer_captions")
         key_captions = fields.get("key_captions")
@@ -789,7 +791,7 @@ class RecordStart:
                 key=key_captions,
             ),
             click_pings,
-            console,
+            console_panel,
             compact,
         )
 
@@ -898,7 +900,7 @@ def handle_session_command(
                 request.clip_destination,
                 captions=request.captions,
                 click_pings=request.click_pings,
-                console=request.console,
+                console_panel=request.console_panel,
                 compact=request.compact,
             )
         write_state()
@@ -916,7 +918,7 @@ def run_session(
     clip_destination: Path | None = None,
     captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
-    console: ConsolePanel | None = None,
+    console_panel: ConsolePanel | None = None,
     compact: bool = False,
     size: tuple[int, int] = (1280, 720),
     x11: bool = False,
@@ -946,7 +948,7 @@ def run_session(
             clip_destination=clip_destination,
             captions=captions,
             click_pings=click_pings,
-            console=console,
+            console_panel=console_panel,
             compact=compact,
             size=size,
             x11=x11,
@@ -963,7 +965,7 @@ def _run_session(
     clip_destination: Path | None,
     captions: CaptionOptions,
     click_pings: bool,
-    console: ConsolePanel | None,
+    console_panel: ConsolePanel | None,
     compact: bool,
     size: tuple[int, int],
     x11: bool,
@@ -1064,7 +1066,7 @@ def _run_session(
                     clip_destination,
                     captions=captions,
                     click_pings=click_pings,
-                    console=console,
+                    console_panel=console_panel,
                     compact=compact,
                 )
                 if error is not None:

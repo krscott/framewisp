@@ -2205,11 +2205,14 @@ def test_rejected_console_panel_leaves_the_app_running(
         assert "--console-size" in result.stderr
         assert not rejected.exists()
     for value, message in (
-        (True, "console must be null or an object"),
-        ({"position": "left"}, "console requires only position, size and cell_scale"),
+        (True, "console_panel must be null or an object"),
+        (
+            {"position": "left"},
+            "console_panel requires only position, size and cell_scale",
+        ),
         (
             {"position": "up", "size": 640, "cell_scale": 1},
-            "console position must be one of",
+            "console_panel position must be one of",
         ),
         ({"position": "left", "size": 641, "cell_scale": 1}, "must be even"),
         ({"position": "left", "size": True, "cell_scale": 1}, "positive even"),
@@ -2231,7 +2234,7 @@ def test_rejected_console_panel_leaves_the_app_running(
                 "session_directory": str(demo.directory.resolve()),
                 "clip_destination": str(rejected),
                 "key_captions": "non-text",
-                "console": value,
+                "console_panel": value,
             }
             connection.sendall((json.dumps(request) + "\n").encode())
             reply = json.loads(connection.makefile().readline())

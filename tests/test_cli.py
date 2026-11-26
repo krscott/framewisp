@@ -239,11 +239,11 @@ def test_record_start_sends_console_panel(
                 session_dir,
                 "record-start",
                 session_dir / "clip.mp4",
-                console=console_panel,
+                console_panel=console_panel,
             )
             thread.join(timeout=5)
     assert result == 0
-    assert received[0]["console"] == expected
+    assert received[0]["console_panel"] == expected
 
 
 def test_run_no_click_pings_requires_record(tmp_path: Path) -> None:
