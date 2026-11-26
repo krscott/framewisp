@@ -459,9 +459,12 @@ import sys
 from pathlib import Path
 from gi.repository import Gio
 from framewisp import attach
+from framewisp.portal import DesktopPortal
 root = Path(sys.argv[1])
 class Portal:
+    interruption = DesktopPortal.interruption
     def __init__(self, stop):
+        self.lost = None
         self.size = (800, 600)
         self.node = 1
         address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
