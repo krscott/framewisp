@@ -120,7 +120,7 @@ def check_socket_paths(runtime_dir: Path) -> None:
 
 def journal_runtime_dir(session_dir: Path, journal: dict[str, object]) -> Path:
     """Return the journal's runtime directory, or raise ValueError or OSError."""
-    value = journal.get("runtime_directory_path")
+    value = journal.get("runtime_directory")
     if value is None:
         raise ValueError("journal has no runtime directory path")
     if not isinstance(value, str):
@@ -368,20 +368,20 @@ def read_journal(session_dir: Path, lock: int) -> Journal:
         if not isinstance(value, dict):
             raise ValueError("journal must be an object")
         journal = cast(dict[str, object], value)
-        if journal.get("session_directory") != identity(session_dir):
+        if journal.get("session_directory_identity") != identity(session_dir):
             raise ValueError("journal does not belong to this session directory")
         runtime_dir = journal_runtime_dir(session_dir, journal)
-        if "runtime_directory" not in journal:
+        if "runtime_directory_identity" not in journal:
             raise ValueError("journal has no runtime directory identity")
-        runtime_dir_identity = parse_identity(journal["runtime_directory"])
-        if runtime_dir_identity is None and journal["runtime_directory"] is not None:
+        runtime_dir_identity = parse_identity(journal["runtime_directory_identity"])
+        if (
+            runtime_dir_identity is None
+            and journal["runtime_directory_identity"] is not None
+        ):
             raise ValueError("journal has an invalid runtime directory identity")
-        recorded_lock = parse_identity(journal.get("lock"))
+        recorded_lock = parse_identity(journal.get("lock_identity"))
         if recorded_lock is None:
-            raise ValueError(
-                "journal has no valid session lock identity. It may predate lock "
-                "verification"
-            )
+            raise ValueError("journal has no valid session lock identity")
     except (OSError, ValueError, RecursionError) as error:
         raise SessionError(unreadable_journal(session_dir, str(error))) from error
     verify_lock(session_dir, recorded_lock, runtime_dir, lock)
@@ -409,10 +409,12 @@ def write_journal(
     with os.fdopen(descriptor, "w") as output:
         json.dump(
             {
-                "session_directory": identity(session_dir),
-                "lock": lock_identity(lock),
-                "runtime_directory_path": str(runtime_dir),
-                "runtime_directory": identity(runtime_dir) if created else None,
+                "session_directory_identity": identity(session_dir),
+                "lock_identity": lock_identity(lock),
+                "runtime_directory": str(runtime_dir),
+                "runtime_directory_identity": (
+                    identity(runtime_dir) if created else None
+                ),
             },
             output,
         )

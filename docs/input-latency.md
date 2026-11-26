@@ -109,8 +109,8 @@ import time
 from pathlib import Path
 
 session_dir = Path('/tmp/latency-demo')
-state = json.loads((session_dir / 'session.json').read_text())
-socket = str(Path(state['runtime_directory']) / 'vnc.sock')
+metadata = json.loads((session_dir / 'session.json').read_text())
+socket = str(Path(metadata['runtime_directory']) / 'vnc.sock')
 vnc = ['vncdo', '-s', socket, '--delay', '0']
 commands = [
     ['framewisp', '--help'],

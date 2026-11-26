@@ -51,9 +51,9 @@ def test_paths_follow_tmpdir(
         headless_runtime_dir(tmp_path, lock) as runtime_dir,
     ):
         assert runtime_dir.parent == first
-        assert json.loads((tmp_path / JOURNAL).read_text())[
-            "runtime_directory_path"
-        ] == str(runtime_dir)
+        assert json.loads((tmp_path / JOURNAL).read_text())["runtime_directory"] == str(
+            runtime_dir
+        )
         monkeypatch.setenv("TMPDIR", str(second))
         monkeypatch.setattr(tempfile, "tempdir", None)
         assert resolve_session_dir("demo") != named
@@ -104,12 +104,12 @@ def test_invalid_journal_runtime_directory_path_refused(
     with pytest.raises(SessionError, match="runtime directory path"):
         with session_lock(tmp_path) as lock, headless_runtime_dir(tmp_path, lock):
             journal = json.loads((tmp_path / JOURNAL).read_text())
-            journal["runtime_directory_path"] = path
+            journal["runtime_directory"] = path
             (tmp_path / JOURNAL).write_text(json.dumps(journal))
     with pytest.raises(SessionError, match="runtime directory path"):
         recover_session(tmp_path)
     journal = json.loads((tmp_path / JOURNAL).read_text())
-    journal["runtime_directory_path"] = str(runtime_dir_path(tmp_path))
+    journal["runtime_directory"] = str(runtime_dir_path(tmp_path))
     (tmp_path / JOURNAL).write_text(json.dumps(journal))
     recover_session(tmp_path)
 

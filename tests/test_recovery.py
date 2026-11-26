@@ -500,30 +500,34 @@ DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
         "[" * 60_000
     ),
     "empty": lambda s, _: (s / JOURNAL).write_text(""),
-    "truncated": lambda s, _: (s / JOURNAL).write_text('{"session_directory": ['),
+    "truncated": lambda s, _: (s / JOURNAL).write_text(
+        '{"session_directory_identity": ['
+    ),
     "binary": lambda s, _: (s / JOURNAL).write_bytes(b"\xff\xfe\x00"),
     "not-an-object": lambda s, _: (s / JOURNAL).write_text("[]"),
     "oversized": pad_journal,
     "directory": replace_journal_with_directory,
     "symlink": replace_journal_with_symlink,
-    "foreign-session": lambda s, _: rewrite_journal(s, session_directory=[0, 0]),
+    "foreign-session": lambda s, _: rewrite_journal(
+        s, session_directory_identity=[0, 0]
+    ),
     "unencodable-runtime-directory": lambda s, r: rewrite_journal(
-        s, runtime_directory_path=f"/tmp/\ud800/{r.name}"
+        s, runtime_directory=f"/tmp/\ud800/{r.name}"
     ),
     "overlong-runtime-directory": lambda s, r: rewrite_journal(
-        s, runtime_directory_path=f"/{'a' * 5000}/{r.name}"
+        s, runtime_directory=f"/{'a' * 5000}/{r.name}"
     ),
     "runtime-directory-under-file": lambda s, r: rewrite_journal(
-        s, runtime_directory_path=f"{s}/app.log/{r.name}"
+        s, runtime_directory=f"{s}/app.log/{r.name}"
     ),
     "invalid-runtime-directory-identity": lambda s, _: rewrite_journal(
-        s, runtime_directory="bad"
+        s, runtime_directory_identity="bad"
     ),
     "no-runtime-directory-identity": lambda s, _: remove_journal_field(
-        s, "runtime_directory"
+        s, "runtime_directory_identity"
     ),
     "no-runtime-directory-path": lambda s, _: remove_journal_field(
-        s, "runtime_directory_path"
+        s, "runtime_directory"
     ),
 }
 
@@ -599,7 +603,7 @@ def test_journal_without_runtime_directory_path_refused_outside_default_tmpdir(
         runtime_dir.mkdir(mode=0o700)
         write_journal(session_dir, runtime_dir, lock, created=True)
     (runtime_dir / "supervisor-123.json").write_text("{}")
-    remove_journal_field(session_dir, "runtime_directory_path")
+    remove_journal_field(session_dir, "runtime_directory")
     with pytest.raises(SessionError, match="no runtime directory path") as refusal:
         recover_session(session_dir)
     assert str(runtime_dir) in str(refusal.value)
@@ -680,7 +684,7 @@ def test_null_runtime_directory_identity_steps_use_the_journal_path(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session_dir, runtime_dir = abandoned
-    rewrite_journal(session_dir, runtime_directory=None)
+    rewrite_journal(session_dir, runtime_directory_identity=None)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with pytest.raises(SessionError, match="no runtime directory identity") as refusal:
         recover_session(session_dir)
@@ -1235,9 +1239,9 @@ def test_journal_without_valid_lock_identity_refused(
     session_dir, runtime_dir = abandoned
     journal = json.loads((session_dir / JOURNAL).read_text())
     if lock is None:
-        del journal["lock"]
+        del journal["lock_identity"]
     else:
-        journal["lock"] = lock
+        journal["lock_identity"] = lock
     (session_dir / JOURNAL).write_text(json.dumps(journal))
     before = (session_dir / JOURNAL).read_bytes()
     with pytest.raises(SessionError, match="no valid session lock") as refusal:

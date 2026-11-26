@@ -1,4 +1,4 @@
-"""Share an existing desktop without owning its app or compositor processes."""
+"""Share an existing desktop without managing its app or compositor processes."""
 
 # pyright: reportMissingModuleSource=false
 # `parse_attached_request` validates required command fields before `perform`.
@@ -680,7 +680,6 @@ def _share_desktop(
                             "command_protocol": COMMAND_PROTOCOL,
                             "share_token": share_token,
                             "command_socket": command_socket,
-                            "processes": {"runner": os.getpid()},
                         },
                     )
                     wrote_metadata = True
