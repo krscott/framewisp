@@ -15,7 +15,8 @@ from framewisp.connection import (
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
     SessionKind,
-    request_attached,
+    request_desktop,
+    session_kind,
     teaching_refusal,
 )
 from framewisp.desktop import stop_sharing
@@ -512,7 +513,7 @@ def main() -> None:
         try:
             metadata = json.loads(state_path.read_text())
             protocol = metadata.get("command_protocol")
-            published_kind = metadata.get("kind")
+            published_kind = session_kind(metadata)
         except (OSError, ValueError, RecursionError, AttributeError) as error:
             parser.exit(1, f"Cannot read session metadata: {error}\n")
         # Every session command passes here, so none needs its own check
@@ -537,9 +538,19 @@ def main() -> None:
                 f"it publishes {published} and this version uses {COMMAND_PROTOCOL}. "
                 f"{remedy}\n",
             )
-        if published_kind in DESKTOP_KINDS:
-            kind = published_kind
-        if kind == "teaching" and args.command not in TEACHING_COMMANDS:
+        if published_kind is None:
+            parser.exit(
+                1,
+                f"Cannot read session metadata: {state_path} publishes no known "
+                "session kind.\n",
+            )
+        kind = published_kind
+        # status and stop reach dispatch, which says how to stop the session.
+        if kind == "teaching" and args.command not in {
+            *TEACHING_COMMANDS,
+            "status",
+            "stop",
+        }:
             parser.exit(1, f"Session {session_dir}: {teaching_refusal(args.command)}\n")
     try:
         result = dispatch(session_dir, args, kind=kind)
@@ -549,7 +560,7 @@ def main() -> None:
 
 
 def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) -> int:
-    desktop = kind != "headless"
+    desktop = kind in DESKTOP_KINDS
     if args.command == "inspect":
         from framewisp.inspection import inspect_session
 
@@ -576,7 +587,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
     elif args.command == "teach-note":
         if kind != "teaching":
             raise SessionError("teach-note requires a teaching session.")
-        result = request_attached(session_dir, "teach-note", {"text": args.text})
+        result = request_desktop(session_dir, "teach-note", {"text": args.text})
     elif args.command == "recover":
         result = recover_session(session_dir)
     elif args.command == "run":
@@ -601,7 +612,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
                 "status and stop manage headless sessions. Use framewisp --stop-sharing to stop a desktop share."
             )
         result = (
-            request_attached(session_dir, args.command, {})
+            request_desktop(session_dir, args.command, {})
             if desktop
             else session_command(
                 session_dir,
@@ -619,7 +630,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
                 "screenshot --region and --json support headless sessions only."
             )
         result = (
-            request_attached(
+            request_desktop(
                 session_dir, "screenshot", {"path": str(args.path.resolve())}
             )
             if desktop
@@ -647,7 +658,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
         if desktop:
             parameters.pop("move_duration", None)
             with log_input(session_dir, args.command, parameters) as action:
-                result = request_attached(session_dir, args.command, parameters)
+                result = request_desktop(session_dir, args.command, parameters)
                 action.returncode = result
         else:
             result = session_command(session_dir, args.command, parameters=parameters)

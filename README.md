@@ -1130,8 +1130,8 @@ The runner discovers Xwayland's allocated display number. It removes the host's
 not a security sandbox for untrusted apps. Sway owns Xwayland and shuts
 it down when the session ends.
 
-The bundled GTK demo app is the tested X11 target. GPU/game support, desktop services,
-and attached sessions on native X11 desktops are outside this mode's scope. X11 Flatpak
+The bundled GTK demo app is the tested X11 target. GPU/game support and desktop services
+are outside this mode's scope; sharing an X11 desktop uses `attach`, not this mode. X11 Flatpak
 launching has not been verified. The first X11 pointer command primes the virtual
 pointer with a one-pixel motion and a 100 ms pause to avoid losing its first
 motion. The worker primes beside its tracked position, or beside the destination
@@ -1238,8 +1238,8 @@ processes manually; their PIDs are diagnostic, not safe signal targets. Resource
 and ownership metadata remain so recovery cannot claim success. Recovery also
 refuses missing or unverifiable journals and replaced runtimes. It removes nothing
 and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
-not recover attached or teaching sessions; use `framewisp --stop-sharing` for those. A desktop share uses the session
-metadata lock and refuses directories with abandoned headless ownership.
+not recover attached or teaching sessions; use `framewisp --stop-sharing` for those. Attached and teaching sessions take
+the same session metadata lock as headless sessions and refuse directories with abandoned headless ownership.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
 AT-SPI registry. These buses do not activate the desktop's services. Apps that

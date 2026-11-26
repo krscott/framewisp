@@ -100,7 +100,7 @@ def stop_sharing() -> int:
                     signal.pidfd_send_signal(process, signal.SIGKILL)
                     if not poll.poll(1000):
                         raise RuntimeError(
-                            "The desktop share's runner did not exit after SIGKILL."
+                            "The attached or teaching session's runner did not exit after SIGKILL."
                         )
             except ProcessLookupError:
                 pass
