@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -406,6 +407,33 @@ def test_session_commands_refuse_another_command_protocol(
     assert "another version of framewisp" in result.stderr
     assert "start the session again" in result.stderr
     assert "Traceback" not in result.stderr
+    assert not (tmp_path / "capture.png").exists()
+
+
+# R-CONTROL-3
+def test_screenshot_checks_the_command_protocol_after_its_delay(tmp_path: Path) -> None:
+    metadata = tmp_path / "session.json"
+    metadata.write_text(json.dumps({"command_protocol": COMMAND_PROTOCOL}))
+    with subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path),
+            "screenshot",
+            "--delay",
+            "3",
+            str(tmp_path / "capture.png"),
+        ],
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as command:
+        # Another version's session takes the directory while the command waits.
+        time.sleep(1.5)
+        metadata.write_text(json.dumps({"command_protocol": COMMAND_PROTOCOL + 1}))
+        _, error = command.communicate(timeout=15)
+    assert command.returncode == 1
+    assert "another version of framewisp" in error
     assert not (tmp_path / "capture.png").exists()
 
 

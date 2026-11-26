@@ -490,6 +490,9 @@ def main() -> None:
             )
     attached = False
     if args.action not in {"run", "attach", "teach", "recover"}:
+        if args.action == "screenshot" and args.delay:
+            # Wait first, so that the checks below see the session that is captured.
+            time.sleep(args.delay)
         exit_message = recorded_app_exit(session_dir)
         if exit_message is not None:
             parser.exit(1, exit_message + "\n")
@@ -507,13 +510,22 @@ def main() -> None:
         # Every session command passes here, so none needs its own check
         # (R-CONTROL-3).
         if protocol != COMMAND_PROTOCOL:
+            published = (
+                "no command protocol"
+                if protocol is None
+                else f"command protocol {protocol!r}"
+            )
+            ending = (
+                "Ask the user to end it with Ctrl+C or framewisp --detach"
+                if attached
+                else "Stop its runner with Ctrl+C or SIGTERM, or run recover if "
+                "the runner has died"
+            )
             parser.exit(
                 1,
-                f"Session {session_dir} was started by another version of framewisp "
-                f"(command protocol {protocol!r}; this version uses {COMMAND_PROTOCOL}). "
-                "Stop its runner with Ctrl+C or SIGTERM, or with framewisp --detach "
-                "for an attached or teaching session, then start the session again "
-                "with this version.\n",
+                f"Session {session_dir} was started by another version of framewisp: "
+                f"it publishes {published} and this version uses {COMMAND_PROTOCOL}. "
+                f"{ending}, then start the session again with this version.\n",
             )
     try:
         result = dispatch(session_dir, args, attached=attached)
@@ -593,8 +605,6 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             raise SessionError(
                 "screenshot --region and --json support headless sessions only."
             )
-        if args.delay:
-            time.sleep(args.delay)
         result = (
             request_attached(
                 session_dir, "screenshot", {"path": str(args.path.resolve())}

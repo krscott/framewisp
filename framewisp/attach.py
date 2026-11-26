@@ -652,13 +652,14 @@ def _run_attachment(
         with reserve_desktop() as directory:
             try:
                 session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                if (
-                    state.exists()
-                    and json.loads(state.read_text()).get("kind") != "attached"
-                ):
-                    raise RuntimeError(
-                        f"{state} belongs to another session. Use a different directory."
-                    )
+                if state.exists():
+                    existing: object = json.loads(state.read_text())
+                    if not isinstance(existing, dict) or (
+                        cast(dict[str, object], existing).get("kind") != "attached"
+                    ):
+                        raise RuntimeError(
+                            f"{state} belongs to another session. Use a different directory."
+                        )
                 with (
                     socket.socket(socket.AF_UNIX) as listener,
                     socket.socket(socket.AF_UNIX) as emergency,

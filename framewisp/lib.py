@@ -1218,11 +1218,9 @@ def screenshot(
         # Read the active clip's destination from session metadata, not from the
         # runner: record-stop renders in the runner's command loop, so asking
         # the runner would wait for it.
-        recording = json.loads((session_dir / "session.json").read_text()).get(
-            "recording"
-        )
+        recording = json.loads((session_dir / "session.json").read_text())["recording"]
         error = capture_path_error(
-            destination, Path(recording) if isinstance(recording, str) else None
+            destination, Path(recording) if recording is not None else None
         )
         if error is not None:
             raise SessionError(error)

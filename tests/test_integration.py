@@ -577,6 +577,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
                 "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
+                "recording": None,
             }
         )
     )
@@ -596,6 +597,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
         assert str(session_dir) in result.stderr
         assert str(tmp_path) in result.stderr
         assert "sandbox" in result.stderr
+        assert "another version" not in result.stderr
         assert "Traceback" not in result.stderr
 
 
@@ -4052,19 +4054,6 @@ def test_screenshot_rejects_active_recording_destination(
     cli(demo.directory, "record-stop")
     assert demo.process.poll() is None
     recording_frames(clip)
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_screenshot_works_on_a_runner_without_the_recording_key(
-    demo: Demo, tmp_path: Path
-) -> None:
-    state_path = demo.directory / "session.json"
-    state = json.loads(state_path.read_text())
-    del state["recording"]
-    state_path.write_text(json.dumps(state))
-    cli(demo.directory, "screenshot", str(tmp_path / "shot.png"))
-    assert (tmp_path / "shot.png").read_bytes().startswith(b"\x89PNG")
 
 
 @pytest.mark.integration
