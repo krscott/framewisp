@@ -12,8 +12,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterator
-from contextlib import suppress
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from threading import Event, Thread, Timer
 from typing import cast
@@ -23,6 +23,7 @@ import pytest
 
 from framewisp import attach
 from framewisp.attach import (
+    INPUT_CANCELLED,
     KEYCODES,
     AttachedInput,
     attach_session,
@@ -33,6 +34,7 @@ from framewisp.attach import (
 from framewisp.connection import DesktopKind, request_desktop
 from framewisp.desktop import lock_desktop, stop_sharing
 from framewisp.errors import SessionError
+from framewisp.input_log import input_error
 from framewisp.portal import DesktopPortal
 from framewisp.recovery import (
     recover_session,
@@ -129,7 +131,7 @@ def test_stop_releases_drag_and_modifiers(
             stop.set()
 
     monkeypatch.setattr(inputs, "move", move_and_stop)
-    with pytest.raises(InterruptedError, match="disconnected"):
+    with pytest.raises(InterruptedError, match=INPUT_CANCELLED):
         inputs.perform(
             "drag",
             {
@@ -214,6 +216,7 @@ import time
 import weakref
 from pathlib import Path
 import framewisp.attach as attach
+from framewisp.portal import DesktopPortal
 from gi.repository import Gio
 test_bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
 test_bus.up()
@@ -222,6 +225,7 @@ class Portal:
     def __init__(self, stop):
         Portal.active = weakref.ref(self)
         self.revoked = False
+        self.lost = None
         self.stop = stop
         self.size = (800, 600)
         self.node = 1
@@ -233,13 +237,21 @@ class Portal:
         while not (root / 'approve').exists():
             if self.stop.wait(.01):
                 raise InterruptedError('Stopped while waiting for desktop permission.')
+    interruption = DesktopPortal.interruption
+    connection_closed = DesktopPortal.connection_closed
     def input(self, method, signature, *values):
+        global pending_signal
         if (root / 'block-input').exists():
             (root / 'block-input').unlink()
             (root / 'blocking').touch()
             while not self.closed:
+                if (root / 'end-input').exists():
+                    # The backend fails the call before the main thread
+                    # dispatches the signal that explains why.
+                    pending_signal = ((root / 'end-input').read_text(), time.monotonic() + .05)
+                    break
                 time.sleep(.01)
-            raise RuntimeError('The connection is closed')
+            raise RuntimeError('g-io-error-quark: The connection is closed (18)')
         if (root / 'fail').exists():
             # Include the values, as a real backend error might.
             raise RuntimeError(f'injected portal failure: {values!r}')
@@ -267,9 +279,18 @@ if (root / 'teach').exists():
     lesson = TestTeaching(root / 'lesson', 'Perform a task')
 original_dispatch = attach.dispatch_events
 revoke_at = None
+pending_signal = None
 def dispatch():
-    global revoke_at
+    global revoke_at, pending_signal
     original_dispatch()
+    if pending_signal is not None and time.monotonic() >= pending_signal[1]:
+        active = Portal.active()
+        if pending_signal[0] == 'revoke':
+            active.revoked = True
+            active.stop.set()
+        else:
+            active.connection_closed(active.bus, True, None)
+        pending_signal = None
     if (root / 'source-end').exists():
         lesson.source_ended.set()
     if (root / 'revoke').exists():
@@ -1299,33 +1320,71 @@ def test_portal_failure_closes_runner(
     assert "Stopped sharing." not in stdout
 
 
-def test_stop_during_input_is_not_a_failure(
-    tmp_path: Path, runner: subprocess.Popen[str]
-) -> None:
+@contextmanager
+def blocked_input(
+    tmp_path: Path, runner: subprocess.Popen[str], arguments: list[str]
+) -> Generator[subprocess.Popen[str]]:
+    """Yield a session command whose input the fake portal holds in flight."""
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
     read_terminal(runner.stdout.fileno(), b"Attached:")
     (tmp_path / "block-input").touch()
     command = subprocess.Popen(
-        [sys.executable, "-m", "framewisp", str(tmp_path / "session"), "key", "a"],
+        [sys.executable, "-m", "framewisp", str(tmp_path / "session"), *arguments],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     try:
         wait_file(tmp_path / "blocking")
-        runner.send_signal(signal.SIGINT)
-        assert command.wait(timeout=5) == 1
+        yield command
+    finally:
+        if command.poll() is None:
+            command.terminate()
+        command.wait(timeout=5)
+
+
+@pytest.mark.parametrize("end", ["sigint", "revoke"])
+@pytest.mark.parametrize("arguments", [["key", "a"], ["move", "1", "1"]])
+def test_user_stop_during_input_cancels_it(
+    tmp_path: Path,
+    runner: subprocess.Popen[str],
+    end: str,
+    arguments: list[str],
+) -> None:
+    with blocked_input(tmp_path, runner, arguments) as command:
+        if end == "sigint":
+            runner.send_signal(signal.SIGINT)
+        else:
+            # The backend fails the input before the revocation is dispatched.
+            (tmp_path / "end-input").write_text("revoke")
+        _, client_stderr = command.communicate(timeout=5)
+        assert command.returncode == 1
+        cancelled = input_error(arguments[0], InterruptedError(INPUT_CANCELLED))
+        assert cancelled in client_stderr
+        assert "quark" not in client_stderr
         assert runner.wait(timeout=5) == 0
         stdout, stderr = runner.communicate(timeout=5)
         assert "Stopped sharing:" not in stderr
         assert stdout.endswith(
             "Stopped sharing. Your apps and desktop are still running.\n"
         )
-    finally:
-        if command.poll() is None:
-            command.terminate()
-        command.wait(timeout=5)
+
+
+def test_lost_bus_during_input_fails_the_share(
+    tmp_path: Path, runner: subprocess.Popen[str]
+) -> None:
+    with blocked_input(tmp_path, runner, ["type", "hunter2"]) as command:
+        (tmp_path / "end-input").write_text("lose-bus")
+        _, client_stderr = command.communicate(timeout=5)
+        assert command.returncode == 1
+        assert INPUT_CANCELLED not in client_stderr
+        assert runner.wait(timeout=5) == 1
+        stdout, stderr = runner.communicate(timeout=5)
+        assert "Stopped sharing: The session bus connection closed." in stderr
+        assert "hunter2" not in client_stderr + stderr + stdout
+        assert stdout.endswith("Your apps and desktop are still running.\n")
+        assert "Stopped sharing." not in stdout
 
 
 @pytest.fixture

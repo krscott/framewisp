@@ -115,6 +115,9 @@ for first, row in [
 ]:
     KEYCODES.update({key: first + offset for offset, key in enumerate(row)})
 BUTTONS = {"left": 272, "right": 273}
+INPUT_CANCELLED = "Session stopped; input cancelled."
+# How long a failed input waits for a stop that explains its failure.
+STOP_GRACE = 0.2
 
 
 class AttachedInput:
@@ -126,7 +129,7 @@ class AttachedInput:
 
     def wait(self, seconds: float = 0) -> None:
         if self.stop.wait(min(seconds, TIMEOUT_MAX)):
-            raise InterruptedError("Attached session disconnected; input cancelled.")
+            raise InterruptedError(INPUT_CANCELLED)
 
     def key(self, code: int, pressed: bool) -> None:
         self.wait()
@@ -293,7 +296,7 @@ def save_screenshot(
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
 SCREENSHOT_TIMEOUT = 10
-SCREENSHOT_CANCELLED = "The session disconnected; screenshot cancelled."
+SCREENSHOT_CANCELLED = "Session stopped; screenshot cancelled."
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -634,10 +637,16 @@ def _share_desktop(
             except (ValueError, InterruptedError, TimeoutError) as failure:
                 status, error = 1, input_error(command, failure)
             except BaseException as failure:
-                status, error = 1, input_error(command, failure)
-                # After a stop, the error comes from shutdown closing the portal
-                # under this request, which is cancelled rather than failed.
-                if not stop.is_set():
+                # A stop closes the portal under a running input, which is then
+                # cancelled rather than failed. The backend can fail the call
+                # before the main thread's next dispatch runs the portal
+                # callback that sets `stop`, so wait briefly for it. A lost bus
+                # sets `stop` too, but the input failed with it.
+                cancelled = stop.wait(STOP_GRACE) and portal.lost is None
+                status, error = 1, input_error(
+                    command, InterruptedError(INPUT_CANCELLED) if cancelled else failure
+                )
+                if not cancelled:
                     # Record the redacted error: the raw one can include typed text.
                     failures.append(RuntimeError(error))
                     stop.set()
@@ -717,7 +726,8 @@ def _share_desktop(
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"
                             )
-                        inputs.wait()
+                        if stop.is_set():
+                            raise portal.interruption(INPUT_CANCELLED)
                         indicator = SharingIndicator(portal.bus, stop)
                         try:
                             indicator.start()
@@ -759,6 +769,8 @@ def _share_desktop(
                                     )
                                 if not ready.is_set() and teaching.count:
                                     announce_ready()
+                        if portal.lost is not None:
+                            raise RuntimeError(portal.lost)
                     finally:
                         stop.set()
                         if indicator is not None:

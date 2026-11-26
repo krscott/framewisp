@@ -23,7 +23,10 @@ def dispatch_events() -> None:
 
 class DesktopPortal:
     def __init__(self, stop: Event):
+        # Why `stop` was set, when the portal set it: the user revoked the share
+        # from the desktop, or the bus connection was lost (a failure).
         self.revoked = False
+        self.lost: str | None = None
         self.stop = stop
         address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
         self.bus = Gio.DBusConnection.new_for_address_sync(
@@ -91,7 +94,7 @@ class DesktopPortal:
                 dispatch_events()
                 if self.stop.wait(0.02):
                     self.close()
-                    raise InterruptedError(
+                    raise self.interruption(
                         "Stopped while waiting for desktop permission."
                     )
             code, result = response[0]
@@ -201,7 +204,7 @@ class DesktopPortal:
         if allow_input:
             self.input("NotifyPointerMotion", "dd", 0.0, 0.0)
         if allow_input and self.stop.wait(0.1):
-            raise InterruptedError("Attach stopped during input setup.")
+            raise self.interruption("Attach stopped during input setup.")
 
     def input(self, method: str, signature: str, *values: object) -> None:
         options: dict[str, GLib.Variant] = {}
@@ -228,9 +231,18 @@ class DesktopPortal:
         assert descriptors is not None
         return descriptors.get(result.unpack()[0])
 
+    def interruption(self, message: str) -> Exception:
+        """A lost bus fails the share; any other stop cancels what was waiting."""
+        return RuntimeError(self.lost) if self.lost else InterruptedError(message)
+
     def connection_closed(
         self, connection: Gio.DBusConnection, remote: bool, error: GLib.Error | None
     ) -> None:
+        # `close` also emits this signal, with neither flag set.
+        if remote or error is not None:
+            self.lost = "The session bus connection closed" + (
+                f": {error.message}" if error is not None else "."
+            )
         self.stop.set()
 
     def close(self) -> None:
