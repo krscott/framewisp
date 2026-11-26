@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.attach import parse_attached_request
+from framewisp.attach import parse_desktop_request
 from framewisp.portal import REMOTE, SCREENCAST, DesktopPortal
 from framewisp.teaching import Teaching
 
@@ -81,7 +81,7 @@ def test_teaching_rejects_commands_but_screenshot_and_note(command: str) -> None
         {"attachment": "token", "command": command, "parameters": {}}
     ).encode()
     with pytest.raises(ValueError, match="this is a teaching session"):
-        parse_attached_request(line, "token", teaching=True)
+        parse_desktop_request(line, "token", "teaching")
 
 
 @pytest.mark.parametrize("text", ["", "  ", 1, "n" * 8001])
@@ -90,31 +90,31 @@ def test_teaching_rejects_invalid_notes(text: object) -> None:
         {"attachment": "token", "command": "teach-note", "parameters": {"text": text}}
     ).encode()
     with pytest.raises(ValueError, match="nonblank"):
-        parse_attached_request(line, "token", teaching=True)
+        parse_desktop_request(line, "token", "teaching")
 
 
 # R-TEACH-2
 @pytest.mark.parametrize("kind", ["directory", "file", "symlink"])
-def test_existing_output_is_untouched(tmp_path: Path, kind: str) -> None:
-    output = tmp_path / "lesson"
+def test_existing_lesson_directory_is_untouched(tmp_path: Path, kind: str) -> None:
+    lesson_dir = tmp_path / "lesson"
     if kind == "directory":
-        output.mkdir()
-        (output / "keep").write_text("precious")
+        lesson_dir.mkdir()
+        (lesson_dir / "keep").write_text("precious")
     elif kind == "file":
-        output.write_text("precious")
+        lesson_dir.write_text("precious")
     else:
-        output.symlink_to(tmp_path / "absent")
-    lesson = Teaching(output, "test")
+        lesson_dir.symlink_to(tmp_path / "absent")
+    lesson = Teaching(lesson_dir, "test")
     with pytest.raises(FileExistsError):
         lesson.start("videotestsrc")
     lesson.close()
     if kind == "directory":
-        assert list(output.iterdir()) == [output / "keep"]
-        assert (output / "keep").read_text() == "precious"
+        assert list(lesson_dir.iterdir()) == [lesson_dir / "keep"]
+        assert (lesson_dir / "keep").read_text() == "precious"
     elif kind == "file":
-        assert output.read_text() == "precious"
+        assert lesson_dir.read_text() == "precious"
     else:
-        assert output.is_symlink() and not (tmp_path / "absent").exists()
+        assert lesson_dir.is_symlink() and not (tmp_path / "absent").exists()
 
 
 def wait_for_frames(lesson: Teaching, count: int) -> None:
