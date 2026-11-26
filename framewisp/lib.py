@@ -753,13 +753,13 @@ class RecordStart:
     compact: bool
 
     @staticmethod
-    def parse(command: dict[str, object]) -> "RecordStart":
-        console = ConsolePanel.parse(command.get("console"))
-        destination = command.get("destination")
-        pointer_captions = command.get("pointer_captions")
-        key_captions = command.get("key_captions")
-        click_pings = command.get("click_pings", True)
-        compact = command.get("compact", False)
+    def parse(fields: dict[str, object]) -> "RecordStart":
+        console = ConsolePanel.parse(fields.get("console"))
+        destination = fields.get("destination")
+        pointer_captions = fields.get("pointer_captions")
+        key_captions = fields.get("key_captions")
+        click_pings = fields.get("click_pings", True)
+        compact = fields.get("compact", False)
         if not isinstance(destination, str):
             raise ValueError("record-start requires a destination")
         if pointer_captions is not None and pointer_captions not in POINTER_CAPTIONS:

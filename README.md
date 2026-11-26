@@ -574,7 +574,7 @@ releases held input. A missing reply leaves completion uncertain; consult the ap
 and per-action input log. A screenshot does not prove the app has finished processing.
 
 Batches require 1 to 256 steps, at most 16,384 typed characters and 10,000 scroll
-steps, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
+ticks, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
 are limited to 1 MiB each. Each step is an action (`"action"`: `move`, `click`,
 `drag`, `scroll`, `type`, or `key`) or a check (`"check"`: `wait`, `assert`, or
 `baseline`); the screenshot is separate. No attached desktops, loops, lifecycle
