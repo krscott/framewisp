@@ -870,7 +870,7 @@ def handle_session_command(
             else:
                 reply(
                     connection,
-                    error="Input queue is full. Wait for pending actions to finish.",
+                    error="Input queue is full. Wait for queued input commands or batches to finish.",
                 )
             return None
         error = None
