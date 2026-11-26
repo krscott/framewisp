@@ -4574,7 +4574,7 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["qt-tree", "x11-qt-tree"], indirect=True)
-def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
+def test_large_qt_check_limits_timeout(demo: Demo, tmp_path: Path) -> None:
     wait_until(
         lambda: "Inspection probe ready" in (demo.directory / "app.log").read_text()
     )

@@ -119,8 +119,7 @@ may differ; they change traversal budgets, not selector or equality semantics:
 The baseline reads one complete, readable control whose value does not match
 (R-CHECK-2).
 An already matching value, absent control, or incomplete baseline fails the
-baseline and stops the steps after it, so put the baseline before the input it
-guards. The later wait resolves the selector again and requires a matching value.
+baseline and stops the steps after it. The later wait resolves the selector again and requires a matching value.
 A replacement widget is allowed: this is a transition of the selected logical
 control, not persistent object identity. Baseline and final observation IDs are
 included for diagnosis. The baseline proves an earlier nonmatching observation;
