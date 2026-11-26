@@ -261,7 +261,9 @@ def open_destination(destination: Path) -> int:
     raise ValueError(f"{failure}: {reason}")
 
 
-def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+def save_screenshot(
+    portal: DesktopPortal, destination: Path, stop: Event, log: Path
+) -> None:
     output = open_destination(destination)
     try:
         # Capture lives in the owner process: even SIGKILL closes every capture FD.
@@ -276,7 +278,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         finally:
             os.close(descriptor)
     except BaseException:
-        # A close failure must not hide why the capture failed.
+        # A close failure must not hide why the screenshot failed.
         with suppress(OSError):
             os.close(output)
         raise
@@ -290,8 +292,8 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
 # Mutter can hand a new PipeWire connection a frame left from an earlier one
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
-CAPTURE_TIMEOUT = 10
-CAPTURE_CANCELLED = "The session disconnected; screenshot cancelled."
+SCREENSHOT_TIMEOUT = 10
+SCREENSHOT_CANCELLED = "The session disconnected; screenshot cancelled."
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -309,7 +311,7 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
     with playing(encoder):
         source_element.emit("push-sample", frame)
         source_element.emit("end-of-stream")
-        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        deadline = time.monotonic() + SCREENSHOT_TIMEOUT
         while not finished(encoder, sink, stop, log, deadline):
             pass
 
@@ -325,7 +327,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
     sink = pipeline.get_by_name("frames")
     assert sink is not None
     with playing(pipeline):
-        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        deadline = time.monotonic() + SCREENSHOT_TIMEOUT
         while (frame := sink.emit("try-pull-sample", 0)) is None:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
@@ -333,7 +335,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
                     raise ValueError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
-            raise InterruptedError(CAPTURE_CANCELLED)
+            raise InterruptedError(SCREENSHOT_CANCELLED)
         frame = sink.emit("try-pull-sample", 0) or frame
         assert isinstance(frame, Gst.Sample)
         # Stopping the source may release the memory behind its buffers.
@@ -361,7 +363,7 @@ def finished(
 ) -> bool:
     """Wait briefly for end of stream. Raise on failure, timeout, or stop."""
     if stop.is_set():
-        raise InterruptedError(CAPTURE_CANCELLED)
+        raise InterruptedError(SCREENSHOT_CANCELLED)
     if time.monotonic() >= deadline:
         raise RuntimeError("Desktop capture timed out.")
     bus = pipeline.get_bus()
@@ -548,7 +550,8 @@ def _share_desktop(
     owns_state = False
     capture_descriptor: int | None = None
     shared = False
-    stopped = "Stopped sharing. Your apps and desktop are still running."
+    # Why a started share ended, for the summary printed when it stops.
+    reasons: list[str] = []
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -558,7 +561,7 @@ def _share_desktop(
         ready.set()
         label = "Teaching session ready" if teaching is not None else "Attached"
         print(
-            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
+            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Press Ctrl+C here to stop; framewisp --stop-sharing is the emergency stop for whichever session is sharing.",
             flush=True,
         )
 
@@ -619,7 +622,9 @@ def _share_desktop(
                     try:
                         inputs.wait()
                         if isinstance(request, Path):
-                            capture(portal, request, stop, session_dir / "capture.log")
+                            save_screenshot(
+                                portal, request, stop, session_dir / "capture.log"
+                            )
                         else:
                             inputs.perform(
                                 command, cast(InputParameters, request.parameters)
@@ -630,7 +635,8 @@ def _share_desktop(
                 status, error = 1, input_error(command, failure)
             except BaseException as failure:
                 status, error = 1, input_error(command, failure)
-                failures.append(failure)
+                # Record the redacted error: the raw one can include typed text.
+                failures.append(RuntimeError(error))
                 stop.set()
                 portal.close()
                 traceback.print_exception(
@@ -773,7 +779,6 @@ def _share_desktop(
                                     )
                             except (OSError, RuntimeError, GLib.Error) as failure:
                                 failures.append(failure)
-                                print(str(failure), file=sys.stderr, flush=True)
                         portal.close()
                         server.join(timeout=0.2)
                         deadline = time.monotonic() + 0.2
@@ -793,8 +798,7 @@ def _share_desktop(
             print(interruption, file=sys.stderr)
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
         if shared:
-            print(f"Stopped sharing: {failure}", file=sys.stderr)
-            stopped = "Your apps and desktop are still running."
+            reasons.append(str(failure))
         else:
             print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
@@ -806,6 +810,15 @@ def _share_desktop(
             os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-        if shared:
-            print(stopped, flush=True)
+        reasons += [str(failure) for failure in failures]
+        if shared and reasons:
+            print(f"Stopped sharing: {'; '.join(reasons)}", file=sys.stderr, flush=True)
+            print("Your apps and desktop are still running.", flush=True)
+        elif shared:
+            print(
+                "Stopped sharing. Your apps and desktop are still running.", flush=True
+            )
+        else:
+            for reason in reasons:
+                print(reason, file=sys.stderr, flush=True)
     return int(bool(failures))
