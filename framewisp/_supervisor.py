@@ -117,7 +117,7 @@ def supervise(
                 json.dumps({"supervisor": os.getpid(), "command": command})
             )
         # Only the supervisor receives runner stop requests. The app retains
-        # default signal handlers and never inherits the private socket.
+        # default signal handlers and never inherits the control socket.
         # Use the exec environment, before Python's own startup changes it.
         app_env: dict[str, str] = {}
         for entry in Path("/proc/self/environ").read_bytes().split(b"\0"):
@@ -172,5 +172,5 @@ if __name__ == "__main__":
     # private socket; its SIGKILL closes that socket too.
     signal.signal(signal.SIGINT, lambda signum, frame: None)
     signal.signal(signal.SIGTERM, lambda signum, frame: None)
-    with socket.socket(fileno=int(sys.argv[1])) as connection:
-        supervise(connection, sys.argv[3:], Path(sys.argv[2]) if sys.argv[2] else None)
+    with socket.socket(fileno=int(sys.argv[1])) as control:
+        supervise(control, sys.argv[3:], Path(sys.argv[2]) if sys.argv[2] else None)

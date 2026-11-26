@@ -112,7 +112,7 @@ project must choose distinct names. Keep launch and session commands in the same
 project (the same working directory outside Git). `Session ready:` and `Attached:`
 print the resolved directory; use that explicit path from another project or an
 environment with a different `TMPDIR`. Bare names under different temporary
-directories select different sessions. Headless runtime sockets also use this
+directories select different session directories. Headless runtime sockets also use this
 temporary directory. If startup reports the 108-byte socket path limit, set
 `TMPDIR` to a shorter writable directory. Cleanup and recovery use the runtime
 path saved in the ownership journal even if `TMPDIR` changes. If the journal is

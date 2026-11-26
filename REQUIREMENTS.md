@@ -283,8 +283,9 @@ investigate or ask; never invent a rationale.
   they must not delete a live session. A same-user program can already remove
   these files directly, so framewisp cannot stop it.
 
-- **R-LIFE-6** [test] A runner rejects a request on its command socket that
-  comes from session metadata copied to another directory.
+- **R-LIFE-6** [test] The runner of a headless session rejects a request on
+  its command socket that was made from a copy of its session metadata in
+  another directory.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
   and its error gives manual cleanup steps.
 
@@ -292,9 +293,9 @@ investigate or ask; never invent a rationale.
 
 - **R-ATTACH-1** [test] `attach` starts only from a foreground interactive
   terminal after the user types `ATTACH` exactly.
-- **R-ATTACH-2** [test] `attach` refuses to start when the user's
-  `XDG_RUNTIME_DIR`, or framewisp's directory in it, is not private or not
-  owned by the user.
+- **R-ATTACH-2** [test] `attach` refuses to start when `XDG_RUNTIME_DIR`
+  (`/run/user/UID` when it is unset), or framewisp's directory in it, is not
+  private or not owned by the user.
 - **R-ATTACH-3** [test] While an attachment is active, framewisp offers a
   compatible tray host an item that says desktop sharing is active.
 
