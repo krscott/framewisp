@@ -147,9 +147,7 @@ def main() -> None:
     teach = commands.add_parser(
         "teach", help="record a screen-only lesson from your desktop"
     )
-    teach.add_argument(
-        "directory", type=Path, help="new directory for the lesson"
-    )
+    teach.add_argument("directory", type=Path, help="new directory for the lesson")
     teach.add_argument("--goal", required=True, help="what the agent should learn")
     note = commands.add_parser(
         "teach-note", help="add an explanation to an active teaching session"

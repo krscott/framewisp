@@ -48,32 +48,33 @@ Subagents, model selection, and classifier workflows are host capabilities;
 Framewisp supplies the session commands. Delegation is an option, not a measured
 speed guarantee.
 
-## Learn from a human demonstration
+## Learn from a lesson
 
 Ask the user to run `framewisp SESSION teach DIRECTORY --goal 'TASK'` in a
 foreground desktop terminal. DIRECTORY must be new and its parent must exist.
 The user reads the capture notice, types `ATTACH`, and approves one monitor in
 the screen-sharing dialog. Do not allocate a PTY or bypass interactive consent.
-Teaching requests screen access only. Input commands are rejected until the
-teaching session ends; normal control requires a separate `attach` confirmation.
+Teaching requests screen access only. A teaching session refuses every command
+except `screenshot` and `teach-note`; normal control requires a separate `attach`
+confirmation.
 
-While the user demonstrates, `framewisp SESSION teach-note 'EXPLANATION'` adds a
+While the user performs the task, `framewisp SESSION teach-note 'EXPLANATION'` adds a
 timestamped note. Explain shortcuts, decisions, variable inputs, and expected
 outcomes that may not be evident visually. Notes must be nonblank and at most
 8000 characters. The agent can issue notes from its own shell so the user can
-keep focus on the app. Collect remaining clarifications after the demonstration
+keep focus on the app. Collect remaining clarifications after the teaching session
 and include them in the procedure. The user stops with Ctrl+C, the sharing indicator, or
 `framewisp --detach`; applications stay running. Screen content and notes are
 unredacted. No audio, physical key events, or clipboard contents are recorded.
 
 Read DIRECTORY/lesson.json for the goal and status, then timeline.jsonl for
 `frame` entries (`time`, relative PNG `path`) and `note` entries (`time`, `text`).
-Times are seconds on the capture timeline. PNGs sample roughly once per second;
-fast interactions may only appear in demonstration.webm. Inspect selected PNGs
+Times are seconds on the capture timeline. Frames sample roughly once per second;
+fast interactions may only appear in video.webm. Inspect selected frames
 with your image tool. For a closer look, extract a video frame to a new path:
 
 ```sh
-ffmpeg -copyts -i DIRECTORY/demonstration.webm -ss 4.5 -frames:v 1 -n /tmp/lesson-detail.png
+ffmpeg -copyts -i DIRECTORY/video.webm -ss 4.5 -frames:v 1 -n /tmp/lesson-detail.png
 ```
 
 `-copyts` preserves the capture timeline, including a delay before the first
@@ -81,14 +82,14 @@ frame, so `-ss` accepts the times in timeline.jsonl. FFmpeg is on PATH in the
 development shell; elsewhere install it separately if
 needed. `complete` means capture finalized successfully, not that the procedure
 has been learned or validated. `failed` names an error; `recording` after the
-owner exits means interrupted capture. Treat either as partial evidence. Images
+owner exits means interrupted capture. Treat either as a partial lesson. Frames
 and notes are available during recording, but do not assume the video is finished.
 
 Derive a procedure describing starting state, variable inputs, control labels,
 decisions, expected outcomes, and recovery or stop conditions. Prefer meaning and
 visible landmarks over recorded coordinates. Distinguish observed actions from
 inferences; ask about hidden shortcuts, missing steps, or ambiguous intent. A
-single demonstration establishes one example, not every branch of the task.
+single lesson establishes one example, not every branch of the task.
 With the user's authorization for the app and data, test a fresh example
 using the normal framewisp commands and verify its result. Save the reusable
 procedure where the user requests only after identifying remaining uncertainty;
@@ -124,7 +125,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory, with silent video and sampled PNGs. User starts it interactively; observation only. |
+| `teach DIRECTORY --goal TEXT` | Record a lesson of the user performing a task on one desktop monitor into a new directory, with silent video and sampled PNG frames. User starts it interactively; it only watches. |
 | `teach-note TEXT` | Add an explanation to the active teaching session. |
 | `run [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, the caption flags, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
@@ -239,7 +240,7 @@ or point the app at a separate profile. Use it only for that kind of debugging,
 because its images and videos can differ between hosts. To show a difference,
 compare it with a default run of the same app.
 
-Start a demo on a private display in a terminal or background tool session.
+Start the demo app on a private display in a terminal or background tool session.
 Use a distinct session name and a fresh working directory, wait for
 `Session ready:`, and keep the runner alive. The app may still be drawing its
 first frame:
@@ -252,8 +253,8 @@ framewisp demo run -- framewisp-demo
 
 From another command session, change to the working directory chosen above and
 create the batch file there.
-These coordinates target the bundled demo's text field at the default display
-size. The first wait checks that the fresh demo's empty entry is accessible before
+These coordinates target the bundled demo app's text field at the default display
+size. The first wait checks that the fresh demo app's empty entry is accessible before
 sending input; the last checks its resulting label:
 
 ```sh
@@ -278,7 +279,7 @@ accessible conditions passed at their observation times. No success PNG is
 captured or needs image inspection. Input-only batches have `verified: null`;
 successful input alone does not verify app state or appearance.
 
-To exercise failure, repeat with a fresh demo session and working directory,
+To exercise failure, repeat with a fresh demo app session and working directory,
 changing only the last `equals` to `"Entered: Wrong"`. The batch exits 1 with
 `verified: false`, `status: "failed"`, `failed_phase: "check"`, and `failed_index: 4`.
 Read `error` and `results[4].observation` (including its `status`, matches, reasons,
@@ -327,7 +328,7 @@ framewisp demo inspect --json --role label --text 'Applied:'
 ```
 
 Role is a case-insensitive exact toolkit name. Name/text are case-insensitive
-substrings; filters combine with AND. GTK demo roles include `button`, `text box`,
+substrings; filters combine with AND. Demo app roles include `button`, `text box`,
 `checkbox`, and `slider`. Qt may use different names.
 
 Read JSON even when the command exits 1. Only `status: "ok"` exits zero. A complete
@@ -367,7 +368,7 @@ listed actions are what the app advertises, not proof that an action will succee
 GTK may expose `sensitive` without `enabled` for an enabled control.
 
 Bounds use window-relative toolkit coordinates. Use a screenshot for pointer
-targets unless the window-to-screenshot transform is known. Native GTK demo
+targets unless the window-to-screenshot transform is known. Demo app
 controls work on Wayland and Xwayland. Qt Quick buttons work, but the tested
 separate popup menu does not appear in its accessible tree. KolourPaint Flatpak
 menus expose names/state, but its canvas still needs screenshots. Keep images

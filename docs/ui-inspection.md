@@ -15,7 +15,7 @@ wlroots 0.20.2 and Pixman at 1280x720, without recording.
 
 | App/toolkit | Wayland | Private Xwayland | Findings and limits |
 | --- | --- | --- | --- |
-| Bundled GTK 4 demo | Tested | Tested | Entry/button discovery, changed entry/result text, checkbox state, slider value, action names, window-relative bounds, and display bounds. |
+| Bundled GTK 4 demo app | Tested | Tested | Entry/button discovery, changed entry/result text, checkbox state, slider value, action names, window-relative bounds, and display bounds. |
 | Qt Quick QML probe | Tested | Tested | Ordinary button name and state work. The separate `Popup.Window` menu item is absent, even while visible. |
 | KolourPaint 26.04.3, Qt Widgets Flatpak | Tested | Not tested for inspection | Menus expose names, states, actions, and bounds. The default 256-node budget is partial; `--max-nodes 1024 --max-depth 16 --timeout 5` traversed 379 objects. Painting content still needs images. |
 | LibreOffice Writer 26.8.1.1, GTK 3 Flatpak | Tested | Tested | Paragraph text verifies an edit with raised traversal budgets. Default queries are partial; display-coordinate conversion is unavailable. See the real-app runs below. |
@@ -37,7 +37,7 @@ commands even when they are not useful for the current label.
 
 ## Verification
 
-Real GUI tests locate the demo's entry/button, type and apply text, read the
+Real GUI tests locate the demo app's entry/button, type and apply text, read the
 result and changed checkbox state, and inspect the slider value without opening
 a screenshot. They run on Wayland and Xwayland. Additional tests cover duplicate
 names, complete missing matches, all traversal caps, 1024-character truncation,
@@ -78,7 +78,7 @@ reaching its deadline. A late stall may therefore report only `timeout`.
 
 The reproducible script is [benchmark_inspection.py](benchmark_inspection.py).
 It performs one warm-up per case, then 40 sequential samples against the same
-running GTK demo with the inspection implementation at `03efe67`, before
+running demo app with the inspection implementation at `03efe67`, before
 integrating the batch command from #61. These are shared-host measurements;
 the end of the regression run and package checks overlapped part of sampling. Setup types `HelloGUI` and applies it before timing. A button
 query discovers the Apply control, a label query reads `Applied: HelloGUI`, and
@@ -101,13 +101,13 @@ framewisp /tmp/fw-inspection-bench stop
 | Screenshot containing both | 154 ms | 171 ms | 62,670 |
 
 Queries currently read each object through several D-Bus calls. Inspection is
-slower than a screenshot in this small demo. It exchanges much less data and lets
+slower than a screenshot in this small demo app. It exchanges much less data and lets
 an agent read text/state without an image-viewing step. Neither response size
 nor these CLI measurements establish a model-latency speedup.
 
 One end-to-end agent trial at revision `bfb5c75` on September 20, 2026 used
 Codex (GPT-6), its shell
-and image-viewing tools, and the same demo state. The task was to locate the Apply
+and image-viewing tools, and the same demo app state. The task was to locate the Apply
 button and read the applied result. Both paths correctly found `Apply text` and
 `Applied: HelloGUI` without retries.
 
@@ -121,7 +121,7 @@ instrumentation call after the model reads the result. It includes Nix shell
 startup, sandbox/tool dispatch, completion polling, and model processing. It
 excludes session setup and input because this comparison is a discovery/read
 task. No separate model-inference or upload timer is available. This is one
-illustrative trial, affected by scheduling and prior knowledge of the demo,
+illustrative trial, affected by scheduling and prior knowledge of the demo app,
 not a latency distribution or evidence of an agent speedup. Both paths took
 about 15.5 seconds despite the large difference in response size.
 
@@ -133,7 +133,7 @@ accept complete observations. No persistent object handles are needed. Each
 observation opens and closes a private connection. Traversal dominates larger
 trees, so a 50 ms polling pause does not promise 50 ms detection or subsecond
 workflows. The small delayed-response probe measures the combined input/check
-path separately from the larger demo's traversal cost.
+path separately from the larger demo app's traversal cost.
 
 It is not enough for general assertions of widget absence or a toolkit-independent
 selector/action API. Omitted Qt popup content, unknown canvas coverage,

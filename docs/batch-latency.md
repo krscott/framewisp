@@ -3,7 +3,7 @@
 The benchmark compares four separate CLI calls with one batch on the same
 persistent runner. Both execute click `(120, 100)`, type `HelloGUI` at interval
 zero, press Return, and save a full 1280x720 PNG. Every sample waits for a new
-`Entered: HelloGUI` entry in the real GTK demo's log. Input logging is enabled;
+`Entered: HelloGUI` entry in the real demo app's log. Input logging is enabled;
 recording is off. No direct VNC calls bypass the production input path.
 
 Run each backend separately in the development environment:
@@ -13,7 +13,7 @@ python docs/benchmark_input.py /tmp/framewisp-batch-wayland.json --samples 40
 python docs/benchmark_input.py /tmp/framewisp-batch-x11.json --samples 40 --x11
 ```
 
-The script starts and cleans up its own sessions. It resets the demo outside
+The script starts and cleans up its own sessions. It resets the demo app outside
 each timed sequence, takes one warm-up then 40 samples for each case, and keeps
 raw wall-clock samples plus nearest-rank p95 and median. Cold session readiness
 is measured separately across six launches. Individual click, key and typing
@@ -42,7 +42,7 @@ speedup reported for #54. Xwayland retains its pointer-priming delay.
 Cold metadata readiness was 662 ms median on Wayland and 752 ms on Xwayland;
 this does not promise that the app has painted. Recording and caption finalization
 were not part of these timings. Input completion alone remains insufficient to
-verify an app result, which is why each sequence checks the demo log.
+verify an app result, which is why each sequence checks the demo app's log.
 
 Local execution and agent/tool turns are different measurements. For an agent
 issuing one tool call per CLI command, this sequence changes four calls into one.

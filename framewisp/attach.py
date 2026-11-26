@@ -699,7 +699,7 @@ def _run_attachment(
                         if teaching is None:
                             portal.open()
                         else:
-                            portal.open(observe_only=True)
+                            portal.open(screen_only=True)
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"

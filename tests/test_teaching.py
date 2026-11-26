@@ -61,7 +61,7 @@ def test_teaching_portal_requests_only_screen_access(
     monkeypatch.setattr(portal, "request", request)
     input_call = Mock()
     monkeypatch.setattr(portal, "input", input_call)
-    portal.open(observe_only=True)
+    portal.open(screen_only=True)
     assert calls == [
         (SCREENCAST, "CreateSession"),
         (SCREENCAST, "SelectSources"),
@@ -212,7 +212,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
     assert teaching.pipeline is not None
     source = teaching.pipeline.get_by_name("source")
     assert source is not None
-    # Portal startup can delay the first image; keep capture timestamps intact.
+    # Portal startup can delay the first frame; keep capture timestamps intact.
     time.sleep(0.4)
     buffer = Gst.Buffer.new_allocate(None, 160 * 120 * 3, None)
     assert buffer is not None

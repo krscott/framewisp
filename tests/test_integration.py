@@ -2549,7 +2549,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
     cli(demo.directory, "type", "Setup outside the clip")
     cli(demo.directory, "key", "Ctrl+a")
     cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
-    # This region is below the demo controls and remains unchanged by input.
+    # This region is below the demo app's controls and remains unchanged by input.
     with Image.open(tmp_path / "before.png") as screenshot:
         patch = screenshot.convert("RGB").crop((340, 644, 940, 708)).tobytes()
     for index, (mode, private) in enumerate(

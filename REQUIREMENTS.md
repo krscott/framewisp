@@ -328,29 +328,29 @@ investigate or ask; never invent a rationale.
   finished look ignored. GNOME can deliver a frame from an earlier capture
   first, with no timestamp to detect it.
 
-## Teaching demonstrations (TEACH)
+## Teaching and lessons (TEACH)
 
 - **R-TEACH-1** [test] Teaching requests screen sharing without requesting
   keyboard or pointer control. A teaching session rejects input commands.
 
-  Rationale: The user performs the demonstration; agent input would interfere
-  with it and require access the demonstration does not need.
+  Rationale: The user performs the task; agent input would interfere with the
+  lesson and require access that teaching does not need.
 
-- **R-TEACH-2** [test] Teaching refuses an existing output directory without
-  changing its contents.
+- **R-TEACH-2** [test] Teaching refuses a lesson directory that already exists
+  without changing its contents.
 
-  Rationale: A demonstration may be the only record of a procedure.
+  Rationale: A lesson may be the only record of a procedure.
 
-- **R-TEACH-3** [test] A completed demonstration contains a playable video,
-  timestamped PNG observations, the stated goal, and timestamped notes.
+- **R-TEACH-3** [test] A completed lesson contains a playable video,
+  timestamped PNG frames, the stated goal, and timestamped notes.
 
-  Rationale: Agents need both visual evidence and explanations of intent to
-  derive a reusable procedure.
+  Rationale: Agents need both what the screen showed and explanations of intent
+  to derive a reusable procedure.
 
-- **R-TEACH-4** [test] A capture failure marks the demonstration as failed and
-  preserves observations and notes already saved.
+- **R-TEACH-4** [test] A capture failure marks the lesson as failed and
+  preserves frames and notes already saved.
 
-  Rationale: Partial evidence can still help, but must not look complete.
+  Rationale: A partial lesson can still help, but must not look complete.
 
 ## Session requests (CONTROL)
 

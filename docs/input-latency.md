@@ -3,7 +3,7 @@
 ## Persistent input
 
 Measured September 20, 2026 UTC against baseline `d20cd47`, with the same
-bundled demo, 1280x720 Pixman display, complete CLI launches, input logging
+bundled demo app, 1280x720 Pixman display, complete CLI launches, input logging
 enabled, and no recording. Each warm result uses 40 wall-clock samples after
 one warm-up per action. p95 uses the nearest-rank method. Host and exact
 backend versions are included with the [raw samples in PR #59](https://github.com/krscott/framewisp/pull/59#issuecomment-5751288124).
@@ -67,7 +67,7 @@ samples and versions. Selection/reset actions stay outside the timed samples.
 The following report describes the earlier implementation, before persistent input.
 
 Measured on the development NixOS x86_64 host with Python 3.14.7 and the pinned
-vncdotool 1.2.0. The target was the bundled Wayland demo at 1280x720. Each entry
+vncdotool 1.2.0. The target was the bundled demo app on Wayland at 1280x720. Each entry
 is the median of five subprocess wall-clock measurements after one warm-up.
 These are local measurements, not latency guarantees; host load varies.
 
@@ -130,4 +130,4 @@ for command in commands:
     print(command, statistics.median(samples[1:]))
 ```
 
-Stop the demo with `framewisp /tmp/latency-demo stop` afterward.
+Stop the demo app with `framewisp /tmp/latency-demo stop` afterward.

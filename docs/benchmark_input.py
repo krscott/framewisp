@@ -128,7 +128,7 @@ def main() -> None:
                             ):
                                 if time.monotonic() >= deadline:
                                     raise RuntimeError(
-                                        "Demo did not acknowledge the sequence"
+                                        "The demo app did not acknowledge the sequence"
                                     )
                                 time.sleep(0.005)
                             if index:

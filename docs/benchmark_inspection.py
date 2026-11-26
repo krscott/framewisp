@@ -1,4 +1,4 @@
-"""Compare complete inspection and screenshot CLI calls on an already running demo."""
+"""Compare complete inspection and screenshot CLI calls on an already running demo app."""
 
 import argparse
 import json

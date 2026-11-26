@@ -228,7 +228,7 @@ class Portal:
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     def open(self, **options):
         if (root / 'teach').exists():
-            assert options == {'observe_only': True}
+            assert options == {'screen_only': True}
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
             if self.stop.wait(.01):
@@ -864,7 +864,16 @@ def test_x11_attach_refuses_without_release(
 
 @pytest.mark.parametrize(
     "metadata",
-    ["", "{", "[" * 10000, "[]", "null", "{}", '{"kind": "other"}', '{"kind": "headless"}'],
+    [
+        "",
+        "{",
+        "[" * 10000,
+        "[]",
+        "null",
+        "{}",
+        '{"kind": "other"}',
+        '{"kind": "headless"}',
+    ],
 )
 def test_attach_refuses_metadata_of_another_session(
     tmp_path: Path,
