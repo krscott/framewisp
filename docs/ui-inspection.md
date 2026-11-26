@@ -43,7 +43,7 @@ a screenshot. They run on Wayland and Xwayland. Additional tests cover duplicate
 names, complete missing matches, all traversal caps, 1024-character truncation,
 a paused app (SIGSTOP), fresh queries after state changes, and Qt
 coverage. A D-Bus I/O test removes an object between enumeration and its read
-and requires a partial response.
+and requires a partial observation.
 
 Two simultaneous headless sessions start with deliberately conflicting inherited
 bus addresses. Inspection stays within each session, and stopping one removes
@@ -130,7 +130,7 @@ about 15.5 seconds despite the large difference in response size.
 The [checks](checks.md) use this coverage for positive
 text/state assertions. They re-run bounded queries, reject ambiguity, and only
 accept complete observations. No persistent object handles are needed. Each
-observation opens and closes a private connection. Traversal dominates larger
+query opens and closes a private connection. Traversal dominates larger
 trees, so a 50 ms polling pause does not promise 50 ms detection or subsecond
 workflows. The small delayed-response probe measures the combined input/check
 path separately from the larger demo's traversal cost.

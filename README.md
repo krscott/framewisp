@@ -538,7 +538,7 @@ without replaying input; restart the session before trying again.
 ## Batch known actions
 
 The primary example above batches input and checks an accessible outcome.
-For a visual-only outcome, save known inputs and an optional final screenshot as JSON:
+For a visual-only outcome, save known inputs and an optional final screenshot as `visual-check.json`:
 
 ```json
 {
@@ -552,7 +552,7 @@ For a visual-only outcome, save known inputs and an optional final screenshot as
 ```
 
 ```sh
-framewisp demo batch --file check.json
+framewisp demo batch --file visual-check.json
 ```
 
 The headless runner validates the complete sequence, then executes it without

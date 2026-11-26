@@ -134,7 +134,8 @@ those conditions at their observation times, not every possible app effect.
 A baseline alone is not verification. Successful input-only or baseline-only
 batches have `verified: null`; failed batches have `verified: false`.
 
-Each check retains its `condition`, `observation` (the last observation),
+Each check retains its `condition`, `observation` (the last query's observation,
+which may be partial; `null` if the check stopped before its first query returned),
 `limits` (configured budgets), `observations` count, `verified`, and
 `duration_seconds`. The observation's `hints` describe standalone
 `inspect` flags; check failure messages describe the JSON `limits`. Baselines and transition

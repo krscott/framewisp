@@ -59,21 +59,21 @@ class Batch:
             raise ValueError(
                 "Batch supports only steps, screenshot, and failure_screenshot."
             )
-        entries = data.get("steps")
+        raw_steps = data.get("steps")
         if (
-            not isinstance(entries, list)
-            or not 1 <= len(cast(list[object], entries)) <= MAX_STEPS
+            not isinstance(raw_steps, list)
+            or not 1 <= len(cast(list[object], raw_steps)) <= MAX_STEPS
         ):
             raise ValueError(f"steps must contain 1 to {MAX_STEPS} steps.")
         steps: list[Step] = []
         pacing = 0.0
         characters = 0
         scroll_ticks = 0
-        for index, entry in enumerate(cast(list[object], entries)):
+        for index, raw_step in enumerate(cast(list[object], raw_steps)):
             try:
-                if not isinstance(entry, dict):
+                if not isinstance(raw_step, dict):
                     raise ValueError("Expected a step object.")
-                item = cast(dict[str, object], entry)
+                item = cast(dict[str, object], raw_step)
                 if ("action" in item) == ("check" in item):
                     raise ValueError("A step needs exactly one of action or check.")
                 if "check" in item:
