@@ -275,8 +275,8 @@ def dispatch():
         lesson.source_ended.set()
         active.stop.set()
 attach.dispatch_events = dispatch
-original_capture = attach.capture
-def capture(portal, *args):
+original_save_screenshot = attach.save_screenshot
+def save_screenshot(portal, *args):
     global revoke_at
     if (root / 'empty-screenshot').exists():
         lesson.source_ended.set()
@@ -284,11 +284,11 @@ def capture(portal, *args):
         (root / 'revoke').touch()
         return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
     if not (root / 'slow-screenshot').exists():
-        return original_capture(portal, *args)
+        return original_save_screenshot(portal, *args)
     (root / 'capturing').touch()
     portal.stop.wait(10)
-    raise InterruptedError('capture stopped')
-attach.capture = capture
+    raise InterruptedError('screenshot stopped')
+attach.save_screenshot = save_screenshot
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -1200,7 +1200,7 @@ def test_truncate_failure_fails_only_that_command(
 
 
 # R-CONTROL-2
-@pytest.mark.parametrize("failure", [None, RuntimeError("capture failed")])
+@pytest.mark.parametrize("failure", [None, RuntimeError("screenshot failed")])
 def test_failure_closing_the_destination_fails_only_that_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception | None
 ) -> None:
@@ -1222,10 +1222,10 @@ def test_failure_closing_the_destination_fails_only_that_command(
     monkeypatch.setattr(attach, "write_png", write)
     monkeypatch.setattr(os, "close", fail_on_output)
     portal = cast(DesktopPortal, CapturePortal())
-    # A fatal capture failure stays fatal, whatever closing the file does.
+    # A fatal screenshot failure stays fatal, whatever closing the file does.
     expected = RuntimeError if failure is not None else ValueError
     with pytest.raises(expected):
-        attach.capture(portal, tmp_path / "x.png", Event(), tmp_path / "log")
+        attach.save_screenshot(portal, tmp_path / "x.png", Event(), tmp_path / "log")
 
 
 # R-CONTROL-2
