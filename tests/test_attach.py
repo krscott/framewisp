@@ -26,11 +26,11 @@ from framewisp.attach import (
     AttachedInput,
     attach_session,
     open_destination,
-    run_attachment,
+    share_desktop,
     write_png,
 )
 from framewisp.connection import request_attached
-from framewisp.desktop import detach_desktop, reserve_desktop
+from framewisp.desktop import lock_desktop, stop_sharing
 from framewisp.errors import SessionError
 from framewisp.ownership import (
     recover_session,
@@ -202,7 +202,7 @@ def test_stale_attach_socket(
             }
         )
     )
-    assert request_attached(tmp_path, "detach", {}) == 1
+    assert request_attached(tmp_path, "click", {}) == 1
     assert "disconnected" in capsys.readouterr().err
 
 
@@ -294,7 +294,7 @@ if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     raise SystemExit(attach.attach_session(root / 'session'))
-raise SystemExit(attach.run_attachment(root / 'session', None, teaching=lesson))
+raise SystemExit(attach.share_desktop(root / 'session', None, teaching=lesson))
 """
 
 
@@ -383,7 +383,7 @@ def test_attach_refuses_shared_desktop_directory(
     shared = private_runtime if target == "runtime" else directory
     shared.chmod(0o755)
     try:
-        with pytest.raises(RuntimeError, match="private"), reserve_desktop():
+        with pytest.raises(RuntimeError, match="private"), lock_desktop():
             pass
     finally:
         shared.chmod(0o700)
@@ -407,7 +407,7 @@ def test_attach_refuses_desktop_directory_of_another_user(
         monkeypatch.setattr("framewisp.desktop.desktop_directory", lambda: directory)
     other = os.getuid() + 1
     monkeypatch.setattr(os, "getuid", lambda: other)
-    with pytest.raises(RuntimeError, match=message), reserve_desktop():
+    with pytest.raises(RuntimeError, match=message), lock_desktop():
         pass
     assert not (directory / "desktop.lock").exists()
 
@@ -537,13 +537,13 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
 
 
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
-def test_global_detach_allows_teaching_to_finalize(
+def test_stop_sharing_allows_teaching_to_finalize(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
     wait_file(tmp_path / "lesson/frames/000000.png")
     (tmp_path / "slow-close").touch()
-    assert detach_desktop() == 0
+    assert stop_sharing() == 0
     assert attach_process.wait(timeout=5) == 0
     assert (
         json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
@@ -667,13 +667,13 @@ def test_pending_consent_reserves_session(
     assert "still live" in duplicate.stderr
     assert metadata.read_text() == original
     assert attach_process.poll() is None
-    assert detach_desktop() == 0
+    assert stop_sharing() == 0
     assert not metadata.exists()
     assert (tmp_path / "closed").exists()
     assert attach_process.wait(timeout=5) == 0
 
 
-def test_detach_cancels_long_input_and_waits_for_cleanup(
+def test_stop_sharing_cancels_long_input_and_waits_for_cleanup(
     tmp_path: Path,
     attach_process: subprocess.Popen[str],
 ) -> None:
@@ -702,7 +702,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
     try:
         wait_file(tmp_path / "events")
         started = time.monotonic()
-        assert detach_desktop() == 0
+        assert stop_sharing() == 0
         assert time.monotonic() - started < 3
         assert command.wait(timeout=5) == 1
         assert (tmp_path / "closed").exists()
@@ -730,9 +730,9 @@ def test_attach_requires_user_terminal(tmp_path: Path, private_runtime: Path) ->
     assert not (private_runtime / "framewisp").exists()
 
 
-def test_global_detach_cli_is_idempotent() -> None:
+def test_stop_sharing_cli_is_idempotent() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "framewisp", "--detach"],
+        [sys.executable, "-m", "framewisp", "--stop-sharing"],
         capture_output=True,
         text=True,
         check=False,
@@ -755,23 +755,25 @@ def test_other_session_cannot_take_desktop(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "already exists" in result.stderr
+    assert "already active" in result.stderr
     assert not (other / "waiting").exists()
     assert attach_process.poll() is None
 
 
-def test_global_detach_kills_suspended_owner_and_recovers(
+def test_stop_sharing_kills_suspended_owner_and_recovers(
     tmp_path: Path,
     attach_process: subprocess.Popen[str],
 ) -> None:
     attach_process.send_signal(signal.SIGSTOP)
     start = time.monotonic()
-    assert detach_desktop() == 0
+    assert stop_sharing() == 0
     # Three seconds for SIGTERM, then up to one second to confirm SIGKILL.
     assert time.monotonic() - start < 5
     assert attach_process.wait(timeout=5) == -signal.SIGKILL
     # SIGKILL cannot remove files. The next owner must recover without trusting them.
-    original = json.loads((tmp_path / "session/session.json").read_text())["attachment"]
+    original = json.loads((tmp_path / "session/session.json").read_text())[
+        "share_token"
+    ]
     replacement = subprocess.Popen(
         [sys.executable, "-c", _SERVER, str(tmp_path)],
         stdout=subprocess.PIPE,
@@ -781,13 +783,13 @@ def test_global_detach_kills_suspended_owner_and_recovers(
     try:
         deadline = time.monotonic() + 5
         while (
-            json.loads((tmp_path / "session/session.json").read_text())["attachment"]
+            json.loads((tmp_path / "session/session.json").read_text())["share_token"]
             == original
         ):
             assert replacement.poll() is None
             assert time.monotonic() < deadline
             time.sleep(0.01)
-        assert detach_desktop() == 0
+        assert stop_sharing() == 0
         assert replacement.wait(timeout=5) == 0
     finally:
         if replacement.poll() is None:
@@ -805,8 +807,8 @@ def test_x11_stop_releases_held_input(
     assert attach_process.stdout is not None
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
-    assert detach_desktop() == 0
-    # The owner must not wait out the release past detach's SIGKILL deadline.
+    assert stop_sharing() == 0
+    # The owner must not wait out the release past --stop-sharing's SIGKILL deadline.
     assert attach_process.wait(timeout=5) == 0
     assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 
@@ -857,7 +859,7 @@ def test_x11_attach_refuses_without_release(
         raise AssertionError("The portal opened without X11 input release.")
 
     monkeypatch.setattr(attach, "DesktopPortal", no_portal)
-    assert run_attachment(tmp_path / "session", None) == 1
+    assert share_desktop(tmp_path / "session", None) == 1
     error = capsys.readouterr().err
     assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
 
@@ -889,7 +891,7 @@ def test_attach_refuses_metadata_of_another_session(
         raise AssertionError("The portal opened over another session's metadata.")
 
     monkeypatch.setattr(attach, "DesktopPortal", no_portal)
-    assert run_attachment(session_dir, None) == 1
+    assert share_desktop(session_dir, None) == 1
     assert "belongs to another session" in capsys.readouterr().err
     assert (session_dir / "session.json").read_text() == metadata
 
@@ -906,7 +908,7 @@ def children(pid: int, name: str) -> list[int]:
 
 
 # R-INPUT-5
-def test_x11_attachment_stops_when_release_guard_dies(
+def test_x11_desktop_share_stops_when_release_guard_dies(
     tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
@@ -1005,14 +1007,14 @@ def test_guard_releases_presses_that_land_after_the_owner_exits(
         holder.wait(timeout=5)
 
 
-def test_old_session_metadata_cannot_command_new_attachment(
+def test_old_session_metadata_cannot_command_new_desktop_share(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     old = tmp_path / "old"
     old.mkdir()
     (old / "session.json").write_text((tmp_path / "session/session.json").read_text())
     state = json.loads((old / "session.json").read_text())
-    state["attachment"] = "previous-owner"
+    state["share_token"] = "previous-owner"
     (old / "session.json").write_text(json.dumps(state))
     assert request_attached(old, "key", {"chord": "a"}) == 1
     assert not (tmp_path / "events").exists()
@@ -1030,7 +1032,7 @@ def request_reply(session_dir: Path, message: bytes) -> dict[str, object]:
 
 
 # R-CONTROL-1, R-CONTROL-2
-def test_malformed_requests_leave_the_attachment_running(
+def test_malformed_requests_leave_the_desktop_share_running(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
@@ -1038,7 +1040,7 @@ def test_malformed_requests_leave_the_attachment_running(
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
     session_dir = tmp_path / "session"
-    token = json.loads((session_dir / "session.json").read_text())["attachment"]
+    token = json.loads((session_dir / "session.json").read_text())["share_token"]
     os.mkfifo(tmp_path / "fifo")
     requests: list[dict[str, object]] = [
         {},
@@ -1076,7 +1078,7 @@ def test_malformed_requests_leave_the_attachment_running(
         b"\xff\n",
         b"[]\n",
         b"[" * 100000 + b"\n",
-        *((json.dumps({"attachment": token} | r) + "\n").encode() for r in requests),
+        *((json.dumps({"share_token": token} | r) + "\n").encode() for r in requests),
     ):
         response = request_reply(session_dir, message)
         assert response["status"] == 1
@@ -1091,7 +1093,7 @@ def test_malformed_requests_leave_the_attachment_running(
 
 
 # R-CONTROL-1, R-CONTROL-2
-def test_trickling_client_gets_a_reply_from_the_attachment(
+def test_trickling_client_gets_a_reply_from_the_attached_session(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
@@ -1277,7 +1279,7 @@ def test_terminal_names_stop_methods_before_confirmation(
     terminal_prompt: tuple[subprocess.Popen[bytes], int, bytes],
 ) -> None:
     _process, _master, printed = terminal_prompt
-    assert b"framewisp --detach" in printed
+    assert b"framewisp --stop-sharing" in printed
     assert b"Ctrl+C" in printed
     assert not (tmp_path / "waiting").exists()
 
@@ -1330,7 +1332,7 @@ def test_closing_terminal_disconnects(
     assert not (tmp_path / "session/session.json").exists()
 
 
-def test_detach_needs_only_standard_library() -> None:
+def test_stop_sharing_needs_only_standard_library() -> None:
     script = """
 import sys
 class NoDesktopImports:
@@ -1338,7 +1340,7 @@ class NoDesktopImports:
         if fullname.split('.')[0] in {'gi', 'vncdotool', 'PIL'}:
             raise RuntimeError('Emergency stop imported ' + fullname)
 sys.meta_path.insert(0, NoDesktopImports())
-sys.argv = ['framewisp', '--detach']
+sys.argv = ['framewisp', '--stop-sharing']
 from framewisp.__main__ import main
 main()
 """
@@ -1361,22 +1363,22 @@ def test_invalid_session_metadata_fails_clearly(
     assert "Cannot use attached session" in capsys.readouterr().err
 
 
-def test_attachment_refuses_headless_ownership(
+def test_desktop_share_refuses_headless_ownership(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     session_dir = tmp_path / "session"
     session_dir.mkdir()
     with session_lease(session_dir) as lease:
-        assert run_attachment(session_dir, None) == 1
+        assert share_desktop(session_dir, None) == 1
         assert "still live" in capsys.readouterr().err
         write_journal(session_dir, runtime_path(session_dir), lease, created=False)
-    assert run_attachment(session_dir, None) == 1
+    assert share_desktop(session_dir, None) == 1
     assert "recover first" in capsys.readouterr().err
     assert not (session_dir / "session.json").exists()
     recover_session(session_dir)
 
 
-def test_recovery_refuses_live_attachment(
+def test_recovery_refuses_live_desktop_share(
     attach_process: subprocess.Popen[str], tmp_path: Path
 ) -> None:
     state = tmp_path / "session" / "session.json"

@@ -203,7 +203,9 @@ def test_cli_resolves_named_session_without_legacy_fallback(
             assert result.returncode == 1
             assert str(session_dir) in result.stderr
             assert (
-                "Use framewisp --detach" if attached else "another version of framewisp"
+                "Use framewisp --stop-sharing"
+                if attached
+                else "another version of framewisp"
             ) in result.stderr
         (session_dir / "session.json").unlink()
         result = subprocess.run(

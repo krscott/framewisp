@@ -40,7 +40,7 @@ from framewisp.connection import (
     resolved_request_path,
     teaching_refusal,
 )
-from framewisp.desktop import reserve_desktop, write_state
+from framewisp.desktop import lock_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
@@ -372,7 +372,7 @@ def finished(
     if message.type == Gst.MessageType.ERROR:
         error, detail = message.parse_error()
         if sink is not None and message.src == sink:
-            # A full disk fails this command, not the attachment, and the log
+            # A full disk fails this command, not the desktop share, and the log
             # may be on that disk.
             raise ValueError(f"Could not write the screenshot: {error.message}")
         log.write_text(f"{error}\n{detail}\n")
@@ -381,13 +381,13 @@ def finished(
 
 
 def parse_attached_request(
-    line: bytes, attachment: str, *, teaching: bool = False
+    line: bytes, share_token: str, *, teaching: bool = False
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one.
-    if fields.get("attachment") != attachment:
+    if fields.get("share_token") != share_token:
         raise ValueError(
             "Attached session is disconnected. Ask the user to attach again."
         )
@@ -443,7 +443,7 @@ def attach_session(
             else "attach"
         )
         print(
-            "Desktop attachment must be started by the user in a foreground interactive terminal.\n"
+            "A desktop share must be started by the user in a foreground interactive terminal.\n"
             "Agents: do not allocate a PTY or bypass this check. Ask the user to run:\n"
             f"  framewisp {shlex.quote(str(session_dir))} {command}\n"
             "in another desktop terminal, read the instructions, and approve sharing.",
@@ -456,7 +456,7 @@ def attach_session(
             "Video, sampled frames, and notes are saved unredacted, including any visible secrets.\n"
             f"Goal: {teaching.goal}\nLesson: {teaching.directory}\n"
             "Keep this terminal open and in the foreground. Stop with Ctrl+C here,\n"
-            "the sharing indicator, or framewisp --detach. Your apps stay running.",
+            "the sharing indicator, or framewisp --stop-sharing. Your apps stay running.",
             flush=True,
         )
     else:
@@ -464,9 +464,9 @@ def attach_session(
             "This shares a monitor and gives agent commands keyboard and pointer control of your live desktop.\n"
             "Input can reach any focused app. Keep this terminal open; do not background or suspend this command.\n"
             "Before continuing, bind BOTH Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape to:\n"
-            "  framewisp --detach\n"
+            "  framewisp --stop-sharing\n"
             "The second binding is needed when the agent holds Shift. Test your bindings.\n"
-            "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
+            "Ctrl+C here also stops sharing. Stop sharing before detaching from tmux or screen.",
             flush=True,
         )
     if x11_desktop():
@@ -493,14 +493,14 @@ def attach_session(
             file=sys.stderr,
         )
         return 1
-    return run_attachment(
+    return share_desktop(
         session_dir,
         sys.stdin.fileno(),
         teaching=teaching,
     )
 
 
-def run_attachment(
+def share_desktop(
     session_dir: Path,
     terminal: int | None,
     *,
@@ -512,7 +512,7 @@ def run_attachment(
         session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         with session_lease(session_dir):
             refuse_abandoned_ownership(session_dir)
-            return _run_attachment(
+            return _share_desktop(
                 session_dir,
                 terminal,
                 teaching=teaching,
@@ -522,13 +522,13 @@ def run_attachment(
         return 1
 
 
-def _run_attachment(
+def _share_desktop(
     session_dir: Path,
     terminal: int | None,
     *,
     teaching: Teaching | None = None,
 ) -> int:
-    """Own all desktop access. The CLI must complete interactive consent first."""
+    """Hold the desktop share. The CLI must complete interactive consent first."""
     stop, ready = Event(), Event()
     lock = Lock()
     workers: list[Thread] = []
@@ -537,7 +537,7 @@ def _run_attachment(
     inputs: AttachedInput | None = None
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
-    attachment = uuid.uuid4().hex
+    share_token = uuid.uuid4().hex
     state = session_dir / "session.json"
     owns_state = False
     capture_descriptor: int | None = None
@@ -549,7 +549,7 @@ def _run_attachment(
         assert portal is not None
         ready.set()
         print(
-            f"Attached: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+            f"Attached: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
             flush=True,
         )
 
@@ -572,7 +572,7 @@ def _run_attachment(
 
             def parse(line: bytes) -> InputAction | Path | str:
                 request = parse_attached_request(
-                    line, attachment, teaching=teaching is not None
+                    line, share_token, teaching=teaching is not None
                 )
                 if not ready.is_set():
                     raise ValueError(
@@ -650,7 +650,7 @@ def _run_attachment(
             traceback.print_exc()
 
     try:
-        with reserve_desktop() as directory:
+        with lock_desktop() as directory:
             try:
                 session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if state.exists():
@@ -671,7 +671,7 @@ def _run_attachment(
                 ):
                     command_socket = str(directory / "command.sock")
                     listener.bind(command_socket)
-                    emergency.bind(str(directory / "detach.sock"))
+                    emergency.bind(str(directory / "stop-sharing.sock"))
                     listener.listen(32)
                     emergency.listen(32)
                     write_state(
@@ -679,7 +679,7 @@ def _run_attachment(
                         {
                             "kind": "attached" if teaching is None else "teaching",
                             "command_protocol": COMMAND_PROTOCOL,
-                            "attachment": attachment,
+                            "share_token": share_token,
                             "command_socket": command_socket,
                             "processes": {"attach": os.getpid()},
                         },
@@ -796,5 +796,5 @@ def _run_attachment(
             os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-        print("Detached. The app and desktop are still running.", flush=True)
+        print("Stopped sharing. Your apps and desktop are still running.", flush=True)
     return int(bool(failures))

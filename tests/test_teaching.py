@@ -78,7 +78,7 @@ def test_teaching_portal_requests_only_screen_access(
 )
 def test_teaching_rejects_every_input_command(command: str) -> None:
     line = json.dumps(
-        {"attachment": "token", "command": command, "parameters": {}}
+        {"share_token": "token", "command": command, "parameters": {}}
     ).encode()
     with pytest.raises(ValueError, match="this is a teaching session"):
         parse_attached_request(line, "token", teaching=True)
@@ -87,7 +87,7 @@ def test_teaching_rejects_every_input_command(command: str) -> None:
 @pytest.mark.parametrize("text", ["", "  ", 1, "n" * 8001])
 def test_teaching_rejects_invalid_notes(text: object) -> None:
     line = json.dumps(
-        {"attachment": "token", "command": "teach-note", "parameters": {"text": text}}
+        {"share_token": "token", "command": "teach-note", "parameters": {"text": text}}
     ).encode()
     with pytest.raises(ValueError, match="nonblank"):
         parse_attached_request(line, "token", teaching=True)

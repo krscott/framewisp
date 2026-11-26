@@ -1,4 +1,4 @@
-"""Per-user ownership and emergency stop for the user's desktop (Linux)."""
+"""The desktop lock and emergency stop for desktop shares (Linux)."""
 
 import fcntl
 import json
@@ -43,7 +43,7 @@ def write_state(path: Path, value: dict[str, object]) -> None:
 
 
 @contextmanager
-def reserve_desktop() -> Generator[Path]:
+def lock_desktop() -> Generator[Path]:
     directory = desktop_directory()
     directory.mkdir(mode=0o700, exist_ok=True)
     info = directory.lstat()
@@ -61,33 +61,33 @@ def reserve_desktop() -> Generator[Path]:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError(
-                "A desktop attachment already exists. Run framewisp --detach to stop it."
+                "A desktop share is already active. Run framewisp --stop-sharing to stop it."
             ) from None
         # Never unlink the lock file: all contenders must lock the same inode.
-        for name in ("command.sock", "detach.sock"):
+        for name in ("command.sock", "stop-sharing.sock"):
             (directory / name).unlink(missing_ok=True)
         try:
             yield directory
         finally:
-            for name in ("command.sock", "detach.sock"):
+            for name in ("command.sock", "stop-sharing.sock"):
                 (directory / name).unlink(missing_ok=True)
     finally:
         os.close(descriptor)
 
 
-def detach_desktop() -> int:
+def stop_sharing() -> int:
     """Stop the socket's actual owner, without trusting a PID in a state file."""
     try:
         directory = desktop_directory()
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(0.5)
-            connection.connect(str(directory / "detach.sock"))
+            connection.connect(str(directory / "stop-sharing.sock"))
             _, uid, _ = struct.unpack(
                 "3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
             )
             if uid != os.getuid():
                 raise RuntimeError(
-                    "Refusing to stop a desktop connection owned by another user."
+                    "Refusing to stop a desktop share that belongs to another user."
                 )
             process = connection.getsockopt(socket.SOL_SOCKET, SO_PEERPIDFD)
         try:
@@ -100,21 +100,21 @@ def detach_desktop() -> int:
                     signal.pidfd_send_signal(process, signal.SIGKILL)
                     if not poll.poll(1000):
                         raise RuntimeError(
-                            "The attach process did not exit after SIGKILL."
+                            "The desktop share's runner did not exit after SIGKILL."
                         )
             except ProcessLookupError:
                 pass
         finally:
             os.close(process)
-        print("Desktop attachment stopped.")
+        print("Desktop share stopped.")
         return 0
     except (FileNotFoundError, ConnectionRefusedError):
-        print("No active desktop attachment.")
+        print("No active desktop share.")
         return 0
     except (OSError, RuntimeError) as error:
-        print(f"Could not detach: {error}", file=sys.stderr)
+        print(f"Could not stop sharing: {error}", file=sys.stderr)
         return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(detach_desktop())
+    raise SystemExit(stop_sharing())

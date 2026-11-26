@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-from framewisp.desktop import detach_desktop
+from framewisp.desktop import stop_sharing
 from framewisp.environment import initialize_environment
 
 
@@ -14,8 +14,8 @@ def main() -> None:
             Path(__file__).with_name("SKILL.md").read_text(encoding="utf-8")
         )
         return
-    if sys.argv[1:] == ["--detach"]:
-        raise SystemExit(detach_desktop())
+    if sys.argv[1:] == ["--stop-sharing"]:
+        raise SystemExit(stop_sharing())
     # Delay optional desktop imports until after the emergency-stop path.
     from framewisp.cli import main as command_main
 

@@ -50,7 +50,7 @@ def start_release_guard(stop: Event) -> subprocess.Popen[bytes] | None:
         return None
     if not os.environ.get("DISPLAY"):
         raise RuntimeError(
-            "An X11 desktop attachment needs DISPLAY to release held input. "
+            "A desktop share on X11 needs DISPLAY to release held input. "
             "Run attach from a terminal on your desktop."
         )
     guard = subprocess.Popen(
@@ -81,7 +81,7 @@ def start_release_guard(stop: Event) -> subprocess.Popen[bytes] | None:
 
 
 def finish_release_guard(guard: subprocess.Popen[bytes]) -> None:
-    """Release held input without waiting, so detach's SIGKILL deadline holds."""
+    """Release held input without waiting, so --stop-sharing's SIGKILL deadline holds."""
     assert guard.stdin is not None
     guard.stdin.close()
     if guard.poll() is not None:
