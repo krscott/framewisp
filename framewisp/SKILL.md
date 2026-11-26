@@ -417,8 +417,10 @@ runtime/session failure, or 2 for invalid CLI/file input. Rejection before execu
 may report only an error on stderr, without result JSON.
 
 Execution stops at the first runtime failure. Inspect completed results and
-`failed_index`; the failed step may itself have sent some input. A screenshot failure
-has `failed_phase: "screenshot"` and a null failed index. No step is rolled back or
+`failed_index`; the failed step may itself have sent some input. A failed final
+`screenshot` has `failed_phase: "screenshot"` and a null failed index. A failed
+`failure_screenshot` keeps the original failure's phase and index and adds
+`failure_screenshot_error`. No step is rolled back or
 retried. If the connection dies before a reply, the outcome may be partial: inspect
 the app and `inputs.jsonl` before deciding what to do next. Disconnecting cancels
 queued work or the remaining running batch and releases held keys/buttons. Session
@@ -475,7 +477,7 @@ put `{"check": "baseline", "timeout": 2, "condition": ...}` before the input,
 then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
 Use the identical condition in both. The baseline must read a unique nonmatching
 value. Limits may differ between baseline and wait. A failed or
-incomplete baseline stops the steps after it, so put it before the input it guards. The wait resolves the selector afresh,
+incomplete baseline stops the steps after it. The wait resolves the selector afresh,
 allowing a replacement control. Observation IDs are diagnostic, not reusable handles.
 This proves observed nonmatching then matching state, not input causation.
 
