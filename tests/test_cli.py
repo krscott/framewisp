@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from framewisp import cli
 from framewisp.connection import COMMAND_PROTOCOL
 from framewisp.layout import ConsolePanel
 from framewisp.lib import session_command
@@ -412,29 +413,29 @@ def test_session_commands_refuse_another_command_protocol(
 
 
 # R-CONTROL-3
-def test_screenshot_checks_the_command_protocol_after_its_delay(tmp_path: Path) -> None:
+def test_screenshot_checks_the_command_protocol_after_its_delay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     metadata = tmp_path / "session.json"
     metadata.write_text(json.dumps({"command_protocol": COMMAND_PROTOCOL}))
-    with subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "framewisp",
-            str(tmp_path),
-            "screenshot",
-            "--delay",
-            "3",
-            str(tmp_path / "capture.png"),
-        ],
-        stderr=subprocess.PIPE,
-        text=True,
-    ) as command:
-        # Another version's session takes the directory while the command waits.
-        time.sleep(1.5)
+    waits: list[float] = []
+
+    def another_version_takes_the_directory(seconds: float) -> None:
+        waits.append(seconds)
         metadata.write_text(json.dumps({"command_protocol": COMMAND_PROTOCOL + 1}))
-        _, error = command.communicate(timeout=15)
-    assert command.returncode == 1
-    assert "another version of framewisp" in error
+
+    monkeypatch.setattr(time, "sleep", another_version_takes_the_directory)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["framewisp", str(tmp_path), "screenshot", "--delay", "3", "capture.png"],
+    )
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 1
+    assert waits == [3.0]
+    assert "another version of framewisp" in capsys.readouterr().err
     assert not (tmp_path / "capture.png").exists()
 
 

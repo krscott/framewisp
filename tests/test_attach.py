@@ -850,7 +850,9 @@ def test_x11_attach_refuses_without_release(
     assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
 
 
-@pytest.mark.parametrize("metadata", ["", "{", "[]", "null", "{}", '{"kind": "other"}'])
+@pytest.mark.parametrize(
+    "metadata", ["", "{", "[" * 10000, "[]", "null", "{}", '{"kind": "other"}']
+)
 def test_attach_refuses_metadata_of_another_session(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

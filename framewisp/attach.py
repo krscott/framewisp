@@ -655,7 +655,7 @@ def _run_attachment(
                 if state.exists():
                     try:
                         existing: object = json.loads(state.read_text())
-                    except ValueError:
+                    except (ValueError, RecursionError):
                         existing = None
                     if not isinstance(existing, dict) or (
                         cast(dict[str, object], existing).get("kind") != "attached"

@@ -505,7 +505,7 @@ def main() -> None:
             metadata = json.loads(state_path.read_text())
             protocol = metadata.get("command_protocol")
             attached = metadata.get("kind") == "attached"
-        except (OSError, ValueError, AttributeError) as error:
+        except (OSError, ValueError, RecursionError, AttributeError) as error:
             parser.exit(1, f"Cannot read session metadata: {error}\n")
         # Every session command passes here, so none needs its own check
         # (R-CONTROL-3).
@@ -516,8 +516,8 @@ def main() -> None:
                 else f"command protocol {protocol!r}"
             )
             remedy = (
-                "Ask the user to end it with Ctrl+C or framewisp --detach, then to "
-                "start it again with this version."
+                "Ask the user to end it with Ctrl+C in its terminal if it is still "
+                "running, then to start it again with this version."
                 if attached
                 else "Stop its runner with Ctrl+C or SIGTERM, or run framewisp "
                 "SESSION recover if the runner has died, then start the session "
