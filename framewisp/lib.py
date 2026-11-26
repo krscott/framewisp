@@ -152,12 +152,12 @@ def app_command(command: list[str], env: dict[str, str]) -> list[str]:
 def start_inspection_buses(
     stack: ExitStack,
     runtime: Path,
-    session: Path,
+    session_dir: Path,
     env: dict[str, str],
     app_env: dict[str, str],
     stop: Event,
 ) -> dict[str, OwnedProcess] | None:
-    """Own both buses and the registry; never activate host desktop services."""
+    """Own both buses and the registry; never activate the desktop's services."""
     config = runtime / "bus.conf"
     config.write_text(
         "<busconfig><type>session</type><auth>EXTERNAL</auth><listen>unix:tmpdir=/tmp</listen>"
@@ -171,7 +171,7 @@ def start_inspection_buses(
         ("accessibility", "AT_SPI_BUS_ADDRESS"),
     ):
         address = unix_bus_address(runtime / (name + ".sock"))
-        log = session / (name + ".log")
+        log = session_dir / (name + ".log")
         process = stack.enter_context(
             managed_process(
                 [
@@ -200,7 +200,7 @@ def start_inspection_buses(
     app_env.update(GTK_A11Y="atspi", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1")
     registry = os.environ.get("FRAMEWISP_ATSPI_REGISTRY", "at-spi2-registryd")
     processes["registry"] = stack.enter_context(
-        managed_process([registry], log=session / "registry.log", env=env)
+        managed_process([registry], log=session_dir / "registry.log", env=env)
     )
     # Wait for the registry's bus name before launching apps that register with it.
     from framewisp.inspection import wait_for_registry
@@ -224,7 +224,7 @@ def start_sway(
     contents = SWAY_CONFIG.format(width=size[0], height=size[1])
     if x11:
         # Sway chooses a free X display. Read its environment from a child,
-        # rather than guessing a number or inheriting the host desktop's DISPLAY.
+        # rather than guessing a number or inheriting the desktop's DISPLAY.
         probe = shlex.join(
             [
                 sys.executable,
@@ -268,7 +268,7 @@ def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]
     commands (R-INPUT-1). Qt dismisses an open context menu when the last input
     client disconnects.
     """
-    # Only the runner needs Twisted; loading it in every control CLI adds latency.
+    # Only the runner needs Twisted; loading it in every session command adds latency.
     from vncdotool import api
     from vncdotool.client import VNCDoToolFactory
 
@@ -488,9 +488,9 @@ def publish_recording(clip: Path, destination: Path, failure: Exception | None) 
         raise RuntimeError(str(failure).replace(str(clip), str(destination)))
 
 
-def recording_path_error(session: Path, destination: Path) -> str | None:
+def recording_path_error(session_dir: Path, destination: Path) -> str | None:
     reserved = {
-        (session / name).resolve()
+        (session_dir / name).resolve()
         for name in (
             ".headless.lock",
             ".headless-owner.json",
@@ -615,7 +615,7 @@ def recording_summary(destination: Path, *, env: dict[str, str]) -> dict[str, ob
 
 @dataclass
 class Recordings:
-    session: Path
+    session_dir: Path
     env: dict[str, str]
     stop_requested: Event
     size: tuple[int, int]
@@ -643,13 +643,13 @@ class Recordings:
         if isinstance(layout, str):
             return layout
         try:
-            error = recording_path_error(self.session, destination)
+            error = recording_path_error(self.session_dir, destination)
             if error is not None:
                 return error
             self.process = self.resources.enter_context(
                 start_recording(
                     destination,
-                    log=self.session / "recorder.log",
+                    log=self.session_dir / "recorder.log",
                     env=self.env,
                     stop=self.stop_requested,
                     captions=captions,
@@ -686,12 +686,12 @@ class Recordings:
             self.destination = None
 
     def with_kept_clip(self, error: str) -> str:
-        clip = kept_recording(self.session)
+        clip = kept_recording(self.session_dir)
         return f"{error}\nThe clip remains at {clip}." if clip is not None else error
 
 
 def session_command(
-    session: Path,
+    session_dir: Path,
     action: str,
     destination: Path | None = None,
     *,
@@ -701,10 +701,10 @@ def session_command(
     compact: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> int:
-    state = json.loads((session / "session.json").read_text())
-    if state.get("control_protocol") != 1:
+    state = json.loads((session_dir / "session.json").read_text())
+    if state.get("command_protocol") != 1:
         raise SessionError(
-            "This session uses an older or unsupported control protocol. "
+            "This session uses an older or unsupported command protocol. "
             "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
             "with this version of framewisp."
         )
@@ -745,7 +745,7 @@ def session_command(
         )
     request: dict[str, object] = {
         "action": action,
-        "session": str(session),
+        "session_directory": str(session_dir),
         "destination": str(destination.resolve()) if destination else None,
         "click_pings": click_pings,
         "compact": compact,
@@ -759,20 +759,20 @@ def session_command(
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
         raise SessionError("Session request exceeds the 1 MiB limit.")
-    control = Path(state["runtime_directory"]) / "control.sock"
+    endpoint = Path(state["runtime_directory"]) / "command.sock"
     try:
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(control))
+            connection.connect(str(endpoint))
             connection.sendall(message)
             with connection.makefile("r") as response:
                 line = response.readline()
     except OSError as connection_error:
         raise SessionError(
-            f"Cannot reach session {session} at {control}: {connection_error}\n{SOCKET_ACCESS_HINT}"
+            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{SOCKET_ACCESS_HINT}"
         ) from None
     if not line:
         print(
-            f"Session {session} disconnected before {action} completed.",
+            f"Session {session_dir} disconnected before {action} completed.",
             file=sys.stderr,
         )
         return 1
@@ -831,7 +831,7 @@ class RecordStart:
 
 SessionAction = Literal["stop", "status", "record-stop"]
 SESSION_ACTIONS: tuple[SessionAction, ...] = get_args(SessionAction)
-ControlRequest = SessionAction | RecordStart | InputAction | Batch
+SessionRequest = SessionAction | RecordStart | InputAction | Batch
 
 
 def parse_batch(raw: object, recordings: Recordings) -> Batch:
@@ -842,7 +842,7 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
         if not capture.path.parent.is_dir():
             raise ValueError("capture.path requires an existing parent directory.")
         resolved = resolved_request_path(capture.path, "capture.path")
-        path_error = recording_path_error(recordings.session, resolved)
+        path_error = recording_path_error(recordings.session_dir, resolved)
         if path_error is not None:
             raise ValueError(path_error.replace("recording path", "capture path"))
         error = capture_path_error(resolved, recordings.destination)
@@ -851,10 +851,10 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
     return batch
 
 
-def parse_request(line: bytes, recordings: Recordings) -> ControlRequest:
+def parse_request(line: bytes, recordings: Recordings) -> SessionRequest:
     """Validate one request line, changing no session state."""
     command = parse_command(line)
-    if command.get("session") != str(recordings.session):
+    if command.get("session_directory") != str(recordings.session_dir):
         raise ValueError(
             "Session metadata points to a different session. Use the original session directory."
         )
@@ -890,7 +890,7 @@ def handle_session_command(
         return None
     stopping = False
     try:
-        request: ControlRequest | None = receive_request(
+        request: SessionRequest | None = receive_request(
             connection,
             lambda failure: reply(connection, error=failure),
             lambda line: parse_request(line, recordings),
@@ -940,7 +940,7 @@ def handle_session_command(
 
 
 def run_session(
-    session: Path,
+    session_dir: Path,
     command: list[str],
     *,
     recording: Path | None = None,
@@ -960,17 +960,17 @@ def run_session(
             "your own file. Pointing it at the host's fonts.conf works, but output "
             "can then differ between hosts."
         )
-    session = session.resolve()
+    session_dir = session_dir.resolve()
     if recording is not None:
         recording = recording.resolve()
-        error = recording_path_error(session, recording)
+        error = recording_path_error(session_dir, recording)
         if error is not None:
             raise SessionError(error)
-    session.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with session_lease(session) as lease:
-        refuse_abandoned_ownership(session)
+    session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with session_lease(session_dir) as lease:
+        refuse_abandoned_ownership(session_dir)
         return _run_session(
-            session,
+            session_dir,
             command,
             lease=lease,
             recording=recording,
@@ -986,7 +986,7 @@ def run_session(
 
 
 def _run_session(
-    session: Path,
+    session_dir: Path,
     command: list[str],
     *,
     lease: int,
@@ -1000,15 +1000,15 @@ def _run_session(
     fonts: str,
     real_env: bool,
 ) -> int:
-    state = session / "session.json"
+    state = session_dir / "session.json"
     if state.exists():
         raise SessionError(
             f"{state} already exists. Run framewisp SESSION recover after the owner exits."
         )
 
-    (session / "app-exit.json").unlink(missing_ok=True)
-    (session / "inputs.jsonl").write_text("", encoding="utf-8")
-    (session / "activity.jsonl").write_text("", encoding="utf-8")
+    (session_dir / "app-exit.json").unlink(missing_ok=True)
+    (session_dir / "inputs.jsonl").write_text("", encoding="utf-8")
+    (session_dir / "activity.jsonl").write_text("", encoding="utf-8")
     stop = Event()
     stop_connection: socket.socket | None = None
     shutdown_error: str | None = None
@@ -1022,7 +1022,7 @@ def _run_session(
     }
     try:
         with (
-            headless_runtime(session, lease) as runtime,
+            headless_runtime(session_dir, lease) as runtime,
             ExitStack() as stack,
         ):
             directory = str(runtime)
@@ -1039,13 +1039,15 @@ def _run_session(
             for process_env in (env, app_env):
                 process_env["FRAMEWISP_OWNER_FD"] = str(lease)
                 process_env["FRAMEWISP_OWNER_RUNTIME"] = directory
-            buses = start_inspection_buses(stack, runtime, session, env, app_env, stop)
+            buses = start_inspection_buses(
+                stack, runtime, session_dir, env, app_env, stop
+            )
             if buses is None:
                 return 0
             compositor = stack.enter_context(
                 start_sway(
                     runtime,
-                    log=session / "sway.log",
+                    log=session_dir / "sway.log",
                     env=env,
                     stop=stop,
                     size=size,
@@ -1060,7 +1062,7 @@ def _run_session(
             x11_display = None
             if x11:
                 x11_display = wait_for_x11(
-                    runtime, process=sway, log=session / "sway.log", stop=stop
+                    runtime, process=sway, log=session_dir / "sway.log", stop=stop
                 )
                 if x11_display is None:
                     return 0
@@ -1074,16 +1076,18 @@ def _run_session(
                 )
 
             vnc = stack.enter_context(
-                start_wayvnc(runtime, log=session / "wayvnc.log", env=env, stop=stop)
+                start_wayvnc(
+                    runtime, log=session_dir / "wayvnc.log", env=env, stop=stop
+                )
             )
             if vnc is None:
                 return 0
             input_client = stack.enter_context(keep_input_devices(runtime, stop))
 
             backends = buses | {"sway": sway, "wayvnc": vnc}
-            console_capture = ConsoleCapture(session)
+            console_capture = ConsoleCapture(session_dir)
             output = stack.enter_context(app_output(console_capture))
-            recordings = Recordings(session, env, stop, size, console_capture)
+            recordings = Recordings(session_dir, env, stop, size, console_capture)
             stack.callback(recordings.close)
             if recording is not None:
                 error = recordings.start(
@@ -1104,15 +1108,15 @@ def _run_session(
             stack.callback(output.close)
             app = stack.enter_context(
                 managed_process(
-                    command, log=session / "app.log", env=app_env, output=output
+                    command, log=session_dir / "app.log", env=app_env, output=output
                 )
             )
             listener = stack.enter_context(socket.socket(socket.AF_UNIX))
-            listener.bind(str(runtime / "control.sock"))
+            listener.bind(str(runtime / "command.sock"))
             listener.listen()
             listener.settimeout(0.1)
             inputs = InputWorker(
-                session,
+                session_dir,
                 input_client,
                 stop,
                 x11=x11,
@@ -1129,11 +1133,11 @@ def _run_session(
                 processes = backends | {"app": app}
                 if recordings.process is not None:
                     processes["recorder"] = recordings.process
-                temporary = session / ".session.json"
+                temporary = session_dir / ".session.json"
                 temporary.write_text(
                     json.dumps(
                         {
-                            "control_protocol": 1,
+                            "command_protocol": 1,
                             "console_cell_scale": True,
                             "compact_recording": True,
                             "click_pings_recording": True,
@@ -1165,7 +1169,7 @@ def _run_session(
             def status() -> dict[str, object]:
                 assert recordings is not None
                 return {
-                    "session": str(session),
+                    "session_directory": str(session_dir),
                     "status": "running",
                     "backend": "x11" if x11 else "wayland",
                     "wayland_display": display,
@@ -1185,18 +1189,20 @@ def _run_session(
                 }
 
             write_state()
-            print(f"Session ready: {session}", flush=True)
+            print(f"Session ready: {session_dir}", flush=True)
             while not stop.is_set():
                 console_capture.check()
                 result = app.poll()
                 if result is not None:
-                    temporary = session / ".app-exit.json"
+                    temporary = session_dir / ".app-exit.json"
                     temporary.write_text(
                         json.dumps({"returncode": result, "time": time.time()}) + "\n"
                     )
-                    temporary.replace(session / "app-exit.json")
+                    temporary.replace(session_dir / "app-exit.json")
                     print(
-                        app_exit_message(session, result), file=sys.stderr, flush=True
+                        app_exit_message(session_dir, result),
+                        file=sys.stderr,
+                        flush=True,
                     )
                     return result if result >= 0 else 128 - result
                 monitored = backends.copy()
@@ -1204,7 +1210,9 @@ def _run_session(
                     monitored["recorder"] = recordings.process
                 for name, process in monitored.items():
                     if process.poll() is not None:
-                        raise log_failure(f"{name} exited", session / (name + ".log"))
+                        raise log_failure(
+                            f"{name} exited", session_dir / (name + ".log")
+                        )
                 stop_connection = handle_session_command(
                     listener, recordings, write_state, status, inputs
                 )
@@ -1216,7 +1224,7 @@ def _run_session(
         shutdown_error = str(error)
         raise
     finally:
-        if not (session / ".headless-owner.json").exists():
+        if not (session_dir / ".headless-owner.json").exists():
             state.unlink(missing_ok=True)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
@@ -1226,15 +1234,15 @@ def _run_session(
                     stop_connection,
                     error=shutdown_error,
                     data={
-                        "session": str(session),
+                        "session_directory": str(session_dir),
                         "status": "stopped",
                         "recording": recordings.last_summary if recordings else None,
                     },
                 )
 
 
-def session_environment(session: Path) -> dict[str, str]:
-    state = json.loads((session / "session.json").read_text())
+def session_environment(session_dir: Path) -> dict[str, str]:
+    state = json.loads((session_dir / "session.json").read_text())
     return os.environ | {
         "XDG_RUNTIME_DIR": state["runtime_directory"],
         "WAYLAND_DISPLAY": state["wayland_display"],
@@ -1242,7 +1250,7 @@ def session_environment(session: Path) -> dict[str, str]:
 
 
 def screenshot(
-    session: Path,
+    session_dir: Path,
     destination: Path,
     *,
     region: tuple[int, int, int, int] | None = None,
@@ -1258,7 +1266,9 @@ def screenshot(
         # runner: record-stop renders in the runner's command loop, so asking
         # the runner would wait for it. A runner from an older framewisp
         # publishes no recording key.
-        recording = json.loads((session / "session.json").read_text()).get("recording")
+        recording = json.loads((session_dir / "session.json").read_text()).get(
+            "recording"
+        )
         error = capture_path_error(
             destination, Path(recording) if isinstance(recording, str) else None
         )
@@ -1269,7 +1279,7 @@ def screenshot(
     x = y = 0
     display_width = display_height = 0
     if region is not None or metadata:
-        state = json.loads((session / "session.json").read_text())
+        state = json.loads((session_dir / "session.json").read_text())
         display_width, display_height = state.get("width"), state.get("height")
         if (
             type(display_width) is not int
@@ -1298,9 +1308,9 @@ def screenshot(
     # while input worked, for an unknown reason. That was seen with Sway 1.12,
     # wlroots 0.20.2, wayvnc 0.10.1 and vncdotool 1.2.0.
     result = display_command(
-        session,
+        session_dir,
         ["grim", "-t", "png", *selector, str(destination)],
-        env=session_environment(session),
+        env=session_environment(session_dir),
         timeout=10,
         cancelled=cancelled,
     )
@@ -1331,7 +1341,7 @@ def batch_screenshot(
             prefix=".framewisp-capture-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "capture.png"
-            screenshot(recordings.session, temporary, cancelled=cancelled)
+            screenshot(recordings.session_dir, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Capture cancelled; caller disconnected or session stopped."

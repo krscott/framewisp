@@ -42,7 +42,7 @@ class VNC(Protocol):
 class InputWorker:
     def __init__(
         self,
-        session: Path,
+        session_dir: Path,
         client: VNC,
         stop: Event,
         *,
@@ -51,7 +51,7 @@ class InputWorker:
         capture: Callable[[Path, Callable[[], bool]], int],
         caption_capture: CaptionCapture | None = None,
     ):
-        self.session = session
+        self.session_dir = session_dir
         self.client = client
         self.stop = stop
         self.x11 = x11
@@ -161,7 +161,7 @@ class InputWorker:
             self.wait(connection)
             if self.x11:
                 # Check at dequeue time so mappings allocated by earlier jobs count.
-                characters = mapped_characters(self.session)
+                characters = mapped_characters(self.session_dir)
                 for index, action in enumerate(batch.actions):
                     if action.action == "type":
                         characters.update(
@@ -186,9 +186,9 @@ class InputWorker:
                             result["baseline_snapshot_id"] = results[action.after][
                                 "baseline_snapshot_id"
                             ]
-                        with log_activity(self.session):
+                        with log_activity(self.session_dir):
                             perform_check(
-                                self.session,
+                                self.session_dir,
                                 action,
                                 result,
                                 cancelled=lambda: self.cancelled(connection),
@@ -224,7 +224,7 @@ class InputWorker:
             if batch.capture is not None:
                 capture_started = time.monotonic()
                 try:
-                    with log_activity(self.session):
+                    with log_activity(self.session_dir):
                         self.wait(connection, batch.capture.delay)
                         self.capture(
                             batch.capture.path, lambda: self.cancelled(connection)
@@ -239,7 +239,7 @@ class InputWorker:
             data["verified"] = False
             if batch.failure_capture is not None and not self.cancelled(connection):
                 try:
-                    with log_activity(self.session):
+                    with log_activity(self.session_dir):
                         self.wait(connection, batch.failure_capture.delay)
                         self.capture(
                             batch.failure_capture.path,
@@ -289,7 +289,7 @@ class InputWorker:
         p = action.parameters
         wait()
         with log_input(
-            self.session,
+            self.session_dir,
             action.action,
             p,
             caption_capture=self.caption_capture,
@@ -363,7 +363,7 @@ class InputWorker:
                             key(character, False)
                     else:
                         type_unicode(
-                            self.session,
+                            self.session_dir,
                             text,
                             interval=interval,
                             cancelled=lambda: self.cancelled(connection),
@@ -390,13 +390,13 @@ class InputWorker:
 
 
 def type_unicode(
-    session: Path,
+    session_dir: Path,
     text: str,
     *,
     interval: float,
     cancelled: Callable[[], bool] | None = None,
 ) -> int:
-    state = json.loads((session / "session.json").read_text())
+    state = json.loads((session_dir / "session.json").read_text())
     env = os.environ | {
         "XDG_RUNTIME_DIR": state["runtime_directory"],
         "WAYLAND_DISPLAY": state["wayland_display"],
@@ -407,7 +407,7 @@ def type_unicode(
             "XAUTHORITY": "/dev/null",
         }
         return type_x11_text(
-            session, text, interval=interval, env=env, cancelled=cancelled
+            session_dir, text, interval=interval, env=env, cancelled=cancelled
         )
     # wtype uploads a keymap containing the requested characters; wayvnc's US
     # keymap cannot represent arbitrary Unicode. Use keysyms so text never
@@ -421,7 +421,7 @@ def type_unicode(
     duration = max(0, len(text) - 1) * pause_ms / 1000
     # wtype also spends 2 ms on each key press and release.
     return display_command(
-        session,
+        session_dir,
         arguments,
         env=env,
         timeout=15 + duration + len(text) * 0.004,

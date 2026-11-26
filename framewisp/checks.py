@@ -183,7 +183,7 @@ class Check:
 
 
 def perform_check(
-    session: Path,
+    session_dir: Path,
     check: Check,
     result: dict[str, object],
     *,
@@ -244,7 +244,7 @@ def perform_check(
         if remaining <= 0:
             raise failure("Condition timed out before a complete matching observation.")
         observation = inspect_session(
-            session,
+            session_dir,
             Query(
                 role=check.condition.role,
                 name=check.condition.name,

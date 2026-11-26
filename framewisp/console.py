@@ -23,7 +23,7 @@ from framewisp.layout import Rect, text_columns, text_rows
 
 @dataclass
 class ConsoleCapture:
-    session: Path
+    session_dir: Path
     lock: Lock = field(default_factory=Lock)
     task: Future[None] | None = field(default=None, init=False)
 
@@ -38,12 +38,12 @@ class ConsoleCapture:
             except FutureTimeout:
                 raise RuntimeError(
                     "App output did not close within 1s. Inspect app descendants; "
-                    f"log: {self.session / 'app.log'}"
+                    f"log: {self.session_dir / 'app.log'}"
                 ) from None
 
     def snapshot(self, destination: Path) -> None:
         with self.lock:
-            shutil.copyfile(self.session / "console.jsonl", destination)
+            shutil.copyfile(self.session_dir / "console.jsonl", destination)
 
     def drain(self, reader: int, stopped: Event, raw: BinaryIO, events: TextIO) -> None:
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -75,8 +75,8 @@ def app_output(capture: ConsoleCapture) -> Generator[BinaryIO, None, None]:
     with (
         os.fdopen(reader, "rb") as source,
         os.fdopen(writer, "wb") as sink,
-        (capture.session / "app.log").open("wb") as raw,
-        (capture.session / "console.jsonl").open("w", encoding="utf-8") as events,
+        (capture.session_dir / "app.log").open("wb") as raw,
+        (capture.session_dir / "console.jsonl").open("w", encoding="utf-8") as events,
         ThreadPoolExecutor(max_workers=1) as worker,
     ):
         task = worker.submit(capture.drain, source.fileno(), stopped, raw, events)
@@ -97,7 +97,7 @@ def app_output(capture: ConsoleCapture) -> Generator[BinaryIO, None, None]:
                 if not failed:
                     raise RuntimeError(
                         "App output did not close within 1s. Inspect app descendants; "
-                        f"log: {capture.session / 'app.log'}"
+                        f"log: {capture.session_dir / 'app.log'}"
                     ) from None
 
 

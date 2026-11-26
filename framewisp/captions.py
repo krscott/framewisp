@@ -222,7 +222,7 @@ def _discard_unfinished_tail(output: BinaryIO) -> None:
 
 @contextmanager
 def log_input(
-    session: Path,
+    session_dir: Path,
     action: str,
     parameters: dict[str, object],
     *,
@@ -240,7 +240,7 @@ def log_input(
 
     def append(event: Literal["start", "ping", "end"], **point: int) -> None:
         timestamp = time.monotonic()
-        with (session / "inputs.jsonl").open("a+b") as output:
+        with (session_dir / "inputs.jsonl").open("a+b") as output:
             # Attached CLI clients can append concurrently. Closing flushes the
             # buffered record before releasing this descriptor's file lock.
             fcntl.flock(output, fcntl.LOCK_EX)

@@ -90,27 +90,27 @@ class FailingPress(HoldingClient):
         raise SessionError("button refused")
 
 
-def logged_records(session: Path) -> list[dict[str, object]]:
-    lines = (session / "inputs.jsonl").read_text().splitlines()
+def logged_records(session_dir: Path) -> list[dict[str, object]]:
+    lines = (session_dir / "inputs.jsonl").read_text().splitlines()
     return [json.loads(line) for line in lines]
 
 
-def pings(session: Path) -> list[tuple[object, object]]:
+def pings(session_dir: Path) -> list[tuple[object, object]]:
     return [
         (record["x"], record["y"])
-        for record in logged_records(session)
+        for record in logged_records(session_dir)
         if record["event"] == "ping"
     ]
 
 
 def perform(
-    session: Path,
+    session_dir: Path,
     work: InputAction | Batch,
     client: HoldingClient | None = None,
 ) -> dict[str, object]:
     stop = Event()
     worker = InputWorker(
-        session,
+        session_dir,
         client if client is not None else HoldingClient(Event()),
         stop,
         x11=False,

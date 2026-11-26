@@ -38,12 +38,12 @@ def main() -> None:
     )
     with tempfile.TemporaryDirectory(prefix="framewisp-crop-bench-") as temporary:
         directory = Path(temporary)
-        session = directory / "session"
+        session_dir = directory / "session"
         with (directory / "runner.log").open("w+") as log:
             runner = subprocess.Popen(
                 [
                     *command,
-                    str(session),
+                    str(session_dir),
                     "run",
                     *(["--x11"] if args.x11 else []),
                     "--",
@@ -57,13 +57,13 @@ def main() -> None:
             app_pid: int | None = None
             try:
                 deadline = time.monotonic() + 20
-                while not (session / "session.json").exists():
+                while not (session_dir / "session.json").exists():
                     if runner.poll() is not None or time.monotonic() > deadline:
                         log.seek(0)
                         raise RuntimeError(log.read())
                     time.sleep(0.01)
                 time.sleep(1)
-                app_pid = json.loads((session / "session.json").read_text())[
+                app_pid = json.loads((session_dir / "session.json").read_text())[
                     "processes"
                 ]["app"]
                 assert isinstance(app_pid, int)
@@ -77,7 +77,7 @@ def main() -> None:
                         path = directory / (name + ".png")
                         capture_command = [
                             *command,
-                            str(session),
+                            str(session_dir),
                             "screenshot",
                             str(path),
                             "--json",

@@ -27,12 +27,12 @@ class ActivityEvent(TypedDict):
 
 
 @contextmanager
-def log_activity(session: Path) -> Generator[None, None, None]:
+def log_activity(session_dir: Path) -> Generator[None, None, None]:
     """Record check/capture spans without retaining conditions, text, or errors."""
     identifier = uuid.uuid4().hex
 
     def append(event: str) -> None:
-        with (session / "activity.jsonl").open("a", encoding="utf-8") as output:
+        with (session_dir / "activity.jsonl").open("a", encoding="utf-8") as output:
             output.write(
                 json.dumps({"id": identifier, "event": event, "time": time.monotonic()})
                 + "\n"

@@ -567,12 +567,12 @@ def test_stop_reports_recording_finalization_failure(demo: Demo) -> None:
 
 @pytest.mark.integration
 def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
-    session = tmp_path / "disconnected"
-    session.mkdir()
-    (session / "session.json").write_text(
+    session_dir = tmp_path / "disconnected"
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(
         json.dumps(
             {
-                "control_protocol": 1,
+                "command_protocol": 1,
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
             }
@@ -584,14 +584,14 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
         ("stop",),
     ):
         result = subprocess.run(
-            ["framewisp", str(session), *arguments],
+            ["framewisp", str(session_dir), *arguments],
             capture_output=True,
             text=True,
             check=False,
             timeout=15,
         )
         assert result.returncode == 1
-        assert str(session) in result.stderr
+        assert str(session_dir) in result.stderr
         assert str(tmp_path) in result.stderr
         assert "sandbox" in result.stderr
         assert "Traceback" not in result.stderr
@@ -905,14 +905,14 @@ def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -
 
 @pytest.mark.integration
 def test_recording_into_new_session_directory(tmp_path: Path) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     result = subprocess.run(
         [
             "framewisp",
-            str(session),
+            str(session_dir),
             "run",
             "--record",
-            str(session / "clip.mp4"),
+            str(session_dir / "clip.mp4"),
             "--",
             sys.executable,
             "-c",
@@ -924,7 +924,7 @@ def test_recording_into_new_session_directory(tmp_path: Path) -> None:
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
-    recording_frames(session / "clip.mp4")
+    recording_frames(session_dir / "clip.mp4")
 
 
 @pytest.mark.integration
@@ -948,12 +948,12 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
 
 @pytest.mark.integration
 def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     marker = tmp_path / "app-started"
     result = subprocess.run(
         [
             "framewisp",
-            str(session),
+            str(session_dir),
             "run",
             "--record",
             str(tmp_path / "missing" / "capture.mp4"),
@@ -971,7 +971,7 @@ def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "Cannot record to" in result.stderr
     assert not marker.exists()
-    assert not (session / "session.json").exists()
+    assert not (session_dir / "session.json").exists()
 
 
 def input_events(demo: Demo) -> list[dict[str, str | float | bool]]:
@@ -2216,10 +2216,10 @@ def test_rejected_console_panel_leaves_the_app_running(
         ),
     ):
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(demo.runtime / "control.sock"))
+            connection.connect(str(demo.runtime / "command.sock"))
             request = {
                 "action": "record-start",
-                "session": str(demo.directory.resolve()),
+                "session_directory": str(demo.directory.resolve()),
                 "destination": str(rejected),
                 "key_captions": "non-text",
                 "console": value,
@@ -2241,10 +2241,10 @@ def test_rejected_console_panel_leaves_the_app_running(
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> None:
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime / "control.sock"))
+        connection.connect(str(demo.runtime / "command.sock"))
         request = {
             "action": "record-start",
-            "session": str(demo.directory.resolve()),
+            "session_directory": str(demo.directory.resolve()),
             "destination": str(tmp_path / "rejected.mp4"),
             "key_captions": "non-text",
             "click_pings": "no",
@@ -2256,9 +2256,9 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
             )
 
 
-def control_reply(demo: Demo, message: bytes) -> bytes:
+def request_reply(demo: Demo, message: bytes) -> bytes:
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime / "control.sock"))
+        connection.connect(str(demo.runtime / "command.sock"))
         connection.sendall(message)
         connection.shutdown(socket.SHUT_WR)
         return connection.makefile("rb").readline()
@@ -2277,7 +2277,7 @@ def test_unusable_recording_destination_leaves_the_app_running(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_for_input_probe_window(demo)
-    session = str(demo.directory.resolve())
+    session_dir = str(demo.directory.resolve())
     for destination, message in (
         (f"{tmp_path}/nul\0.mp4", "destination is not a usable path"),
         (f"{tmp_path}/\ud800.mp4", "destination is not a usable path"),
@@ -2286,11 +2286,11 @@ def test_unusable_recording_destination_leaves_the_app_running(
     ):
         request = {
             "action": "record-start",
-            "session": session,
+            "session_directory": session_dir,
             "destination": destination,
             "key_captions": "non-text",
         }
-        line = control_reply(demo, (json.dumps(request) + "\n").encode())
+        line = request_reply(demo, (json.dumps(request) + "\n").encode())
         assert_session_running(demo)
         error = json.loads(line)["error"]
         assert error and message in error
@@ -2310,11 +2310,11 @@ def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> N
     clip = tmp_path / "\udc80.mp4"
     request = {
         "action": "record-start",
-        "session": str(demo.directory.resolve()),
+        "session_directory": str(demo.directory.resolve()),
         "destination": str(clip),
         "key_captions": "non-text",
     }
-    line = control_reply(demo, (json.dumps(request) + "\n").encode())
+    line = request_reply(demo, (json.dumps(request) + "\n").encode())
     assert_session_running(demo)
     assert json.loads(line)["error"] is None
     time.sleep(0.5)
@@ -2326,10 +2326,10 @@ def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> N
 # R-CONTROL-1, R-CONTROL-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_trickling_client_cannot_hold_the_control_loop(demo: Demo) -> None:
+def test_trickling_client_cannot_hold_the_command_loop(demo: Demo) -> None:
     wait_for_input_probe_window(demo)
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime / "control.sock"))
+        connection.connect(str(demo.runtime / "command.sock"))
         started = time.monotonic()
         while not select.select([connection], [], [], 0.3)[0]:
             # Without a total deadline, this client is never answered.
@@ -2346,10 +2346,12 @@ def test_trickling_client_cannot_hold_the_control_loop(demo: Demo) -> None:
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> None:
     wait_for_input_probe_window(demo)
-    session = str(demo.directory.resolve())
+    session_dir = str(demo.directory.resolve())
 
     def encoded(request: dict[str, object]) -> bytes:
-        return (json.dumps({"session": session} | request) + "\n").encode()
+        return (
+            json.dumps({"session_directory": session_dir} | request) + "\n"
+        ).encode()
 
     not_requests = [
         b"",
@@ -2362,7 +2364,9 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         b"[]\n",
     ]
     other_session = [
-        (json.dumps({"session": "/nonexistent", "action": name}) + "\n").encode()
+        (
+            json.dumps({"session_directory": "/nonexistent", "action": name}) + "\n"
+        ).encode()
         for name in ("stop", "status", "record-stop")
     ]
     bad_commands: list[dict[str, object]] = [
@@ -2403,7 +2407,7 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         *other_session,
         *(encoded(command) for command in bad_commands),
     ):
-        line = control_reply(demo, message)
+        line = request_reply(demo, message)
         assert_session_running(demo)
         response = json.loads(line)
         assert isinstance(response["error"], str) and response["error"]
@@ -2794,10 +2798,10 @@ def test_runner_rejects_invalid_caption_mode(
     destination = tmp_path / "clip.mp4"
     for value in (True, "mouse", ["all"]):
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(demo.runtime / "control.sock"))
+            connection.connect(str(demo.runtime / "command.sock"))
             request = {
                 "action": "record-start",
-                "session": str(demo.directory),
+                "session_directory": str(demo.directory),
                 "destination": str(destination),
                 field: value,
             }
@@ -3024,12 +3028,12 @@ def input_request(
 ) -> socket.socket:
     connection = socket.socket(socket.AF_UNIX)
     connection.settimeout(5)
-    connection.connect(str(demo.runtime / "control.sock"))
+    connection.connect(str(demo.runtime / "command.sock"))
     connection.sendall(
         (
             json.dumps(
                 {
-                    "session": str(demo.directory),
+                    "session_directory": str(demo.directory),
                     "action": action,
                     "parameters": parameters,
                 }
@@ -3369,8 +3373,8 @@ def test_qt_menu_survives_between_commands(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Item chosen" in log.read_text())
 
 
-def inspect(session: Demo | Path, *arguments: str) -> dict[str, Any]:
-    directory = session.directory if isinstance(session, Demo) else session
+def inspect(target: Demo | Path, *arguments: str) -> dict[str, Any]:
+    directory = target.directory if isinstance(target, Demo) else target
     result = subprocess.run(
         ["framewisp", str(directory), "inspect", "--json", *arguments],
         capture_output=True,
@@ -3383,7 +3387,7 @@ def inspect(session: Demo | Path, *arguments: str) -> dict[str, Any]:
     return observation
 
 
-def wait_for_control(session: Demo | Path, name: str) -> None:
+def wait_for_control(target: Demo | Path, name: str) -> None:
     # GTK and Qt can finish exporting the tree after the app logs that it is ready.
     # Until then, inspect correctly reports "unsupported".
     observation: dict[str, Any] = {}
@@ -3393,7 +3397,7 @@ def wait_for_control(session: Demo | Path, name: str) -> None:
         # The control can sit deep or after many nodes; the walk stops at the match.
         # These are the maximums in framewisp/inspection_limits.py.
         observation = inspect(
-            session,
+            target,
             *("--name", name, "--limit", "1"),
             *("--max-depth", "64", "--max-nodes", "4096"),
         )
@@ -4839,24 +4843,24 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
 def test_app_exit_is_reported_after_cleanup(
     tmp_path: Path, script: str, exit_code: int, reason: str, returncode: int
 ) -> None:
-    session = tmp_path / "session with spaces"
+    session_dir = tmp_path / "session with spaces"
     started = time.time()
     result = subprocess.run(
-        ["framewisp", str(session), "run", "--", sys.executable, "-c", script],
+        ["framewisp", str(session_dir), "run", "--", sys.executable, "-c", script],
         capture_output=True,
         text=True,
         timeout=20,
     )
     assert result.returncode == exit_code, result.stderr
-    expected = f"App exited: {reason}; see {session / 'app.log'}"
+    expected = f"App exited: {reason}; see {session_dir / 'app.log'}"
     assert expected in result.stderr
-    assert not (session / "session.json").exists()
-    record = json.loads((session / "app-exit.json").read_text())
+    assert not (session_dir / "session.json").exists()
+    record = json.loads((session_dir / "app-exit.json").read_text())
     assert record["returncode"] == returncode
     assert started <= record["time"] <= time.time()
     for arguments in [("status",), ("stop",), ("key", "Return"), ("inspect", "--json")]:
         later = subprocess.run(
-            ["framewisp", str(session), *arguments],
+            ["framewisp", str(session_dir), *arguments],
             capture_output=True,
             text=True,
             timeout=5,
@@ -5338,12 +5342,12 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
 
 
 @pytest.mark.integration
-def test_named_session_launch_control_and_cleanup(tmp_path: Path) -> None:
+def test_named_session_launch_commands_and_cleanup(tmp_path: Path) -> None:
     project = tmp_path / "project"
     nested = project / "nested"
     nested.mkdir(parents=True)
     subprocess.run(["git", "init", str(project)], check=True, capture_output=True)
-    session: Path | None = None
+    session_dir: Path | None = None
     runner_log = tmp_path / "named-runner.log"
     with runner_log.open("w") as output:
         process = subprocess.Popen(
@@ -5359,16 +5363,16 @@ def test_named_session_launch_control_and_cleanup(tmp_path: Path) -> None:
             return "Session ready: " in runner_log.read_text()
 
         wait_until(ready)
-        session = Path(
+        session_dir = Path(
             next(
                 line.removeprefix("Session ready: ")
                 for line in runner_log.read_text().splitlines()
                 if line.startswith("Session ready: ")
             )
         )
-        assert session.is_absolute()
-        assert session.name == "browser"
-        state = json.loads((session / "session.json").read_text())
+        assert session_dir.is_absolute()
+        assert session_dir.name == "browser"
+        state = json.loads((session_dir / "session.json").read_text())
         runtime = Path(state["runtime_directory"])
 
         def named(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -5400,7 +5404,7 @@ def test_named_session_launch_control_and_cleanup(tmp_path: Path) -> None:
         assert "Session owner or descendant cleanup is still live" in duplicate.stderr
         named("stop")
         assert process.wait(timeout=20) == 0
-        assert not (session / "session.json").exists()
+        assert not (session_dir / "session.json").exists()
         assert not runtime.exists()
         for pid in state["processes"].values():
             assert not Path(f"/proc/{pid}").exists()
@@ -5408,6 +5412,6 @@ def test_named_session_launch_control_and_cleanup(tmp_path: Path) -> None:
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=20)
-        if session is not None:
-            shutil.rmtree(session)
-            session.parent.rmdir()
+        if session_dir is not None:
+            shutil.rmtree(session_dir)
+            session_dir.parent.rmdir()

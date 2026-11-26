@@ -13,13 +13,13 @@ from pathlib import Path
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("session", type=Path)
+    parser.add_argument("session_dir", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--samples", type=int, default=40)
     args = parser.parse_args()
     if args.samples < 20:
         parser.error("use at least 20 samples for a p95")
-    command = [sys.executable, "-m", "framewisp", str(args.session)]
+    command = [sys.executable, "-m", "framewisp", str(args.session_dir)]
 
     def run(*arguments: str) -> bytes:
         return subprocess.run(

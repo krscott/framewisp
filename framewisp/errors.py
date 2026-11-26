@@ -27,7 +27,7 @@ class SessionError(RuntimeError):
 
 
 SOCKET_ACCESS_HINT = (
-    "The runner and control commands both need access to the private display sockets. "
+    "The runner and session commands both need access to the private display sockets. "
     "A sandbox can deny that access even if the runner started successfully; "
     "use your execution environment's normal permission process when needed."
 )
@@ -47,7 +47,7 @@ def log_failure(message: str, log: Path, *, display: bool = False) -> SessionErr
     return SessionError(detail)
 
 
-def app_exit_message(session: Path, returncode: int) -> str:
+def app_exit_message(session_dir: Path, returncode: int) -> str:
     exit_code = returncode if returncode >= 0 else 128 - returncode
     reason = f"exit {exit_code}"
     if returncode < 0:
@@ -56,12 +56,12 @@ def app_exit_message(session: Path, returncode: int) -> str:
         except ValueError:
             name = f"signal {-returncode}"
         reason = f"{name} ({reason})"
-    return f"App exited: {reason}; see {session / 'app.log'}"
+    return f"App exited: {reason}; see {session_dir / 'app.log'}"
 
 
-def recorded_app_exit(session: Path) -> str | None:
+def recorded_app_exit(session_dir: Path) -> str | None:
     try:
-        record = json.loads((session / "app-exit.json").read_text())
+        record = json.loads((session_dir / "app-exit.json").read_text())
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as error:
@@ -72,12 +72,12 @@ def recorded_app_exit(session: Path) -> str | None:
         else None
     )
     if type(returncode) is not int:
-        return f"Invalid app exit record: {session / 'app-exit.json'}"
-    return app_exit_message(session, returncode)
+        return f"Invalid app exit record: {session_dir / 'app-exit.json'}"
+    return app_exit_message(session_dir, returncode)
 
 
 def display_command(
-    session: Path,
+    session_dir: Path,
     command: list[str],
     *,
     timeout: float,
@@ -87,9 +87,9 @@ def display_command(
     cancelled: Callable[[], bool] | None = None,
     input_content: bool = False,
 ) -> int:
-    state = json.loads((session / "session.json").read_text())
+    state = json.loads((session_dir / "session.json").read_text())
     context = (
-        f"{command[0]} failed for session {session}, display {display or state['wayland_display']}, "
+        f"{command[0]} failed for session {session_dir}, display {display or state['wayland_display']}, "
         f"runtime directory {state['runtime_directory']}"
     )
     try:

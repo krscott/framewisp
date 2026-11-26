@@ -12,7 +12,7 @@ inspection is not always faster than a screenshot.
 
 Prefer `framewisp` on PATH. Otherwise replace `framewisp` in the examples with
 `nix run github:krscott/framewisp --`. No checkout or development shell is needed.
-The package includes `framewisp-demo`; other target apps must be installed separately.
+The package includes `framewisp-demo`; other apps must be installed separately.
 
 Requires running outside of agent sandbox.
 
@@ -26,10 +26,10 @@ state through `inspect --json`; others need a model that can interpret images.
 Keep short tasks with the main agent when delegation would add overhead.
 
 Give the subagent this guide, the objective and expected result, the absolute
-session path printed at startup, and an artifact directory. Define when it should
+session directory path printed at startup, and an artifact directory. Define when it should
 stop and report a blocker, including a time or attempt limit. Delegate a sequence
 of interactions rather than spawning a subagent per command. Only one agent
-should control a session at a time; keep its foreground runner alive through the
+should send commands to a session at a time; keep its foreground runner alive through the
 handoff and agree who will stop it.
 
 The subagent should batch known actions, verify accessible outcomes with bounded
@@ -89,7 +89,7 @@ decisions, expected outcomes, and recovery or stop conditions. Prefer meaning an
 visible landmarks over recorded coordinates. Distinguish observed actions from
 inferences; ask about hidden shortcuts, missing steps, or ambiguous intent. A
 single demonstration establishes one example, not every branch of the task.
-With the user's authorization for the target app and data, test a fresh example
+With the user's authorization for the app and data, test a fresh example
 using the normal framewisp commands and verify its result. Save the reusable
 procedure where the user requests only after identifying remaining uncertainty;
 do not label the task learned merely because capture completed.
@@ -108,7 +108,7 @@ Git is required for names and included in the Nix package.
 Explicit paths such as `/tmp/framewisp-demo`, `./browser`, and `sessions/browser`
 retain their behavior. Bare names never fall back to a legacy directory. Empty
 names and `.`/`..` are invalid; names must fit in 255 bytes. Agents in the same
-project must choose distinct names. Keep launch and control commands in the same
+project must choose distinct names. Keep launch and session commands in the same
 project (the same working directory outside Git). `Session ready:` and `Attached:`
 print the resolved directory; use that explicit path from another project or an
 environment with a different `TMPDIR`. Bare names under different temporary
@@ -510,7 +510,7 @@ kept clip. After a killed runner, `recover` prints the interrupted clip's path a
 `interrupted_recording`. Text captions are off by default. For a clip that needs
 them, use `--pointer-captions modifiers` for shortcuts such as Ctrl+Click or
 `--pointer-captions all` for every pointer action. Use `--key-captions non-text`
-for Ctrl/Alt shortcuts and named controls such as Return and arrows. Use
+for Ctrl/Alt shortcuts and named keys such as Return and arrows. Use
 `--key-captions all` when the clip should show literal keystrokes and typed text.
 The two flags can be combined.
 
@@ -601,7 +601,7 @@ yourself or allocate a terminal to bypass its user confirmation. The user must
 configure stop shortcuts, type `ATTACH`, approve the desktop dialog, and keep
 the terminal open. Wait for `Attached:` before sending commands.
 
-Other processes with access to the attachment's state and control socket can
+Other processes with access to the attachment's state and command socket can
 issue commands. Portal approval grants desktop access to the attachment; it
 does not authenticate a particular agent.
 
@@ -627,10 +627,10 @@ Screenshots cover the selected monitor. Recording attached sessions is unsupport
 Inspect the session's `dbus.log`, `accessibility.log`, `app.log`, `sway.log`, and
 `wayvnc.log` for headless launch failures, or `recorder.log` and `captions.log`
 for recording failures.
-The runner and every screenshot/input/control invocation need access to the
+The runner and every session command need access to the
 private display sockets. Launching outside a sandbox does not grant later
 sandboxed commands access. If the environment denies socket access, use its
-normal permission process for both launch and control commands. Connection
+normal permission process for both launch and session commands. Connection
 errors can also mean the session exited; check the error and logs first.
 If something goes wrong, ask the user for permission before filing an issue at
 https://github.com/krscott/framewisp/issues. Agree on the report and any logs or

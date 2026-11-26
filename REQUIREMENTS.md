@@ -38,9 +38,9 @@ investigate or ask; never invent a rationale.
   does not own or that group or others can write. It creates no file in that
   directory.
 
-## Target app environment (ENV)
+## App environment (ENV)
 
-- **R-ENV-1** [test] The target app receives the caller's environment with the
+- **R-ENV-1** [test] The app receives the caller's environment with the
   private session settings applied and, by default, the sanitized settings
   (R-ENV-4, R-ENV-6). Variables from framewisp's Nix wrapper do not reach the
   app.
@@ -53,7 +53,7 @@ investigate or ask; never invent a rationale.
 - **R-ENV-2** [test] The caller's Python settings, such as `PYTHONPATH`,
   `PYTHONHOME`, and `sitecustomize`, do not change how the installed Nix package
   starts.
-- **R-ENV-3** [test] The target app receives the caller's `PYTHONPATH`
+- **R-ENV-3** [test] The app receives the caller's `PYTHONPATH`
   unchanged.
 - **R-ENV-4** [test] By default, two `run` sessions of the same framewisp and
   native app builds, at the same display size and backend and with the same app
@@ -283,8 +283,8 @@ investigate or ask; never invent a rationale.
   they must not delete a live session. A same-user program can already remove
   these files directly, so framewisp cannot stop it.
 
-- **R-LIFE-6** [test] Session metadata copied to another directory cannot
-  control the original session.
+- **R-LIFE-6** [test] A session command that reads session metadata copied to
+  another directory cannot reach the original session.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
   and its error gives manual cleanup steps.
 
@@ -292,8 +292,9 @@ investigate or ask; never invent a rationale.
 
 - **R-ATTACH-1** [test] `attach` starts only from a foreground interactive
   terminal after the user types `ATTACH` exactly.
-- **R-ATTACH-2** [test] `attach` refuses a desktop runtime directory that is
-  not private or not owned by the user.
+- **R-ATTACH-2** [test] `attach` refuses to start when the user's
+  `XDG_RUNTIME_DIR`, or framewisp's directory in it, is not private or not
+  owned by the user.
 - **R-ATTACH-3** [test] While an attachment is active, framewisp offers a
   compatible tray host an item that says desktop sharing is active.
 
@@ -349,8 +350,9 @@ investigate or ask; never invent a rationale.
 
   Rationale: Partial evidence can still help, but must not look complete.
 
-## Control requests (CONTROL)
+## Session requests (CONTROL)
 
-- **R-CONTROL-1** [test] A malformed control request gets an error reply.
-- **R-CONTROL-2** [test] A malformed control request leaves the session and its
-  app running.
+- **R-CONTROL-1** [test] A malformed request on the command socket gets an
+  error reply.
+- **R-CONTROL-2** [test] A malformed request on the command socket leaves the
+  session and its app running.

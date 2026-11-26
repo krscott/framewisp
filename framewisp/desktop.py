@@ -1,4 +1,4 @@
-"""Per-user ownership and emergency stop for the real desktop (Linux)."""
+"""Per-user ownership and emergency stop for the user's desktop (Linux)."""
 
 import fcntl
 import json
@@ -64,12 +64,12 @@ def reserve_desktop() -> Generator[Path]:
                 "A desktop attachment already exists. Run framewisp --detach to stop it."
             ) from None
         # Never unlink the lock file: all contenders must lock the same inode.
-        for name in ("control.sock", "detach.sock", "desktop.json"):
+        for name in ("command.sock", "detach.sock", "desktop.json"):
             (directory / name).unlink(missing_ok=True)
         try:
             yield directory
         finally:
-            for name in ("control.sock", "detach.sock", "desktop.json"):
+            for name in ("command.sock", "detach.sock", "desktop.json"):
                 (directory / name).unlink(missing_ok=True)
     finally:
         os.close(descriptor)

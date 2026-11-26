@@ -27,8 +27,8 @@ def main() -> None:
     logs: dict[str, str] = {}
     with tempfile.TemporaryDirectory(prefix="fw-traversal-bench-") as directory:
         root = Path(directory)
-        session = root / "session"
-        command = [sys.executable, "-m", "framewisp", str(session)]
+        session_dir = root / "session"
+        command = [sys.executable, "-m", "framewisp", str(session_dir)]
         tests = Path(__file__).resolve().parents[1] / "tests"
         app = (
             [
@@ -62,8 +62,8 @@ def main() -> None:
             )
             deadline = time.monotonic() + 15
             while (
-                not (session / "app.log").exists()
-                or ready not in (session / "app.log").read_text()
+                not (session_dir / "app.log").exists()
+                or ready not in (session_dir / "app.log").read_text()
             ):
                 if runner.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError((root / "runner.log").read_text())
