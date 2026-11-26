@@ -48,8 +48,7 @@ def teaching_refusal(command: str) -> str:
     return (
         f"{command} is refused: this is a teaching session, which only watches. "
         "It accepts only screenshot and teach-note. "
-        "The user ends this session with Ctrl+C in its terminal; framewisp "
-        "--detach stops whichever session is sharing the desktop."
+        "The user ends this session with Ctrl+C in its terminal."
     )
 
 
@@ -76,7 +75,12 @@ def request_desktop(
     command: str,
     parameters: dict[str, object],
 ) -> int:
-    """Send a command to the desktop session whose metadata publishes `kind`."""
+    """Send a command to the desktop session in `session_dir`.
+
+    The caller passes the `kind` it read from the session metadata; it only
+    words the messages printed here. The runner refuses a command that its own
+    kind does not accept or whose attachment token does not match.
+    """
     try:
         state = json.loads((session_dir / "session.json").read_text())
         endpoint = Path(state["command_socket"])

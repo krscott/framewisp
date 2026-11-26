@@ -528,12 +528,8 @@ def main() -> None:
             if published_kind in DESKTOP_KINDS:
                 remedy = (
                     "Ask the user to end it with Ctrl+C in its terminal if it is "
-                    "still running, then to start it again with this version"
-                    + (
-                        " and a new lesson directory."
-                        if published_kind == "teaching"
-                        else "."
-                    )
+                    "still running, then to start it again with this version "
+                    "(for teach, with a new lesson directory)."
                 )
             else:
                 remedy = (

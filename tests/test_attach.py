@@ -438,8 +438,7 @@ def test_attached_cli_input_retention(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     for arguments in [
         ("type", "--interval", "0", "café 日本語 😀"),
@@ -522,7 +521,8 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
             timeout=5,
         )
         assert refused.returncode == 1
-        assert "framewisp --detach" in refused.stderr
+        assert "Ctrl+C in its terminal" in refused.stderr
+        assert "--detach" not in refused.stderr
     assert request_desktop(session_dir, "teaching", "click", {"x": 20, "y": 20}) == 1
     assert (
         request_desktop(
@@ -702,8 +702,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
     assert not (tmp_path / "events").exists()
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     command = subprocess.Popen(
         [
             sys.executable,
@@ -823,8 +822,7 @@ def test_x11_stop_releases_held_input(
     assert releases(x11_desktop) == [STARTUP_RELEASE]
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     assert detach_desktop() == 0
     # The owner must not wait out the release past detach's SIGKILL deadline.
     assert attach_process.wait(timeout=5) == 0
@@ -848,8 +846,7 @@ def test_x11_release_survives_killing_the_owner_job(
         wait_file(tmp_path / "waiting")
         (tmp_path / "approve").touch()
         assert owner.stdout is not None
-        while "Attached:" not in owner.stdout.readline():
-            assert owner.poll() is None
+        read_terminal(owner.stdout.fileno(), b"Attached:")
         os.killpg(owner.pid, signal.SIGKILL)
         assert owner.wait(timeout=5) == -signal.SIGKILL
         assert wait_releases(x11_desktop, 2)[1] == FINAL_RELEASE
@@ -933,8 +930,7 @@ def test_x11_attachment_stops_when_release_guard_dies(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     (guard,) = children(attach_process.pid, "bash")
     os.kill(guard, signal.SIGKILL)
     assert attach_process.wait(timeout=5) == 1
@@ -1065,8 +1061,7 @@ def test_malformed_requests_leave_the_attachment_running(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     token = json.loads((session_dir / "session.json").read_text())["attachment"]
     os.mkfifo(tmp_path / "fifo")
@@ -1126,8 +1121,7 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     state = json.loads((session_dir / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
@@ -1248,8 +1242,7 @@ def test_portal_failure_closes_owner(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     (tmp_path / "fail").touch()
     assert request_desktop(tmp_path / "session", "attached", "key", {"chord": "a"}) == 1
     assert attach_process.wait(timeout=5) == 1
