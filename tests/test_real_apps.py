@@ -52,7 +52,7 @@ class RealApp:
         assert result.returncode == returncode, result.stdout + result.stderr
         return result.stdout
 
-    def capture(self, name: str) -> bool:
+    def screenshot(self, name: str) -> bool:
         path = self.directory / f"{name}.png"
         self.cli("screenshot", "--delay", "0.5", str(path))
         with Image.open(path) as image:
@@ -206,7 +206,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
             return True
 
         wait_until(visible)
-        wait_until(lambda: app.capture("startup"))
+        wait_until(lambda: app.screenshot("startup"))
         time.sleep(1)
         yield app
     finally:
@@ -253,7 +253,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
     indirect=True,
 )
 def test_writer_flatpak(real_app: RealApp) -> None:
-    assert real_app.capture("startup")
+    assert real_app.screenshot("startup")
     # LibreOffice 26.8's first-run welcome has three pages, despite the CLI flag.
     for _ in range(3):
         real_app.cli("click", "944", "521")
@@ -261,7 +261,7 @@ def test_writer_flatpak(real_app: RealApp) -> None:
     real_app.cli("click", "500", "250")
     time.sleep(0.3)
     real_app.cli("type", "--interval", "0", "Framewisp compatibility café")
-    assert real_app.capture("typed")
+    assert real_app.screenshot("typed")
     default = json.loads(
         real_app.cli("inspect", "--json", "--role", "paragraph", returncode=1)
     )
@@ -291,7 +291,7 @@ def test_writer_flatpak(real_app: RealApp) -> None:
         success=True,
     )
     assert result["verified"] is True
-    assert real_app.capture("verified")
+    assert real_app.screenshot("verified")
 
 
 @pytest.mark.parametrize(
@@ -301,17 +301,17 @@ def test_writer_flatpak(real_app: RealApp) -> None:
     indirect=True,
 )
 def test_blender_canvas(real_app: RealApp) -> None:
-    assert real_app.capture("startup")
+    assert real_app.screenshot("startup")
     real_app.cli("click", "300", "300")  # Dismiss the splash.
     time.sleep(0.3)
     for key in ["g", "x", "2", "Return"]:
         real_app.cli("key", key)
         time.sleep(0.2)
-    real_app.cli("scroll", "500", "300", "up", "--steps", "2")
-    assert real_app.capture("translated")
+    real_app.cli("scroll", "500", "300", "up", "--ticks", "2")
+    assert real_app.screenshot("translated")
     # Function keys are unsupported; choose Python Console through the editor menu.
     real_app.cli("click", "18", "38")
-    assert real_app.capture("editor-menu")
+    assert real_app.screenshot("editor-menu")
     real_app.cli("move", "490", "112")
     time.sleep(0.3)
     real_app.cli("click", "490", "112")
@@ -325,10 +325,10 @@ def test_blender_canvas(real_app: RealApp) -> None:
     )
     time.sleep(0.3)
     real_app.cli("key", "Return")
-    assert real_app.capture("console")
+    assert real_app.screenshot("console")
     wait_until(output.exists)
     assert output.read_text() == "(2.0, 0.0, 0.0)"
-    assert real_app.capture("console")
+    assert real_app.screenshot("console")
     result = real_app.batch(
         "unsupported-check",
         [

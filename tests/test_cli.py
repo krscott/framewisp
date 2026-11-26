@@ -640,8 +640,8 @@ def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
 
 
 # R-INPUT-3
-@pytest.mark.parametrize("steps", ["0", "-1", "1.5", "nope"])
-def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("ticks", ["0", "-1", "1.5", "nope"])
+def test_invalid_scroll_ticks(ticks: str, tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -652,7 +652,7 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
             "100",
             "100",
             "down",
-            f"--steps={steps}",
+            f"--ticks={ticks}",
         ],
         capture_output=True,
         text=True,
@@ -660,7 +660,7 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
         timeout=5,
     )
     assert result.returncode == 2
-    assert "--steps" in result.stderr
+    assert "--ticks" in result.stderr
     assert "session.json" not in result.stderr
 
 

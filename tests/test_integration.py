@@ -1610,7 +1610,7 @@ def test_scroll_targets_pane_and_returns_to_start(
     demo: Demo, direction: str, reverse: str, axis: str
 ) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "scroll", "900", "300", direction, "--steps", "3")
+    cli(demo.directory, "scroll", "900", "300", direction, "--ticks", "3")
 
     def position(pane: str) -> float:
         events = [
@@ -1627,7 +1627,7 @@ def test_scroll_targets_pane_and_returns_to_start(
     events = [event for event in input_events(demo) if event["event"] == "scroll"]
     assert all(event["pane"] == "right" for event in events)
     assert sum(float(event[f"d{axis}"]) for event in events) == 3
-    cli(demo.directory, "scroll", "900", "300", reverse, "--steps", "3")
+    cli(demo.directory, "scroll", "900", "300", reverse, "--ticks", "3")
     wait_until(lambda: position("right") == 0)
     # Move to the other pane and use the default one-step count.
     cli(demo.directory, "scroll", "300", "300", direction)
@@ -2858,14 +2858,14 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
         return int(x), int(y)
 
     for direction in ["down", "right"]:
-        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "3")
+        cli(demo.directory, "scroll", "700", "250", direction, "--ticks", "3")
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
     for direction in ["up", "left"]:
-        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "8")
+        cli(demo.directory, "scroll", "700", "250", direction, "--ticks", "8")
     wait_until(lambda: position() == (0, 0))
     # GTK can report zero during overshoot; move far enough back into the content.
     for direction in ["down", "right"]:
-        cli(demo.directory, "scroll", "700", "250", direction, "--steps", "3")
+        cli(demo.directory, "scroll", "700", "250", direction, "--ticks", "3")
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
     cli(demo.directory, "click", "120", "100")
     # Submitting a long result must not push the neighboring Reset offscreen.

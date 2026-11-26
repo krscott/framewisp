@@ -144,7 +144,7 @@ def action(name: str, **parameters: object) -> InputAction:
             [(1, 2), (30, 40)],
         ),
         (action("move", x=10, y=20), []),
-        (action("scroll", x=10, y=20, direction="down", steps=2), []),
+        (action("scroll", x=10, y=20, direction="down", ticks=2), []),
     ],
 )
 def test_pings_mark_pointer_presses(

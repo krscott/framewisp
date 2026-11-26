@@ -27,7 +27,7 @@ from framewisp.connection import COMMAND_PROTOCOL
         {"steps": [{"action": "type", "text": "a" * 16385, "interval": 0}]},
         {
             "steps": [
-                {"action": "scroll", "x": 1, "y": 1, "direction": "up", "steps": 10001}
+                {"action": "scroll", "x": 1, "y": 1, "direction": "up", "ticks": 10001}
             ]
         },
         {"steps": [{"action": "key", "chord": "Ctrl+Ctrl+a"}]},

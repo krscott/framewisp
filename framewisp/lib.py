@@ -787,9 +787,11 @@ class RecordStart:
         )
 
 
-SessionCommand = Literal["stop", "status", "record-stop"]
-SESSION_COMMANDS: tuple[SessionCommand, ...] = get_args(SessionCommand)
-SessionRequest = SessionCommand | RecordStart | InputAction | Batch
+ParameterlessCommand = Literal["stop", "status", "record-stop"]
+PARAMETERLESS_COMMANDS: tuple[ParameterlessCommand, ...] = get_args(
+    ParameterlessCommand
+)
+SessionRequest = ParameterlessCommand | RecordStart | InputAction | Batch
 
 
 def parse_batch(raw: object, recordings: Recordings) -> Batch:
@@ -822,7 +824,7 @@ def parse_request(line: bytes, recordings: Recordings) -> SessionRequest:
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
-    if command in SESSION_COMMANDS:
+    if command in PARAMETERLESS_COMMANDS:
         return command
     if command == "record-start":
         return RecordStart.parse(fields)

@@ -134,9 +134,9 @@ those conditions at their observation times, not every possible app effect.
 A baseline alone is not verification. Successful input-only or baseline-only
 batches have `verified: null`; failed batches have `verified: false`.
 
-Each check retains its `condition`, `observation` (last full inspection response),
+Each check retains its `condition`, `observation` (the last observation),
 `limits` (configured budgets), `observations` count, `verified`, and
-`duration_seconds`. The inspection response's `hints` describe standalone
+`duration_seconds`. The observation's `hints` describe standalone
 `inspect` flags; check failure messages describe the JSON `limits`. Baselines and transition
 waits also include `baseline_observation_id`. Failure stops subsequent steps and
 preserves earlier results. It reports `failed_phase: "check"` and `failed_index`.
@@ -157,7 +157,7 @@ pauses are interruptible too. Checks create no input logs or captions.
 
 `benchmark_check_traversal.py` compares default and explicit traversal budgets
 against one running large GTK or Qt app. It records baseline, wait, assert,
-and standalone inspection responses, complete CLI timings, and runner/app logs.
+and standalone inspection observations, complete CLI timings, and runner/app logs.
 Write its output outside the repository:
 
 ```sh
