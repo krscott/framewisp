@@ -285,8 +285,8 @@ investigate or ask; never invent a rationale.
 
 - **R-LIFE-6** [test] The runner of a headless session rejects a request on
   its command socket that names a session directory other than its own. A
-  session command run from a copy of its session metadata in another directory
-  sends such a request.
+  session command that uses the command socket sends such a request when it is
+  run from a copy of that session's metadata in another directory.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
   and its error gives manual cleanup steps.
 
