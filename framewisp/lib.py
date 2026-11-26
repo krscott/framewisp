@@ -49,6 +49,7 @@ from framewisp.finalization import (
     POINTER_CAPTIONS,
     CaptionOptions,
     capture_origin,
+    raw_clip_failure,
     render_clip,
 )
 from framewisp.input_log import CaptionCapture
@@ -412,20 +413,18 @@ def start_recording(
             restored = restore_hidden_frames(clip, log=log, env=env)
         except Exception as error:
             restored = False
-            failure = RuntimeError(
-                f"Finalization failed; raw clip remains at {clip} without "
-                f"overlays, console panel or compaction. Cause: {error}"
-            )
+            failure = raw_clip_failure(clip, error, extras=timed)
         # A clip with no duration has nothing to render on (R-REC-22).
         if restored and timed:
-            # render_clip reports every failure as a RuntimeError naming the raw clip.
+            input_log = log.parent / "inputs.jsonl"
+            finalization_log = log.parent / "finalization.log"
             try:
                 render_clip(
                     clip,
-                    input_log=log.parent / "inputs.jsonl",
+                    input_log=input_log,
                     origin=origin,
                     stopped=stopped,
-                    log=log.parent / "finalization.log",
+                    log=finalization_log,
                     captions=captions,
                     literal_captions=literal_captions,
                     click_pings=click_pings,
@@ -434,8 +433,10 @@ def start_recording(
                     layout=layout,
                     env=env,
                 )
-            except RuntimeError as error:
-                failure = error
+            except Exception as error:
+                failure = raw_clip_failure(
+                    clip, error, extras=True, logs=(finalization_log, input_log)
+                )
         publish_clip(clip, destination, failure)
     finally:
         if not capturing:
@@ -638,7 +639,7 @@ class Recording:
     caption_capture: CaptionCapture = field(default_factory=CaptionCapture)
     process: OwnedProcess | None = None
     resources: ExitStack = field(default_factory=ExitStack)
-    destination: Path | None = None
+    clip_destination: Path | None = None
     last_summary: dict[str, object] | None = None
 
     def start(
@@ -680,7 +681,7 @@ class Recording:
         if self.process is None:
             self.resources.close()
             return "Session stopped while starting recording."
-        self.destination = destination
+        self.clip_destination = destination
         return None
 
     def finish(self) -> str | None:
@@ -692,13 +693,13 @@ class Recording:
     def close(self) -> None:
         try:
             self.resources.close()
-            if self.destination is not None:
-                self.last_summary = clip_summary(self.destination, env=self.env)
+            if self.clip_destination is not None:
+                self.last_summary = clip_summary(self.clip_destination, env=self.env)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
             raise SessionError(self.with_kept_clip(str(error))) from None
         finally:
             self.process = None
-            self.destination = None
+            self.clip_destination = None
 
     def with_kept_clip(self, error: str) -> str:
         clip = kept_clip(self.session_dir)
@@ -826,7 +827,7 @@ def parse_batch(raw: object, recording: Recording) -> Batch:
         path_error = new_file_error(recording.session_dir, resolved, "screenshot path")
         if path_error is not None:
             raise ValueError(path_error)
-        error = screenshot_path_error(resolved, recording.destination)
+        error = screenshot_path_error(resolved, recording.clip_destination)
         if error is not None:
             raise ValueError(error)
     return batch
@@ -1129,8 +1130,8 @@ def _run_session(
                             "height": size[1],
                             "x11_display": x11_display,
                             "clip_destination": (
-                                str(recording.destination)
-                                if recording.destination is not None
+                                str(recording.clip_destination)
+                                if recording.clip_destination is not None
                                 else None
                             ),
                             "processes": {
@@ -1156,7 +1157,7 @@ def _run_session(
                     "app": {"pid": app.pid, "running": app.poll() is None},
                     "recording": (
                         {
-                            "clip_destination": str(recording.destination),
+                            "clip_destination": str(recording.clip_destination),
                             "pid": recording.process.pid,
                             "running": recording.process.poll() is None,
                         }
@@ -1314,7 +1315,7 @@ def batch_screenshot(
                     "Screenshot cancelled; caller disconnected or session stopped."
                 )
             # A recording may have started since this batch was validated.
-            error = screenshot_path_error(destination, recording.destination)
+            error = screenshot_path_error(destination, recording.clip_destination)
             if error is not None:
                 raise SessionError(error)
             destination.hardlink_to(temporary)

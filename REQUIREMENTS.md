@@ -213,8 +213,9 @@ investigate or ask; never invent a rationale.
 - **R-REC-9** [test] With `--console`, click pings and hold discs keep their GUI
   positions. They never draw on the console panel.
 - **R-REC-10** [test] When the recorder stops cleanly but finalization fails
-  before publishing the clip, the raw clip remains playable at the clip
-  destination, or under R-REC-18 at another path. The error names where.
+  before publishing the clip, the raw clip remains at the clip destination, or
+  under R-REC-18 at another path. It is playable when the recorder wrote a
+  playable file. The error names where.
 - **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the clip. The default is right.
@@ -230,9 +231,9 @@ investigate or ask; never invent a rationale.
 - **R-REC-17** [test] A rejected console panel leaves the app running.
 - **R-REC-18** [test] When framewisp cannot publish a clip at its clip
   destination, such as when a file takes it first or its directory is no longer
-  writable, framewisp leaves any file there intact. The rendered clip remains at
-  another path, or the raw clip does if rendering failed (R-REC-10), and the
-  error names that path.
+  writable, framewisp leaves any file there intact. The clip remains at another
+  path with whatever finalization completed, raw if finalization failed
+  (R-REC-10), and the error names that path.
 - **R-REC-19** [test] Framewisp rejects a clip destination on a filesystem
   without hard links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports
