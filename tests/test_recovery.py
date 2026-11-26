@@ -713,6 +713,27 @@ def test_stale_desktop_session_gets_desktop_session_steps(
     assert recover_session(tmp_path) == 0
 
 
+# R-LIFE-7
+@pytest.mark.parametrize("kind", ["attached", "teaching"])
+def test_run_gives_desktop_session_steps_for_stale_desktop_metadata(
+    tmp_path: Path, kind: str
+) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "run", "--", "true"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "records an attached or teaching session" in result.stderr
+    assert " recover`" not in result.stderr
+    assert (tmp_path / "session.json").exists()
+    run_commands(result.stderr, "rm ")
+    assert not (tmp_path / "session.json").exists()
+
+
 @pytest.mark.parametrize("kind", [[], {}])
 def test_recover_refuses_metadata_with_an_unhashable_kind(
     tmp_path: Path, kind: object

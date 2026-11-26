@@ -1201,9 +1201,9 @@ has died, first run `framewisp SESSION recover` with the framewisp version that
 started the session. End an attached or teaching session with Ctrl+C in its
 terminal and start it again; a teaching session needs a new lesson directory.
 
-The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
+A headless session's directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
-`recorder.log` when recording. During a
+`recorder.log` when recording. During a headless
 session, `session.json` records the private runtime directory, command socket,
 Wayland socket name, and managed process IDs. Normal shutdown removes the runtime directory and
 `session.json`, and keeps the logs. Reusing the directory replaces its logs.

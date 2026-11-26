@@ -35,7 +35,7 @@ def foreign_python(tmp_path: Path) -> Path:
 
 # R-ENV-2
 @pytest.mark.parametrize("x11", [False, True])
-def test_packaged_demo_ignores_caller_python_settings(
+def test_packaged_demo_app_ignores_caller_python_settings(
     tmp_path: Path, foreign_python: Path, x11: bool
 ) -> None:
     session_dir = tmp_path / "session"
@@ -43,7 +43,7 @@ def test_packaged_demo_ignores_caller_python_settings(
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
     env = os.environ | {
-        "PATH": str(tmp_path / "no demo on caller PATH"),
+        "PATH": str(tmp_path / "no demo app on caller PATH"),
         "PYTHONPATH": str(foreign_python),
         "PYTHONHOME": str(tmp_path / "missing Python home"),
     }

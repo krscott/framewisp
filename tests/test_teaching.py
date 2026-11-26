@@ -397,7 +397,7 @@ def desktop_demo_app(tmp_path: Path) -> Iterator[tuple[str, Path]]:
             '<policy context="default"><allow send_destination="*"/>'
             '<allow receive_sender="*"/><allow own="*"/></policy></busconfig>'
         )
-        log = tmp_path / "demo.log"
+        log = tmp_path / "demo-app.log"
         with log.open("wb") as output:
             app = subprocess.Popen(
                 [

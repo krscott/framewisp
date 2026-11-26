@@ -65,8 +65,10 @@ from framewisp.recovery import (
     LOCK,
     headless_runtime_dir,
     kept_clip,
+    records_desktop_session,
     refuse_unrecovered_session,
     session_lock,
+    stale_desktop_session,
 )
 
 SWAY_CONFIG = """\
@@ -987,6 +989,8 @@ def _run_session(
 ) -> int:
     metadata_path = session_dir / "session.json"
     if metadata_path.exists():
+        if records_desktop_session(session_dir):
+            raise SessionError(stale_desktop_session(session_dir))
         raise SessionError(
             f"{metadata_path} is left over from a session that has exited. Run "
             f"`{shlex.join(['framewisp', str(session_dir), 'recover'])}` with the "
