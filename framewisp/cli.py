@@ -618,8 +618,7 @@ def dispatch(
         if desktop is not None and args.command in {"status", "stop"}:
             raise SessionError(
                 "status and stop manage headless sessions. The user ends this session with Ctrl+C "
-                "in its terminal; framewisp --stop-sharing is the emergency stop for whichever "
-                "session is sharing."
+                "in its terminal."
             )
         result = (
             request_desktop(session_dir, desktop, args.command, {})

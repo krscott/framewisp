@@ -438,10 +438,11 @@ indicator: its menu requires a responsive runner. The indicator disappears when 
 session ends, and framewisp registers a new one for the next attached or teaching session.
 See [sharing indicator verification](docs/sharing-indicator.md) for setup and verification status.
 
-Ctrl+Alt+Escape runs `framewisp --stop-sharing`. Ctrl+C, loss of the controlling terminal,
+Stop a session with Ctrl+C in its terminal. Loss of the controlling terminal,
 pressing Ctrl+Z, or portal revocation also ends the desktop share. Detaching from tmux
-or screen can leave that terminal and the attach process running. Use `--stop-sharing`
-before disconnecting from a terminal multiplexer. If the attach
+or screen can leave that terminal and the attach process running, so press Ctrl+C in
+the session's terminal before disconnecting from a terminal multiplexer. Ctrl+Alt+Escape
+runs `framewisp --stop-sharing`, the emergency stop for whichever session is sharing. If the attach
 process crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive attach process
 after three seconds. This allows lessons to finalize. It uses Linux

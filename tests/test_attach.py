@@ -234,7 +234,8 @@ class Portal:
                 raise InterruptedError('Stopped while waiting for desktop permission.')
     def input(self, method, signature, *values):
         if (root / 'fail').exists():
-            raise RuntimeError('injected portal failure')
+            # Include the values, as a real backend error might.
+            raise RuntimeError(f'injected portal failure: {values!r}')
         with (root / 'events').open('a') as out:
             out.write(repr((method, values)) + '\\n')
     def capture_fd(self):
@@ -511,6 +512,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         )
         assert refused.returncode == 1
         assert "this is a teaching session" in refused.stderr
+        assert "--stop-sharing" not in refused.stderr
     # The runner empties the input log at startup, and a refused command adds
     # no entry.
     assert (session_dir / "inputs.jsonl").read_text() == ""
@@ -522,7 +524,8 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
             timeout=5,
         )
         assert refused.returncode == 1
-        assert "framewisp --stop-sharing" in refused.stderr
+        assert "Ctrl+C in its terminal" in refused.stderr
+        assert "--stop-sharing" not in refused.stderr
     assert request_desktop(session_dir, "teaching", "click", {"x": 20, "y": 20}) == 1
     assert (
         request_desktop(
@@ -1268,10 +1271,28 @@ def test_portal_failure_closes_owner(
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
     (tmp_path / "fail").touch()
-    assert request_desktop(tmp_path / "session", "attached", "key", {"chord": "a"}) == 1
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "type",
+            "hunter2",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
     assert attach_process.wait(timeout=5) == 1
     assert (tmp_path / "closed").exists()
     assert not (tmp_path / "session/session.json").exists()
+    stdout, stderr = attach_process.communicate(timeout=5)
+    assert "Stopped sharing: RuntimeError: input details omitted" in stderr
+    assert "hunter2" not in stderr and "hunter2" not in stdout
+    assert stdout.endswith("Your apps and desktop are still running.\n")
+    assert "Stopped sharing." not in stdout
 
 
 @pytest.fixture

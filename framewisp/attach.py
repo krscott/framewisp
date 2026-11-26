@@ -546,7 +546,8 @@ def _share_desktop(
     owns_state = False
     capture_descriptor: int | None = None
     shared = False
-    stopped = "Stopped sharing. Your apps and desktop are still running."
+    # Why a started share ended, for the summary printed when it stops.
+    reasons: list[str] = []
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -556,7 +557,7 @@ def _share_desktop(
         ready.set()
         label = "Teaching session ready" if teaching is not None else "Attached"
         print(
-            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
+            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Press Ctrl+C here to stop; framewisp --stop-sharing is the emergency stop for whichever session is sharing.",
             flush=True,
         )
 
@@ -628,7 +629,8 @@ def _share_desktop(
                 status, error = 1, input_error(command, failure)
             except BaseException as failure:
                 status, error = 1, input_error(command, failure)
-                failures.append(failure)
+                # Record the redacted error: the raw one can include typed text.
+                failures.append(RuntimeError(error))
                 stop.set()
                 portal.close()
                 traceback.print_exception(
@@ -771,7 +773,6 @@ def _share_desktop(
                                     )
                             except (OSError, RuntimeError, GLib.Error) as failure:
                                 failures.append(failure)
-                                print(str(failure), file=sys.stderr, flush=True)
                         portal.close()
                         server.join(timeout=0.2)
                         deadline = time.monotonic() + 0.2
@@ -791,8 +792,7 @@ def _share_desktop(
             print(interruption, file=sys.stderr)
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
         if shared:
-            print(f"Stopped sharing: {failure}", file=sys.stderr)
-            stopped = "Your apps and desktop are still running."
+            reasons.append(str(failure))
         else:
             print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
@@ -804,6 +804,15 @@ def _share_desktop(
             os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-        if shared:
-            print(stopped, flush=True)
+        reasons += [str(failure) for failure in failures]
+        if shared and reasons:
+            print(f"Stopped sharing: {'; '.join(reasons)}", file=sys.stderr, flush=True)
+            print("Your apps and desktop are still running.", flush=True)
+        elif shared:
+            print(
+                "Stopped sharing. Your apps and desktop are still running.", flush=True
+            )
+        else:
+            for reason in reasons:
+                print(reason, file=sys.stderr, flush=True)
     return int(bool(failures))
