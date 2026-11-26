@@ -171,7 +171,11 @@ def main() -> None:
         "between hosts",
     )
     run.add_argument(
-        "--record", type=Path, metavar="FILE", help="record the session to MP4"
+        "--record",
+        type=Path,
+        metavar="FILE",
+        help="record a clip to FILE, starting before the app launches; record-stop "
+        "or the end of the session finishes it",
     )
     run.add_argument(
         "--width",

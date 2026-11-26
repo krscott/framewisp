@@ -782,7 +782,7 @@ can be removed. Captions, click pings, and console text stay aligned with the
 retained GUI frames; console timestamps still show original clip time. The reported duration measures the compacted MP4. Session logs keep their original
 timestamps and content.
 
-Finalization draws compaction, the console panel, captions, and click pings in one
+Finalization applies compaction and draws the console panel and overlays in one
 FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
 finalization fails, the raw GUI video remains playable. It stays at the clip destination
 unless framewisp cannot publish it there, and the error names its path and
