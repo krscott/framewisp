@@ -206,6 +206,19 @@ def test_screenshot_through_a_symlink_cannot_be_the_active_clip_destination(
         parse_batch({"steps": [action], kind: screenshot}, clips)
 
 
+def test_existing_screenshot_path_error_keeps_the_path_verbatim(
+    clips: Clips, tmp_path: Path
+) -> None:
+    existing = tmp_path / "clip destination.png"
+    existing.write_bytes(b"")
+    action = {"action": "move", "x": 0, "y": 0}
+    with pytest.raises(ValueError) as error:
+        parse_batch({"steps": [action], "screenshot": {"path": str(existing)}}, clips)
+    assert str(error.value) == (
+        f"{existing} already exists. Choose a new screenshot path."
+    )
+
+
 # R-CONTROL-1
 def test_stalled_client_gets_an_error_reply(
     listener: socket.socket, clips: Clips

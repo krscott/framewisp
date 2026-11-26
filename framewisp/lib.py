@@ -489,7 +489,12 @@ def publish_clip(clip: Path, destination: Path, failure: Exception | None) -> No
         raise RuntimeError(str(failure).replace(str(clip), str(destination)))
 
 
-def clip_destination_error(session_dir: Path, destination: Path) -> str | None:
+def new_file_error(
+    session_dir: Path,
+    path: Path,
+    kind: Literal["clip destination", "screenshot path"],
+) -> str | None:
+    """Refuse a path for a new file that exists or that the session uses."""
     reserved = {
         (session_dir / name).resolve()
         for name in (
@@ -514,10 +519,10 @@ def clip_destination_error(session_dir: Path, destination: Path) -> str | None:
             "registry.log",
         )
     }
-    if destination in reserved:
-        return f"{destination} is reserved for session files. Choose a new clip destination."
-    if destination.exists():
-        return f"{destination} already exists. Choose a new clip destination."
+    if path in reserved:
+        return f"{path} is reserved for session files. Choose a new {kind}."
+    if path.exists():
+        return f"{path} already exists. Choose a new {kind}."
     return None
 
 
@@ -642,7 +647,7 @@ class Clips:
         if isinstance(layout, str):
             return layout
         try:
-            error = clip_destination_error(self.session_dir, destination)
+            error = new_file_error(self.session_dir, destination, "clip destination")
             if error is not None:
                 return error
             self.process = self.resources.enter_context(
@@ -803,9 +808,9 @@ def parse_batch(raw: object, clips: Clips) -> Batch:
         if not screenshot.path.parent.is_dir():
             raise ValueError(f"{kind}.path requires an existing parent directory.")
         resolved = resolved_request_path(screenshot.path, f"{kind}.path")
-        path_error = clip_destination_error(clips.session_dir, resolved)
+        path_error = new_file_error(clips.session_dir, resolved, "screenshot path")
         if path_error is not None:
-            raise ValueError(path_error.replace("clip destination", "screenshot path"))
+            raise ValueError(path_error)
         error = screenshot_path_error(resolved, clips.destination)
         if error is not None:
             raise ValueError(error)
@@ -924,7 +929,7 @@ def run_session(
     session_dir = session_dir.resolve()
     if clip_destination is not None:
         clip_destination = clip_destination.resolve()
-        error = clip_destination_error(session_dir, clip_destination)
+        error = new_file_error(session_dir, clip_destination, "clip destination")
         if error is not None:
             raise SessionError(error)
     session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
