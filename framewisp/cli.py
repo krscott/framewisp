@@ -13,6 +13,7 @@ from framewisp.connection import (
     COMMAND_PROTOCOL,
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
+    DesktopKind,
     SessionKind,
     request_desktop,
     session_kind,
@@ -192,9 +193,9 @@ def main() -> None:
     )
     run.add_argument(
         "app_command",
-        metavar="command",
+        metavar="APP",
         nargs=argparse.REMAINDER,
-        help="-- executable [args...]",
+        help="-- APP [ARGS...]: the app executable and its arguments",
     )
 
     record_start = commands.add_parser("record-start", help="start recording a clip")
@@ -561,7 +562,7 @@ def main() -> None:
 
 
 def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) -> int:
-    desktop = kind in DESKTOP_KINDS
+    desktop: DesktopKind | None = None if kind == "headless" else kind
     if args.command == "inspect":
         from framewisp.inspection import inspect_session
 
@@ -588,7 +589,9 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
     elif args.command == "teach-note":
         if kind != "teaching":
             raise SessionError("teach-note requires a teaching session.")
-        result = request_desktop(session_dir, "teach-note", {"text": args.text})
+        result = request_desktop(
+            session_dir, "teaching", "teach-note", {"text": args.text}
+        )
     elif args.command == "recover":
         result = recover_session(session_dir)
     elif args.command == "run":
@@ -610,10 +613,12 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
     elif args.command in {"record-start", "record-stop", "status", "stop"}:
         if desktop and args.command in {"status", "stop"}:
             raise SessionError(
-                "status and stop manage headless sessions. Use framewisp --stop-sharing to stop a desktop share."
+                "status and stop manage headless sessions. The user ends this session with Ctrl+C "
+                "in its terminal; framewisp --stop-sharing is the emergency stop for whichever "
+                "session is sharing."
             )
         result = (
-            request_desktop(session_dir, args.command, {})
+            request_desktop(session_dir, desktop, args.command, {})
             if desktop
             else session_command(
                 session_dir,
@@ -632,7 +637,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
             )
         result = (
             request_desktop(
-                session_dir, "screenshot", {"path": str(args.path.resolve())}
+                session_dir, desktop, "screenshot", {"path": str(args.path.resolve())}
             )
             if desktop
             else screenshot(
@@ -659,7 +664,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
         if desktop:
             parameters.pop("move_duration", None)
             with log_input(session_dir, args.command, parameters) as action:
-                result = request_desktop(session_dir, args.command, parameters)
+                result = request_desktop(session_dir, desktop, args.command, parameters)
                 action.returncode = result
         else:
             result = session_command(session_dir, args.command, parameters=parameters)

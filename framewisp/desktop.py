@@ -65,7 +65,8 @@ def lock_desktop() -> Generator[Path]:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError(
-                "A desktop share is already active. Run framewisp --stop-sharing to stop it."
+                "Another attached or teaching session is starting or running. "
+                "End it with Ctrl+C in its terminal or run framewisp --stop-sharing."
             ) from None
         # Never unlink the lock file: all contenders must lock the same inode.
         for name in ("command.sock", STOP_SOCKET):
@@ -110,7 +111,7 @@ def stop_sharing() -> int:
                 pass
         finally:
             os.close(process)
-        print("Desktop share stopped.")
+        print("Stopped the attached or teaching session.")
         return 0
     except (FileNotFoundError, ConnectionRefusedError):
         print("No active desktop share.")

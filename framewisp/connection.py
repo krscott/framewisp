@@ -25,7 +25,8 @@ Request = TypeVar("Request")
 # The `kind` that session metadata publishes.
 SessionKind = Literal["headless", "attached", "teaching"]
 # The kinds of session on the user's desktop, reached by `request_desktop`.
-DESKTOP_KINDS: frozenset[SessionKind] = frozenset({"attached", "teaching"})
+DesktopKind = Literal["attached", "teaching"]
+DESKTOP_KINDS: frozenset[SessionKind] = frozenset(get_args(DesktopKind))
 # The session commands a teaching session accepts; it only watches.
 TEACHING_COMMANDS = frozenset({"screenshot", "teach-note"})
 
@@ -47,40 +48,37 @@ def teaching_refusal(command: str) -> str:
     return (
         f"{command} is refused: this is a teaching session, which only watches. "
         "It accepts only screenshot and teach-note. "
-        "The user ends it with Ctrl+C in its terminal or framewisp --stop-sharing."
+        "The user ends it with Ctrl+C in its terminal; "
+        "framewisp --stop-sharing is the emergency stop for whichever session is sharing."
     )
 
 
-def desktop_session(kind: SessionKind | None) -> str:
+def desktop_session(kind: DesktopKind) -> str:
     return "teaching session" if kind == "teaching" else "attached session"
 
 
-def restart_remedy(kind: SessionKind | None) -> str:
+def restart_remedy(kind: DesktopKind) -> str:
     """Say how the user starts a desktop session of this kind again."""
     if kind == "teaching":
-        return "Ask the user to run teach again."
+        return "Ask the user to run teach again with a new lesson directory."
     return "Ask the user to run attach in another terminal."
 
 
-def disconnected(kind: SessionKind | None) -> str:
+def disconnected(kind: DesktopKind) -> str:
     return (
         f"{desktop_session(kind).capitalize()} is disconnected. {restart_remedy(kind)}"
     )
 
 
 def request_desktop(
-    session_dir: Path, command: str, parameters: dict[str, object]
+    session_dir: Path,
+    kind: DesktopKind,
+    command: str,
+    parameters: dict[str, object],
 ) -> int:
-    kind: SessionKind | None = None
+    """Send a command to the desktop session whose metadata publishes `kind`."""
     try:
         state = json.loads((session_dir / "session.json").read_text())
-        kind = session_kind(state)
-        if kind not in DESKTOP_KINDS:
-            print(
-                "This command requires an attached or teaching session.",
-                file=sys.stderr,
-            )
-            return 1
         endpoint = Path(state["command_socket"])
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))

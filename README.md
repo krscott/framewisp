@@ -224,7 +224,7 @@ remains session-independent.
 | `teach DIRECTORY --goal TEXT` | Capture a lesson of the user performing a task on one desktop monitor into a new directory, without keyboard or pointer access. |
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
-| `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
+| `attach` | Share your desktop with an attached session (screenshots and input); stay in the foreground. |
 | `--stop-sharing` (no session) | Stop the active desktop share and leave your apps running. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
