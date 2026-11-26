@@ -61,10 +61,10 @@ class RealApp:
             return high - low > 32
 
     def batch(
-        self, name: str, actions: list[dict[str, Any]], *, success: bool
+        self, name: str, steps: list[dict[str, Any]], *, success: bool
     ) -> dict[str, Any]:
         path = self.directory / f"{name}.json"
-        path.write_text(json.dumps({"actions": actions}))
+        path.write_text(json.dumps({"steps": steps}))
         result: dict[str, Any] = json.loads(
             self.cli("batch", "--file", str(path), returncode=0 if success else 1)
         )
@@ -278,9 +278,9 @@ def test_writer_flatpak(real_app: RealApp) -> None:
         [
             {"action": "type", "text": "Verified Writer café", "interval": 0},
             {
-                "action": "wait",
+                "check": "wait",
                 "timeout": 10,
-                "observation": {"max_nodes": 4096, "max_depth": 32, "timeout": 10},
+                "limits": {"max_nodes": 4096, "max_depth": 32, "timeout": 10},
                 "condition": {
                     "role": "paragraph",
                     "field": "text",
@@ -333,7 +333,7 @@ def test_blender_canvas(real_app: RealApp) -> None:
         "unsupported-check",
         [
             {
-                "action": "assert",
+                "check": "assert",
                 "timeout": 1,
                 "condition": {
                     "role": "label",

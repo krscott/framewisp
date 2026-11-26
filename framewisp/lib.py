@@ -32,11 +32,11 @@ from framewisp.captions import (
 from framewisp.compact import ffprobe
 from framewisp.connection import (
     COMMAND_PROTOCOL,
-    capture_path_error,
-    parse_command,
+    parse_request_fields,
     receive_request,
     reply,
     resolved_request_path,
+    screenshot_path_error,
 )
 from framewisp.console import ConsoleCapture, app_output
 from framewisp.environment import (
@@ -693,7 +693,7 @@ class Recordings:
 
 def session_command(
     session_dir: Path,
-    action: str,
+    command: str,
     destination: Path | None = None,
     *,
     captions: CaptionOptions = CaptionOptions(),
@@ -704,7 +704,7 @@ def session_command(
 ) -> int:
     state = json.loads((session_dir / "session.json").read_text())
     request: dict[str, object] = {
-        "action": action,
+        "command": command,
         "session_directory": str(session_dir),
         "destination": str(destination.resolve()) if destination else None,
         "click_pings": click_pings,
@@ -712,7 +712,7 @@ def session_command(
         "console": console.parameters() if console is not None else None,
         "parameters": parameters,
     }
-    if action == "record-start":
+    if command == "record-start":
         request.update(pointer_captions=captions.pointer, key_captions=captions.key)
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
@@ -730,13 +730,13 @@ def session_command(
         ) from None
     if not line:
         print(
-            f"Session {session_dir} disconnected before {action} completed.",
+            f"Session {session_dir} disconnected before {command} completed.",
             file=sys.stderr,
         )
         return 1
     result = json.loads(line)
     error = result["error"]
-    if result["data"] is not None and (error is None or action == "batch"):
+    if result["data"] is not None and (error is None or command == "batch"):
         print(json.dumps(result["data"]))
     if error is not None:
         print(error, file=sys.stderr)
@@ -787,23 +787,26 @@ class RecordStart:
         )
 
 
-SessionAction = Literal["stop", "status", "record-stop"]
-SESSION_ACTIONS: tuple[SessionAction, ...] = get_args(SessionAction)
-SessionRequest = SessionAction | RecordStart | InputAction | Batch
+SessionCommand = Literal["stop", "status", "record-stop"]
+SESSION_COMMANDS: tuple[SessionCommand, ...] = get_args(SessionCommand)
+SessionRequest = SessionCommand | RecordStart | InputAction | Batch
 
 
 def parse_batch(raw: object, recordings: Recordings) -> Batch:
     batch = Batch.parse(raw)
-    for capture in (batch.capture, batch.failure_capture):
-        if capture is None:
+    for kind, screenshot in (
+        ("screenshot", batch.screenshot),
+        ("failure_screenshot", batch.failure_screenshot),
+    ):
+        if screenshot is None:
             continue
-        if not capture.path.parent.is_dir():
-            raise ValueError("capture.path requires an existing parent directory.")
-        resolved = resolved_request_path(capture.path, "capture.path")
+        if not screenshot.path.parent.is_dir():
+            raise ValueError(f"{kind}.path requires an existing parent directory.")
+        resolved = resolved_request_path(screenshot.path, f"{kind}.path")
         path_error = recording_path_error(recordings.session_dir, resolved)
         if path_error is not None:
-            raise ValueError(path_error.replace("recording path", "capture path"))
-        error = capture_path_error(resolved, recordings.destination)
+            raise ValueError(path_error.replace("recording path", "screenshot path"))
+        error = screenshot_path_error(resolved, recordings.destination)
         if error is not None:
             raise ValueError(error)
     return batch
@@ -811,22 +814,22 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
 
 def parse_request(line: bytes, recordings: Recordings) -> SessionRequest:
     """Validate one request line, changing no session state."""
-    command = parse_command(line)
-    if command.get("session_directory") != str(recordings.session_dir):
+    fields = parse_request_fields(line)
+    if fields.get("session_directory") != str(recordings.session_dir):
         raise ValueError(
             "Session metadata points to a different session. Use the original session directory."
         )
-    action = command.get("action")
-    if not isinstance(action, str):
-        raise ValueError("action must be a string.")
-    if action in SESSION_ACTIONS:
-        return action
-    if action == "record-start":
-        return RecordStart.parse(command)
-    if action == "batch":
-        return parse_batch(command.get("parameters"), recordings)
-    if action in {"move", "click", "drag", "scroll", "type", "key"}:
-        return InputAction.parse(action, command.get("parameters"))
+    command = fields.get("command")
+    if not isinstance(command, str):
+        raise ValueError("command must be a string.")
+    if command in SESSION_COMMANDS:
+        return command
+    if command == "record-start":
+        return RecordStart.parse(fields)
+    if command == "batch":
+        return parse_batch(fields.get("parameters"), recordings)
+    if command in {"move", "click", "drag", "scroll", "type", "key"}:
+        return InputAction.parse(command, fields.get("parameters"))
     raise ValueError("Unsupported headless session command.")
 
 
@@ -1081,7 +1084,7 @@ def _run_session(
                 x11=x11,
                 size=size,
                 caption_capture=recordings.caption_capture,
-                capture=lambda path, cancelled: batch_screenshot(
+                screenshot=lambda path, cancelled: batch_screenshot(
                     recordings, path, cancelled
                 ),
             )
@@ -1219,7 +1222,7 @@ def screenshot(
         # runner: record-stop renders in the runner's command loop, so asking
         # the runner would wait for it.
         recording = json.loads((session_dir / "session.json").read_text())["recording"]
-        error = capture_path_error(
+        error = screenshot_path_error(
             destination, Path(recording) if recording is not None else None
         )
         if error is not None:
@@ -1265,7 +1268,7 @@ def screenshot(
                     "height": height,
                     "display_width": display_width,
                     "display_height": display_height,
-                    "capture_seconds": time.monotonic() - started,
+                    "screenshot_seconds": time.monotonic() - started,
                 }
             )
         )
@@ -1278,21 +1281,23 @@ def batch_screenshot(
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
         with tempfile.TemporaryDirectory(
-            prefix=".framewisp-capture-", dir=destination.parent
+            prefix=".framewisp-screenshot-", dir=destination.parent
         ) as directory:
-            temporary = Path(directory) / "capture.png"
+            temporary = Path(directory) / "screenshot.png"
             screenshot(recordings.session_dir, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
-                    "Capture cancelled; caller disconnected or session stopped."
+                    "Screenshot cancelled; caller disconnected or session stopped."
                 )
             # A recording may have started since this batch was validated.
-            error = capture_path_error(destination, recordings.destination)
+            error = screenshot_path_error(destination, recordings.destination)
             if error is not None:
                 raise SessionError(error)
             destination.hardlink_to(temporary)
     except InterruptedError:
         raise
     except OSError as error:
-        raise SessionError(f"Cannot save capture to {destination}: {error}") from None
+        raise SessionError(
+            f"Cannot save screenshot to {destination}: {error}"
+        ) from None
     return 0

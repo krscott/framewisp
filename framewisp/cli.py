@@ -70,7 +70,7 @@ def main() -> None:
         metavar="SESSION",
         help="project-scoped session name (e.g. browser), or the path of a session directory (e.g. ./browser or /tmp/browser)",
     )
-    commands = parser.add_subparsers(dest="action")
+    commands = parser.add_subparsers(dest="command")
 
     commands.add_parser(
         "status", help="report live headless app and recording state as JSON"
@@ -119,19 +119,19 @@ def main() -> None:
 
     batch = commands.add_parser(
         "batch",
-        help="run ordered headless inputs and optional capture from JSON",
+        help="run ordered headless steps and an optional screenshot from JSON",
         description="Validate all inputs, execute without interleaving, and print JSON results. "
-        "Stop at the first failure; completed actions cannot be rolled back. "
-        f"baseline/wait/assert accept observation: {{max_nodes: 1..{limits.MAX_NODES} (default {limits.DEFAULT_MAX_NODES}), "
+        "Stop at the first failure; completed steps cannot be rolled back. "
+        f"The checks baseline/wait/assert accept limits: {{max_nodes: 1..{limits.MAX_NODES} (default {limits.DEFAULT_MAX_NODES}), "
         f"max_depth: 1..{limits.MAX_DEPTH} (default {limits.DEFAULT_MAX_DEPTH}), timeout: >0..{limits.MAX_TIMEOUT} seconds (default {limits.DEFAULT_CHECK_TIMEOUT})}}. "
-        f"The required check timeout (>0..{limits.MAX_TIMEOUT} seconds) caps all observations. "
-        "Use interval 0 for unpaced typing. Capture is not an app acknowledgement.",
+        f"The required check timeout (>0..{limits.MAX_TIMEOUT} seconds) caps all queries. "
+        "Use interval 0 for unpaced typing. A screenshot is not an app acknowledgement.",
     )
     batch.add_argument(
         "--file",
         type=Path,
         required=True,
-        help="JSON file with actions and optional capture",
+        help="JSON file with steps and an optional screenshot",
     )
 
     commands.add_parser(
@@ -179,7 +179,10 @@ def main() -> None:
         help="display height in pixels (default: 720)",
     )
     run.add_argument(
-        "command", nargs=argparse.REMAINDER, help="-- executable [args...]"
+        "app_command",
+        metavar="command",
+        nargs=argparse.REMAINDER,
+        help="-- executable [args...]",
     )
 
     record_start = commands.add_parser("record-start", help="start recording a clip")
@@ -188,7 +191,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--compact",
             action="store_true",
-            help=f"trim gaps between inputs, keeping {PADDING_BEFORE:g} s before and {PADDING_AFTER:g} s after, preserving batch waits and capture delays",
+            help=f"trim gaps between inputs, keeping {PADDING_BEFORE:g} s before and {PADDING_AFTER:g} s after, preserving batch waits and screenshot delays",
         )
         recording_parser.add_argument(
             "--console",
@@ -231,23 +234,23 @@ def main() -> None:
         "record-stop", help="finalize the active clip and keep the app running"
     )
 
-    capture = commands.add_parser(
+    screenshot_parser = commands.add_parser(
         "screenshot", help="save the current display as a PNG"
     )
-    capture.add_argument("path", type=Path)
-    capture.add_argument(
+    screenshot_parser.add_argument("path", type=Path)
+    screenshot_parser.add_argument(
         "--region",
         type=int,
         nargs=4,
         metavar=("X", "Y", "WIDTH", "HEIGHT"),
         help="capture a known region in display pixels (headless only); omit for full context",
     )
-    capture.add_argument(
+    screenshot_parser.add_argument(
         "--json",
         action="store_true",
-        help="print crop origin, dimensions, display dimensions, path and capture time (headless only)",
+        help="print crop origin, dimensions, display dimensions, path and screenshot time (headless only)",
     )
-    capture.add_argument(
+    screenshot_parser.add_argument(
         "--delay",
         type=seconds,
         default=0.0,
@@ -366,10 +369,10 @@ def main() -> None:
     if getattr(args, "agent_skill", False):
         parser.error("--agent-skill must be used alone")
     if args.detach:
-        if args.session is not None or args.action is not None:
+        if args.session is not None or args.command is not None:
             parser.error("--detach takes no session or command")
         raise SystemExit(detach_desktop())
-    if args.session is None or args.action is None:
+    if args.session is None or args.command is None:
         parser.error(
             "SESSION and COMMAND are required (or use --detach or --agent-skill)"
         )
@@ -377,7 +380,7 @@ def main() -> None:
         session_dir = resolve_session_dir(args.session)
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
         parser.error(f"Cannot resolve the session directory: {error}")
-    if args.action == "inspect":
+    if args.command == "inspect":
         from framewisp.inspection import Query
 
         try:
@@ -392,7 +395,7 @@ def main() -> None:
             )
         except ValueError as error:
             parser.error(str(error))
-    if args.action == "batch":
+    if args.command == "batch":
         try:
             with args.file.open("rb") as source:
                 content = source.read(MAX_REQUEST_BYTES + 1)
@@ -401,31 +404,31 @@ def main() -> None:
             args.batch = Batch.parse(json.loads(content), directory=Path.cwd())
         except (OSError, ValueError, TypeError, OverflowError, RecursionError) as error:
             parser.error(f"Invalid batch: {error}")
-    if args.action in {"click", "drag"} and len(set(args.modifier)) != len(
+    if args.command in {"click", "drag"} and len(set(args.modifier)) != len(
         args.modifier
     ):
         parser.error("each --modifier may only be specified once")
-    if args.action == "scroll" and args.steps < 1:
+    if args.command == "scroll" and args.steps < 1:
         parser.error("--steps must be a positive integer")
     if (
-        args.action in {"move", "click", "scroll", "drag"}
+        args.command in {"move", "click", "scroll", "drag"}
         and args.move_duration is not None
         and args.move_duration > 300
     ):
         parser.error("--move-duration must not exceed 300 seconds")
-    if args.action == "type" and any(not char.isprintable() for char in args.text):
+    if args.command == "type" and any(not char.isprintable() for char in args.text):
         parser.error(
             "type supports printable characters only; use key for Return or Tab"
         )
-    if args.action == "key" and key_commands(args.chord) is None:
+    if args.command == "key" and key_commands(args.chord) is None:
         parser.error(
             "unsupported key combination; use key --help for supported keys and modifiers"
         )
-    if args.action in {"run", "record-start"}:
+    if args.command in {"run", "record-start"}:
         args.captions = CaptionOptions(
             pointer=args.pointer_captions, key=args.key_captions
         )
-        if args.action == "run" and args.captions.enabled and args.record is None:
+        if args.command == "run" and args.captions.enabled and args.record is None:
             parser.error(
                 "--pointer-captions and --key-captions require --record; "
                 "use record-start for later clips"
@@ -454,11 +457,11 @@ def main() -> None:
                 )
             except ValueError as error:
                 parser.error(str(error))
-        if args.action == "run" and args.no_click_pings and args.record is None:
+        if args.command == "run" and args.no_click_pings and args.record is None:
             parser.error(
                 "--no-click-pings requires --record; use record-start --no-click-pings for later clips"
             )
-    if args.action == "run":
+    if args.command == "run":
         if args.compact and args.record is None:
             parser.error(
                 "--compact requires --record; use record-start --compact for later clips"
@@ -467,7 +470,7 @@ def main() -> None:
             parser.error(
                 "--console requires --record; use record-start --console for later clips"
             )
-        if not args.command or args.command == ["--"]:
+        if not args.app_command or args.app_command == ["--"]:
             parser.error("run requires an app command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
@@ -475,7 +478,7 @@ def main() -> None:
         if isinstance(layout, str):
             parser.error(layout)
     state_path = session_dir / "session.json"
-    if args.action == "teach":
+    if args.command == "teach":
         if not args.goal.strip():
             parser.error("--goal must not be blank")
         args.directory = args.directory.absolute()
@@ -489,8 +492,8 @@ def main() -> None:
                 f"Teaching output parent must be an existing writable directory: {parent}"
             )
     attached = False
-    if args.action not in {"run", "attach", "teach", "recover"}:
-        if args.action == "screenshot" and args.delay:
+    if args.command not in {"run", "attach", "teach", "recover"}:
+        if args.command == "screenshot" and args.delay:
             # Wait first, so that the checks below see the session the screenshot shows.
             time.sleep(args.delay)
         exit_message = recorded_app_exit(session_dir)
@@ -537,22 +540,22 @@ def main() -> None:
 
 
 def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> int:
-    if args.action == "inspect":
+    if args.command == "inspect":
         from framewisp.inspection import inspect_session
 
         observation = inspect_session(session_dir, args.query)
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         result = 0 if observation["status"] == "ok" else 1
-    elif args.action == "batch":
+    elif args.command == "batch":
         if attached:
             raise SessionError("batch supports headless sessions only.")
         batch: Batch = args.batch
         result = session_command(session_dir, "batch", parameters=batch.parameters())
-    elif args.action in {"attach", "teach"}:
+    elif args.command in {"attach", "teach"}:
         # Desktop portal imports are only needed by the foreground attach owner.
         from framewisp.attach import attach_session
 
-        if args.action == "teach":
+        if args.command == "teach":
             from framewisp.teaching import Teaching
 
             result = attach_session(
@@ -560,21 +563,21 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             )
         else:
             result = attach_session(session_dir)
-    elif args.action == "teach-note":
+    elif args.command == "teach-note":
         if not attached:
             raise SessionError(
                 "teach-note requires a teaching session on your desktop."
             )
         result = request_attached(session_dir, "teach-note", {"text": args.text})
-    elif args.action == "recover":
+    elif args.command == "recover":
         result = recover_session(session_dir)
-    elif args.action == "run":
-        command: list[str] = args.command
-        if command[:1] == ["--"]:
-            command = command[1:]
+    elif args.command == "run":
+        app_command: list[str] = args.app_command
+        if app_command[:1] == ["--"]:
+            app_command = app_command[1:]
         result = run_session(
             session_dir,
-            command,
+            app_command,
             recording=args.record,
             captions=args.captions,
             click_pings=not args.no_click_pings,
@@ -584,25 +587,25 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             x11=args.x11,
             real_env=args.real_env,
         )
-    elif args.action in {"record-start", "record-stop", "status", "stop"}:
-        if attached and args.action in {"status", "stop"}:
+    elif args.command in {"record-start", "record-stop", "status", "stop"}:
+        if attached and args.command in {"status", "stop"}:
             raise SessionError(
                 "status and stop manage headless sessions. Use framewisp --detach to stop desktop attachment."
             )
         result = (
-            request_attached(session_dir, args.action, {})
+            request_attached(session_dir, args.command, {})
             if attached
             else session_command(
                 session_dir,
-                args.action,
-                args.path if args.action == "record-start" else None,
+                args.command,
+                args.path if args.command == "record-start" else None,
                 captions=getattr(args, "captions", CaptionOptions()),
                 click_pings=not getattr(args, "no_click_pings", False),
                 console=getattr(args, "console_panel", None),
                 compact=getattr(args, "compact", False),
             )
         )
-    elif args.action == "screenshot":
+    elif args.command == "screenshot":
         if attached and (args.region is not None or args.json):
             raise SessionError(
                 "screenshot --region and --json support headless sessions only."
@@ -620,7 +623,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             )
         )
     else:
-        if args.action in {"move", "click", "scroll", "drag"}:
+        if args.command in {"move", "click", "scroll", "drag"}:
             if attached:
                 if args.move_duration is not None:
                     raise SessionError(
@@ -631,13 +634,13 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
         parameters = {
             key: value
             for key, value in vars(args).items()
-            if key not in {"session", "action", "detach"}
+            if key not in {"session", "command", "detach"}
         }
         if attached:
             parameters.pop("move_duration", None)
-            with log_input(session_dir, args.action, parameters) as action:
-                result = request_attached(session_dir, args.action, parameters)
+            with log_input(session_dir, args.command, parameters) as action:
+                result = request_attached(session_dir, args.command, parameters)
                 action.returncode = result
         else:
-            result = session_command(session_dir, args.action, parameters=parameters)
+            result = session_command(session_dir, args.command, parameters=parameters)
     return result

@@ -33,7 +33,7 @@ from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
     COMMAND_PROTOCOL,
-    parse_command,
+    parse_request_fields,
     receive_request,
     resolved_request_path,
 )
@@ -381,27 +381,27 @@ def parse_attached_request(
     line: bytes, attachment: str, *, teaching: bool = False
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
-    command = parse_command(line)
+    fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one.
-    if command.get("attachment") != attachment:
+    if fields.get("attachment") != attachment:
         raise ValueError(
             "Attached session is disconnected. Ask the user to attach again."
         )
-    action = command.get("action")
-    if not isinstance(action, str):
-        raise ValueError("action must be a string.")
-    if teaching and action not in {"screenshot", "teach-note"}:
+    command = fields.get("command")
+    if not isinstance(command, str):
+        raise ValueError("command must be a string.")
+    if teaching and command not in {"screenshot", "teach-note"}:
         raise ValueError(
             "Teaching is observation-only; input and recording commands are disabled."
         )
-    if action.startswith("record-"):
+    if command.startswith("record-"):
         raise ValueError("Recording attached sessions is not supported yet.")
-    raw = command.get("parameters")
+    raw = fields.get("parameters")
     if not isinstance(raw, dict):
         raise ValueError("Input requires an action and parameters object.")
     parameters = cast(dict[str, object], raw)
-    if action == "teach-note":
+    if command == "teach-note":
         if not teaching:
             raise ValueError("teach-note requires a teaching session.")
         text = parameters.get("text")
@@ -410,9 +410,9 @@ def parse_attached_request(
                 "teach-note requires nonblank text of at most 8000 characters."
             )
         return text
-    if action != "screenshot":
+    if command != "screenshot":
         defaults: dict[str, object] = {"modifier": []}
-        return InputAction.parse(action, defaults | parameters)
+        return InputAction.parse(command, defaults | parameters)
     path = parameters.get("path")
     if not isinstance(path, str) or not Path(path).is_absolute():
         raise ValueError("screenshot requires an absolute path.")
@@ -593,7 +593,7 @@ def _run_attachment(
             if request is None:
                 return
             status, error = 0, None
-            action = (
+            command = (
                 "screenshot"
                 if isinstance(request, Path)
                 else "teach-note" if isinstance(request, str) else request.action
@@ -612,14 +612,14 @@ def _run_attachment(
                             capture(portal, request, stop, session_dir / "capture.log")
                         else:
                             inputs.perform(
-                                action, cast(InputParameters, request.parameters)
+                                command, cast(InputParameters, request.parameters)
                             )
                     finally:
                         lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
-                status, error = 1, input_error(action, failure)
+                status, error = 1, input_error(command, failure)
             except BaseException as failure:
-                status, error = 1, input_error(action, failure)
+                status, error = 1, input_error(command, failure)
                 failures.append(failure)
                 stop.set()
                 portal.close()

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.batch import MAX_ACTIONS, MAX_REQUEST_BYTES, Batch
+from framewisp.batch import MAX_REQUEST_BYTES, MAX_STEPS, Batch
 from framewisp.connection import COMMAND_PROTOCOL
 
 
@@ -15,42 +15,42 @@ from framewisp.connection import COMMAND_PROTOCOL
         None,
         [],
         {},
-        {"actions": []},
-        {"actions": [{"action": "key", "chord": "a"}] * (MAX_ACTIONS + 1)},
-        {"actions": [None]},
-        {"actions": [{"action": "stop"}]},
-        {"actions": [{"action": "click", "x": True, "y": 1}]},
-        {"actions": [{"action": "click", "x": -1, "y": 1}]},
-        {"actions": [{"action": "type", "text": "a\nb"}]},
-        {"actions": [{"action": "type", "text": "abc", "interval": float("nan")}]},
-        {"actions": [{"action": "type", "text": "abc", "interval": 151}]},
-        {"actions": [{"action": "type", "text": "a" * 16385, "interval": 0}]},
+        {"steps": []},
+        {"steps": [{"action": "key", "chord": "a"}] * (MAX_STEPS + 1)},
+        {"steps": [None]},
+        {"steps": [{"action": "stop"}]},
+        {"steps": [{"action": "click", "x": True, "y": 1}]},
+        {"steps": [{"action": "click", "x": -1, "y": 1}]},
+        {"steps": [{"action": "type", "text": "a\nb"}]},
+        {"steps": [{"action": "type", "text": "abc", "interval": float("nan")}]},
+        {"steps": [{"action": "type", "text": "abc", "interval": 151}]},
+        {"steps": [{"action": "type", "text": "a" * 16385, "interval": 0}]},
         {
-            "actions": [
+            "steps": [
                 {"action": "scroll", "x": 1, "y": 1, "direction": "up", "steps": 10001}
             ]
         },
-        {"actions": [{"action": "key", "chord": "Ctrl+Ctrl+a"}]},
-        {"actions": [{"action": "type", "text": "abc", "intevral": 0}]},
-        {"actions": [{"action": "key", "chord": "a"}], "repeat": 2},
-        {"actions": [{"action": "key", "chord": "a"}], "capture": None},
-        {"actions": [{"action": "key", "chord": "a"}], "capture": {"path": ""}},
-        {"actions": [{"action": "key", "chord": "a"}], "capture": {"path": "a\0b"}},
+        {"steps": [{"action": "key", "chord": "Ctrl+Ctrl+a"}]},
+        {"steps": [{"action": "type", "text": "abc", "intevral": 0}]},
+        {"steps": [{"action": "key", "chord": "a"}], "repeat": 2},
+        {"steps": [{"action": "key", "chord": "a"}], "screenshot": None},
+        {"steps": [{"action": "key", "chord": "a"}], "screenshot": {"path": ""}},
+        {"steps": [{"action": "key", "chord": "a"}], "screenshot": {"path": "a\0b"}},
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": "/tmp/a", "delay": -1},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": "/tmp/a", "delay": -1},
         },
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": "/tmp/a", "delay": True},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": "/tmp/a", "delay": True},
         },
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": "/tmp/a", "delay": 301},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": "/tmp/a", "delay": 301},
         },
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": "/tmp/a", "delai": 1},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": "/tmp/a", "delai": 1},
         },
     ],
 )
@@ -59,18 +59,18 @@ def test_reject_batch(raw: object) -> None:
         Batch.parse(raw)
 
 
-def test_defaults_and_capture_resolution(tmp_path: Path) -> None:
+def test_defaults_and_screenshot_path_resolution(tmp_path: Path) -> None:
     batch = Batch.parse(
         {
-            "actions": [
+            "steps": [
                 {"action": "click", "x": 12, "y": 34},
                 {"action": "type", "text": "é"},
             ],
-            "capture": {"path": "image.png"},
+            "screenshot": {"path": "image.png"},
         },
         directory=tmp_path,
     )
-    assert batch.actions[0].parameters == {
+    assert batch.steps[0].parameters == {
         "x": 12,
         "y": 34,
         "button": "left",
@@ -78,17 +78,32 @@ def test_defaults_and_capture_resolution(tmp_path: Path) -> None:
         "modifier": [],
         "move_duration": 0.3,
     }
-    assert batch.actions[1].parameters["interval"] == 0.08
-    assert batch.capture is not None
-    assert batch.capture.path == tmp_path / "image.png"
+    assert batch.steps[1].parameters["interval"] == 0.08
+    assert batch.screenshot is not None
+    assert batch.screenshot.path == tmp_path / "image.png"
     assert Batch.parse(batch.parameters()) == batch
+
+
+@pytest.mark.parametrize(
+    "step, message",
+    [
+        ({}, "exactly one of action or check"),
+        ({"action": "key", "check": "wait", "chord": "a"}, "exactly one of"),
+        ({"action": "wait", "timeout": 1}, 'wait is a check; write "check": "wait"'),
+        (
+            {"check": "click", "timeout": 1},
+            "check must be one of assert, wait, baseline",
+        ),
+    ],
+)
+def test_step_names_an_action_or_a_check(step: object, message: str) -> None:
+    with pytest.raises(ValueError, match=rf"^steps\[0\]: .*{message}"):
+        Batch.parse({"steps": [step]})
 
 
 def test_pacing_limit_is_for_whole_batch() -> None:
     with pytest.raises(ValueError, match="300 seconds"):
-        Batch.parse(
-            {"actions": [{"action": "type", "text": "ab", "interval": 151}] * 2}
-        )
+        Batch.parse({"steps": [{"action": "type", "text": "ab", "interval": 151}] * 2})
 
 
 # R-INPUT-3
@@ -96,14 +111,14 @@ def test_pacing_limit_is_for_whole_batch() -> None:
 def test_invalid_move_duration(value: object) -> None:
     with pytest.raises(ValueError, match="move_duration"):
         Batch.parse(
-            {"actions": [{"action": "move", "x": 1, "y": 1, "move_duration": value}]}
+            {"steps": [{"action": "move", "x": 1, "y": 1, "move_duration": value}]}
         )
 
 
 def test_move_duration_counts_toward_batch_budget() -> None:
     with pytest.raises(ValueError, match="300 seconds"):
         Batch.parse(
-            {"actions": [{"action": "move", "x": 1, "y": 1, "move_duration": 151}] * 2}
+            {"steps": [{"action": "move", "x": 1, "y": 1, "move_duration": 151}] * 2}
         )
 
 
@@ -112,7 +127,7 @@ def test_move_duration_counts_toward_batch_budget() -> None:
     [
         b"{",
         b"x" * (MAX_REQUEST_BYTES + 1),
-        b'{"actions":[{"action":"key","chord":"bad"}]}',
+        b'{"steps":[{"action":"key","chord":"bad"}]}',
     ],
     ids=["malformed-json", "too-large", "invalid-key"],
 )
@@ -143,7 +158,7 @@ def test_batch_rejects_attached_session(tmp_path: Path) -> None:
         json.dumps({"kind": "attached", "command_protocol": COMMAND_PROTOCOL})
     )
     path = tmp_path / "batch.json"
-    path.write_text(json.dumps({"actions": [{"action": "key", "chord": "a"}]}))
+    path.write_text(json.dumps({"steps": [{"action": "key", "chord": "a"}]}))
     result = subprocess.run(
         [
             sys.executable,

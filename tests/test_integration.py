@@ -461,7 +461,7 @@ def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_compact_clip_preserves_failed_wait_and_capture_delay(
+def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_for_demo_frame(demo, tmp_path / "before.png")
@@ -476,9 +476,9 @@ def test_compact_clip_preserves_failed_wait_and_capture_delay(
     time.sleep(5)
     failure = tmp_path / "failure.png"
     batch = {
-        "actions": [
+        "steps": [
             {
-                "action": "wait",
+                "check": "wait",
                 "timeout": 2,
                 "condition": {
                     "role": "label",
@@ -488,7 +488,7 @@ def test_compact_clip_preserves_failed_wait_and_capture_delay(
                 },
             }
         ],
-        "failure_capture": {"path": str(failure), "delay": 1},
+        "failure_screenshot": {"path": str(failure), "delay": 1},
     }
     plan = tmp_path / "wait.json"
     plan.write_text(json.dumps(batch))
@@ -529,9 +529,9 @@ def test_status_and_stop_reject_copied_session_metadata(
     other = tmp_path / "copied-session"
     other.mkdir()
     (other / "session.json").write_bytes((demo.directory / "session.json").read_bytes())
-    for action in ("status", "stop"):
+    for command in ("status", "stop"):
         result = subprocess.run(
-            ["framewisp", str(other), action],
+            ["framewisp", str(other), command],
             capture_output=True,
             text=True,
             check=False,
@@ -1195,7 +1195,7 @@ def test_pointer_approach_uses_tracked_position(
     plan.write_text(
         json.dumps(
             {
-                "actions": [
+                "steps": [
                     {
                         "action": "drag",
                         "x1": 100,
@@ -1423,11 +1423,11 @@ def test_typing_paces_received_characters(
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_shortcuts_select_and_edit_text(demo: Demo) -> None:
-    capture = demo.directory / "ready.png"
+    screenshot_path = demo.directory / "ready.png"
 
     def entry_is_visible() -> bool:
-        cli(demo.directory, "screenshot", str(capture))
-        with Image.open(capture) as image:
+        cli(demo.directory, "screenshot", str(screenshot_path))
+        with Image.open(screenshot_path) as image:
             return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
 
     wait_until(entry_is_visible)
@@ -1572,10 +1572,10 @@ def test_punctuation_navigation_and_function_shortcuts(
             ]
         )
     plan = tmp_path / "shortcuts.json"
-    plan.write_text(json.dumps({"actions": actions}))
+    plan.write_text(json.dumps({"steps": actions}))
     result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
     assert result["status"] == "completed"
-    assert result["completed_actions"] == len(actions)
+    assert result["completed_steps"] == len(actions)
 
     def presses() -> list[dict[str, str | float | bool]]:
         return [
@@ -1698,9 +1698,9 @@ def disconnect_vnc_with_clipboard(runtime: Path) -> None:
 )
 def test_custom_display_size(demo: Demo, size: tuple[int, int], tmp_path: Path) -> None:
     wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    capture = tmp_path / "custom-size.png"
-    cli(demo.directory, "screenshot", str(capture))
-    with Image.open(capture) as image:
+    screenshot_path = tmp_path / "custom-size.png"
+    cli(demo.directory, "screenshot", str(screenshot_path))
+    with Image.open(screenshot_path) as image:
         assert image.size == size
     # This point is outside the default display. Check coordinates received by GTK.
     cli(demo.directory, "click", "1500", "300")
@@ -2061,10 +2061,8 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     plan.write_text(
         json.dumps(
             {
-                "actions": [
-                    {"action": "click", "x": 300, "y": 200, "move_duration": 0}
-                ],
-                "capture": {"path": str(shot), "delay": 0.05},
+                "steps": [{"action": "click", "x": 300, "y": 200, "move_duration": 0}],
+                "screenshot": {"path": str(shot), "delay": 0.05},
             }
         )
     )
@@ -2222,7 +2220,7 @@ def test_rejected_console_panel_leaves_the_app_running(
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(demo.runtime / "command.sock"))
             request = {
-                "action": "record-start",
+                "command": "record-start",
                 "session_directory": str(demo.directory.resolve()),
                 "destination": str(rejected),
                 "key_captions": "non-text",
@@ -2247,7 +2245,7 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
     with socket.socket(socket.AF_UNIX) as connection:
         connection.connect(str(demo.runtime / "command.sock"))
         request = {
-            "action": "record-start",
+            "command": "record-start",
             "session_directory": str(demo.directory.resolve()),
             "destination": str(tmp_path / "rejected.mp4"),
             "key_captions": "non-text",
@@ -2289,7 +2287,7 @@ def test_unusable_recording_destination_leaves_the_app_running(
         (f"{tmp_path}/{'a' * 300}.mp4", ""),
     ):
         request = {
-            "action": "record-start",
+            "command": "record-start",
             "session_directory": session_dir,
             "destination": destination,
             "key_captions": "non-text",
@@ -2313,7 +2311,7 @@ def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> N
     wait_for_input_probe_window(demo)
     clip = tmp_path / "\udc80.mp4"
     request = {
-        "action": "record-start",
+        "command": "record-start",
         "session_directory": str(demo.directory.resolve()),
         "destination": str(clip),
         "key_captions": "non-text",
@@ -2362,47 +2360,47 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         b"\n",
         b"not json\n",
         b"\xff\xfe\n",
-        b'{"action"',
+        b'{"command"',
         b"[" * 100000 + b"\n",
-        b'{"action": ' + b"9" * 5000 + b"}\n",
+        b'{"command": ' + b"9" * 5000 + b"}\n",
         b"[]\n",
     ]
     other_session = [
         (
-            json.dumps({"session_directory": "/nonexistent", "action": name}) + "\n"
+            json.dumps({"session_directory": "/nonexistent", "command": name}) + "\n"
         ).encode()
         for name in ("stop", "status", "record-stop")
     ]
     bad_commands: list[dict[str, object]] = [
         {},
-        {"action": 1},
-        {"action": "unknown"},
-        {"action": "record-start"},
-        {"action": "record-start", "destination": "x.mp4", "key_captions": "non-text"},
-        {"action": "record-start", "destination": "/tmp/x.mp4", "key_captions": []},
+        {"command": 1},
+        {"command": "unknown"},
+        {"command": "record-start"},
+        {"command": "record-start", "destination": "x.mp4", "key_captions": "non-text"},
+        {"command": "record-start", "destination": "/tmp/x.mp4", "key_captions": []},
         {
-            "action": "record-start",
+            "command": "record-start",
             "destination": "/tmp/x.mp4",
             "key_captions": "non-text",
             "compact": "yes",
         },
-        {"action": "move"},
-        {"action": "click"},
-        {"action": "drag"},
-        {"action": "scroll"},
-        {"action": "type"},
-        {"action": "key"},
-        {"action": "batch"},
-        {"action": "move", "parameters": {"x": [], "y": 0}},
-        {"action": "click", "parameters": {"x": 0, "y": 0, "button": []}},
-        {"action": "type", "parameters": {"text": "\0", "interval": 0}},
-        {"action": "key", "parameters": {"chord": "\ud800"}},
-        {"action": "batch", "parameters": {"actions": [{"action": []}]}},
+        {"command": "move"},
+        {"command": "click"},
+        {"command": "drag"},
+        {"command": "scroll"},
+        {"command": "type"},
+        {"command": "key"},
+        {"command": "batch"},
+        {"command": "move", "parameters": {"x": [], "y": 0}},
+        {"command": "click", "parameters": {"x": 0, "y": 0, "button": []}},
+        {"command": "type", "parameters": {"text": "\0", "interval": 0}},
+        {"command": "key", "parameters": {"chord": "\ud800"}},
+        {"command": "batch", "parameters": {"steps": [{"action": []}]}},
         {
-            "action": "batch",
+            "command": "batch",
             "parameters": {
-                "actions": [{"action": "move", "x": 0, "y": 0}],
-                "capture": {"path": "/tmp/\ud800.png"},
+                "steps": [{"action": "move", "x": 0, "y": 0}],
+                "screenshot": {"path": "/tmp/\ud800.png"},
             },
         },
     ]
@@ -2569,7 +2567,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             plan.write_text(
                 json.dumps(
                     {
-                        "actions": [
+                        "steps": [
                             {
                                 "action": "type",
                                 "text": "café 日本語 😀",
@@ -2804,7 +2802,7 @@ def test_runner_rejects_invalid_caption_mode(
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(demo.runtime / "command.sock"))
             request = {
-                "action": "record-start",
+                "command": "record-start",
                 "session_directory": str(demo.directory),
                 "destination": str(destination),
                 field: value,
@@ -3038,7 +3036,7 @@ def input_request(
             json.dumps(
                 {
                     "session_directory": str(demo.directory),
-                    "action": action,
+                    "command": action,
                     "parameters": parameters,
                 }
             )
@@ -3462,7 +3460,7 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
     reset = inspect(demo, "--text", "Applied: Inspected text")
     assert reset["status"] == "ok", reset
     assert reset["match_count"] == 0
-    assert reset["snapshot_id"] != label["snapshot_id"]
+    assert reset["observation_id"] != label["observation_id"]
 
 
 @pytest.mark.integration
@@ -3542,7 +3540,7 @@ def test_inspect_qt_controls_and_popup_gap(demo: Demo) -> None:
     cli(demo.directory, "click", "--button", "right", "500", "300")
     again = inspect(demo, "--name", "Inspection button")
     assert again["status"] == "ok", again
-    assert again["snapshot_id"] != item["snapshot_id"]
+    assert again["observation_id"] != item["observation_id"]
 
 
 @pytest.mark.integration
@@ -3620,30 +3618,32 @@ def test_inspection_private_buses_and_unsupported_apps(
 # R-CHECK-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
+def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
     cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "ready.png"))
     plan = tmp_path / "batch.json"
-    capture = tmp_path / "result.png"
+    screenshot_path = tmp_path / "result.png"
     actions = [
         {"action": "click", "x": 120, "y": 100},
         {"action": "type", "text": "HelloGUI é中", "interval": 0},
         {"action": "key", "chord": "Shift+a"},
         {"action": "key", "chord": "Return"},
     ]
-    plan.write_text(json.dumps({"actions": actions, "capture": {"path": str(capture)}}))
+    plan.write_text(
+        json.dumps({"steps": actions, "screenshot": {"path": str(screenshot_path)}})
+    )
     result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
     assert result["status"] == "completed"
     assert result["verified"] is None
-    assert result["completed_actions"] == 4
+    assert result["completed_steps"] == 4
     assert result["failed_index"] is None
     assert result["failed_phase"] is None
-    assert result["artifacts"] == [str(capture)]
+    assert result["artifacts"] == [str(screenshot_path)]
     assert result["duration_seconds"] >= sum(
         item["duration_seconds"] for item in result["results"]
     )
-    assert result["capture_seconds"] > 0
-    with Image.open(capture) as image:
+    assert result["screenshot_seconds"] > 0
+    with Image.open(screenshot_path) as image:
         assert image.size == (1280, 720)
     wait_until(
         lambda: "Entered: HelloGUI é中A\n" in (demo.directory / "app.log").read_text()
@@ -3672,27 +3672,27 @@ def test_batch_cli_unicode_capture_and_logs(demo: Demo, tmp_path: Path) -> None:
 # R-BATCH-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> None:
+def test_batch_validates_later_steps_and_screenshot_before_input(demo: Demo) -> None:
     before = (demo.directory / "inputs.jsonl").read_text()
     invalid: list[dict[str, object]] = [
         {
-            "actions": [
+            "steps": [
                 {"action": "key", "chord": "a"},
                 {"action": "key", "chord": "bad"},
             ]
         },
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": str(demo.directory / "session.json")},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": str(demo.directory / "session.json")},
         },
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": str(demo.directory / "missing" / "image.png")},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": str(demo.directory / "missing" / "image.png")},
         },
         {
-            "actions": [
+            "steps": [
                 {"action": "key", "chord": "a"},
-                check_step("assert", "Done") | {"observation": {"max_nodes": True}},
+                check_step("assert", "Done") | {"limits": {"max_nodes": True}},
             ]
         },
     ]
@@ -3706,7 +3706,7 @@ def test_batch_validates_later_actions_and_capture_before_input(demo: Demo) -> N
 # R-BATCH-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_no_interleaving_through_final_capture(
+def test_batch_no_interleaving_through_final_screenshot(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
@@ -3715,18 +3715,18 @@ def test_batch_no_interleaving_through_final_capture(
         demo,
         "batch",
         {
-            "actions": [
+            "steps": [
                 {"action": "type", "text": "ab", "interval": 0.3},
                 {"action": "key", "chord": "Return"},
             ],
-            "capture": {"path": str(tmp_path / "batch.png"), "delay": 0.3},
+            "screenshot": {"path": str(tmp_path / "batch.png"), "delay": 0.3},
         },
     ) as first:
         wait_until(
             lambda: '"action": "type"' in (demo.directory / "inputs.jsonl").read_text()
         )
         with input_request(
-            demo, "batch", {"actions": [{"action": "type", "text": "c", "interval": 0}]}
+            demo, "batch", {"steps": [{"action": "type", "text": "c", "interval": 0}]}
         ) as second:
             assert (
                 json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
@@ -3762,7 +3762,7 @@ def test_batch_checks_x11_capacity_before_input(
     plan.write_text(
         json.dumps(
             {
-                "actions": [
+                "steps": [
                     {"action": "key", "chord": "a"},
                     {
                         "action": "type",
@@ -3776,7 +3776,7 @@ def test_batch_checks_x11_capacity_before_input(
                     },
                     {"action": "key", "chord": "z"},
                 ],
-                "capture": {"path": str(tmp_path / "never.png")},
+                "screenshot": {"path": str(tmp_path / "never.png")},
             }
         )
     )
@@ -3789,7 +3789,7 @@ def test_batch_checks_x11_capacity_before_input(
     assert response.returncode == 1
     result = json.loads(response.stdout)
     assert result["status"] == "failed"
-    assert result["completed_actions"] == 0
+    assert result["completed_steps"] == 0
     assert result["failed_index"] == failed
     assert result["failed_phase"] == "validation"
     assert result["results"] == []
@@ -3802,7 +3802,7 @@ def test_batch_checks_x11_capacity_before_input(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_capture_failure_keeps_completed_results(
+def test_batch_screenshot_failure_keeps_completed_results(
     demo: Demo, tmp_path: Path
 ) -> None:
     parent = tmp_path / "removed"
@@ -3811,8 +3811,8 @@ def test_batch_capture_failure_keeps_completed_results(
         demo,
         "batch",
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": str(parent / "image.png"), "delay": 0.5},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": str(parent / "image.png"), "delay": 0.5},
         },
     ) as connection:
         wait_until(
@@ -3822,9 +3822,9 @@ def test_batch_capture_failure_keeps_completed_results(
         response = json.loads(connection.recv(8192))
     result = response["data"]
     assert response["error"] is not None
-    assert result["completed_actions"] == 1
+    assert result["completed_steps"] == 1
     assert result["failed_index"] is None
-    assert result["failed_phase"] == "capture"
+    assert result["failed_phase"] == "screenshot"
     assert result["artifacts"] == []
     cli(demo.directory, "key", "b")
 
@@ -3840,7 +3840,7 @@ def test_batch_disconnect_releases_gesture_and_skips_tail(
         demo,
         "batch",
         {
-            "actions": [
+            "steps": [
                 {
                     "action": "drag",
                     "x1": 100,
@@ -3852,7 +3852,7 @@ def test_batch_disconnect_releases_gesture_and_skips_tail(
                 },
                 {"action": "key", "chord": "z"},
             ],
-            "capture": {"path": str(tmp_path / "never.png")},
+            "screenshot": {"path": str(tmp_path / "never.png")},
         },
     ) as batch:
         wait_until(
@@ -3876,13 +3876,13 @@ def test_batch_disconnect_releases_gesture_and_skips_tail(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_stop_cancels_batch_capture_delay(demo: Demo, tmp_path: Path) -> None:
+def test_stop_cancels_batch_screenshot_delay(demo: Demo, tmp_path: Path) -> None:
     with input_request(
         demo,
         "batch",
         {
-            "actions": [{"action": "key", "chord": "a"}],
-            "capture": {"path": str(tmp_path / "never.png"), "delay": 30},
+            "steps": [{"action": "key", "chord": "a"}],
+            "screenshot": {"path": str(tmp_path / "never.png"), "delay": 30},
         },
     ) as connection:
         wait_until(
@@ -3892,8 +3892,8 @@ def test_stop_cancels_batch_capture_delay(demo: Demo, tmp_path: Path) -> None:
         cli(demo.directory, "stop")
         assert time.monotonic() - start < 3
         result = json.loads(connection.recv(8192))["data"]
-    assert result["completed_actions"] == 1
-    assert result["failed_phase"] == "capture"
+    assert result["completed_steps"] == 1
+    assert result["failed_phase"] == "screenshot"
     assert "cancelled" in result["error"]
     assert not (tmp_path / "never.png").exists()
 
@@ -3902,13 +3902,13 @@ def test_stop_cancels_batch_capture_delay(demo: Demo, tmp_path: Path) -> None:
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
     with input_request(
-        demo, "batch", {"actions": [{"action": "type", "text": "ab", "interval": 30}]}
+        demo, "batch", {"steps": [{"action": "type", "text": "ab", "interval": 30}]}
     ) as first:
         wait_until(
             lambda: '"event": "start"' in (demo.directory / "inputs.jsonl").read_text()
         )
         with input_request(
-            demo, "batch", {"actions": [{"action": "key", "chord": "z"}]}
+            demo, "batch", {"steps": [{"action": "key", "chord": "z"}]}
         ) as queued:
             cli(demo.directory, "status")
             queued.close()
@@ -3927,7 +3927,7 @@ def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_disconnect_during_capture(demo: Demo, tmp_path: Path) -> None:
+def test_batch_disconnect_during_screenshot(demo: Demo, tmp_path: Path) -> None:
     cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
     state = json.loads((demo.directory / "session.json").read_text())
     sway_pid = state["processes"]["sway"]
@@ -3937,14 +3937,14 @@ def test_batch_disconnect_during_capture(demo: Demo, tmp_path: Path) -> None:
             demo,
             "batch",
             {
-                "actions": [{"action": "type", "text": "", "interval": 0}],
-                "capture": {"path": str(tmp_path / "cancelled.png")},
+                "steps": [{"action": "type", "text": "", "interval": 0}],
+                "screenshot": {"path": str(tmp_path / "cancelled.png")},
             },
         ) as connection:
-            wait_until(lambda: bool(list(tmp_path.glob(".framewisp-capture-*"))))
+            wait_until(lambda: bool(list(tmp_path.glob(".framewisp-screenshot-*"))))
             connection.close()
             started = time.monotonic()
-            wait_until(lambda: not list(tmp_path.glob(".framewisp-capture-*")))
+            wait_until(lambda: not list(tmp_path.glob(".framewisp-screenshot-*")))
             assert time.monotonic() - started < 2
     finally:
         os.kill(sway_pid, signal.SIGCONT)
@@ -3955,31 +3955,31 @@ def test_batch_disconnect_during_capture(demo: Demo, tmp_path: Path) -> None:
 # R-REC-1
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_capture_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> None:
-    capture = tmp_path / "result.png"
+def test_batch_screenshot_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> None:
+    screenshot_path = tmp_path / "result.png"
     with input_request(
         demo,
         "batch",
         {
-            "actions": [{"action": "type", "text": "", "interval": 0}],
-            "capture": {"path": str(capture), "delay": 0.5},
+            "steps": [{"action": "type", "text": "", "interval": 0}],
+            "screenshot": {"path": str(screenshot_path), "delay": 0.5},
         },
     ) as connection:
         wait_until(
             lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
         )
-        capture.write_bytes(b"another client's artifact")
+        screenshot_path.write_bytes(b"another client's artifact")
         response = json.loads(connection.recv(8192))
-    assert response["data"]["failed_phase"] == "capture"
+    assert response["data"]["failed_phase"] == "screenshot"
     assert response["data"]["artifacts"] == []
-    assert capture.read_bytes() == b"another client's artifact"
-    assert not list(tmp_path.glob(".framewisp-capture-*"))
+    assert screenshot_path.read_bytes() == b"another client's artifact"
+    assert not list(tmp_path.glob(".framewisp-screenshot-*"))
 
 
 # R-REC-1, R-REC-21
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_capture_rejects_active_recording_destination(
+def test_batch_screenshot_rejects_active_recording_destination(
     demo: Demo, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
@@ -3988,8 +3988,8 @@ def test_batch_capture_rejects_active_recording_destination(
         demo,
         "batch",
         {
-            "actions": [{"action": "type", "text": "", "interval": 0}],
-            "capture": {"path": str(clip)},
+            "steps": [{"action": "type", "text": "", "interval": 0}],
+            "screenshot": {"path": str(clip)},
         },
     ) as connection:
         response = json.loads(connection.recv(8192))
@@ -4013,7 +4013,7 @@ def rejected_screenshot(demo: Demo, path: Path) -> str:
 # R-REC-21
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_capture_yields_to_a_recording_started_during_the_batch(
+def test_batch_screenshot_yields_to_a_recording_started_during_the_batch(
     demo: Demo, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
@@ -4021,15 +4021,15 @@ def test_batch_capture_yields_to_a_recording_started_during_the_batch(
         demo,
         "batch",
         {
-            "actions": [{"action": "type", "text": "", "interval": 0}],
+            "steps": [{"action": "type", "text": "", "interval": 0}],
             # Longer than record-start's ten-second limit, so it finishes first.
-            "capture": {"path": str(clip), "delay": 11},
+            "screenshot": {"path": str(clip), "delay": 11},
         },
     ) as connection:
         connection.settimeout(20)
         cli(demo.directory, "record-start", str(clip))
         response = json.loads(connection.makefile().readline())
-    assert response["data"]["failed_phase"] == "capture"
+    assert response["data"]["failed_phase"] == "screenshot"
     assert "active recording" in response["error"]
     assert not clip.exists()
     cli(demo.directory, "record-stop")
@@ -4296,7 +4296,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
         demo,
         "batch",
         {
-            "actions": [
+            "steps": [
                 {"action": "key", "chord": "a"},
                 {
                     "action": "drag",
@@ -4309,7 +4309,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
                 },
                 {"action": "key", "chord": "z"},
             ],
-            "capture": {"path": str(tmp_path / "never.png")},
+            "screenshot": {"path": str(tmp_path / "never.png")},
         },
     ) as connection:
         wait_until(
@@ -4319,7 +4319,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
         os.kill(state["processes"]["wayvnc"], signal.SIGTERM)
         demo.process.wait(timeout=5)
         result = json.loads(connection.recv(8192))["data"]
-    assert result["completed_actions"] == 1
+    assert result["completed_steps"] == 1
     assert result["failed_index"] == 1
     assert result["status"] == "failed"
     assert not any(event.get("key") == "z" for event in input_events(demo))
@@ -4335,12 +4335,12 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
     plan.write_text(
         json.dumps(
             {
-                "actions": [
+                "steps": [
                     {"action": "click", "x": 120, "y": 100},
                     {"action": "type", "text": "HelloBatch", "interval": 0},
                     {"action": "click", "x": 120, "y": 170},
                     {
-                        "action": "wait",
+                        "check": "wait",
                         "timeout": 5,
                         "condition": {
                             "role": "label",
@@ -4350,7 +4350,7 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
                         },
                     },
                     {
-                        "action": "assert",
+                        "check": "assert",
                         "timeout": 5,
                         "condition": {
                             "role": "button",
@@ -4360,12 +4360,12 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
                         },
                     },
                     {
-                        "action": "assert",
+                        "check": "assert",
                         "timeout": 5,
                         "condition": {"role": "slider", "field": "value", "equals": 25},
                     },
                     {
-                        "action": "baseline",
+                        "check": "baseline",
                         "timeout": 5,
                         "condition": {
                             "role": "checkbox",
@@ -4375,7 +4375,7 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
                     },
                     {"action": "click", "x": 54, "y": 266},
                     {
-                        "action": "wait",
+                        "check": "wait",
                         "timeout": 5,
                         "after": 6,
                         "condition": {
@@ -4400,15 +4400,15 @@ def wait_condition(text: str) -> dict[str, object]:
     return {"role": "label", "name": "Result", "field": "text", "equals": text}
 
 
-def check_step(action: str, text: str, timeout: float = 5) -> dict[str, object]:
-    return {"action": action, "condition": wait_condition(text), "timeout": timeout}
+def check_step(kind: str, text: str, timeout: float = 5) -> dict[str, object]:
+    return {"check": kind, "condition": wait_condition(text), "timeout": timeout}
 
 
 def checked_batch(
-    demo: Demo, tmp_path: Path, actions: list[dict[str, object]], **options: object
+    demo: Demo, tmp_path: Path, steps: list[dict[str, object]], **options: object
 ) -> dict[str, Any]:
     path = tmp_path / "checks.json"
-    path.write_text(json.dumps({"actions": actions, **options}))
+    path.write_text(json.dumps({"steps": steps, **options}))
     response = subprocess.run(
         ["framewisp", str(demo.directory), "batch", "--file", str(path)],
         capture_output=True,
@@ -4442,12 +4442,12 @@ def test_checks_submit_delayed_and_replaced_widgets(
         ],
     )
     assert data["verified"] is True, data
-    assert data["completed_actions"] == 6
+    assert data["completed_steps"] == 6
     assert data["results"][0]["observations"] == 1
     assert data["results"][4]["observations"] > 1
-    baseline = data["results"][1]["observation"]["snapshot_id"]
-    assert data["results"][4]["baseline_snapshot_id"] == baseline
-    assert data["results"][4]["observation"]["snapshot_id"] != baseline
+    baseline = data["results"][1]["observation"]["observation_id"]
+    assert data["results"][4]["baseline_observation_id"] == baseline
+    assert data["results"][4]["observation"]["observation_id"] != baseline
     assert data["results"][5]["observation"]["matches"][0]["text"] == text
 
 
@@ -4459,39 +4459,39 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
     default = inspect(demo, "--role", "label", "--name", "Result")
     assert default["status"] == "partial", default
     assert "max-depth" in default["reasons"], default
-    for action in ("baseline", "wait", "assert"):
-        failed = checked_batch(demo, tmp_path, [check_step(action, "Done", 0.5)])
+    for kind in ("baseline", "wait", "assert"):
+        failed = checked_batch(demo, tmp_path, [check_step(kind, "Done", 0.5)])
         assert failed["verified"] is False, failed
-        assert "observation.max_depth" in failed["error"], failed
+        assert "limits.max_depth" in failed["error"], failed
         assert "longer check timeout alone" in failed["error"], failed
 
     depth_only = checked_batch(
         demo,
         tmp_path,
-        [check_step("assert", "Waiting") | {"observation": {"max_depth": 16}}],
+        [check_step("assert", "Waiting") | {"limits": {"max_depth": 16}}],
     )
     assert depth_only["verified"] is False, depth_only
-    assert "observation.max_nodes" in depth_only["error"], depth_only
+    assert "limits.max_nodes" in depth_only["error"], depth_only
     assert depth_only["results"][0]["observation"]["matches"][0]["text"] == "Waiting"
 
-    observation = {"max_nodes": 1024, "max_depth": 16, "timeout": 5}
-    actions: list[dict[str, object]] = [
-        check_step("baseline", "Done") | {"observation": observation},
+    limits = {"max_nodes": 1024, "max_depth": 16, "timeout": 5}
+    steps: list[dict[str, object]] = [
+        check_step("baseline", "Done") | {"limits": limits},
         {"action": "type", "text": "Done", "interval": 0},
         {"action": "key", "chord": "Return"},
-        check_step("wait", "Done") | {"after": 0, "observation": observation},
-        check_step("assert", "Done") | {"observation": observation},
+        check_step("wait", "Done") | {"after": 0, "limits": limits},
+        check_step("assert", "Done") | {"limits": limits},
     ]
-    passed = checked_batch(demo, tmp_path, actions)
+    passed = checked_batch(demo, tmp_path, steps)
     assert passed["verified"] is True, passed
     for index in (0, 3, 4):
         result = passed["results"][index]
         assert result["observation"]["status"] == "ok"
         assert result["observation"]["visited"] > 256
-        assert result["observation_settings"] == observation
+        assert result["limits"] == limits
     assert (
-        passed["results"][3]["baseline_snapshot_id"]
-        == passed["results"][0]["baseline_snapshot_id"]
+        passed["results"][3]["baseline_observation_id"]
+        == passed["results"][0]["baseline_observation_id"]
     )
 
     cli(demo.directory, "key", "Ctrl+a")
@@ -4501,7 +4501,7 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
         lambda: "Finished: duplicate" in (demo.directory / "app.log").read_text()
     )
     duplicate = checked_batch(
-        demo, tmp_path, [check_step("wait", "duplicate") | {"observation": observation}]
+        demo, tmp_path, [check_step("wait", "duplicate") | {"limits": limits}]
     )
     assert duplicate["verified"] is False, duplicate
     assert "ambiguous" in duplicate["error"]
@@ -4526,9 +4526,9 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
     assert deep["match_count"] == 1, deep
     assert deep["matches"][0]["depth"] > 40, deep
 
-    def step(action: str, name: str, depth: int) -> dict[str, object]:
+    def step(kind: str, name: str, depth: int) -> dict[str, object]:
         return {
-            "action": action,
+            "check": kind,
             "timeout": 5,
             "condition": {
                 "role": "button",
@@ -4536,7 +4536,7 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
                 "field": "name",
                 "equals": name,
             },
-            "observation": {"max_depth": depth},
+            "limits": {"max_depth": depth},
         }
 
     failed = checked_batch(demo, tmp_path, [step("assert", "Shallow", 32)])
@@ -4547,16 +4547,16 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
         demo,
         tmp_path,
         [
-            step(action, name, 64)
-            for action in ("wait", "assert")
+            step(kind, name, 64)
+            for kind in ("wait", "assert")
             for name in ("Shallow", "Deep")
         ],
     )
     assert passed["verified"] is True, passed
-    assert passed["completed_actions"] == 4, passed
+    assert passed["completed_steps"] == 4, passed
     for result in passed["results"]:
         assert result["observation"]["status"] == "ok", result
-        assert result["observation_settings"]["max_depth"] == 64, result
+        assert result["limits"]["max_depth"] == 64, result
 
 
 @pytest.mark.integration
@@ -4572,17 +4572,17 @@ def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
         "equals": True,
     }
     step: dict[str, object] = {
-        "action": "assert",
+        "check": "assert",
         "timeout": 5,
         "condition": condition,
-        "observation": {"max_nodes": 1024, "timeout": 5},
+        "limits": {"max_nodes": 1024, "timeout": 5},
     }
     exhausted = checked_batch(
-        demo, tmp_path, [step | {"observation": {"max_nodes": 1024, "timeout": 0.1}}]
+        demo, tmp_path, [step | {"limits": {"max_nodes": 1024, "timeout": 0.1}}]
     )
     assert exhausted["verified"] is False, exhausted
     assert exhausted["results"][0]["observation"]["status"] == "timeout"
-    assert "observation.timeout" in exhausted["error"]
+    assert "limits.timeout" in exhausted["error"]
     complete = checked_batch(demo, tmp_path, [step])
     assert complete["verified"] is True, complete
     assert complete["results"][0]["observation"]["visited"] >= 800
@@ -4592,26 +4592,26 @@ def test_large_qt_check_observation_timeout(demo: Demo, tmp_path: Path) -> None:
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", ["waits"], indirect=True)
 @pytest.mark.parametrize(
-    "action,text,timeout",
+    "kind,text,timeout",
     [("wait", "Never", 0.3), ("assert", "Never", 2), ("baseline", "Waiting", 2)],
 )
-def test_failed_checks_stop_and_capture(
-    demo: Demo, tmp_path: Path, action: str, text: str, timeout: float
+def test_failed_checks_stop_and_take_failure_screenshot(
+    demo: Demo, tmp_path: Path, kind: str, text: str, timeout: float
 ) -> None:
     wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
-    capture = tmp_path / "failed.png"
+    screenshot_path = tmp_path / "failed.png"
     data = checked_batch(
         demo,
         tmp_path,
         [
             check_step("wait", "Waiting"),
-            check_step(action, text, timeout),
+            check_step(kind, text, timeout),
             {"action": "type", "text": "should-not-run"},
         ],
-        failure_capture={"path": str(capture)},
+        failure_screenshot={"path": str(screenshot_path)},
     )
     assert data["verified"] is False
-    assert data["completed_actions"] == 1
+    assert data["completed_steps"] == 1
     assert data["failed_index"] == 1
     assert data["failed_phase"] == "check"
     assert data["results"][1]["condition"] == wait_condition(text)
@@ -4621,8 +4621,8 @@ def test_failed_checks_stop_and_capture(
     else:
         assert observation["status"] == "timeout"
     assert data["results"][1]["duration_seconds"] < 3
-    assert data["artifacts"] == [str(capture)]
-    with Image.open(capture) as image:
+    assert data["artifacts"] == [str(screenshot_path)]
+    with Image.open(screenshot_path) as image:
         assert image.size == (1280, 720)
     assert (demo.directory / "inputs.jsonl").read_text() == ""
     cli(demo.directory, "key", "a")
@@ -4660,10 +4660,10 @@ def test_wait_cancellation_and_app_exit(
             demo,
             "batch",
             {
-                "actions": [
+                "steps": [
                     check_step("wait", "Never", 10)
                     | {
-                        "observation": {
+                        "limits": {
                             "max_nodes": 1024,
                             "max_depth": 16,
                             "timeout": 10,
@@ -4671,7 +4671,7 @@ def test_wait_cancellation_and_app_exit(
                     },
                     {"action": "key", "chord": "z"},
                 ],
-                "failure_capture": {"path": str(tmp_path / "never.png")},
+                "failure_screenshot": {"path": str(tmp_path / "never.png")},
             },
         ) as connection:
             time.sleep(0.15)
@@ -4765,9 +4765,9 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
             "height": h,
             "display_width": width,
             "display_height": height,
-            "capture_seconds": metadata["capture_seconds"],
+            "screenshot_seconds": metadata["screenshot_seconds"],
         }
-        assert metadata["capture_seconds"] > 0
+        assert metadata["screenshot_seconds"] > 0
         with Image.open(full_path) as full_image, Image.open(crop_path) as crop:
             assert crop.size == (w, h)
             assert (
@@ -5262,10 +5262,10 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
         [sys.executable, "-c", "import time; time.sleep(60)"]
     ) as unrelated:
         try:
-            for action in (["recover"], ["run", "--", sys.executable, "-c", "pass"]):
+            for command in (["recover"], ["run", "--", sys.executable, "-c", "pass"]):
                 before = (demo.directory / "inputs.jsonl").read_bytes()
                 rejected = subprocess.run(
-                    ["framewisp", str(demo.directory), *action],
+                    ["framewisp", str(demo.directory), *command],
                     capture_output=True,
                     text=True,
                     timeout=20,
@@ -5379,9 +5379,9 @@ def test_named_session_launch_commands_and_cleanup(tmp_path: Path) -> None:
 
         named("status")
         named("move", "120", "100")
-        capture = tmp_path / "named.png"
-        named("screenshot", str(capture))
-        with Image.open(capture) as image:
+        screenshot_path = tmp_path / "named.png"
+        named("screenshot", str(screenshot_path))
+        with Image.open(screenshot_path) as image:
             assert image.size == (1280, 720)
         duplicate = subprocess.run(
             ["framewisp", "browser", "run", "--", "framewisp-demo"],

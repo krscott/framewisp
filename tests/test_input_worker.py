@@ -53,7 +53,7 @@ def test_interrupted_drag_releases_held_input(tmp_path: Path, cause: str) -> Non
         stop,
         x11=False,
         size=(800, 600),
-        capture=lambda _path, _cancelled: 0,
+        screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
     action = InputAction.parse(
@@ -115,7 +115,7 @@ def perform(
         stop,
         x11=False,
         size=(800, 600),
-        capture=lambda _path, _cancelled: 0,
+        screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
     try:
@@ -198,7 +198,7 @@ def test_interrupted_drag_pings_its_press_only(tmp_path: Path) -> None:
         stop,
         x11=False,
         size=(800, 600),
-        capture=lambda _path, _cancelled: 0,
+        screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
     try:

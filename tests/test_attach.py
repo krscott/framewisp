@@ -563,7 +563,7 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
                 request_attached(
                     tmp_path / "session",
                     "screenshot",
-                    {"path": str(tmp_path / "capture.png")},
+                    {"path": str(tmp_path / "screenshot.png")},
                 )
             )
         )
@@ -626,7 +626,9 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
     (tmp_path / "empty-screenshot").touch()
     assert (
         request_attached(
-            tmp_path / "session", "screenshot", {"path": str(tmp_path / "capture.png")}
+            tmp_path / "session",
+            "screenshot",
+            {"path": str(tmp_path / "screenshot.png")},
         )
         == 1
     )
@@ -1020,30 +1022,30 @@ def test_malformed_requests_leave_the_attachment_running(
     os.mkfifo(tmp_path / "fifo")
     requests: list[dict[str, object]] = [
         {},
-        {"action": 1, "parameters": {}},
-        {"action": "key"},
-        {"action": "key", "parameters": []},
-        {"action": "key", "parameters": {}},
-        {"action": "key", "parameters": {"chord": []}},
-        {"action": "key", "parameters": {"chord": "\ud800"}},
-        {"action": "unknown", "parameters": {}},
-        {"action": "record-start", "parameters": {}},
-        {"action": "click", "parameters": {"x": "a", "y": 0}},
-        {"action": "screenshot"},
-        {"action": "screenshot", "parameters": {"path": 1}},
-        {"action": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
-        {"action": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
-        {"action": "screenshot", "parameters": {"path": "x.png"}},
-        {"action": "screenshot", "parameters": {"path": ""}},
-        {"action": "screenshot", "parameters": {"path": str(tmp_path)}},
-        {"action": "screenshot", "parameters": {"path": str(tmp_path / "fifo")}},
-        {"action": "screenshot", "parameters": {"path": "/dev/full"}},
+        {"command": 1, "parameters": {}},
+        {"command": "key"},
+        {"command": "key", "parameters": []},
+        {"command": "key", "parameters": {}},
+        {"command": "key", "parameters": {"chord": []}},
+        {"command": "key", "parameters": {"chord": "\ud800"}},
+        {"command": "unknown", "parameters": {}},
+        {"command": "record-start", "parameters": {}},
+        {"command": "click", "parameters": {"x": "a", "y": 0}},
+        {"command": "screenshot"},
+        {"command": "screenshot", "parameters": {"path": 1}},
+        {"command": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
+        {"command": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
+        {"command": "screenshot", "parameters": {"path": "x.png"}},
+        {"command": "screenshot", "parameters": {"path": ""}},
+        {"command": "screenshot", "parameters": {"path": str(tmp_path)}},
+        {"command": "screenshot", "parameters": {"path": str(tmp_path / "fifo")}},
+        {"command": "screenshot", "parameters": {"path": "/dev/full"}},
         {
-            "action": "screenshot",
+            "command": "screenshot",
             "parameters": {"path": str(tmp_path / "missing" / "x.png")},
         },
         {
-            "action": "screenshot",
+            "command": "screenshot",
             "parameters": {"path": str(tmp_path / ("a" * 300))},
         },
     ]

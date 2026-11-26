@@ -85,19 +85,19 @@ def main() -> None:
             plan = root / "plan.json"
             for sample in range(args.samples):
                 for mode in ("default", "explicit"):
-                    for action in ("inspect", "baseline", "wait", "assert"):
+                    for kind in ("inspect", "baseline", "wait", "assert"):
                         request: dict[str, object] = {
-                            "action": action,
+                            "check": kind,
                             "timeout": 5,
                             "condition": condition,
                         }
-                        if action == "baseline":
+                        if kind == "baseline":
                             request["condition"] = condition | {
                                 "equals": "Never" if args.app == "gtk" else False
                             }
                         if mode == "explicit":
-                            request["observation"] = budgets
-                        plan.write_text(json.dumps({"actions": [request]}))
+                            request["limits"] = budgets
+                        plan.write_text(json.dumps({"steps": [request]}))
                         arguments = (
                             [
                                 "inspect",
@@ -122,7 +122,7 @@ def main() -> None:
                                     else []
                                 ),
                             ]
-                            if action == "inspect"
+                            if kind == "inspect"
                             else ["batch", "--file", str(plan)]
                         )
                         started = time.monotonic()
@@ -140,7 +140,7 @@ def main() -> None:
                             {
                                 "sample": sample,
                                 "mode": mode,
-                                "action": action,
+                                "kind": kind,
                                 "cli_wall_seconds": wall,
                                 "request": request,
                                 "exit_code": response.returncode,
@@ -159,13 +159,13 @@ def main() -> None:
             }
     summary: dict[str, object] = {}
     for mode in ("default", "explicit"):
-        for action in ("inspect", "baseline", "wait", "assert"):
+        for kind in ("inspect", "baseline", "wait", "assert"):
             rows = [
                 row
                 for row in measurements
-                if row["mode"] == mode and row["action"] == action
+                if row["mode"] == mode and row["kind"] == kind
             ]
-            summary[f"{mode}_{action}"] = {
+            summary[f"{mode}_{kind}"] = {
                 "successes": sum(row["success"] for row in rows),
                 "samples": len(rows),
                 "median_cli_wall_seconds": statistics.median(

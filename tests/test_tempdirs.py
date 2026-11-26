@@ -158,13 +158,13 @@ def test_session_commands_with_changed_tmpdir(
         assert command("status").returncode == 0
         wait_for_control(session_dir, "Apply text")
         batch = tmp_path / "batch.json"
-        batch.write_text(json.dumps({"actions": [{"action": "key", "chord": "Tab"}]}))
+        batch.write_text(json.dumps({"steps": [{"action": "key", "chord": "Tab"}]}))
         result = command("batch", "--file", str(batch))
         assert result.returncode == 0, result
-        capture = tmp_path / "capture.png"
-        result = command("screenshot", str(capture))
+        screenshot = tmp_path / "screenshot.png"
+        result = command("screenshot", str(screenshot))
         assert result.returncode == 0, result
-        with Image.open(capture) as image:
+        with Image.open(screenshot) as image:
             assert image.size == (1280, 720)
         if ending == "stop":
             result = command("stop")

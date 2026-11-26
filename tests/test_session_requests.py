@@ -94,7 +94,7 @@ def handle(
 
 def start_request(tmp_path: Path) -> dict[str, object]:
     return {
-        "action": "record-start",
+        "command": "record-start",
         "destination": str(tmp_path / "clip.mp4"),
         "key_captions": "non-text",
     }
@@ -114,7 +114,7 @@ def test_validator_bug_is_reported_without_ending_the_session(
     response = handle(
         listener,
         recordings,
-        {"action": "type", "parameters": {"text": SECRET, "interval": 0}},
+        {"command": "type", "parameters": {"text": SECRET, "interval": 0}},
     )
     error = cast(str, response["error"])
     assert "Framewisp bug" in error and "KeyError" in error
@@ -151,7 +151,7 @@ def test_validator_bug_with_a_closed_stderr_keeps_the_session(
     response = handle(
         listener,
         recordings,
-        {"action": "type", "parameters": {"text": SECRET, "interval": 0}},
+        {"command": "type", "parameters": {"text": SECRET, "interval": 0}},
     )
     assert "Framewisp bug" in cast(str, response["error"])
 
@@ -179,7 +179,7 @@ def test_error_while_reporting_status_is_a_runner_failure(
         raise ValueError("runner bug")
 
     with pytest.raises(ValueError, match="runner bug"):
-        handle(listener, recordings, {"action": "status"}, status)
+        handle(listener, recordings, {"command": "status"}, status)
 
 
 # R-CONTROL-1
@@ -194,23 +194,23 @@ def test_deadline_also_stops_a_client_that_keeps_sending(
 
 
 # R-REC-21
-@pytest.mark.parametrize("kind", ["capture", "failure_capture"])
-def test_capture_through_a_symlink_cannot_be_the_active_recording(
+@pytest.mark.parametrize("kind", ["screenshot", "failure_screenshot"])
+def test_screenshot_through_a_symlink_cannot_be_the_active_recording(
     recordings: Recordings, tmp_path: Path, kind: str
 ) -> None:
     recordings.destination = tmp_path / "clip.mp4"
     (tmp_path / "alias").symlink_to(tmp_path)
     action = {"action": "move", "x": 0, "y": 0}
-    capture = {"path": str(tmp_path / "alias" / "clip.mp4")}
+    screenshot = {"path": str(tmp_path / "alias" / "clip.mp4")}
     with pytest.raises(ValueError, match="active recording"):
-        parse_batch({"actions": [action], kind: capture}, recordings)
+        parse_batch({"steps": [action], kind: screenshot}, recordings)
 
 
 # R-CONTROL-1
 def test_stalled_client_gets_an_error_reply(
     listener: socket.socket, recordings: Recordings
 ) -> None:
-    response = handle_bytes(listener, recordings, b'{"action"')
+    response = handle_bytes(listener, recordings, b'{"command"')
     assert "Timed out waiting" in cast(str, response["error"])
 
 

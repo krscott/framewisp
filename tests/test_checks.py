@@ -5,7 +5,7 @@ import pytest
 
 from framewisp import inspection
 from framewisp.batch import Batch
-from framewisp.checks import Check, Condition, Observation, perform_check
+from framewisp.checks import Check, Condition, Limits, perform_check
 from framewisp.errors import SessionError
 
 
@@ -46,32 +46,30 @@ def condition() -> dict[str, object]:
 )
 def test_invalid_wait(extra: dict[str, object]) -> None:
     with pytest.raises(ValueError):
-        Batch.parse(
-            {"actions": [{"action": "wait", "condition": condition(), **extra}]}
-        )
+        Batch.parse({"steps": [{"check": "wait", "condition": condition(), **extra}]})
 
 
 # R-CHECK-2
 def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
-    baseline = {"action": "baseline", "condition": condition(), "timeout": 1}
-    wait = {"action": "wait", "condition": condition(), "timeout": 2, "after": 0}
+    baseline = {"check": "baseline", "condition": condition(), "timeout": 1}
+    wait = {"check": "wait", "condition": condition(), "timeout": 2, "after": 0}
     batch = Batch.parse(
         {
-            "actions": [baseline, {"action": "key", "chord": "Return"}, wait],
-            "failure_capture": {"path": "failed.png"},
+            "steps": [baseline, {"action": "key", "chord": "Return"}, wait],
+            "failure_screenshot": {"path": "failed.png"},
         },
         directory=tmp_path,
     )
     assert Batch.parse(batch.parameters()) == batch
-    for actions in (
+    for steps in (
         [wait],
         [{"action": "key", "chord": "Return"}, wait],
         [baseline, wait | {"condition": condition() | {"equals": "Other"}}],
     ):
         with pytest.raises(ValueError):
-            Batch.parse({"actions": actions})
+            Batch.parse({"steps": steps})
     with pytest.raises(ValueError, match="300 seconds"):
-        Batch.parse({"actions": [baseline | {"timeout": 10}] * 31})
+        Batch.parse({"steps": [baseline | {"timeout": 10}] * 31})
 
 
 # R-INPUT-3
@@ -99,49 +97,47 @@ def test_baseline_reference_and_round_trip(tmp_path: Path) -> None:
         {"timeout": float("inf")},
     ],
 )
-@pytest.mark.parametrize("action", ["baseline", "wait", "assert"])
-def test_invalid_observation_options(options: object, action: str) -> None:
-    with pytest.raises(ValueError, match=r"actions\[1\].*observation"):
+@pytest.mark.parametrize("kind", ["baseline", "wait", "assert"])
+def test_invalid_limits(options: object, kind: str) -> None:
+    with pytest.raises(ValueError, match=r"steps\[1\].*limits"):
         Batch.parse(
             {
-                "actions": [
+                "steps": [
                     {"action": "key", "chord": "Return"},
                     {
-                        "action": action,
+                        "check": kind,
                         "condition": condition(),
                         "timeout": 5,
-                        "observation": options,
+                        "limits": options,
                     },
                 ]
             }
         )
 
 
-def test_observation_round_trip_and_transition_matching() -> None:
+def test_limits_round_trip_and_transition_matching() -> None:
     baseline = {
-        "action": "baseline",
+        "check": "baseline",
         "condition": condition(),
         "timeout": 5,
-        "observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5},
+        "limits": {"max_nodes": 1024, "max_depth": 16, "timeout": 5},
     }
     wait = {
-        "action": "wait",
+        "check": "wait",
         "condition": condition(),
         "timeout": 10,
         "after": 0,
-        "observation": {"max_nodes": 4096, "max_depth": 64, "timeout": 10},
+        "limits": {"max_nodes": 4096, "max_depth": 64, "timeout": 10},
     }
-    batch = Batch.parse({"actions": [baseline, wait]})
+    batch = Batch.parse({"steps": [baseline, wait]})
     assert Batch.parse(batch.parameters()) == batch
-    assert isinstance(batch.actions[0], Check)
-    assert batch.actions[0].observation == Observation(1024, 16, 5)
-    assert Observation.parse({}) == Observation()
+    assert isinstance(batch.steps[0], Check)
+    assert batch.steps[0].limits == Limits(1024, 16, 5)
+    assert Limits.parse({}) == Limits()
     with pytest.raises(ValueError, match="300 seconds"):
         Batch.parse(
             {
-                "actions": [
-                    {key: value for key, value in wait.items() if key != "after"}
-                ]
+                "steps": [{key: value for key, value in wait.items() if key != "after"}]
                 * 31
             }
         )
@@ -152,7 +148,7 @@ def readable_observation(
 ) -> dict[str, object]:
     return {
         "status": status,
-        "snapshot_id": "fresh",
+        "observation_id": "fresh",
         "matches": [{"text": text, "states": [], "role": "label"}],
         "reasons": reasons or [],
     }
@@ -175,18 +171,18 @@ def test_baseline_requires_a_nonmatching_value(
         return observation
 
     monkeypatch.setattr(inspection, "inspect_session", inspect)
-    check = Check.parse("baseline", {"condition": condition(), "timeout": 1})
+    check = Check.parse({"check": "baseline", "condition": condition(), "timeout": 1})
     result: dict[str, object] = {}
     with pytest.raises(SessionError, match="nonmatching"):
         perform_check(
             tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None
         )
-    assert "baseline_snapshot_id" not in result
+    assert "baseline_observation_id" not in result
 
 
-@pytest.mark.parametrize("action", ["baseline", "wait", "assert"])
+@pytest.mark.parametrize("kind", ["baseline", "wait", "assert"])
 def test_query_settings_and_authoritative_deadline(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str
 ) -> None:
     clock = [0.0]
     monkeypatch.setattr("framewisp.checks.time.monotonic", lambda: clock[0])
@@ -203,15 +199,15 @@ def test_query_settings_and_authoritative_deadline(
         assert cancelled is not None and not cancelled()
         queries.append(query)
         clock[0] += 3
-        return readable_observation(text="Waiting" if action == "baseline" else "Done")
+        return readable_observation(text="Waiting" if kind == "baseline" else "Done")
 
     monkeypatch.setattr(inspection, "inspect_session", inspect)
     check = Check.parse(
-        action,
         {
+            "check": kind,
             "condition": condition(),
             "timeout": 4,
-            "observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5},
+            "limits": {"max_nodes": 1024, "max_depth": 16, "timeout": 5},
         },
     )
     result: dict[str, object] = {}
@@ -226,12 +222,17 @@ def test_query_settings_and_authoritative_deadline(
             timeout=4,
         )
     ]
-    assert result["verified"] is (action != "baseline")
-    assert result["observation_settings"] == check.observation.parameters()
+    assert result["verified"] is (kind != "baseline")
+    assert result["limits"] == check.limits.parameters()
 
     clock[0] = 0
     check = Check.parse(
-        action, {"condition": condition(), "timeout": 2, "observation": {"timeout": 5}}
+        {
+            "check": kind,
+            "condition": condition(),
+            "timeout": 2,
+            "limits": {"timeout": 5},
+        }
     )
     with pytest.raises(SessionError, match="timed out"):
         perform_check(tmp_path, check, {}, cancelled=cancelled, wait=lambda _: None)
@@ -262,10 +263,10 @@ def test_wait_partial_responses_and_remaining_budget(
         clock[0] += seconds
 
     monkeypatch.setattr(inspection, "inspect_session", inspect)
-    check = Check.parse("wait", {"condition": condition(), "timeout": 5})
+    check = Check.parse({"check": "wait", "condition": condition(), "timeout": 5})
     result: dict[str, object] = {}
     with pytest.raises(
-        SessionError, match=r"observation.max_nodes.*longer check timeout alone"
+        SessionError, match=r"limits.max_nodes.*longer check timeout alone"
     ):
         perform_check(tmp_path, check, result, cancelled=lambda: False, wait=wait)
     assert [q.timeout for q in queries] == pytest.approx([2, 2, 0.9])
@@ -296,7 +297,7 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
         return next(observations)
 
     monkeypatch.setattr(inspection, "inspect_session", inspect)
-    check = Check.parse("wait", {"condition": condition(), "timeout": 2})
+    check = Check.parse({"check": "wait", "condition": condition(), "timeout": 2})
     with pytest.raises(SessionError, match="timed out") as failure:
         perform_check(
             tmp_path,
@@ -318,7 +319,7 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
     assert result["observations"] == 1
 
 
-@pytest.mark.parametrize("action", ["baseline", "assert"])
+@pytest.mark.parametrize("kind", ["baseline", "assert"])
 @pytest.mark.parametrize(
     "reason,field",
     [("max-depth", "max_depth"), ("max-nodes", "max_nodes"), ("timeout", "timeout")],
@@ -326,7 +327,7 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
 def test_incomplete_check_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    action: str,
+    kind: str,
     reason: str,
     field: str,
 ) -> None:
@@ -339,8 +340,8 @@ def test_incomplete_check_diagnostics(
         return readable_observation(text="Waiting", status="partial", reasons=[reason])
 
     monkeypatch.setattr(inspection, "inspect_session", inspect)
-    check = Check.parse(action, {"condition": condition(), "timeout": 5})
-    with pytest.raises(SessionError, match=f"observation.{field}"):
+    check = Check.parse({"check": kind, "condition": condition(), "timeout": 5})
+    with pytest.raises(SessionError, match=f"limits.{field}"):
         perform_check(tmp_path, check, {}, cancelled=lambda: False, wait=lambda _: None)
 
 
