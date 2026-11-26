@@ -697,8 +697,8 @@ plus the console panel when `--console` is enabled, 640 pixels of width by defau
 Recording requires even width and height (R-REC-2). An existing file at the
 clip destination is never overwritten (R-REC-1). The clip does not appear there
 until it is finalized. Until then, framewisp records to a hidden
-`.framewisp-clip-*` directory beside it, so that directory must be writable and on a filesystem
-with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
+`.framewisp-clip-*` directory beside it, so the clip destination's directory must be writable and
+on a filesystem with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
 when the clip starts (R-REC-19).
 
 If another file appears at the clip destination during a clip, framewisp leaves that
@@ -787,9 +787,9 @@ Finalization applies compaction and draws the console panel and overlays in one
 FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
 that pass fails, the raw GUI video remains playable. It stays at the clip destination
 unless framewisp cannot publish it there, and the error names its path and
-`finalization.log` (R-REC-10). If the pass succeeds but publishing fails, the
-finished clip stays in the hidden directory and the error names its path
-(R-REC-18). A session that hits either failure stops, even when `record-stop`
+`finalization.log` (R-REC-10). If the pass succeeds but a file takes the clip
+destination first, the finished clip stays in the hidden directory and the error
+names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
 triggered it.
 
 ## Share media in GitHub comments
@@ -900,10 +900,7 @@ nothing else needs rendering. `run --no-click-pings` requires `--record`.
 Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for finalization to finish.
-This adds encoding time when stopping a captioned clip. If drawing the captions
-fails, the command fails and leaves the uncaptioned MP4 playable. The MP4 is at the
-clip destination unless framewisp cannot publish it there. The error names its path
-and `finalization.log` for details (R-REC-10).
+This adds encoding time when stopping a captioned clip.
 
 The recorder log retains diagnostics and the first frame's timestamp used for
 caption alignment. Framewisp filters the remaining Wayland protocol trace as it

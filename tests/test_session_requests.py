@@ -18,7 +18,7 @@ from framewisp.console import ConsoleCapture
 from framewisp.errors import SessionError, display_command
 from framewisp.inputs import InputWorker
 from framewisp.lib import (
-    Clips,
+    Recording,
     RecordStart,
     clip_summary,
     handle_session_command,
@@ -52,8 +52,8 @@ def test_record_start_requires_a_boolean_compact(raw: object) -> None:
 
 
 @pytest.fixture
-def clips(tmp_path: Path) -> Clips:
-    return Clips(tmp_path, {}, Event(), (1280, 720), ConsoleCapture(tmp_path))
+def recording(tmp_path: Path) -> Recording:
+    return Recording(tmp_path, {}, Event(), (1280, 720), ConsoleCapture(tmp_path))
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ def listener(tmp_path: Path) -> Iterator[socket.socket]:
 
 def handle_bytes(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     message: bytes,
     status: Callable[[], dict[str, object]] = dict,
 ) -> dict[str, object]:
@@ -76,7 +76,7 @@ def handle_bytes(
         client.sendall(message)
         handle_session_command(
             listener,
-            clips,
+            recording,
             lambda: None,
             status,
             # A request rejected or failed before queueing never reaches the worker.
@@ -87,13 +87,13 @@ def handle_bytes(
 
 def handle(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     request: dict[str, object],
     status: Callable[[], dict[str, object]] = dict,
 ) -> dict[str, object]:
-    message = {"session_directory": str(clips.session_dir)} | request
+    message = {"session_directory": str(recording.session_dir)} | request
     encoded = (json.dumps(message) + "\n").encode()
-    return handle_bytes(listener, clips, encoded, status)
+    return handle_bytes(listener, recording, encoded, status)
 
 
 def start_request(tmp_path: Path) -> dict[str, object]:
@@ -107,7 +107,7 @@ def start_request(tmp_path: Path) -> dict[str, object]:
 # R-CONTROL-1, R-CONTROL-2
 def test_validator_bug_is_reported_without_ending_the_session(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
 ) -> None:
@@ -117,7 +117,7 @@ def test_validator_bug_is_reported_without_ending_the_session(
     monkeypatch.setattr(InputAction, "parse", parse)
     response = handle(
         listener,
-        clips,
+        recording,
         {"command": "type", "parameters": {"text": SECRET, "interval": 0}},
     )
     error = cast(str, response["error"])
@@ -143,7 +143,7 @@ class BrokenStderr:
 )
 def test_validator_bug_with_a_closed_stderr_keeps_the_session(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     monkeypatch: pytest.MonkeyPatch,
     failure: Exception,
 ) -> None:
@@ -154,7 +154,7 @@ def test_validator_bug_with_a_closed_stderr_keeps_the_session(
     monkeypatch.setattr(sys, "stderr", BrokenStderr(failure))
     response = handle(
         listener,
-        clips,
+        recording,
         {"command": "type", "parameters": {"text": SECRET, "interval": 0}},
     )
     assert "Framewisp bug" in cast(str, response["error"])
@@ -163,7 +163,7 @@ def test_validator_bug_with_a_closed_stderr_keeps_the_session(
 @pytest.mark.parametrize("failure", [ValueError, TypeError, OSError, KeyError])
 def test_error_while_recording_starts_is_a_runner_failure(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: type[Exception],
@@ -171,53 +171,55 @@ def test_error_while_recording_starts_is_a_runner_failure(
     def start(*args: object, **kwargs: object) -> str | None:
         raise failure("runner bug")
 
-    monkeypatch.setattr(Clips, "start", start)
+    monkeypatch.setattr(Recording, "start", start)
     with pytest.raises(failure, match="runner bug"):
-        handle(listener, clips, start_request(tmp_path))
+        handle(listener, recording, start_request(tmp_path))
 
 
 def test_error_while_reporting_status_is_a_runner_failure(
-    listener: socket.socket, clips: Clips
+    listener: socket.socket, recording: Recording
 ) -> None:
     def status() -> dict[str, object]:
         raise ValueError("runner bug")
 
     with pytest.raises(ValueError, match="runner bug"):
-        handle(listener, clips, {"command": "status"}, status)
+        handle(listener, recording, {"command": "status"}, status)
 
 
 # R-CONTROL-1
 def test_deadline_also_stops_a_client_that_keeps_sending(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(connection, "REQUEST_SECONDS", 0)
-    response = handle_bytes(listener, clips, b"{}\n")
+    response = handle_bytes(listener, recording, b"{}\n")
     assert "Timed out waiting" in cast(str, response["error"])
 
 
 # R-REC-21
 @pytest.mark.parametrize("kind", ["screenshot", "failure_screenshot"])
 def test_screenshot_through_a_symlink_cannot_be_the_active_clip_destination(
-    clips: Clips, tmp_path: Path, kind: str
+    recording: Recording, tmp_path: Path, kind: str
 ) -> None:
-    clips.destination = tmp_path / "clip.mp4"
+    recording.destination = tmp_path / "clip.mp4"
     (tmp_path / "alias").symlink_to(tmp_path)
     action = {"action": "move", "x": 0, "y": 0}
     screenshot = {"path": str(tmp_path / "alias" / "clip.mp4")}
     with pytest.raises(ValueError, match="active recording"):
-        parse_batch({"steps": [action], kind: screenshot}, clips)
+        parse_batch({"steps": [action], kind: screenshot}, recording)
 
 
 def test_existing_screenshot_path_error_keeps_the_path_verbatim(
-    clips: Clips, tmp_path: Path
+    recording: Recording, tmp_path: Path
 ) -> None:
     existing = tmp_path / "clip destination.png"
     existing.write_bytes(b"")
     action = {"action": "move", "x": 0, "y": 0}
     with pytest.raises(ValueError) as error:
-        parse_batch({"steps": [action], "screenshot": {"path": str(existing)}}, clips)
+        parse_batch(
+            {"steps": [action], "screenshot": {"path": str(existing)}}, recording
+        )
     assert str(error.value) == (
         f"{existing} already exists. Choose a new screenshot path."
     )
@@ -225,16 +227,16 @@ def test_existing_screenshot_path_error_keeps_the_path_verbatim(
 
 # R-CONTROL-1
 def test_stalled_client_gets_an_error_reply(
-    listener: socket.socket, clips: Clips
+    listener: socket.socket, recording: Recording
 ) -> None:
-    response = handle_bytes(listener, clips, b'{"command"')
+    response = handle_bytes(listener, recording, b'{"command"')
     assert "Timed out waiting" in cast(str, response["error"])
 
 
 # R-CONTROL-1, R-CONTROL-2
 def test_destination_lookup_failure_is_an_error_reply(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -244,7 +246,7 @@ def test_destination_lookup_failure_is_an_error_reply(
         raise OSError(errno.ENAMETOOLONG, "File name too long", str(self))
 
     monkeypatch.setattr(Path, "exists", exists)
-    response = handle(listener, clips, start_request(tmp_path))
+    response = handle(listener, recording, start_request(tmp_path))
     assert "File name too long" in cast(str, response["error"])
 
 

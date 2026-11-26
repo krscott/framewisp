@@ -13,7 +13,7 @@ import pytest
 from framewisp.console import ConsoleCapture
 from framewisp.finalization import capture_origin
 from framewisp.layout import ConsolePanel
-from framewisp.lib import Clips
+from framewisp.lib import Recording
 from framewisp.ownership import ACTIVE_RECORDING, interrupted_clip
 from framewisp.recorder import filter_recorder_output, recorder_output
 
@@ -58,16 +58,16 @@ while :; do sleep 0.01; done
     session_dir.mkdir()
     (session_dir / "inputs.jsonl").touch()
     environment = os.environ | {"PATH": f"{tools}:{os.environ['PATH']}"}
-    clips = Clips(
+    recording = Recording(
         session_dir, environment, Event(), (1280, 720), ConsoleCapture(session_dir)
     )
     destination = tmp_path / "clip.mp4"
-    error = clips.start(destination, compact=compact, console=console)
+    error = recording.start(destination, compact=compact, console=console)
     assert error is None
-    assert clips.finish() is None
+    assert recording.finish() is None
     assert destination.stat().st_size > 0
     assert not list(tmp_path.glob(".framewisp-clip-*"))
-    summary = clips.last_summary
+    summary = recording.last_summary
     assert summary is not None
     return summary
 
@@ -164,12 +164,14 @@ def test_filesystem_without_hard_links_rejects_recording_at_start(
     session_dir.mkdir()
     output = tmp_path / "output"
     output.mkdir()
-    clips = Clips(session_dir, {}, Event(), (1280, 720), ConsoleCapture(session_dir))
-    error = clips.start(output / "clip.mp4")
+    recording = Recording(
+        session_dir, {}, Event(), (1280, 720), ConsoleCapture(session_dir)
+    )
+    error = recording.start(output / "clip.mp4")
     assert error is not None
     assert "hard links" in error
     assert "another filesystem" in error
-    assert clips.process is None
+    assert recording.process is None
     assert list(output.iterdir()) == []
     assert not (session_dir / "recorder.log").exists()
 

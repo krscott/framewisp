@@ -620,7 +620,7 @@ def clip_summary(destination: Path, *, env: dict[str, str]) -> dict[str, object]
 
 
 @dataclass
-class Clips:
+class Recording:
     session_dir: Path
     env: dict[str, str]
     stop_requested: Event
@@ -801,7 +801,7 @@ PARAMETERLESS_COMMANDS: tuple[ParameterlessCommand, ...] = get_args(
 SessionRequest = ParameterlessCommand | RecordStart | InputAction | Batch
 
 
-def parse_batch(raw: object, clips: Clips) -> Batch:
+def parse_batch(raw: object, recording: Recording) -> Batch:
     batch = Batch.parse(raw)
     for kind, screenshot in (
         ("screenshot", batch.screenshot),
@@ -812,19 +812,19 @@ def parse_batch(raw: object, clips: Clips) -> Batch:
         if not screenshot.path.parent.is_dir():
             raise ValueError(f"{kind}.path requires an existing parent directory.")
         resolved = resolved_request_path(screenshot.path, f"{kind}.path")
-        path_error = new_file_error(clips.session_dir, resolved, "screenshot path")
+        path_error = new_file_error(recording.session_dir, resolved, "screenshot path")
         if path_error is not None:
             raise ValueError(path_error)
-        error = screenshot_path_error(resolved, clips.destination)
+        error = screenshot_path_error(resolved, recording.destination)
         if error is not None:
             raise ValueError(error)
     return batch
 
 
-def parse_request(line: bytes, clips: Clips) -> SessionRequest:
+def parse_request(line: bytes, recording: Recording) -> SessionRequest:
     """Validate one request line, changing no session state."""
     fields = parse_request_fields(line)
-    if fields.get("session_directory") != str(clips.session_dir):
+    if fields.get("session_directory") != str(recording.session_dir):
         raise ValueError(
             "Session metadata points to a different session. Use the original session directory."
         )
@@ -836,7 +836,7 @@ def parse_request(line: bytes, clips: Clips) -> SessionRequest:
     if command == "record-start":
         return RecordStart.parse(fields)
     if command == "batch":
-        return parse_batch(fields.get("parameters"), clips)
+        return parse_batch(fields.get("parameters"), recording)
     if command in {"move", "click", "drag", "scroll", "type", "key"}:
         return InputAction.parse(command, fields.get("parameters"))
     raise ValueError("Unsupported headless session command.")
@@ -844,7 +844,7 @@ def parse_request(line: bytes, clips: Clips) -> SessionRequest:
 
 def handle_session_command(
     listener: socket.socket,
-    clips: Clips,
+    recording: Recording,
     write_state: Callable[[], None],
     status: Callable[[], dict[str, object]],
     inputs: InputWorker,
@@ -863,7 +863,7 @@ def handle_session_command(
         request: SessionRequest | None = receive_request(
             connection,
             lambda failure: reply(connection, error=failure),
-            lambda line: parse_request(line, clips),
+            lambda line: parse_request(line, recording),
         )
         if request is None:
             return None
@@ -886,15 +886,15 @@ def handle_session_command(
             data = status()
         elif request == "record-stop":
             try:
-                error = clips.finish()
+                error = recording.finish()
             except SessionError as failure:
                 # The session still fails; the caller needs the reason and raw path.
                 reply(connection, error=str(failure))
                 raise
             if error is None:
-                data = clips.last_summary
+                data = recording.last_summary
         else:
-            error = clips.start(
+            error = recording.start(
                 request.clip_destination,
                 captions=request.captions,
                 click_pings=request.click_pings,
@@ -982,7 +982,7 @@ def _run_session(
     stop = Event()
     stop_connection: socket.socket | None = None
     shutdown_error: str | None = None
-    clips: Clips | None = None
+    recording: Recording | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -1057,10 +1057,10 @@ def _run_session(
             backends = buses | {"sway": sway, "wayvnc": vnc}
             console_capture = ConsoleCapture(session_dir)
             output = stack.enter_context(app_output(console_capture))
-            clips = Clips(session_dir, env, stop, size, console_capture)
-            stack.callback(clips.close)
+            recording = Recording(session_dir, env, stop, size, console_capture)
+            stack.callback(recording.close)
             if clip_destination is not None:
-                error = clips.start(
+                error = recording.start(
                     clip_destination,
                     captions=captions,
                     click_pings=click_pings,
@@ -1092,18 +1092,18 @@ def _run_session(
                 stop,
                 x11=x11,
                 size=size,
-                caption_capture=clips.caption_capture,
+                caption_capture=recording.caption_capture,
                 screenshot=lambda path, cancelled: batch_screenshot(
-                    clips, path, cancelled
+                    recording, path, cancelled
                 ),
             )
             stack.callback(inputs.close)
 
             def write_state() -> None:
-                assert clips is not None
+                assert recording is not None
                 processes = backends | {"app": app}
-                if clips.process is not None:
-                    processes["recorder"] = clips.process
+                if recording.process is not None:
+                    processes["recorder"] = recording.process
                 temporary = session_dir / ".session.json"
                 temporary.write_text(
                     json.dumps(
@@ -1118,8 +1118,8 @@ def _run_session(
                             "height": size[1],
                             "x11_display": x11_display,
                             "clip_destination": (
-                                str(clips.destination)
-                                if clips.destination is not None
+                                str(recording.destination)
+                                if recording.destination is not None
                                 else None
                             ),
                             "processes": {
@@ -1133,7 +1133,7 @@ def _run_session(
                 temporary.replace(state)
 
             def status() -> dict[str, object]:
-                assert clips is not None
+                assert recording is not None
                 return {
                     "session_directory": str(session_dir),
                     "status": "running",
@@ -1145,11 +1145,11 @@ def _run_session(
                     "app": {"pid": app.pid, "running": app.poll() is None},
                     "recording": (
                         {
-                            "clip_destination": str(clips.destination),
-                            "pid": clips.process.pid,
-                            "running": clips.process.poll() is None,
+                            "clip_destination": str(recording.destination),
+                            "pid": recording.process.pid,
+                            "running": recording.process.poll() is None,
                         }
-                        if clips.process is not None
+                        if recording.process is not None
                         else None
                     ),
                 }
@@ -1172,15 +1172,15 @@ def _run_session(
                     )
                     return result if result >= 0 else 128 - result
                 monitored = backends.copy()
-                if clips.process is not None:
-                    monitored["recorder"] = clips.process
+                if recording.process is not None:
+                    monitored["recorder"] = recording.process
                 for name, process in monitored.items():
                     if process.poll() is not None:
                         raise log_failure(
                             f"{name} exited", session_dir / (name + ".log")
                         )
                 stop_connection = handle_session_command(
-                    listener, clips, write_state, status, inputs
+                    listener, recording, write_state, status, inputs
                 )
                 if stop_connection is not None:
                     stop.set()
@@ -1202,7 +1202,7 @@ def _run_session(
                     data={
                         "session_directory": str(session_dir),
                         "status": "stopped",
-                        "clip": clips.last_summary if clips else None,
+                        "clip": recording.last_summary if recording else None,
                     },
                 )
 
@@ -1289,7 +1289,7 @@ def screenshot(
 
 
 def batch_screenshot(
-    clips: Clips, destination: Path, cancelled: Callable[[], bool]
+    recording: Recording, destination: Path, cancelled: Callable[[], bool]
 ) -> int:
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
@@ -1297,13 +1297,13 @@ def batch_screenshot(
             prefix=".framewisp-screenshot-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "screenshot.png"
-            screenshot(clips.session_dir, temporary, cancelled=cancelled)
+            screenshot(recording.session_dir, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Screenshot cancelled; caller disconnected or session stopped."
                 )
             # A recording may have started since this batch was validated.
-            error = screenshot_path_error(destination, clips.destination)
+            error = screenshot_path_error(destination, recording.destination)
             if error is not None:
                 raise SessionError(error)
             destination.hardlink_to(temporary)

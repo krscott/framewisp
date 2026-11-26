@@ -127,7 +127,7 @@ def log_input(
     *,
     caption_capture: CaptionCapture | None = None,
 ) -> Generator[InputResult, None, None]:
-    """Record command start/end and button presses and releases.
+    """Record command start/end and button presses and drag releases.
 
     These are not app acknowledgements.
     """

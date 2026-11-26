@@ -504,8 +504,8 @@ Recording works only in headless sessions, so clips come only from them. It
 requires even display dimensions and produces silent MP4 video. Only one clip may be active. Normal runner
 shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
-`.framewisp-clip-*` directory beside it, so that directory must be
-writable and support hard links. If another file takes the clip destination first,
+`.framewisp-clip-*` directory beside it, so the clip destination's
+directory must be writable and support hard links. If another file takes the clip destination first,
 framewisp leaves that file alone, ends the session with an error, and names the
 kept clip. After a killed runner, `recover` prints the interrupted clip's path as
 `interrupted_clip`. Text captions are off by default. For a clip that needs
