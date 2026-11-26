@@ -548,8 +548,9 @@ def _share_desktop(
     def announce_ready() -> None:
         assert portal is not None
         ready.set()
+        label = "Teaching session ready" if teaching is not None else "Attached"
         print(
-            f"Attached: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
+            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --stop-sharing or Ctrl+C.",
             flush=True,
         )
 
@@ -694,9 +695,9 @@ def _share_desktop(
                     server.start()
                     try:
                         if teaching is None:
-                            portal.open()
+                            portal.open(allow_input=True)
                         else:
-                            portal.open(screen_only=True)
+                            portal.open(allow_input=False)
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"

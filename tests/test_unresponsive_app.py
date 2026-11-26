@@ -12,7 +12,7 @@ __all__ = ["demo"]
 # R-INSPECT-6
 @pytest.mark.integration
 def test_unresponsive_app_does_not_block_stop(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     state = json.loads((demo.directory / "session.json").read_text())
     pid = state["processes"]["app"]
     os.kill(pid, signal.SIGSTOP)

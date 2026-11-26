@@ -61,7 +61,7 @@ def test_teaching_portal_requests_only_screen_access(
     monkeypatch.setattr(portal, "request", request)
     input_call = Mock()
     monkeypatch.setattr(portal, "input", input_call)
-    portal.open(screen_only=True)
+    portal.open(allow_input=False)
     assert calls == [
         (SCREENCAST, "CreateSession"),
         (SCREENCAST, "SelectSources"),
@@ -410,7 +410,7 @@ def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
                 start_new_session=True,
             )
             deadline = time.monotonic() + 10
-            while "Demo ready" not in log.read_text():
+            while "Demo app ready" not in log.read_text():
                 assert app.poll() is None, log.read_text()
                 assert time.monotonic() < deadline, log.read_text()
                 time.sleep(0.02)
@@ -439,7 +439,7 @@ def test_teaching_captures_a_task_performed_in_the_demo_app(
             "xdotool",
             "search",
             "--name",
-            "Framewisp demo",
+            "Framewisp demo app",
             "windowfocus",
             "mousemove",
             "120",
