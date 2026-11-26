@@ -102,8 +102,8 @@ investigate or ask; never invent a rationale.
   `nix shell nixpkgs#stress-ng`, then run 300
   `framewisp SESSION run --x11 -- python tests/input_probe.py` sessions, four at
   a time. After `app.log` shows `"event": "ready"`, read `runtime_directory`
-  from `session.json` as RUNTIME and run
-  `SWAYSOCK=$(ls RUNTIME/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
+  from `session.json` as RUNTIME_DIR and run
+  `SWAYSOCK=$(ls RUNTIME_DIR/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
   must list a window named `Input probe` within 10 seconds.] An X11 app window
   always appears in Sway, even when the app never redraws after its first frame.
 
@@ -279,8 +279,8 @@ investigate or ask; never invent a rationale.
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
   directory usable again.
-- **R-LIFE-5** [test] Recovery refuses copied, damaged, symlinked, or replaced
-  ownership files and runtime directories. A same-user program that deliberately
+- **R-LIFE-5** [test] Recovery refuses a copied, damaged, symlinked, or replaced
+  session lock, recovery journal, or runtime directory. A same-user program that deliberately
   rewrites them so they verify is out of scope.
 
   Rationale: Copies, damage and accidental replacement are honest mistakes, and
@@ -291,8 +291,9 @@ investigate or ask; never invent a rationale.
   its command socket that names a session directory other than its own. A
   session command that uses the command socket sends such a request when it is
   run from a copy of that session's metadata in another directory.
-- **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
-  and its error gives manual cleanup steps.
+- **R-LIFE-7** [test] When recovery cannot verify the session lock, the recovery
+  journal, or the runtime directory, it removes nothing and its error gives
+  manual cleanup steps.
 
 ## Desktop shares (ATTACH)
 

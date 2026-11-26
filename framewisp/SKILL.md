@@ -82,7 +82,7 @@ frame, so `-ss` accepts the times in timeline.jsonl. FFmpeg is on PATH in the
 development shell; elsewhere install it separately if
 needed. `complete` means capture finalized successfully, not that the procedure
 has been learned or validated. `failed` names an error; `capturing` after the
-owner exits means interrupted capture. Treat either as a partial lesson. Frames
+runner exits means interrupted capture. Treat either as a partial lesson. Frames
 and notes are available during capture, but do not assume the video is finished.
 
 Derive a procedure describing starting state, variable inputs, control labels,
@@ -113,10 +113,11 @@ project must choose distinct names. Keep launch and session commands in the same
 project (the same working directory outside Git). `Session ready:` and `Attached:`
 print the resolved directory; use that explicit path from another project or an
 environment with a different `TMPDIR`. Bare names under different temporary
-directories select different session directories. Headless runtime sockets also use this
-temporary directory. If startup reports the 108-byte socket path limit, set
-`TMPDIR` to a shorter writable directory. Cleanup and recovery use the runtime
-path saved in the ownership journal even if `TMPDIR` changes. If the journal is
+directories select different session directories. A headless session's runtime
+directory, which holds its sockets, is also in this temporary directory. If startup
+reports the 108-byte socket path limit, set `TMPDIR` to a shorter writable directory.
+Cleanup and recovery use the runtime directory path saved in the recovery journal
+even if `TMPDIR` changes. If the journal is
 unreadable, the manual steps recovery prints assume the current `TMPDIR`.
 Project scoping does not change sandbox socket permissions.
 
@@ -140,7 +141,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and the active recording's `clip_destination`, PID and running state (or null). |
-| `stop` | Stop a headless session, finalize any active clip, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last clip's summary as `clip`, if any. |
+| `stop` | Stop a headless session, finalize any active clip, and wait for managed processes and the runtime directory to be cleaned up. Print JSON with stopped status and the last clip's summary as `clip`, if any. |
 | `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the desktop share instructions below. |
 
 Standalone commands take no SESSION: `framewisp --stop-sharing` stops the active
@@ -612,10 +613,10 @@ enabled StatusNotifierItem/AppIndicator extension. The desktop controls placemen
 overflow, panel auto-hide, and visibility, so registration does not guarantee a
 visible icon. If no compatible host is available, the attach terminal reports
 that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
-The indicator ends with the desktop share's owner; reconnecting needs fresh portal
+The indicator ends with the desktop share's runner; reconnecting needs fresh portal
 approval and creates a new indicator. Keep emergency shortcuts configured. The
-indicator's menu needs a responsive owner, while `--stop-sharing` can stop a
-suspended owner.
+indicator's menu needs a responsive runner, while `--stop-sharing` can stop a
+suspended runner.
 
 The stop command is `framewisp --stop-sharing`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also

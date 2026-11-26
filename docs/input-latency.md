@@ -83,9 +83,9 @@ These are local measurements, not latency guarantees; host load varies.
 `python -X importtime -m framewisp --help` attributed about 368 ms to
 `vncdotool.api` and its imports, and 174 ms to `framewisp.attach` and its imports
 in a separate baseline sample. Neither is needed by a screenshot or input CLI:
-the runner uses the API for its idle VNC connection, and only the foreground
-attach owner needs the desktop portal libraries. Importing those modules when
-their owning commands run removed about 0.56 seconds from a complete click in
+the runner uses the API for its idle VNC connection, and only the runner of an
+attached or teaching session needs the desktop portal libraries. Importing those
+modules when the commands that use them run removed about 0.56 seconds from a complete click in
 this sample, roughly 32%, without changing input delivery.
 
 The remaining VNC subprocess startup is substantial. Its measured connection

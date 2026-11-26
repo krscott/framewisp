@@ -178,7 +178,7 @@ resizing, hidden windows, unsupported transforms, and bounded private IPC reads.
 clicks a dialog button in tiled and moved floating windows, and verifies that
 view switcher tabs with inconsistent ancestor extents produce a warning. The
 libadwaita dependency belongs to the development shell and package compatibility
-tests, rather than the framewisp runtime.
+tests, rather than framewisp's runtime dependencies.
 
 ## Real-app compatibility runs
 
