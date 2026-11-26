@@ -257,7 +257,7 @@ if (root / 'teach').exists():
             if (root / 'slow-close').exists():
                 time.sleep(.8)
             super().close(*args, **kwargs)
-    lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
+    lesson = TestTeaching(root / 'lesson', 'Perform a task')
 original_dispatch = attach.dispatch_events
 revoke_at = None
 def dispatch():
@@ -502,12 +502,22 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         timeout=5,
     )
     assert note.returncode == 0, note.stderr
+    metadata = json.loads((session_dir / "session.json").read_text())
+    assert metadata["kind"] == "teaching"
+    click = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "click", "20", "20"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert click.returncode == 1
+    assert "this is a teaching session" in click.stderr
     assert request_attached(session_dir, "click", {"x": 20, "y": 20}) == 1
     assert (
         request_attached(
             session_dir,
             "screenshot",
-            {"path": str(tmp_path / "lesson/demonstration.webm")},
+            {"path": str(tmp_path / "lesson/video.webm")},
         )
         == 1
     )
@@ -515,7 +525,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
     attach_process.send_signal(stop_signal)
     assert attach_process.wait(timeout=5) == 0
     assert attach_process.stderr is not None
-    assert "Partial demonstration" not in attach_process.stderr.read()
+    assert "Partial lesson" not in attach_process.stderr.read()
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
     assert manifest["status"] == "complete"
     assert (
@@ -853,7 +863,8 @@ def test_x11_attach_refuses_without_release(
 
 
 @pytest.mark.parametrize(
-    "metadata", ["", "{", "[" * 10000, "[]", "null", "{}", '{"kind": "other"}']
+    "metadata",
+    ["", "{", "[" * 10000, "[]", "null", "{}", '{"kind": "other"}', '{"kind": "headless"}'],
 )
 def test_attach_refuses_metadata_of_another_session(
     tmp_path: Path,

@@ -137,7 +137,7 @@ def session_environment_for_run(
 
 
 def app_command(command: list[str], env: dict[str, str]) -> list[str]:
-    """Make the bundled demo available to nix run without changing the app PATH."""
+    """Make the bundled demo app available to nix run without changing the app PATH."""
     if (
         command[0] == "framewisp-demo"
         and shutil.which(
@@ -1099,6 +1099,7 @@ def _run_session(
                 temporary.write_text(
                     json.dumps(
                         {
+                            "kind": "headless",
                             "command_protocol": COMMAND_PROTOCOL,
                             "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
                             "command_socket": command_socket,

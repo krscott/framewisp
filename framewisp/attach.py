@@ -33,9 +33,12 @@ from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
     COMMAND_PROTOCOL,
+    DESKTOP_KINDS,
+    TEACHING_COMMANDS,
     parse_request_fields,
     receive_request,
     resolved_request_path,
+    teaching_refusal,
 )
 from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
@@ -391,10 +394,8 @@ def parse_attached_request(
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
-    if teaching and command not in {"screenshot", "teach-note"}:
-        raise ValueError(
-            "Teaching is observation-only; input and recording commands are disabled."
-        )
+    if teaching and command not in TEACHING_COMMANDS:
+        raise ValueError(teaching_refusal(command))
     if command.startswith("record-"):
         raise ValueError("Recording attached sessions is not supported yet.")
     raw = fields.get("parameters")
@@ -452,8 +453,8 @@ def attach_session(
     if teaching is not None:
         print(
             "Teaching records your selected monitor and cursor, without keyboard or pointer control.\n"
-            "Video, sampled images, and notes are saved unredacted, including any visible secrets.\n"
-            f"Goal: {teaching.goal}\nOutput: {teaching.directory}\n"
+            "Video, sampled frames, and notes are saved unredacted, including any visible secrets.\n"
+            f"Goal: {teaching.goal}\nLesson: {teaching.directory}\n"
             "Keep this terminal open and in the foreground. Stop with Ctrl+C here,\n"
             "the sharing indicator, or framewisp --detach. Your apps stay running.",
             flush=True,
@@ -476,7 +477,7 @@ def attach_session(
         )
     try:
         confirmation = input(
-            "Type ATTACH to confirm you understand and want to record this demonstration: "
+            "Type ATTACH to confirm you understand and want to record this lesson: "
             if teaching is not None
             else "Type ATTACH to confirm the bindings are configured and you understand this access: "
         )
@@ -583,7 +584,7 @@ def _run_attachment(
                     and request.is_relative_to(teaching.directory.resolve())
                 ):
                     raise ValueError(
-                        "Screenshots cannot overwrite the active teaching bundle. Choose a path outside it."
+                        "Screenshots cannot overwrite the active lesson. Choose a path outside it."
                     )
                 return request
 
@@ -658,7 +659,8 @@ def _run_attachment(
                     except (ValueError, RecursionError):
                         existing = None
                     if not isinstance(existing, dict) or (
-                        cast(dict[str, object], existing).get("kind") != "attached"
+                        cast(dict[str, object], existing).get("kind")
+                        not in DESKTOP_KINDS
                     ):
                         raise RuntimeError(
                             f"{state} belongs to another session. Use a different directory."
@@ -675,7 +677,7 @@ def _run_attachment(
                     write_state(
                         state,
                         {
-                            "kind": "attached",
+                            "kind": "attached" if teaching is None else "teaching",
                             "command_protocol": COMMAND_PROTOCOL,
                             "attachment": attachment,
                             "command_socket": command_socket,
@@ -761,7 +763,7 @@ def _run_attachment(
                                 )
                                 if teaching.created:
                                     print(
-                                        f"Demonstration saved: {teaching.directory}",
+                                        f"Lesson saved: {teaching.directory}",
                                         flush=True,
                                     )
                             except (OSError, RuntimeError, GLib.Error) as failure:

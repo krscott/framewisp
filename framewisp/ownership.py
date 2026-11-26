@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
+from framewisp.connection import DESKTOP_KINDS
 from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
@@ -327,7 +328,7 @@ def records_attachment(session_dir: Path) -> bool:
         return False
     return (
         isinstance(state, dict)
-        and cast(dict[str, object], state).get("kind") == "attached"
+        and cast(dict[str, object], state).get("kind") in DESKTOP_KINDS
     )
 
 

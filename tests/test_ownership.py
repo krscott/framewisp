@@ -663,8 +663,9 @@ def test_null_runtime_identity_steps_use_the_journal_path(
 
 
 # R-LIFE-7
-def test_stale_attachment_gets_attachment_steps(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text('{"kind": "attached"}')
+@pytest.mark.parametrize("kind", ["attached", "teaching"])
+def test_stale_attachment_gets_attachment_steps(tmp_path: Path, kind: str) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
     with pytest.raises(SessionError, match="--detach") as refusal:
         recover_session(tmp_path)
     message = str(refusal.value)

@@ -80,7 +80,7 @@ def test_teaching_rejects_every_input_command(command: str) -> None:
     line = json.dumps(
         {"attachment": "token", "command": command, "parameters": {}}
     ).encode()
-    with pytest.raises(ValueError, match="observation-only"):
+    with pytest.raises(ValueError, match="this is a teaching session"):
         parse_attached_request(line, "token", teaching=True)
 
 
@@ -117,25 +117,25 @@ def test_existing_output_is_untouched(tmp_path: Path, kind: str) -> None:
         assert output.is_symlink() and not (tmp_path / "absent").exists()
 
 
-def observe(lesson: Teaching, count: int) -> None:
+def wait_for_frames(lesson: Teaching, count: int) -> None:
     deadline = time.monotonic() + 8
     while lesson.count < count:
         if not lesson.poll():
             raise RuntimeError("Teaching capture ended unexpectedly.")
-        assert time.monotonic() < deadline, "No teaching observations arrived"
+        assert time.monotonic() < deadline, "No teaching frames arrived"
         time.sleep(0.02)
 
 
 # R-TEACH-3
-def test_bundle_has_playable_video_images_goal_and_timed_notes(
+def test_lesson_has_playable_video_frames_goal_and_timed_notes(
     teaching: Teaching,
 ) -> None:
     teaching.start(
         "videotestsrc is-live=true pattern=ball ! video/x-raw,width=320,height=240,framerate=30/1"
     )
-    observe(teaching, 1)
+    wait_for_frames(teaching, 1)
     teaching.note("Choose this customer; the name is a variable. ✓")
-    observe(teaching, 3)
+    wait_for_frames(teaching, 3)
     teaching.close()
     with pytest.raises(ValueError, match="notes are closed"):
         teaching.note("Too late")
@@ -188,17 +188,17 @@ def test_bundle_has_playable_video_images_goal_and_timed_notes(
 
 
 # R-TEACH-4
-def test_capture_failure_preserves_partial_evidence(teaching: Teaching) -> None:
+def test_capture_failure_preserves_a_partial_lesson(teaching: Teaching) -> None:
     teaching.start("videotestsrc is-live=true ! video/x-raw,width=160,height=120")
-    observe(teaching, 1)
-    teaching.note("Keep this evidence")
-    with pytest.raises(RuntimeError, match="Partial demonstration"):
+    wait_for_frames(teaching, 1)
+    teaching.note("Keep this note")
+    with pytest.raises(RuntimeError, match="Partial lesson"):
         teaching.close("The stream disconnected")
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
     assert manifest["status"] == "failed"
     assert manifest["error"] == "The stream disconnected"
     assert (teaching.directory / "frames/000000.png").exists()
-    assert "Keep this evidence" in (teaching.directory / "timeline.jsonl").read_text()
+    assert "Keep this note" in (teaching.directory / "timeline.jsonl").read_text()
 
 
 def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
@@ -219,13 +219,13 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
     buffer.fill(0, bytes([255, 0, 0]) * (160 * 120))
     buffer.pts = 0
     assert source.emit("push-buffer", buffer) == Gst.FlowReturn.OK
-    observe(teaching, 1)
+    wait_for_frames(teaching, 1)
     blue_buffer = Gst.Buffer.new_allocate(None, 160 * 120 * 3, None)
     assert blue_buffer is not None
     blue_buffer.fill(0, bytes([0, 0, 255]) * (160 * 120))
     blue_buffer.pts = Gst.SECOND // 2
     assert source.emit("push-buffer", blue_buffer) == Gst.FlowReturn.OK
-    observe(teaching, 2)
+    wait_for_frames(teaching, 2)
     teaching.note("This unchanged screen is the final result")
     time.sleep(0.2)
     teaching.close()
@@ -242,7 +242,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
             "-show_frames",
             "-of",
             "json",
-            str(teaching.directory / "demonstration.webm"),
+            str(teaching.directory / "video.webm"),
         ],
         capture_output=True,
         text=True,
@@ -263,7 +263,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
             "error",
             "-copyts",
             "-i",
-            str(teaching.directory / "demonstration.webm"),
+            str(teaching.directory / "video.webm"),
             "-ss",
             str(note_time),
             "-frames:v",
@@ -282,15 +282,15 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
         assert blue > 200 and green < 20 and red < 20
 
 
-def test_source_ending_is_a_failure_even_when_a_last_image_remains(
+def test_source_ending_is_a_failure_even_when_a_last_frame_remains(
     teaching: Teaching,
 ) -> None:
     teaching.start(
         "videotestsrc is-live=true num-buffers=30 ! video/x-raw,width=160,height=120,framerate=30/1"
     )
     with pytest.raises(RuntimeError, match="ended unexpectedly"):
-        observe(teaching, 4)
-    with pytest.raises(RuntimeError, match="Partial demonstration"):
+        wait_for_frames(teaching, 4)
+    with pytest.raises(RuntimeError, match="Partial lesson"):
         teaching.close()
     assert (
         json.loads((teaching.directory / "lesson.json").read_text())["status"]
@@ -358,7 +358,7 @@ def test_teach_rejects_invalid_parent_before_consent(
 
 @pytest.fixture
 def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
-    """Run the bundled app on an isolated desktop, never the user's display."""
+    """Run the demo app on an isolated desktop, never the user's display."""
     read, write = os.pipe()
     server = subprocess.Popen(
         [
@@ -425,14 +425,14 @@ def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
         server.wait(timeout=5)
 
 
-def test_teaching_captures_a_demonstrated_task_in_the_real_demo(
+def test_teaching_captures_a_task_performed_in_the_demo_app(
     desktop_demo: tuple[str, Path], teaching: Teaching
 ) -> None:
     display, log = desktop_demo
     teaching.start(
         f"ximagesrc display-name={display} show-pointer=true use-damage=false ! video/x-raw,framerate=30/1"
     )
-    observe(teaching, 1)
+    wait_for_frames(teaching, 1)
     teaching.note("Type a variable value and apply it")
     result = subprocess.run(
         [
@@ -461,11 +461,11 @@ def test_teaching_captures_a_demonstrated_task_in_the_real_demo(
         check=True,
         timeout=5,
     )
-    observe(teaching, teaching.count + 3)
+    wait_for_frames(teaching, teaching.count + 3)
     teaching.close()
     assert "Applied: LearnMe" in log.read_text()
-    images = sorted((teaching.directory / "frames").iterdir())
-    with Image.open(images[0]) as first, Image.open(images[-1]) as last:
+    frames = sorted((teaching.directory / "frames").iterdir())
+    with Image.open(frames[0]) as first, Image.open(frames[-1]) as last:
         assert first.size == last.size == (1280, 720)
         assert (
             ImageChops.difference(first.convert("RGB"), last.convert("RGB")).getbbox()

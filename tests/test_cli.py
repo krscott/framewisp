@@ -375,6 +375,7 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
         {"command_protocol": COMMAND_PROTOCOL + 1},
         {"command_protocol": str(COMMAND_PROTOCOL)},
         {"kind": "attached"},
+        {"kind": "teaching"},
     ],
 )
 @pytest.mark.parametrize(
@@ -406,7 +407,9 @@ def test_session_commands_refuse_another_command_protocol(
     )
     assert result.returncode == 1
     assert "another version of framewisp" in result.stderr
-    assert ("Ask the user" in result.stderr) is (metadata.get("kind") == "attached")
+    assert ("Ask the user" in result.stderr) is (
+        metadata.get("kind") in {"attached", "teaching"}
+    )
     assert "again with this version" in result.stderr
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "screenshot.png").exists()

@@ -7,14 +7,14 @@ import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Literal, TypeVar, cast
 
 from framewisp.batch import MAX_REQUEST_BYTES
 
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 3
+COMMAND_PROTOCOL = 4
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -22,14 +22,31 @@ REJECTED_REQUEST = (ValueError, TypeError, OverflowError, OSError)
 
 Request = TypeVar("Request")
 
+# The `kind` that session metadata publishes.
+SessionKind = Literal["headless", "attached", "teaching"]
+# The kinds of session on the user's desktop, reached by `request_attached`.
+DESKTOP_KINDS = frozenset({"attached", "teaching"})
+# The session commands a teaching session accepts; it only watches.
+TEACHING_COMMANDS = frozenset({"screenshot", "teach-note"})
+
+
+def teaching_refusal(command: str) -> str:
+    return (
+        f"{command} is refused: this is a teaching session, which only watches. "
+        "It accepts only screenshot and teach-note."
+    )
+
 
 def request_attached(
     session_dir: Path, command: str, parameters: dict[str, object]
 ) -> int:
     try:
         state = json.loads((session_dir / "session.json").read_text())
-        if state.get("kind") != "attached":
-            print("This command requires an attached desktop session.", file=sys.stderr)
+        if state.get("kind") not in DESKTOP_KINDS:
+            print(
+                "This command requires an attached or teaching session.",
+                file=sys.stderr,
+            )
             return 1
         endpoint = Path(state["command_socket"])
         with socket.socket(socket.AF_UNIX) as connection:
