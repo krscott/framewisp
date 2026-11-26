@@ -7,7 +7,7 @@ import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal, TypeVar, cast
+from typing import Literal, TypeVar, cast, get_args
 
 from framewisp.batch import MAX_REQUEST_BYTES
 
@@ -24,10 +24,23 @@ Request = TypeVar("Request")
 
 # The `kind` that session metadata publishes.
 SessionKind = Literal["headless", "attached", "teaching"]
-# The kinds of session on the user's desktop, reached by `request_attached`.
-DESKTOP_KINDS = frozenset({"attached", "teaching"})
+# The kinds of session on the user's desktop, reached by `request_desktop`.
+DESKTOP_KINDS: frozenset[SessionKind] = frozenset({"attached", "teaching"})
 # The session commands a teaching session accepts; it only watches.
 TEACHING_COMMANDS = frozenset({"screenshot", "teach-note"})
+
+
+def session_kind(metadata: object) -> SessionKind | None:
+    """Return the kind that parsed session metadata publishes.
+
+    None means it publishes no known kind. Such a session is not a desktop
+    session, and session commands refuse it.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    kind = cast(dict[str, object], metadata).get("kind")
+    # Compare by equality: an unhashable kind cannot be looked up in a set.
+    return next((known for known in get_args(SessionKind) if known == kind), None)
 
 
 def teaching_refusal(command: str) -> str:
@@ -37,12 +50,31 @@ def teaching_refusal(command: str) -> str:
     )
 
 
-def request_attached(
+def desktop_session(kind: SessionKind | None) -> str:
+    return "teaching session" if kind == "teaching" else "attached session"
+
+
+def restart_remedy(kind: SessionKind | None) -> str:
+    """Say how the user starts a desktop session of this kind again."""
+    if kind == "teaching":
+        return "Ask the user to run teach again."
+    return "Ask the user to run attach in another terminal."
+
+
+def disconnected(kind: SessionKind | None) -> str:
+    return (
+        f"{desktop_session(kind).capitalize()} is disconnected. {restart_remedy(kind)}"
+    )
+
+
+def request_desktop(
     session_dir: Path, command: str, parameters: dict[str, object]
 ) -> int:
+    kind: SessionKind | None = None
     try:
         state = json.loads((session_dir / "session.json").read_text())
-        if state.get("kind") not in DESKTOP_KINDS:
+        kind = session_kind(state)
+        if kind not in DESKTOP_KINDS:
             print(
                 "This command requires an attached or teaching session.",
                 file=sys.stderr,
@@ -66,22 +98,19 @@ def request_attached(
             with connection.makefile("r") as response:
                 line = response.readline()
         if not line:
-            print("Attached session disconnected.", file=sys.stderr)
+            print(disconnected(kind), file=sys.stderr)
             return 1
         result = json.loads(line)
         if result["error"]:
             print(result["error"], file=sys.stderr)
         return int(result["status"])
     except (FileNotFoundError, ConnectionError):
-        print(
-            "Attached session is disconnected. Ask the user to run attach in another terminal.",
-            file=sys.stderr,
-        )
+        print(disconnected(kind), file=sys.stderr)
         return 1
 
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         print(
-            f"Cannot use attached session: {error}. Ask the user to reconnect.",
+            f"Cannot use {desktop_session(kind)}: {error}. {restart_remedy(kind)}",
             file=sys.stderr,
         )
         return 1

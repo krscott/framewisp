@@ -49,7 +49,7 @@ type ATTACH, and approve sharing for one monitor. Never automate user consent.
 4. Reattach separately for `--stop-sharing`, Ctrl+C, terminal closure, owner exit,
    forced owner death, and portal revocation. Confirm each removes the indicator.
 5. Verify `--stop-sharing` during held-modifier input and after suspending the
-   owner with SIGSTOP. Confirm the desktop share ends and the icon disappears.
+   owner with SIGSTOP. Confirm the desktop share ends and the indicator disappears.
    On X11, one second after each stop in steps 3 to 5, check that
    `xinput query-state "Virtual core XTEST keyboard"` and the matching
    `pointer` device report nothing `down`.

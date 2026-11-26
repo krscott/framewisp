@@ -664,7 +664,7 @@ def test_null_runtime_identity_steps_use_the_journal_path(
 
 # R-LIFE-7
 @pytest.mark.parametrize("kind", ["attached", "teaching"])
-def test_stale_desktop_share_gets_desktop_share_steps(
+def test_stale_desktop_session_gets_desktop_session_steps(
     tmp_path: Path, kind: str
 ) -> None:
     (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
@@ -675,6 +675,24 @@ def test_stale_desktop_share_gets_desktop_share_steps(
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0
+
+
+@pytest.mark.parametrize("kind", [[], {}])
+def test_recover_refuses_metadata_with_an_unhashable_kind(
+    tmp_path: Path, kind: object
+) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "recover"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "journal is missing" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert (tmp_path / "session.json").exists()
 
 
 # R-LIFE-7
@@ -1049,14 +1067,14 @@ def open_session_permissions(session_dir: Path) -> None:
     session_dir.chmod(0o777)
 
 
-def record_stale_desktop_share(session_dir: Path) -> None:
+def record_stale_desktop_session(session_dir: Path) -> None:
     (session_dir / JOURNAL).unlink()
     (session_dir / "session.json").write_text('{"kind": "attached"}')
 
 
 # R-LIFE-7, R-REC-20
 @pytest.mark.parametrize(
-    "refuse", [corrupt_lock, open_session_permissions, record_stale_desktop_share]
+    "refuse", [corrupt_lock, open_session_permissions, record_stale_desktop_session]
 )
 def test_early_refusals_report_interrupted_clip(
     abandoned: tuple[Path, Path],

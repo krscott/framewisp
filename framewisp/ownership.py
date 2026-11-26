@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from framewisp.connection import DESKTOP_KINDS
+from framewisp.connection import DESKTOP_KINDS, session_kind
 from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
@@ -321,24 +321,21 @@ def unverified_runtime(session_dir: Path, runtime: Path, problem: str) -> str:
     )
 
 
-def records_desktop_share(session_dir: Path) -> bool:
+def records_desktop_session(session_dir: Path) -> bool:
     try:
         state = read_metadata(session_dir / "session.json")
     except (OSError, ValueError, RecursionError):
         return False
-    return (
-        isinstance(state, dict)
-        and cast(dict[str, object], state).get("kind") in DESKTOP_KINDS
-    )
+    return session_kind(state) in DESKTOP_KINDS
 
 
-def stale_desktop_share(session_dir: Path) -> str:
+def stale_desktop_session(session_dir: Path) -> str:
     metadata = shlex.join(["rm", "-f", "--", str(session_dir / "session.json")])
     return (
         f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
         "If it is running, stop it with `framewisp --stop-sharing`.\n"
-        f"Otherwise attach again, or delete its metadata:\n  {metadata}"
+        f"Otherwise start it again with attach or teach, or delete its metadata:\n  {metadata}"
     ) + kept_clip_note(session_dir)
 
 
@@ -530,8 +527,8 @@ def recover_session(session_dir: Path) -> int:
                 path_status(path) != "absent"
                 for path in (likely_runtime(session_dir), *metadata)
             ):
-                if records_desktop_share(session_dir):
-                    raise SessionError(stale_desktop_share(session_dir))
+                if records_desktop_session(session_dir):
+                    raise SessionError(stale_desktop_session(session_dir))
                 raise SessionError(
                     unreadable_journal(session_dir, "journal is missing")
                 )
