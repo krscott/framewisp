@@ -14,6 +14,7 @@ from framewisp.connection import (
     COMMAND_PROTOCOL,
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
+    DesktopKind,
     SessionKind,
     request_desktop,
     session_kind,
@@ -556,7 +557,7 @@ def main() -> None:
 
 
 def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) -> int:
-    desktop = kind in DESKTOP_KINDS
+    desktop: DesktopKind | None = None if kind == "headless" else kind
     if args.command == "inspect":
         from framewisp.inspection import inspect_session
 
@@ -583,7 +584,9 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
     elif args.command == "teach-note":
         if kind != "teaching":
             raise SessionError("teach-note requires a teaching session.")
-        result = request_desktop(session_dir, "teach-note", {"text": args.text})
+        result = request_desktop(
+            session_dir, "teaching", "teach-note", {"text": args.text}
+        )
     elif args.command == "recover":
         result = recover_session(session_dir)
     elif args.command == "run":
@@ -608,7 +611,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
                 "status and stop manage headless sessions. Use framewisp --detach to stop desktop attachment."
             )
         result = (
-            request_desktop(session_dir, args.command, {})
+            request_desktop(session_dir, desktop, args.command, {})
             if desktop
             else session_command(
                 session_dir,
@@ -627,7 +630,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
             )
         result = (
             request_desktop(
-                session_dir, "screenshot", {"path": str(args.path.resolve())}
+                session_dir, desktop, "screenshot", {"path": str(args.path.resolve())}
             )
             if desktop
             else screenshot(
@@ -654,7 +657,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
         if desktop:
             parameters.pop("move_duration", None)
             with log_input(session_dir, args.command, parameters) as action:
-                result = request_desktop(session_dir, args.command, parameters)
+                result = request_desktop(session_dir, desktop, args.command, parameters)
                 action.returncode = result
         else:
             result = session_command(session_dir, args.command, parameters=parameters)

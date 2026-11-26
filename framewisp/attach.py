@@ -389,12 +389,10 @@ def parse_desktop_request(
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one. The sender's kind may
-    # differ from this session's, so the message names neither.
+    # differ from this session's, and its session directory may differ too, so
+    # the message names neither.
     if fields.get("attachment") != attachment:
-        raise ValueError(
-            "The session this command was addressed to has ended. "
-            "Its session directory now holds another session."
-        )
+        raise ValueError("The session this command was addressed to has ended.")
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
@@ -431,7 +429,14 @@ def foreground_terminal(descriptor: int) -> bool:
         return False
 
 
-def start_failure(teaching: Teaching | None) -> str:
+def failure_prefix(teaching: Teaching | None, *, ready: bool) -> str:
+    """Name what failed: starting the session, or the session once ready."""
+    if ready:
+        return (
+            "Teaching session ended"
+            if teaching is not None
+            else "Attached session ended"
+        )
     return "Could not start teaching" if teaching is not None else "Could not attach"
 
 
@@ -527,7 +532,7 @@ def run_attachment(
                 teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
-        print(f"{start_failure(teaching)}: {failure}", file=sys.stderr)
+        print(f"{failure_prefix(teaching, ready=False)}: {failure}", file=sys.stderr)
         return 1
 
 
@@ -794,7 +799,10 @@ def _run_attachment(
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(f"{start_failure(teaching)}: {failure}", file=sys.stderr)
+        print(
+            f"{failure_prefix(teaching, ready=ready.is_set())}: {failure}",
+            file=sys.stderr,
+        )
         return 1
     finally:
         stop.set()
