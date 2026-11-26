@@ -59,10 +59,10 @@ from framewisp.layout import ClipLayout, ConsolePanel, clip_layout
 from framewisp.processes import ManagedProcess, managed_process, run_managed
 from framewisp.recorder import recorder_output
 from framewisp.recovery import (
-    PRIVATE_CLIP,
     JOURNAL,
     JOURNAL_TEMPORARY,
     LOCK,
+    PRIVATE_CLIP,
     headless_runtime_dir,
     kept_clip,
     records_desktop_session,

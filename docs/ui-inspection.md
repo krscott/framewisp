@@ -221,7 +221,7 @@ formatting controls, file dialogs, multi-paragraph documents, and other
 LibreOffice components are untested. Settings-portal warnings did not prevent
 this workflow; portal-dependent features remain untested.
 
-Blender's run dismissed the splash, used `g`, `x`, `2`, Return to translate the
+Blender's session dismissed the splash, used `g`, `x`, `2`, Return to translate the
 selected cube, and sent two upward wheel ticks over the viewport. Screenshots
 recorded the viewport and editor menu. Selecting Python Console through the
 menu and typing a Python expression wrote the actual cube location to a file;

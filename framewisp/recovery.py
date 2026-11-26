@@ -197,8 +197,13 @@ def session_lock(session_dir: Path) -> Generator[int, None, None]:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            stop = shlex.join(["framewisp", str(session_dir), "stop"])
             raise SessionError(
-                "The session's runner or a supervisor is still live. Wait for cleanup and retry."
+                f"{session_dir} is in use by a live session, or by supervisors "
+                "cleaning up after a runner that just died.\n"
+                f"To end a live session, run `{stop}`, press Ctrl+C in the terminal "
+                "of an attached or teaching session, or use another session directory.\n"
+                "If the runner just died, wait a few seconds and retry."
             ) from None
         yield descriptor
     finally:
@@ -338,7 +343,9 @@ def stale_desktop_session(session_dir: Path) -> str:
     return (
         f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
-        "Start it again with attach or teach "
+        "First confirm that the runner of that attached or teaching session has stopped: "
+        "the terminal that ran attach or teach is back at its prompt. "
+        "Then start it again with attach or teach "
         "(for teach, with a new lesson directory), "
         f"or delete its metadata:\n  {metadata}"
     ) + kept_clip_note(session_dir)

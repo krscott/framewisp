@@ -183,7 +183,7 @@ def test_session_commands_with_changed_tmpdir(
                 result = command("recover")
                 if result.returncode == 0:
                     break
-                assert "still live" in result.stderr, result
+                assert "is in use by a live session" in result.stderr, result
                 assert time.monotonic() < deadline, result
                 time.sleep(0.05)
         assert not runtime_dir.exists()

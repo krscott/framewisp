@@ -205,7 +205,7 @@ def test_capture_failure_preserves_a_partial_lesson(teaching: Teaching) -> None:
     assert "Keep this note" in (teaching.directory / "timeline.jsonl").read_text()
 
 
-def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
+def test_sparse_display_updates_keep_final_notes_on_the_video_timeline(
     teaching: Teaching,
 ) -> None:
     from gi.repository import Gst
@@ -230,7 +230,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
     blue_buffer.pts = Gst.SECOND // 2
     assert source.emit("push-buffer", blue_buffer) == Gst.FlowReturn.OK
     wait_for_frames(teaching, 2)
-    teaching.note("This unchanged screen is the final result")
+    teaching.note("This unchanged display is the final result")
     time.sleep(0.2)
     teaching.close()
     entries = [

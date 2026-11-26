@@ -17,10 +17,10 @@ import pytest
 
 from framewisp.errors import SessionError
 from framewisp.recovery import (
-    PRIVATE_CLIP,
     JOURNAL,
     JOURNAL_TEMPORARY,
     LOCK,
+    PRIVATE_CLIP,
     headless_runtime_dir,
     recover_session,
     runtime_dir_path,
@@ -122,7 +122,7 @@ with session_lock(session_dir) as lock:
                     assert recover_session(session_dir) == 0
                     break
                 except SessionError as error:
-                    assert "still live" in str(error)
+                    assert "is in use by a live session" in str(error)
                     assert time.monotonic() < deadline
                     time.sleep(0.05)
             assert not runtime_dir.exists()
@@ -162,8 +162,11 @@ def test_live_runner_and_copied_or_damaged_metadata(tmp_path: Path) -> None:
         )
         (runtime_dir / "important").write_text("live resource")
         shutil.copytree(session_dir, copied)
-        with pytest.raises(SessionError, match="still live"):
+        with pytest.raises(SessionError, match="is in use by a live session") as busy:
             recover_session(session_dir)
+        stop = shlex.join(["framewisp", str(session_dir), "stop"])
+        assert f"run `{stop}`" in str(busy.value)
+        assert "wait a few seconds and retry" in str(busy.value)
         with pytest.raises(SessionError, match="does not belong"):
             recover_session(copied)
         assert (runtime_dir / "important").read_text() == "live resource"
@@ -330,7 +333,7 @@ def test_hard_linked_lock_is_the_same_lock_while_session_live(tmp_path: Path) ->
         original = tmp_path / "original.lock"
         lock_path.rename(original)
         os.link(original, lock_path)
-        with pytest.raises(SessionError, match="still live"):
+        with pytest.raises(SessionError, match="is in use by a live session"):
             recover_session(tmp_path)
         assert runtime_dir.is_dir()
     assert not runtime_dir.exists()
@@ -358,7 +361,9 @@ def test_unusable_replacement_lock_refused_while_session_live(
         assert "move it aside" in " ".join(str(refusal.value).split())
         assert runtime_dir.is_dir()
         lock_path.rename(tmp_path / "aside")
-        with pytest.raises(SessionError, match="was replaced|still live"):
+        with pytest.raises(
+            SessionError, match="was replaced|is in use by a live session"
+        ):
             recover_session(tmp_path)
         assert runtime_dir.is_dir()
     assert not runtime_dir.exists()
@@ -714,7 +719,6 @@ def test_stale_desktop_session_gets_desktop_session_steps(
     assert recover_session(tmp_path) == 0
 
 
-# R-LIFE-7
 @pytest.mark.parametrize("kind", ["attached", "teaching"])
 def test_run_gives_desktop_session_steps_for_stale_desktop_metadata(
     tmp_path: Path, kind: str
@@ -730,6 +734,7 @@ def test_run_gives_desktop_session_steps_for_stale_desktop_metadata(
     assert result.returncode == 1
     assert "records an attached or teaching session" in result.stderr
     assert " recover`" not in result.stderr
+    assert result.stderr.index("has stopped") < result.stderr.index("rm -f")
     assert (tmp_path / "session.json").exists()
     run_commands(result.stderr, "rm ")
     assert not (tmp_path / "session.json").exists()

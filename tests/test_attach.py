@@ -699,7 +699,7 @@ def test_pending_consent_reserves_session(
         check=False,
     )
     assert duplicate.returncode == 1
-    assert "still live" in duplicate.stderr
+    assert "is in use by a live session" in duplicate.stderr
     assert metadata.read_text() == original
     assert runner.poll() is None
     assert stop_sharing() == 0
@@ -1493,7 +1493,7 @@ def test_desktop_share_refuses_unrecovered_headless_session(
     session_dir.mkdir()
     with session_lock(session_dir) as lock:
         assert share_desktop(session_dir, None) == 1
-        assert "still live" in capsys.readouterr().err
+        assert "is in use by a live session" in capsys.readouterr().err
         write_journal(session_dir, runtime_dir_path(session_dir), lock, created=False)
     assert share_desktop(session_dir, None) == 1
     recover = shlex.join(["framewisp", str(session_dir), "recover"])
@@ -1507,7 +1507,7 @@ def test_recovery_refuses_live_desktop_share(
 ) -> None:
     metadata_path = tmp_path / "session" / "session.json"
     before = metadata_path.read_bytes()
-    with pytest.raises(SessionError, match="still live"):
+    with pytest.raises(SessionError, match="is in use by a live session"):
         recover_session(tmp_path / "session")
     assert metadata_path.read_bytes() == before
     assert runner.poll() is None

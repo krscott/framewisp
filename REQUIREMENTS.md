@@ -282,9 +282,13 @@ investigate or ask; never invent a rationale.
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
   directory usable again.
-- **R-LIFE-5** [test] Recovery refuses a copied, damaged, symlinked, or replaced
-  session lock, recovery journal, or runtime directory. A same-user program that deliberately
-  rewrites them so they verify is out of scope.
+- **R-LIFE-5** [test] Recovery refuses a damaged or symlinked session lock,
+  recovery journal, or runtime directory. It also refuses a recovery journal
+  whose recorded identities do not match: one copied into a different session
+  directory, or one whose recorded session lock or runtime directory identity
+  differs from the one present, as when either was copied or replaced. A
+  same-user program that deliberately rewrites them so they verify is out of
+  scope.
 
   Rationale: Copies, damage and accidental replacement are honest mistakes, and
   they must not delete a live session. A same-user program can already remove

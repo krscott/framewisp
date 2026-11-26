@@ -4685,9 +4685,9 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {private_clip(tmp_path)}" in error
     assert "raw clip remains" in error
     assert "finalization.log" in error
-    assert (
-        headless_session.directory / ".private-clip"
-    ).readlink() == private_clip(tmp_path)
+    assert (headless_session.directory / ".private-clip").readlink() == private_clip(
+        tmp_path
+    )
     assert len(clip_frames(private_clip(tmp_path))) > 1
 
 
@@ -5940,7 +5940,7 @@ def test_recover_killed_runner_and_reuse_directory(
                     timeout=20,
                 )
                 assert rejected.returncode != 0
-                assert "still live" in rejected.stderr
+                assert "is in use by a live session" in rejected.stderr
                 assert (
                     headless_session.directory / "inputs.jsonl"
                 ).read_bytes() == before
@@ -5966,7 +5966,7 @@ def test_recover_killed_runner_and_reuse_directory(
                 )
                 if result.returncode == 0:
                     break
-                assert "still live" in result.stderr, result.stderr
+                assert "is in use by a live session" in result.stderr, result.stderr
                 assert time.monotonic() < deadline
                 time.sleep(0.05)
             assert json.loads(result.stdout)["status"] == "recovered"
@@ -6065,7 +6065,7 @@ def test_named_session_launch_commands_and_cleanup(tmp_path: Path) -> None:
         )
         assert duplicate.returncode == 1
         assert process.poll() is None
-        assert "runner or a supervisor is still live" in duplicate.stderr
+        assert "is in use by a live session" in duplicate.stderr
         named("stop")
         assert process.wait(timeout=20) == 0
         assert not (session_dir / "session.json").exists()

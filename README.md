@@ -1223,8 +1223,11 @@ access to your files or end work launched by an existing external service.
 After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`
 with the framewisp version that started the session,
 then reuse the directory with `framewisp SESSION run -- APP`. Supervisors start
-cleanup on runner loss. Recovery refuses while the runner or any supervisor
-holds the session lock; wait a few seconds and retry. It removes the
+cleanup on runner loss. Recovery refuses while the session lock is held. A
+live session holds it: stop that session with `framewisp SESSION stop`, or with
+Ctrl+C in an attached or teaching session's terminal, or use another session
+directory. Supervisors also hold it while they clean up after a runner that just
+died: wait a few seconds and retry. Recovery removes the
 runtime directory and stale session metadata, preserves logs and clips, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
 session replaces its logs. If a private clip remains, the JSON also has
@@ -1234,8 +1237,9 @@ incomplete. Recovery leaves it in place, and it does not block later clips.
 Move what you want to keep and delete the directory.
 
 Recovery never signals PIDs from session metadata or follows its runtime directory path.
-The recovery journal is bound to the session directory's device and inode, so a copied
-recovery journal cannot recover the original session. Keep `.session.lock` in place, including between sessions.
+The recovery journal records the identities (device and inode) of the session directory,
+session lock and runtime directory. Recovery refuses a journal copied into a different
+session directory, or one whose recorded lock or runtime directory identity does not match. Keep `.session.lock` in place, including between sessions.
 If it is deleted or replaced, recovery refuses, removes nothing (R-LIFE-5), and
 prints the steps to stop the session or clean up manually. `stop` still works. Use a private session directory. Startup and recovery reject session
 directories owned by another user or writable by the group or others. Same-user programs that deliberately
