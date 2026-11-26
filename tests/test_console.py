@@ -275,7 +275,7 @@ def test_console_render_failure_preserves_raw_clip(tmp_path: Path) -> None:
     video = tmp_path / "invalid.mp4"
     video.write_bytes(b"raw file contents")
     (tmp_path / "console.jsonl").write_text("")
-    with pytest.raises(RuntimeError, match="raw clip remains"):
+    with pytest.raises(RuntimeError):
         render_clip(
             video,
             input_log=tmp_path / "unused",

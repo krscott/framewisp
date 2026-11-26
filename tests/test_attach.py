@@ -235,7 +235,8 @@ class Portal:
                 raise InterruptedError('Stopped while waiting for desktop permission.')
     def input(self, method, signature, *values):
         if (root / 'fail').exists():
-            raise RuntimeError('injected portal failure')
+            # Include the values, as a real backend error might.
+            raise RuntimeError(f'injected portal failure: {values!r}')
         with (root / 'events').open('a') as out:
             out.write(repr((method, values)) + '\\n')
     def capture_fd(self):
@@ -276,8 +277,8 @@ def dispatch():
         lesson.source_ended.set()
         active.stop.set()
 attach.dispatch_events = dispatch
-original_capture = attach.capture
-def capture(portal, *args):
+original_save_screenshot = attach.save_screenshot
+def save_screenshot(portal, *args):
     global revoke_at
     if (root / 'empty-screenshot').exists():
         lesson.source_ended.set()
@@ -285,11 +286,11 @@ def capture(portal, *args):
         (root / 'revoke').touch()
         return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
     if not (root / 'slow-screenshot').exists():
-        return original_capture(portal, *args)
+        return original_save_screenshot(portal, *args)
     (root / 'capturing').touch()
     portal.stop.wait(10)
-    raise InterruptedError('capture stopped')
-attach.capture = capture
+    raise InterruptedError('screenshot stopped')
+attach.save_screenshot = save_screenshot
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -442,8 +443,7 @@ def test_attached_cli_input_retention(
 ) -> None:
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     for arguments in [
         ("type", "--interval", "0", "café 日本語 😀"),
@@ -515,6 +515,7 @@ def test_teaching_runner_records_notes_rejects_input_and_finalizes(
         )
         assert refused.returncode == 1
         assert "this is a teaching session" in refused.stderr
+        assert "--stop-sharing" not in refused.stderr
     # The runner empties the input log at startup, and a refused command adds
     # no entry.
     assert (session_dir / "inputs.jsonl").read_text() == ""
@@ -526,7 +527,8 @@ def test_teaching_runner_records_notes_rejects_input_and_finalizes(
             timeout=5,
         )
         assert refused.returncode == 1
-        assert "framewisp --stop-sharing" in refused.stderr
+        assert "Ctrl+C in its terminal" in refused.stderr
+        assert "--stop-sharing" not in refused.stderr
     assert request_desktop(session_dir, "teaching", "click", {"x": 20, "y": 20}) == 1
     assert (
         request_desktop(
@@ -712,8 +714,7 @@ def test_stop_sharing_cancels_long_input_and_waits_for_cleanup(
     assert not (tmp_path / "events").exists()
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     command = subprocess.Popen(
         [
             sys.executable,
@@ -840,8 +841,7 @@ def test_x11_stop_releases_held_input(
     assert releases(x11_desktop) == [STARTUP_RELEASE]
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     assert stop_sharing() == 0
     # The runner must not wait out the release past --stop-sharing's SIGKILL deadline.
     assert runner.wait(timeout=5) == 0
@@ -865,8 +865,7 @@ def test_x11_release_survives_killing_the_runner_job(
         wait_file(tmp_path / "waiting")
         (tmp_path / "approve").touch()
         assert runner.stdout is not None
-        while "Attached:" not in runner.stdout.readline():
-            assert runner.poll() is None
+        read_terminal(runner.stdout.fileno(), b"Attached:")
         os.killpg(runner.pid, signal.SIGKILL)
         assert runner.wait(timeout=5) == -signal.SIGKILL
         assert wait_releases(x11_desktop, 2)[1] == FINAL_RELEASE
@@ -953,8 +952,7 @@ def test_x11_desktop_share_stops_when_release_guard_dies(
 ) -> None:
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     (guard,) = children(runner.pid, "bash")
     os.kill(guard, signal.SIGKILL)
     assert runner.wait(timeout=5) == 1
@@ -1087,8 +1085,7 @@ def test_malformed_requests_leave_the_desktop_share_running(
 ) -> None:
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     token = json.loads((session_dir / "session.json").read_text())["share_token"]
     os.mkfifo(tmp_path / "fifo")
@@ -1148,8 +1145,7 @@ def test_trickling_client_gets_a_reply_from_the_attached_session(
 ) -> None:
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     metadata = json.loads((session_dir / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
@@ -1228,7 +1224,7 @@ def test_truncate_failure_fails_only_that_command(
 
 
 # R-CONTROL-2
-@pytest.mark.parametrize("failure", [None, RuntimeError("capture failed")])
+@pytest.mark.parametrize("failure", [None, RuntimeError("screenshot failed")])
 def test_failure_closing_the_destination_fails_only_that_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception | None
 ) -> None:
@@ -1250,10 +1246,10 @@ def test_failure_closing_the_destination_fails_only_that_command(
     monkeypatch.setattr(attach, "write_png", write)
     monkeypatch.setattr(os, "close", fail_on_output)
     portal = cast(DesktopPortal, CapturePortal())
-    # A fatal capture failure stays fatal, whatever closing the file does.
+    # A fatal screenshot failure stays fatal, whatever closing the file does.
     expected = RuntimeError if failure is not None else ValueError
     with pytest.raises(expected):
-        attach.capture(portal, tmp_path / "x.png", Event(), tmp_path / "log")
+        attach.save_screenshot(portal, tmp_path / "x.png", Event(), tmp_path / "log")
 
 
 # R-CONTROL-2
@@ -1270,13 +1266,30 @@ def test_portal_failure_closes_runner(
 ) -> None:
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
-    while "Attached:" not in runner.stdout.readline():
-        assert runner.poll() is None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
     (tmp_path / "fail").touch()
-    assert request_desktop(tmp_path / "session", "attached", "key", {"chord": "a"}) == 1
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "type",
+            "hunter2",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
     assert runner.wait(timeout=5) == 1
     assert (tmp_path / "closed").exists()
     assert not (tmp_path / "session/session.json").exists()
+    stdout, stderr = runner.communicate(timeout=5)
+    assert "Stopped sharing: RuntimeError: input details omitted" in stderr
+    assert "hunter2" not in stderr and "hunter2" not in stdout
+    assert stdout.endswith("Your apps and desktop are still running.\n")
+    assert "Stopped sharing." not in stdout
 
 
 @pytest.fixture

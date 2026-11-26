@@ -439,11 +439,12 @@ indicator: its menu requires a responsive runner. The indicator disappears when 
 session ends, and framewisp registers a new one for the next attached or teaching session.
 See [sharing indicator verification](docs/sharing-indicator.md) for setup and verification status.
 
-Ctrl+Alt+Escape runs `framewisp --stop-sharing`. Ctrl+C, loss of the controlling terminal,
+Stop a session with Ctrl+C in its terminal. Loss of the controlling terminal,
 pressing Ctrl+Z, or portal revocation also ends the desktop share. Detaching from tmux
-or screen can leave that terminal and the session's runner running. Use `--stop-sharing`
-before disconnecting from a terminal multiplexer. If the runner
-crashes or is killed, its private portal connection and capture handles
+or screen can leave that terminal and the session's runner running, so press Ctrl+C in
+the session's terminal before disconnecting from a terminal multiplexer. Ctrl+Alt+Escape
+runs `framewisp --stop-sharing`, the emergency stop for whichever session is sharing. If the
+runner crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive runner
 after three seconds. This allows lessons to finalize. It uses Linux
 6.5 or newer to identify the process holding the socket safely.
@@ -786,12 +787,13 @@ timestamps and content.
 
 Finalization applies compaction and draws the console panel and overlays in one
 FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
-that pass fails, the raw clip remains playable at the clip destination, and the
-error names its path and `finalization.log` (R-REC-10). If framewisp cannot
+that pass fails, the raw clip remains at the clip destination, playable when the
+recorder wrote a playable file, and the error names its path and
+`finalization.log` (R-REC-10). If framewisp cannot
 publish the clip there, for example because a file takes the clip destination
 first or its directory is no longer writable, it leaves any file there intact.
-The rendered clip, or the raw clip if the pass failed, stays in the hidden
-directory and the error names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
+The clip stays in the hidden directory with whatever finalization completed,
+and the error names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
 triggered it.
 
 ## Share media in GitHub comments

@@ -534,12 +534,8 @@ def main() -> None:
             if published_kind in DESKTOP_KINDS:
                 remedy = (
                     "Ask the user to end it with Ctrl+C in its terminal if it is "
-                    "still running, then to start it again with this version"
-                    + (
-                        " and a new lesson directory."
-                        if published_kind == "teaching"
-                        else "."
-                    )
+                    "still running, then to start it again with this version "
+                    "(for teach, with a new lesson directory)."
                 )
             else:
                 remedy = (
@@ -625,8 +621,7 @@ def dispatch(
         if desktop is not None and args.command in {"status", "stop"}:
             raise SessionError(
                 "status and stop manage headless sessions. The user ends this session with Ctrl+C "
-                "in its terminal; framewisp --stop-sharing is the emergency stop for whichever "
-                "session is sharing."
+                "in its terminal."
             )
         result = (
             request_desktop(session_dir, desktop, args.command, {})

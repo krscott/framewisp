@@ -11,6 +11,7 @@ from framewisp.finalization import (
     Caption,
     CaptionOptions,
     captions_for_clip,
+    raw_clip_failure,
     subtitle_script,
 )
 from framewisp.input_log import KEY_ACTIONS, CaptionCapture, log_input
@@ -374,3 +375,23 @@ def test_caption_text_cannot_inject_ass_formatting() -> None:
     assert r"\pos" not in script
     assert r"\N" not in script
     assert "\\{\\\u2060pos(0,0)\\}\\\u2060N日本語" in script
+
+
+# R-REC-10
+def test_raw_clip_failure_names_the_clip_missing_extras_and_logs() -> None:
+    error = str(
+        raw_clip_failure(
+            Path("clip.mp4"),
+            ValueError("bad line"),
+            extras=True,
+            logs=(Path("finalization.log"), Path("inputs.jsonl")),
+        )
+    )
+    assert error == (
+        "Finalization failed; raw clip remains at clip.mp4 without overlays, "
+        "console panel or compaction. See finalization.log and inputs.jsonl. "
+        "Cause: bad line"
+    )
+    assert str(raw_clip_failure(Path("clip.mp4"), ValueError("x"), extras=False)) == (
+        "Finalization failed; raw clip remains at clip.mp4. Cause: x"
+    )

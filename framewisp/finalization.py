@@ -2,11 +2,10 @@
 
 import re
 import tempfile
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from functools import wraps
 from pathlib import Path
-from typing import Literal, ParamSpec, cast, get_args
+from typing import Literal, cast, get_args
 
 from framewisp.compact import (
     activity_events,
@@ -184,27 +183,23 @@ Format: Layer, Start, End, Style, Text
     return script
 
 
-P = ParamSpec("P")
+def raw_clip_failure(
+    clip: Path, cause: Exception, *, extras: bool, logs: Iterable[Path] = ()
+) -> RuntimeError:
+    """Report a finalization failure with the raw clip it left behind (R-REC-10).
+
+    `extras` says whether the clip requested overlays, a console panel or
+    compaction, which the raw clip lacks.
+    """
+    missing = " without overlays, console panel or compaction" if extras else ""
+    names = " and ".join(str(log) for log in logs)
+    see = f" See {names}." if names else ""
+    return RuntimeError(
+        f"Finalization failed; raw clip remains at {clip}{missing}.{see} "
+        f"Cause: {cause}"
+    )
 
 
-def keeps_raw_clip(render: Callable[P, None]) -> Callable[P, None]:
-    """Report any failure after capture with the clip it left behind."""
-
-    @wraps(render)
-    def rendered(*args: P.args, **kwargs: P.kwargs) -> None:
-        try:
-            render(*args, **kwargs)
-        except Exception as error:
-            raise RuntimeError(
-                f"Finalization failed; raw clip remains at {args[0]} without "
-                f"overlays, console panel or compaction. See {kwargs['log']} and "
-                f"{kwargs['input_log']}. Cause: {error}"
-            ) from error
-
-    return rendered
-
-
-@keeps_raw_clip
 def render_clip(
     clip: Path,
     /,

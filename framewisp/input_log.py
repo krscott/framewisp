@@ -69,9 +69,9 @@ def retained_parameters(
     return p
 
 
-def input_error(action: str, error: BaseException) -> str:
+def input_error(command: str, error: BaseException) -> str:
     """Input tool errors can include text, keysyms, or serialized subprocess arguments."""
-    if action not in KEY_ACTIONS:
+    if command not in KEY_ACTIONS:
         return str(error)
     if isinstance(error, InterruptedError):
         return "Input cancelled; caller disconnected or session stopped."

@@ -43,8 +43,8 @@ A condition selects by `role` and/or `name`, with the same case-insensitive exac
 role and name substring rules as inspection. Only a complete observation with
 exactly one readable match can satisfy it (R-CHECK-1). Duplicate matches fail immediately, even if one has
 the desired value. Missing objects, stale references, truncation, unsupported
-apps, and timeouts never count as success. A wait can retry those observations;
-an unavailable bus fails immediately. There is no absence condition and no
+apps, and timeouts never count as success. A wait queries again after an incomplete
+observation or a missing match; an unavailable bus fails immediately. There is no absence condition and no
 observation-ID selector.
 
 | Field | Equality semantics |

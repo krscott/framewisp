@@ -11,6 +11,7 @@ from threading import Event
 import pytest
 
 from framewisp.console import ConsoleCapture
+from framewisp.errors import SessionError
 from framewisp.finalization import capture_origin
 from framewisp.layout import ConsolePanel
 from framewisp.lib import Recording
@@ -35,14 +36,15 @@ def decoded_frames(path: Path) -> int:
     return sum(1 for line in decoded.stdout.splitlines() if not line.startswith("#"))
 
 
-def recorded_by_fake_recorder(
+def started_by_fake_recorder(
     tmp_path: Path,
     written: Path,
     *,
+    click_pings: bool = True,
     compact: bool = False,
     console_panel: ConsolePanel | None = None,
-) -> dict[str, object]:
-    """Finish a clip whose recorder writes `written`, and return the summary."""
+) -> Recording:
+    """Start a clip at `tmp_path / "clip.mp4"` whose recorder writes `written`."""
     tools = tmp_path / "recorder-tools"
     tools.mkdir()
     recorder = tools / "wf-recorder"
@@ -61,11 +63,29 @@ while :; do sleep 0.01; done
     recording = Recording(
         session_dir, environment, Event(), (1280, 720), ConsoleCapture(session_dir)
     )
-    destination = tmp_path / "clip.mp4"
-    error = recording.start(destination, compact=compact, console_panel=console_panel)
+    error = recording.start(
+        tmp_path / "clip.mp4",
+        click_pings=click_pings,
+        compact=compact,
+        console_panel=console_panel,
+    )
     assert error is None
+    return recording
+
+
+def recorded_by_fake_recorder(
+    tmp_path: Path,
+    written: Path,
+    *,
+    compact: bool = False,
+    console_panel: ConsolePanel | None = None,
+) -> dict[str, object]:
+    """Finish a clip whose recorder writes `written`, and return the summary."""
+    recording = started_by_fake_recorder(
+        tmp_path, written, compact=compact, console_panel=console_panel
+    )
     assert recording.finish() is None
-    assert destination.stat().st_size > 0
+    assert (tmp_path / "clip.mp4").stat().st_size > 0
     assert not list(tmp_path.glob(".framewisp-clip-*"))
     summary = recording.last_summary
     assert summary is not None
@@ -127,6 +147,30 @@ def fail_remux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str) -> 
     remuxer.write_text(f"#!/bin/sh\n{script}\nexit 1\n")
     remuxer.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+
+
+def fail_restore(clip: Path, *, log: Path, env: dict[str, str]) -> bool:
+    raise RuntimeError("probe failed")
+
+
+# R-REC-10
+@pytest.mark.parametrize("click_pings", [True, False])
+def test_failed_restore_publishes_the_raw_clip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, click_pings: bool
+) -> None:
+    monkeypatch.setattr("framewisp.lib.restore_hidden_frames", fail_restore)
+    recording = started_by_fake_recorder(
+        tmp_path, ZERO_DURATION_CLIP, click_pings=click_pings
+    )
+    with pytest.raises(SessionError) as failure:
+        recording.finish()
+    clip = tmp_path / "clip.mp4"
+    assert clip.read_bytes() == ZERO_DURATION_CLIP.read_bytes()
+    assert not list(tmp_path.glob(".framewisp-clip-*"))
+    error = str(failure.value)
+    assert f"raw clip remains at {clip}" in error
+    assert "probe failed" in error
+    assert ("without overlays" in error) == click_pings
 
 
 # R-REC-22

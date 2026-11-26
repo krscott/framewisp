@@ -203,10 +203,11 @@ def test_cli_resolves_named_session_without_legacy_fallback(
             assert result.returncode == 1
             assert str(session_dir) in result.stderr
             assert (
-                "framewisp --stop-sharing is the emergency stop"
+                "The user ends this session with Ctrl+C in its terminal."
                 if attached
                 else "another version of framewisp"
             ) in result.stderr
+            assert "--stop-sharing" not in result.stderr
         (session_dir / "session.json").unlink()
         result = subprocess.run(
             [sys.executable, "-m", "framewisp", "browser", "status"],

@@ -202,7 +202,7 @@ def test_deadline_also_stops_a_client_that_keeps_sending(
 def test_screenshot_through_a_symlink_cannot_be_the_active_clip_destination(
     recording: Recording, tmp_path: Path, kind: str
 ) -> None:
-    recording.destination = tmp_path / "clip.mp4"
+    recording.clip_destination = tmp_path / "clip.mp4"
     (tmp_path / "alias").symlink_to(tmp_path)
     action = {"action": "move", "x": 0, "y": 0}
     screenshot = {"path": str(tmp_path / "alias" / "clip.mp4")}

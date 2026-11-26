@@ -380,6 +380,8 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
         {"command_protocol": str(COMMAND_PROTOCOL)},
         {"kind": "attached"},
         {"kind": "teaching"},
+        # The previous version published teaching sessions as attached.
+        {"kind": "attached", "command_protocol": 3},
     ],
 )
 @pytest.mark.parametrize(
@@ -417,7 +419,7 @@ def test_session_commands_refuse_another_command_protocol(
     assert (f"`{recover}` with the framewisp version" in result.stderr) is not desktop
     assert "again with this version" in result.stderr
     assert ("a new lesson directory" in result.stderr) is (
-        metadata.get("kind") == "teaching"
+        metadata.get("kind") in {"attached", "teaching"}
     )
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "screenshot.png").exists()
