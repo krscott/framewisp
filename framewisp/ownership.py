@@ -52,13 +52,13 @@ def lease_identity(lease: int) -> list[int]:
     return [info.st_dev, info.st_ino]
 
 
-def runtime_name(session: Path) -> str:
-    device, inode = identity(session)
+def runtime_name(session_dir: Path) -> str:
+    device, inode = identity(session_dir)
     return f"framewisp-{os.getuid()}-{device:x}-{inode:x}"
 
 
-def runtime_path(session: Path) -> Path:
-    return Path(tempfile.gettempdir()) / runtime_name(session)
+def runtime_path(session_dir: Path) -> Path:
+    return Path(tempfile.gettempdir()) / runtime_name(session_dir)
 
 
 def temporary_parents() -> list[Path]:
@@ -92,9 +92,9 @@ def path_status(path: Path) -> Literal["present", "absent", "unchecked"]:
     return "present"
 
 
-def likely_runtime(session: Path) -> Path:
+def likely_runtime(session_dir: Path) -> Path:
     """Find this session's runtime directory, for refusals and for checking leftovers."""
-    name = runtime_name(session)
+    name = runtime_name(session_dir)
     runtimes = [parent / name for parent in temporary_parents()]
     for status in ("present", "unchecked"):
         for runtime in runtimes:
@@ -116,7 +116,7 @@ def check_socket_paths(runtime: Path) -> None:
         )
 
 
-def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
+def journal_runtime(session_dir: Path, journal: dict[str, object]) -> Path:
     """Return the journal's runtime path, or raise ValueError or OSError."""
     value = journal.get("runtime_path")
     if value is None:
@@ -124,7 +124,7 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     if not isinstance(value, str):
         raise ValueError("journal runtime path must be an absolute path")
     runtime = Path(value)
-    if not runtime.is_absolute() or runtime.name != runtime_name(session):
+    if not runtime.is_absolute() or runtime.name != runtime_name(session_dir):
         raise ValueError(f"journal has an invalid runtime path: {value!r}")
     # Path.exists() reports a path that cannot be checked as missing, which would
     # read as a finished cleanup. Only a confirmed absence may.
@@ -135,11 +135,11 @@ def journal_runtime(session: Path, journal: dict[str, object]) -> Path:
     return runtime
 
 
-def kept_recording_note(session: Path) -> str:
-    clip = kept_recording(session)
+def kept_recording_note(session_dir: Path) -> str:
+    clip = kept_recording(session_dir)
     if clip is None:
         return ""
-    recover = shlex.join(["framewisp", str(session), "recover"])
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
     return (
         f"\nAn interrupted recording is kept at {str(clip)!r}. These steps do not touch "
         f"it, and a successful `{recover}` reports it."
@@ -158,27 +158,29 @@ def unusable_lock(lock: Path, problem: str) -> str:
 
 
 @contextmanager
-def session_lease(session: Path) -> Generator[int, None, None]:
+def session_lease(session_dir: Path) -> Generator[int, None, None]:
     try:
-        directory = session.lstat()
+        directory = session_dir.lstat()
     except OSError as error:
-        raise SessionError(unreadable_journal(session, str(error.strerror))) from error
+        raise SessionError(
+            unreadable_journal(session_dir, str(error.strerror))
+        ) from error
     if (
         not stat.S_ISDIR(directory.st_mode)
         or directory.st_uid != os.getuid()
         or directory.st_mode & 0o022
     ):
         raise SessionError(
-            f"Unsafe session directory: {session}. Use a directory you own without group or other write permission (chmod 700)."
-            + kept_recording_note(session)
+            f"Unsafe session directory: {session_dir}. Use a directory you own without group or other write permission (chmod 700)."
+            + kept_recording_note(session_dir)
         )
-    lock = session / LOCK
+    lock = session_dir / LOCK
     try:
         descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     except OSError as error:
         if error.errno == errno.ENOENT:
             raise SessionError(
-                unreadable_journal(session, str(error.strerror))
+                unreadable_journal(session_dir, str(error.strerror))
             ) from error
         # Other errors, such as an unwritable directory, say nothing about the lock.
         if error.errno in (errno.ELOOP, errno.EISDIR, errno.ENXIO) or (
@@ -200,9 +202,9 @@ def session_lease(session: Path) -> Generator[int, None, None]:
         os.close(descriptor)
 
 
-def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
+def cleanup_steps(session_dir: Path, runtime: Path, *process_checks: str) -> str:
     """Describe manual cleanup for ownership that recovery cannot verify."""
-    framewisp = shlex.join(["framewisp", str(session)])
+    framewisp = shlex.join(["framewisp", str(session_dir)])
     quoted = shlex.quote(str(runtime))
     # The directory's name is the same under any TMPDIR. In a UTF-8 locale, `.*`
     # would not match a TMPDIR that is not valid UTF-8.
@@ -221,10 +223,11 @@ def cleanup_steps(session: Path, runtime: Path, *process_checks: str) -> str:
         # find does not follow a symlinked start; rm needs only directory access.
         f"  find {quoted} -type d -exec chmod u+rwx {{}} +",
         f"  rm -rf -- {quoted}",
-        "  " + shlex.join(["rm", "-rf", "--", *(str(session / m) for m in metadata)]),
+        "  "
+        + shlex.join(["rm", "-rf", "--", *(str(session_dir / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
-    return "\n".join(lines) + kept_recording_note(session)
+    return "\n".join(lines) + kept_recording_note(session_dir)
 
 
 def read_metadata(path: Path) -> object:
@@ -240,12 +243,12 @@ def read_metadata(path: Path) -> object:
         return json.load(source)
 
 
-def stop_step(session: Path) -> str:
-    framewisp = shlex.join(["framewisp", str(session)])
+def stop_step(session_dir: Path) -> str:
+    framewisp = shlex.join(["framewisp", str(session_dir)])
     return f"If the session is running, stop it with `{framewisp} stop`.\n"
 
 
-def missing_session_steps(session: Path) -> str:
+def missing_session_steps(session_dir: Path) -> str:
     # The runtime directory's name comes from the session directory's identity, which
     # is gone. Nothing printable can identify it, and a starting session has no
     # marked process yet, so these steps must never single out a directory to delete.
@@ -255,7 +258,7 @@ def missing_session_steps(session: Path) -> str:
     environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/framewisp-{uid}-[0-9a-f-]+$")
     framewisp = shlex.join(["framewisp", "NEW_PATH", "recover"])
     return (
-        f"Session directory {session} does not exist, or cannot be read. Check the "
+        f"Session directory {session_dir} does not exist, or cannot be read. Check the "
         "path.\n"
         f"If it moved within its filesystem, run `{framewisp}`: its ownership files "
         "moved with it.\n"
@@ -275,15 +278,15 @@ def missing_session_steps(session: Path) -> str:
     )
 
 
-def derived_steps(session: Path) -> str:
+def derived_steps(session_dir: Path) -> str:
     """Describe manual cleanup when no journal can be trusted to name the runtime."""
     # A journal is the only trustworthy record of the session's TMPDIR. A path copied
     # from an unverified one could also aim these steps at another session, so they
     # use the path derived from this session's identity.
     try:
-        runtime = likely_runtime(session)
+        runtime = likely_runtime(session_dir)
     except OSError:
-        return missing_session_steps(session)
+        return missing_session_steps(session_dir)
     unchecked = (
         f"Cannot check {runtime}, so a runtime may remain there. Restore access, then "
         "run recover again. Unset TMPDIR instead only if you know this session never "
@@ -293,33 +296,33 @@ def derived_steps(session: Path) -> str:
     )
     return (
         unchecked
-        + stop_step(session)
+        + stop_step(session_dir)
         + f"Otherwise follow these steps, which assume TMPDIR is {runtime.parent}. "
         "If the session started with another TMPDIR, set it and run recover again "
-        "for steps with that path.\n" + cleanup_steps(session, runtime)
+        "for steps with that path.\n" + cleanup_steps(session_dir, runtime)
     )
 
 
-def unreadable_journal(session: Path, problem: str) -> str:
+def unreadable_journal(session_dir: Path, problem: str) -> str:
     return (
-        f"Cannot verify ownership at {session / JOURNAL}: {problem}\n"
+        f"Cannot verify ownership at {session_dir / JOURNAL}: {problem}\n"
         "Cannot prove the session has exited. Nothing was removed.\n"
-        + derived_steps(session)
+        + derived_steps(session_dir)
     )
 
 
-def unverified_runtime(session: Path, runtime: Path, problem: str) -> str:
+def unverified_runtime(session_dir: Path, runtime: Path, problem: str) -> str:
     return (
         f"{problem}\nNothing was removed.\n"
-        + stop_step(session)
+        + stop_step(session_dir)
         + "Otherwise:\n"
-        + cleanup_steps(session, runtime)
+        + cleanup_steps(session_dir, runtime)
     )
 
 
-def records_attachment(session: Path) -> bool:
+def records_attachment(session_dir: Path) -> bool:
     try:
-        state = read_metadata(session / "session.json")
+        state = read_metadata(session_dir / "session.json")
     except (OSError, ValueError, RecursionError):
         return False
     return (
@@ -328,43 +331,45 @@ def records_attachment(session: Path) -> bool:
     )
 
 
-def stale_attachment(session: Path) -> str:
-    metadata = shlex.join(["rm", "-f", "--", str(session / "session.json")])
+def stale_attachment(session_dir: Path) -> str:
+    metadata = shlex.join(["rm", "-f", "--", str(session_dir / "session.json")])
     return (
-        f"{session} records a desktop attachment, which recover does not clean up. "
+        f"{session_dir} records a desktop attachment, which recover does not clean up. "
         "Nothing was removed.\n"
         "If the attachment is running, stop it with `framewisp --detach`.\n"
         f"Otherwise attach again, or delete its metadata:\n  {metadata}"
-    ) + kept_recording_note(session)
+    ) + kept_recording_note(session_dir)
 
 
-def verify_lock(session: Path, recorded: list[int], runtime: Path, lease: int) -> None:
+def verify_lock(
+    session_dir: Path, recorded: list[int], runtime: Path, lease: int
+) -> None:
     held = lease_identity(lease)
     if recorded == held:
         return
-    lock = session / LOCK
+    lock = session_dir / LOCK
     raise SessionError(
         f"Session lock {lock} was replaced: the ownership journal records "
         f"device:inode {recorded[0]}:{recorded[1]}, but found {held[0]}:{held[1]}. "
         "A live session may still hold the original lock, so nothing was removed.\n"
-        f"{stop_step(session)}If you still have the original lock file, move it back "
+        f"{stop_step(session_dir)}If you still have the original lock file, move it back "
         f"to {lock} and run recover again.\n"
         "If the original lock is lost:\n"
-        + cleanup_steps(session, runtime, f"grep ':{recorded[1]} ' /proc/locks")
+        + cleanup_steps(session_dir, runtime, f"grep ':{recorded[1]} ' /proc/locks")
     )
 
 
-def read_journal(session: Path, lease: int) -> Journal:
+def read_journal(session_dir: Path, lease: int) -> Journal:
     """Return the verified journal, or refuse with manual cleanup steps."""
-    path = session / JOURNAL
+    path = session_dir / JOURNAL
     try:
         value = read_metadata(path)
         if not isinstance(value, dict):
             raise ValueError("journal must be an object")
         journal = cast(dict[str, object], value)
-        if journal.get("session") != identity(session):
+        if journal.get("session_directory") != identity(session_dir):
             raise ValueError("journal does not belong to this session directory")
-        runtime = journal_runtime(session, journal)
+        runtime = journal_runtime(session_dir, journal)
         if "runtime" not in journal:
             raise ValueError("journal has no runtime identity")
         runtime_identity = parse_identity(journal["runtime"])
@@ -377,8 +382,8 @@ def read_journal(session: Path, lease: int) -> Journal:
                 "verification"
             )
     except (OSError, ValueError, RecursionError) as error:
-        raise SessionError(unreadable_journal(session, str(error))) from error
-    verify_lock(session, lock, runtime, lease)
+        raise SessionError(unreadable_journal(session_dir, str(error))) from error
+    verify_lock(session_dir, lock, runtime, lease)
     return Journal(runtime, runtime_identity)
 
 
@@ -395,13 +400,15 @@ def sync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) -> None:
-    temporary = session / ".headless-owner.tmp"
+def write_journal(
+    session_dir: Path, runtime: Path, lease: int, *, created: bool
+) -> None:
+    temporary = session_dir / ".headless-owner.tmp"
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as output:
         json.dump(
             {
-                "session": identity(session),
+                "session_directory": identity(session_dir),
                 "lock": lease_identity(lease),
                 "runtime_path": str(runtime),
                 "runtime": identity(runtime) if created else None,
@@ -410,8 +417,8 @@ def write_journal(session: Path, runtime: Path, lease: int, *, created: bool) ->
         )
         output.flush()
         os.fsync(output.fileno())
-    temporary.replace(session / JOURNAL)
-    sync_directory(session)
+    temporary.replace(session_dir / JOURNAL)
+    sync_directory(session_dir)
 
 
 def make_directories_removable(root: Path) -> None:
@@ -423,19 +430,21 @@ def make_directories_removable(root: Path) -> None:
                 path.chmod(0o700)
 
 
-def remove_runtime(session: Path, lease: int) -> None:
-    journal = read_journal(session, lease)
+def remove_runtime(session_dir: Path, lease: int) -> None:
+    journal = read_journal(session_dir, lease)
     runtime = journal.runtime
     if runtime.is_symlink():
         raise SessionError(
-            unverified_runtime(session, runtime, f"Refusing symlink runtime: {runtime}")
+            unverified_runtime(
+                session_dir, runtime, f"Refusing symlink runtime: {runtime}"
+            )
         )
     if runtime.exists():
         info = runtime.lstat()
         if info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise SessionError(
                 unverified_runtime(
-                    session,
+                    session_dir,
                     runtime,
                     f"Runtime ownership or permissions changed: {runtime}",
                 )
@@ -448,7 +457,7 @@ def remove_runtime(session: Path, lease: int) -> None:
             except OSError as error:
                 raise SessionError(
                     unverified_runtime(
-                        session,
+                        session_dir,
                         runtime,
                         f"Ownership journal records no runtime identity, but {runtime} "
                         f"cannot be removed: {error.strerror}.",
@@ -458,7 +467,7 @@ def remove_runtime(session: Path, lease: int) -> None:
             if journal.runtime_identity != identity(runtime):
                 raise SessionError(
                     unverified_runtime(
-                        session,
+                        session_dir,
                         runtime,
                         f"Runtime identity changed; resources remain at {runtime}.",
                     )
@@ -467,7 +476,7 @@ def remove_runtime(session: Path, lease: int) -> None:
             if pending:
                 raise SessionError(
                     unverified_runtime(
-                        session,
+                        session_dir,
                         runtime,
                         f"Cleanup is incomplete; resources remain at {runtime}. "
                         "Inspect supervisor records: "
@@ -478,8 +487,12 @@ def remove_runtime(session: Path, lease: int) -> None:
             shutil.rmtree(runtime)
 
 
-def refuse_abandoned_ownership(session: Path) -> None:
-    paths = (session / JOURNAL, session / ".headless-owner.tmp", runtime_path(session))
+def refuse_abandoned_ownership(session_dir: Path) -> None:
+    paths = (
+        session_dir / JOURNAL,
+        session_dir / ".headless-owner.tmp",
+        runtime_path(session_dir),
+    )
     if any(path_status(path) != "absent" for path in paths):
         raise SessionError(
             "Abandoned headless ownership remains. Run framewisp SESSION recover first."
@@ -487,45 +500,47 @@ def refuse_abandoned_ownership(session: Path) -> None:
 
 
 @contextmanager
-def headless_runtime(session: Path, lease: int) -> Generator[Path, None, None]:
-    runtime = runtime_path(session)
-    refuse_abandoned_ownership(session)
+def headless_runtime(session_dir: Path, lease: int) -> Generator[Path, None, None]:
+    runtime = runtime_path(session_dir)
+    refuse_abandoned_ownership(session_dir)
     check_socket_paths(runtime)
-    write_journal(session, runtime, lease, created=False)
+    write_journal(session_dir, runtime, lease, created=False)
     runtime.mkdir(mode=0o700)
-    write_journal(session, runtime, lease, created=True)
+    write_journal(session_dir, runtime, lease, created=True)
     try:
         yield runtime
     finally:
-        remove_runtime(session, lease)
+        remove_runtime(session_dir, lease)
         # Keep proof of ownership until metadata is gone, including if shutdown
         # is interrupted after removing the runtime.
         for name in ("session.json", ".session.json"):
-            (session / name).unlink(missing_ok=True)
-        (session / JOURNAL).unlink()
+            (session_dir / name).unlink(missing_ok=True)
+        (session_dir / JOURNAL).unlink()
 
 
-def recover_session(session: Path) -> int:
-    with session_lease(session) as lease:
-        if path_status(session / JOURNAL) == "absent":
+def recover_session(session_dir: Path) -> int:
+    with session_lease(session_dir) as lease:
+        if path_status(session_dir / JOURNAL) == "absent":
             # Before the first journal commit, no runtime or children may exist.
             # A partial temporary journal is disposable, but stale session JSON
             # without an ownership journal belongs to an unsupported older run.
-            metadata = (session / "session.json", session / ".session.json")
+            metadata = (session_dir / "session.json", session_dir / ".session.json")
             if any(
                 path_status(path) != "absent"
-                for path in (likely_runtime(session), *metadata)
+                for path in (likely_runtime(session_dir), *metadata)
             ):
-                if records_attachment(session):
-                    raise SessionError(stale_attachment(session))
-                raise SessionError(unreadable_journal(session, "journal is missing"))
+                if records_attachment(session_dir):
+                    raise SessionError(stale_attachment(session_dir))
+                raise SessionError(
+                    unreadable_journal(session_dir, "journal is missing")
+                )
         else:
-            remove_runtime(session, lease)
+            remove_runtime(session_dir, lease)
         for name in ("session.json", ".session.json", ".headless-owner.tmp", JOURNAL):
-            (session / name).unlink(missing_ok=True)
-        interrupted = interrupted_recording(session)
+            (session_dir / name).unlink(missing_ok=True)
+        interrupted = interrupted_recording(session_dir)
     result: dict[str, str] = {
-        "session": str(session),
+        "session_directory": str(session_dir),
         "status": "recovered",
         "logs": "preserved",
     }
@@ -535,19 +550,19 @@ def recover_session(session: Path) -> int:
     return 0
 
 
-def kept_recording(session: Path) -> Path | None:
+def kept_recording(session_dir: Path) -> Path | None:
     """Return the private clip that the active-recording link points at, if any."""
     # Refusals call this, so a damaged link must not raise.
     try:
-        clip = (session / ACTIVE_RECORDING).readlink()
+        clip = (session_dir / ACTIVE_RECORDING).readlink()
     except OSError:
         return None
     return None if path_status(clip) == "absent" else clip
 
 
-def interrupted_recording(session: Path) -> Path | None:
+def interrupted_recording(session_dir: Path) -> Path | None:
     """Clear the active-recording link, returning the clip it left behind."""
-    link = session / ACTIVE_RECORDING
+    link = session_dir / ACTIVE_RECORDING
     if not link.is_symlink():
         return None
     clip = link.readlink()

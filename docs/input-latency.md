@@ -108,8 +108,8 @@ import subprocess
 import time
 from pathlib import Path
 
-session = Path('/tmp/latency-demo')
-state = json.loads((session / 'session.json').read_text())
+session_dir = Path('/tmp/latency-demo')
+state = json.loads((session_dir / 'session.json').read_text())
 socket = str(Path(state['runtime_directory']) / 'vnc.sock')
 vnc = ['vncdo', '-s', socket, '--delay', '0']
 commands = [
@@ -118,7 +118,7 @@ commands = [
     vnc + ['pause', '0'],
     vnc + ['pause', '0.1'],
     vnc + ['pause', '0.1', 'move', '120', '100', 'click', '1'],
-    ['framewisp', str(session), 'click', '120', '100'],
+    ['framewisp', str(session_dir), 'click', '120', '100'],
 ]
 for command in commands:
     samples = []

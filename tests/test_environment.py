@@ -191,9 +191,17 @@ def test_run_refuses_a_missing_font_file(tmp_path: Path, value: str | None) -> N
     env.pop("FRAMEWISP_FONTCONFIG_FILE", None)
     if value is not None:
         env["FRAMEWISP_FONTCONFIG_FILE"] = value and str(tmp_path / value)
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     result = subprocess.run(
-        [sys.executable, "-m", "framewisp", str(session), "run", "--", "unused-app"],
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(session_dir),
+            "run",
+            "--",
+            "unused-app",
+        ],
         env=env,
         capture_output=True,
         text=True,
@@ -202,4 +210,4 @@ def test_run_refuses_a_missing_font_file(tmp_path: Path, value: str | None) -> N
     assert result.returncode == 1
     assert "FRAMEWISP_FONTCONFIG_FILE" in result.stderr
     assert "set it to" in result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()

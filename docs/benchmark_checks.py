@@ -23,8 +23,8 @@ def main() -> None:
     measurements: list[dict[str, object]] = []
     with tempfile.TemporaryDirectory(prefix="fw-check-bench-") as directory:
         root = Path(directory)
-        session = root / "session"
-        command = [sys.executable, "-m", "framewisp", str(session)]
+        session_dir = root / "session"
+        command = [sys.executable, "-m", "framewisp", str(session_dir)]
         with (root / "runner.log").open("w") as log:
             runner = subprocess.Popen(
                 [
@@ -43,8 +43,8 @@ def main() -> None:
         try:
             deadline = time.monotonic() + 15
             while (
-                not (session / "session.json").exists()
-                or "Wait probe ready" not in (session / "app.log").read_text()
+                not (session_dir / "session.json").exists()
+                or "Wait probe ready" not in (session_dir / "app.log").read_text()
             ):
                 if runner.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError((root / "runner.log").read_text())

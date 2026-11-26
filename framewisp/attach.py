@@ -426,7 +426,7 @@ def foreground_terminal(descriptor: int) -> bool:
 
 
 def attach_session(
-    session: Path,
+    session_dir: Path,
     *,
     teaching: Teaching | None = None,
 ) -> int:
@@ -443,7 +443,7 @@ def attach_session(
         print(
             "Desktop attachment must be started by the user in a foreground interactive terminal.\n"
             "Agents: do not allocate a PTY or bypass this check. Ask the user to run:\n"
-            f"  framewisp {shlex.quote(str(session))} {command}\n"
+            f"  framewisp {shlex.quote(str(session_dir))} {command}\n"
             "in another desktop terminal, read the instructions, and approve sharing.",
             file=sys.stderr,
         )
@@ -492,26 +492,26 @@ def attach_session(
         )
         return 1
     return run_attachment(
-        session,
+        session_dir,
         sys.stdin.fileno(),
         teaching=teaching,
     )
 
 
 def run_attachment(
-    session: Path,
+    session_dir: Path,
     terminal: int | None,
     *,
     teaching: Teaching | None = None,
 ) -> int:
     """Reserve session metadata after the CLI completes interactive consent."""
-    session = session.resolve()
+    session_dir = session_dir.resolve()
     try:
-        session.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with session_lease(session):
-            refuse_abandoned_ownership(session)
+        session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with session_lease(session_dir):
+            refuse_abandoned_ownership(session_dir)
             return _run_attachment(
-                session,
+                session_dir,
                 terminal,
                 teaching=teaching,
             )
@@ -521,7 +521,7 @@ def run_attachment(
 
 
 def _run_attachment(
-    session: Path,
+    session_dir: Path,
     terminal: int | None,
     *,
     teaching: Teaching | None = None,
@@ -536,7 +536,7 @@ def _run_attachment(
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
     attachment = uuid.uuid4().hex
-    state = session / "session.json"
+    state = session_dir / "session.json"
     owns_state = False
     capture_descriptor: int | None = None
 
@@ -547,7 +547,7 @@ def _run_attachment(
         assert portal is not None
         ready.set()
         print(
-            f"Attached: {session} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+            f"Attached: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
             flush=True,
         )
 
@@ -608,7 +608,7 @@ def _run_attachment(
                     try:
                         inputs.wait()
                         if isinstance(request, Path):
-                            capture(portal, request, stop, session / "capture.log")
+                            capture(portal, request, stop, session_dir / "capture.log")
                         else:
                             inputs.perform(
                                 action, cast(InputParameters, request.parameters)
@@ -650,7 +650,7 @@ def _run_attachment(
     try:
         with reserve_desktop() as directory:
             try:
-                session.mkdir(mode=0o700, parents=True, exist_ok=True)
+                session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if (
                     state.exists()
                     and json.loads(state.read_text()).get("kind") != "attached"
@@ -662,7 +662,8 @@ def _run_attachment(
                     socket.socket(socket.AF_UNIX) as listener,
                     socket.socket(socket.AF_UNIX) as emergency,
                 ):
-                    listener.bind(str(directory / "control.sock"))
+                    command_socket = str(directory / "command.sock")
+                    listener.bind(command_socket)
                     emergency.bind(str(directory / "detach.sock"))
                     listener.listen(32)
                     emergency.listen(32)
@@ -672,17 +673,13 @@ def _run_attachment(
                             "kind": "attached",
                             "input_caption_options": True,
                             "attachment": attachment,
-                            "runtime_directory": str(directory),
+                            "command_socket": command_socket,
                             "processes": {"attach": os.getpid()},
                         },
                     )
                     owns_state = True
-                    (session / "app-exit.json").unlink(missing_ok=True)
-                    write_state(
-                        directory / "desktop.json",
-                        {"session": str(session), "attachment": attachment},
-                    )
-                    (session / "inputs.jsonl").write_text("", encoding="utf-8")
+                    (session_dir / "app-exit.json").unlink(missing_ok=True)
+                    (session_dir / "inputs.jsonl").write_text("", encoding="utf-8")
                     if teaching is None:
                         guard = start_release_guard(stop)
                     portal = DesktopPortal(stop)

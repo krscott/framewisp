@@ -30,7 +30,7 @@ from framewisp.lib import (
 )
 from framewisp.ownership import recover_session
 from framewisp.pointer import DEFAULT_MOVE_DURATION
-from framewisp.sessions import resolve_session
+from framewisp.sessions import resolve_session_dir
 
 
 def seconds(value: str) -> float:
@@ -68,7 +68,7 @@ def main() -> None:
         "session",
         nargs="?",
         metavar="SESSION",
-        help="project-scoped session name (e.g. browser), or explicit path (e.g. ./browser or /tmp/browser)",
+        help="project-scoped session name (e.g. browser), or the path of a session directory (e.g. ./browser or /tmp/browser)",
     )
     commands = parser.add_subparsers(dest="action")
 
@@ -374,9 +374,9 @@ def main() -> None:
             "SESSION and COMMAND are required (or use --detach or --agent-skill)"
         )
     try:
-        session = resolve_session(args.session)
+        session_dir = resolve_session_dir(args.session)
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
-        parser.error(f"Cannot resolve session: {error}")
+        parser.error(f"Cannot resolve the session directory: {error}")
     if args.action == "inspect":
         from framewisp.inspection import Query
 
@@ -468,13 +468,13 @@ def main() -> None:
                 "--console requires --record; use record-start --console for later clips"
             )
         if not args.command or args.command == ["--"]:
-            parser.error("run requires an application command after --")
+            parser.error("run requires an app command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
         layout = video_layout((args.width, args.height), args.console_panel)
         if isinstance(layout, str):
             parser.error(layout)
-    state_path = session / "session.json"
+    state_path = session_dir / "session.json"
     if args.action == "teach":
         if not args.goal.strip():
             parser.error("--goal must not be blank")
@@ -489,7 +489,7 @@ def main() -> None:
                 f"Teaching output parent must be an existing writable directory: {parent}"
             )
     if args.action not in {"run", "attach", "teach", "recover"}:
-        exit_message = recorded_app_exit(session)
+        exit_message = recorded_app_exit(session_dir)
         if exit_message is not None:
             parser.exit(1, exit_message + "\n")
     if (
@@ -509,24 +509,24 @@ def main() -> None:
     except (OSError, ValueError, AttributeError) as error:
         parser.exit(1, f"Cannot read session metadata: {error}\n")
     try:
-        result = dispatch(session, args, attached=attached)
+        result = dispatch(session_dir, args, attached=attached)
     except (SessionError, OSError, subprocess.TimeoutExpired) as error:
-        parser.exit(1, f"Session {session}: {error}\n")
+        parser.exit(1, f"Session {session_dir}: {error}\n")
     raise SystemExit(result)
 
 
-def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
+def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> int:
     if args.action == "inspect":
         from framewisp.inspection import inspect_session
 
-        observation = inspect_session(session, args.query)
+        observation = inspect_session(session_dir, args.query)
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         result = 0 if observation["status"] == "ok" else 1
     elif args.action == "batch":
         if attached:
             raise SessionError("batch supports headless sessions only.")
         batch: Batch = args.batch
-        result = session_command(session, "batch", parameters=batch.parameters())
+        result = session_command(session_dir, "batch", parameters=batch.parameters())
     elif args.action in {"attach", "teach"}:
         # Desktop portal imports are only needed by the foreground attach owner.
         from framewisp.attach import attach_session
@@ -535,24 +535,24 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
             from framewisp.teaching import Teaching
 
             result = attach_session(
-                session, teaching=Teaching(args.directory, args.goal)
+                session_dir, teaching=Teaching(args.directory, args.goal)
             )
         else:
-            result = attach_session(session)
+            result = attach_session(session_dir)
     elif args.action == "teach-note":
         if not attached:
             raise SessionError(
                 "teach-note requires a teaching session on your desktop."
             )
-        result = request_attached(session, "teach-note", {"text": args.text})
+        result = request_attached(session_dir, "teach-note", {"text": args.text})
     elif args.action == "recover":
-        result = recover_session(session)
+        result = recover_session(session_dir)
     elif args.action == "run":
         command: list[str] = args.command
         if command[:1] == ["--"]:
             command = command[1:]
         result = run_session(
-            session,
+            session_dir,
             command,
             recording=args.record,
             captions=args.captions,
@@ -569,10 +569,10 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
                 "status and stop manage headless sessions. Use framewisp --detach to stop desktop attachment."
             )
         result = (
-            request_attached(session, args.action, {})
+            request_attached(session_dir, args.action, {})
             if attached
             else session_command(
-                session,
+                session_dir,
                 args.action,
                 args.path if args.action == "record-start" else None,
                 captions=getattr(args, "captions", CaptionOptions()),
@@ -589,10 +589,12 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
         if args.delay:
             time.sleep(args.delay)
         result = (
-            request_attached(session, "screenshot", {"path": str(args.path.resolve())})
+            request_attached(
+                session_dir, "screenshot", {"path": str(args.path.resolve())}
+            )
             if attached
             else screenshot(
-                session,
+                session_dir,
                 args.path,
                 region=tuple(args.region) if args.region is not None else None,
                 metadata=args.json,
@@ -614,9 +616,9 @@ def dispatch(session: Path, args: argparse.Namespace, *, attached: bool) -> int:
         }
         if attached:
             parameters.pop("move_duration", None)
-            with log_input(session, args.action, parameters) as action:
-                result = request_attached(session, args.action, parameters)
+            with log_input(session_dir, args.action, parameters) as action:
+                result = request_attached(session_dir, args.action, parameters)
                 action.returncode = result
         else:
-            result = session_command(session, args.action, parameters=parameters)
+            result = session_command(session_dir, args.action, parameters=parameters)
     return result

@@ -164,7 +164,7 @@ def test_baseline_requires_a_nonmatching_value(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str | None
 ) -> None:
     def inspect(
-        session: Path,
+        session_dir: Path,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -194,12 +194,12 @@ def test_query_settings_and_authoritative_deadline(
     cancelled = lambda: False
 
     def inspect(
-        session: Path,
+        session_dir: Path,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
-        assert session == tmp_path
+        assert session_dir == tmp_path
         assert cancelled is not None and not cancelled()
         queries.append(query)
         clock[0] += 3
@@ -246,7 +246,7 @@ def test_wait_partial_responses_and_remaining_budget(
     queries: list[inspection.Query] = []
 
     def inspect(
-        session: Path,
+        session_dir: Path,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -287,7 +287,7 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
     )
 
     def inspect(
-        session: Path,
+        session_dir: Path,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -331,7 +331,7 @@ def test_incomplete_check_diagnostics(
     field: str,
 ) -> None:
     def inspect(
-        session: Path,
+        session_dir: Path,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,

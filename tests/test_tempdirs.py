@@ -20,7 +20,7 @@ from framewisp.ownership import (
     runtime_path,
     session_lease,
 )
-from framewisp.sessions import resolve_session
+from framewisp.sessions import resolve_session_dir
 
 
 @pytest.fixture(params=["a", "a,%; é~"])
@@ -43,9 +43,9 @@ def test_paths_follow_tmpdir(
 ) -> None:
     first, second = temp_roots
     monkeypatch.chdir(tmp_path)
-    named = resolve_session("demo")
+    named = resolve_session_dir("demo")
     assert named.parent.parent == first
-    assert resolve_session("./demo") == tmp_path / "demo"
+    assert resolve_session_dir("./demo") == tmp_path / "demo"
     with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
         assert runtime.parent == first
         assert json.loads((tmp_path / JOURNAL).read_text())["runtime_path"] == str(
@@ -53,7 +53,7 @@ def test_paths_follow_tmpdir(
         )
         monkeypatch.setenv("TMPDIR", str(second))
         monkeypatch.setattr(tempfile, "tempdir", None)
-        assert resolve_session("demo") != named
+        assert resolve_session_dir("demo") != named
         assert runtime_path(tmp_path).parent == second
     assert not runtime.exists()
 
@@ -66,7 +66,7 @@ def test_default_paths_without_temporary_environment(
     monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.chdir(tmp_path)
     assert runtime_path(tmp_path).parent == Path("/tmp")
-    assert resolve_session("demo").parent.parent == Path("/tmp")
+    assert resolve_session_dir("demo").parent.parent == Path("/tmp")
 
 
 @pytest.mark.parametrize("size", [107, 108, 109])
@@ -112,7 +112,7 @@ def test_invalid_journal_runtime_path_refused(tmp_path: Path, path: object) -> N
 @pytest.mark.integration
 @pytest.mark.parametrize("named", [False, True])
 @pytest.mark.parametrize("ending", ["stop", "recover"])
-def test_session_controls_with_changed_tmpdir(
+def test_session_commands_with_changed_tmpdir(
     tmp_path: Path,
     temp_roots: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -121,13 +121,13 @@ def test_session_controls_with_changed_tmpdir(
 ) -> None:
     first, second = temp_roots
     monkeypatch.chdir(tmp_path)
-    session = resolve_session("demo" if named else str(first / "session"))
+    session_dir = resolve_session_dir("demo" if named else str(first / "session"))
     log = tmp_path / "runner.log"
     with log.open("w") as output:
         runner = subprocess.Popen(
             [
                 "framewisp",
-                "demo" if named else str(session),
+                "demo" if named else str(session_dir),
                 "run",
                 "--",
                 "framewisp-demo",
@@ -141,7 +141,7 @@ def test_session_controls_with_changed_tmpdir(
             assert runner.poll() is None, log.read_text()
             assert time.monotonic() < deadline, log.read_text()
             time.sleep(0.05)
-        state = json.loads((session / "session.json").read_text())
+        state = json.loads((session_dir / "session.json").read_text())
         runtime = Path(state["runtime_directory"])
         assert runtime.parent == first
         monkeypatch.setenv("TMPDIR", str(second))
@@ -149,14 +149,14 @@ def test_session_controls_with_changed_tmpdir(
 
         def command(*arguments: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(
-                ["framewisp", str(session), *arguments],
+                ["framewisp", str(session_dir), *arguments],
                 capture_output=True,
                 text=True,
                 timeout=20,
             )
 
         assert command("status").returncode == 0
-        wait_for_control(session, "Apply text")
+        wait_for_control(session_dir, "Apply text")
         batch = tmp_path / "batch.json"
         batch.write_text(json.dumps({"actions": [{"action": "key", "chord": "Tab"}]}))
         result = command("batch", "--file", str(batch))
@@ -182,8 +182,8 @@ def test_session_controls_with_changed_tmpdir(
                 assert time.monotonic() < deadline, result
                 time.sleep(0.05)
         assert not runtime.exists()
-        assert not (session / "session.json").exists()
-        assert not (session / JOURNAL).exists()
+        assert not (session_dir / "session.json").exists()
+        assert not (session_dir / JOURNAL).exists()
         assert all(
             not Path(f"/proc/{pid}").exists() for pid in state["processes"].values()
         )

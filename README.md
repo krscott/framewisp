@@ -21,7 +21,7 @@ Framewisp's Python CLI manages the session and calls these tools:
 | GTK 4, GLib, and PyGObject | Provide the bundled demo and test apps, their event loops, and Python bindings. |
 
 The Nix flake pins and packages these dependencies and wraps the installed
-commands with their runtime environment. Target applications, including Flatpaks,
+commands with their runtime environment. The apps you run, including Flatpaks,
 are installed separately.
 
 Development uses pytest and Pillow to run real GUI tests and compare screenshots.
@@ -40,8 +40,8 @@ declarations.
 
 The flake supports `x86_64-linux`. The package supplies framewisp's display,
 input, screenshot, and recording tools, plus the bundled GTK demo. No development
-shell, checkout, virtual environment, or sudo is needed for `nix run`. External
-applications such as Flatpaks still need their own installation.
+shell, checkout, virtual environment, or sudo is needed for `nix run`. Other
+apps, such as Flatpaks, still need their own installation.
 
 Run directly from the public repository:
 
@@ -189,14 +189,14 @@ these commands inside `nix develop` when working on the source.
 
 ## Commands
 
-Every command takes a session name or explicit path before the subcommand: `framewisp SESSION COMMAND ...`.
+Every command takes a session name or the path of a session directory before the subcommand: `framewisp SESSION COMMAND ...`.
 Use a bare name such as `browser` or `demo` by default. Names resolve to
 `<tempdir>/framewisp-project-<hash>/NAME`, where `<tempdir>` is Python's
 `tempfile.gettempdir()` (`TMPDIR` when set to a writable directory, normally
 `/tmp` otherwise) and `<hash>` is the first 24 hexadecimal
 characters of SHA-256 of the canonical project path. Inside Git, the project is
 the worktree root, so commands from its subdirectories agree. Separate worktrees
-have separate sessions. Outside Git, the project is the current working directory.
+have separate session directories. Outside Git, the project is the current working directory.
 Symlinked project paths resolve to the same canonical path. Git must be installed
 (it is included in the Nix package).
 
@@ -208,9 +208,9 @@ select those directories. Names over 255 bytes are also invalid (R-SESSION-4).
 
 Agents in the same project must choose distinct names to avoid sharing a session.
 Both `run` and user-started `attach` print the resolved session directory at
-startup. Use that explicit path to control the session from another project or
+startup. Use that explicit path to send session commands from another project or
 an environment with a different `TMPDIR`. The same bare name resolves to different
-sessions under different temporary directories.
+session directories under different temporary directories.
 Headless runtime sockets also use this temporary directory. Startup checks the
 108-byte Unix socket limit, including the terminating NUL, and asks for a shorter
 `TMPDIR` if needed. Cleanup and recovery use the runtime path in the ownership
@@ -223,7 +223,7 @@ session-independent.
 | --- | --- |
 | `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory; screen-only access. |
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
-| `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and application; stay in the foreground. |
+| `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
 | `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
 | `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
@@ -246,7 +246,7 @@ KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below).
 Attaching to an X11 desktop without RemoteDesktop and ScreenCast portals, such as
 most standalone window managers, and GPU-dependent apps are outside this MVP.
 
-Clipboard forwarding between VNC clients and the session is disabled. Applications
+Clipboard forwarding between VNC clients and the session is disabled. The app
 can still use Ctrl+C/Ctrl+V and primary selection. Framewisp's Nix package patches
 wayvnc to disable forwarding independently of keyboard and pointer input, avoiding
 the clipboard-offer crash described in [#30](https://github.com/krscott/framewisp/issues/30).
@@ -256,7 +256,7 @@ for more room. Screenshots and input use those pixel dimensions, with `(0, 0)`
 at the top left. Width and height are positive integers (R-INPUT-3); recording also
 requires both to be even (R-REC-2), because the recorder crops odd dimensions.
 
-`Session ready:` means the display and input sockets exist and the application
+`Session ready:` means the display and input sockets exist and the app's
 process has started. The app may still be drawing its first frame. A screenshot
 captures the current display; it does not wait for the app to finish responding
 to input automatically. Prefer a [bounded check](docs/conditional-checks.md) for
@@ -405,7 +405,7 @@ the user to run it, never allocate a terminal to bypass the startup check. The
 terminal check prevents accidental agent startup; it is not a security boundary
 against programs running under the same user account.
 
-Other processes with access to the attachment's state and control socket can
+Other processes with access to the attachment's state and command socket can
 issue commands. Portal approval grants desktop access to the attachment; it
 does not authenticate a particular agent.
 
@@ -523,8 +523,8 @@ framewisp paint click --count 2 500 400
 
 `--button` accepts `left` (default) or `right`. `--count` accepts `1` (default)
 or `2`. Two clicks use the same connection and position, with a 0.1-second pause
-between them. Every click presses and releases the chosen button. The target
-app's settings and the control under the pointer determine how it responds.
+between them. Every click presses and releases the chosen button. The app's
+settings and the control under the pointer determine how it responds.
 Plain `click X Y` still sends one left click.
 
 The runner sends input through one persistent connection for the session. It
@@ -658,7 +658,7 @@ before connecting. Shortcut behavior depends on the focused app and control.
 
 ## Record a session
 
-Add `--record` before the application command to save a silent MP4:
+Add `--record` before the app command to save a silent MP4:
 
 ```sh
 framewisp demo run --record /tmp/demo.mp4 -- framewisp-demo
@@ -914,7 +914,7 @@ backslashes, so they draw as themselves and never act as subtitle formatting.
 Screenshots and recordings
 can still show secrets displayed by apps. Omitting input content does not redact
 screen content or provide a general app-log redaction guarantee. Shell history,
-batch files, application logs, and runtime input state are outside this policy.
+batch files, app logs, and runtime input state are outside this policy.
 Review artifacts before sharing.
 
 ## App environment
@@ -1128,7 +1128,7 @@ The runner discovers Xwayland's allocated display number. It removes the host's
 `DISPLAY`, `WAYLAND_DISPLAY`, and `XAUTHORITY`, then gives the app the private
 `DISPLAY` and `XAUTHORITY=/dev/null`. It sets `GDK_BACKEND=x11`,
 `QT_QPA_PLATFORM=xcb`, and `SDL_VIDEODRIVER=x11` for the app. Display selection is
-not a security sandbox for untrusted applications. Sway owns Xwayland and shuts
+not a security sandbox for untrusted apps. Sway owns Xwayland and shuts
 it down when the session ends.
 
 The bundled GTK demo is the tested X11 target. GPU/game support, desktop services,
@@ -1189,19 +1189,20 @@ last recording summary, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
 These commands manage headless sessions; use `framewisp --detach` for desktop
 attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
-After upgrading from a recording-only control protocol, stop the old runner with
-Ctrl+C or SIGTERM and start a fresh session. New control commands reject that old
-protocol before sending a request.
+A session command that sends a request to a headless session's runner first
+checks the command protocol in session metadata, and refuses a runner that does
+not publish this version's. Stop that runner with Ctrl+C or SIGTERM and start a
+fresh session.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
 `recorder.log` when recording. During a
-run, `session.json` records the private runtime directory, Wayland socket name,
-and managed process IDs. Normal shutdown removes the runtime sockets and
+run, `session.json` records the private runtime directory, command socket,
+Wayland socket name, and managed process IDs. Normal shutdown removes the runtime sockets and
 `session.json`, and keeps the logs. Reusing the directory replaces its logs.
 
-The runner stops its managed processes on Ctrl+C, SIGTERM, or application
-exit. It returns the application's exit code when the app exits on its own.
+The runner stops its managed processes on Ctrl+C, SIGTERM, or app
+exit. It returns the app's exit code when the app exits on its own.
 Each managed process has a private Linux subreaper supervisor that also stops
 forked helpers and detached descendants. Cleanup allows five seconds for SIGTERM
 and two more for SIGKILL per tree, and reports failures with process IDs and logs.
@@ -1242,12 +1243,12 @@ not recover desktop attachments; use `framewisp --detach` for those. Attachment 
 metadata lock and refuses directories with abandoned headless ownership.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
-AT-SPI registry. These buses do not activate host desktop services. Apps that
+AT-SPI registry. These buses do not activate the desktop's services. Apps that
 need additional D-Bus services may still require their own setup.
 
 Expected startup failures include a bounded tail of the component log. Failed
 headless display commands identify the session, display/socket directory, and
-tool error. If running in an agent sandbox, both the runner and every control
+tool error. If running in an agent sandbox, both the runner and every session
 command need permission to access the private sockets. A successful launch
 outside the sandbox does not give later sandboxed calls access. Use your execution
 environment's normal permission process when needed. A connection failure can

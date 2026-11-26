@@ -60,7 +60,7 @@ affected module in `pyproject.toml`.
 
 `tests/test_python_environment.py` runs only in the installed-package checks,
 which split cases across twelve shards. Run `nix flake check` when changing how
-framewisp or its target apps get their environment.
+framewisp or the app gets its environment.
 The installed-package checks also run `test_integration.py`,
 `test_app_environment.py` and `test_unresponsive_app.py` without the `framewisp`
 module on the Python path, so those files must not import it.
@@ -88,8 +88,8 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
   a word listed under a term's _Avoid_ for that term's concept. When a concept
   has no term, or a term no longer fits, change the glossary in the same PR.
   Keep implementation detail out of it.
-  Existing code and docs still use some avoided words; issues #196 to #200 and
-  #204 rename them. Use the glossary's terms in new work.
+  Existing code and docs still use some avoided words; issues #196 to #200
+  rename them. Use the glossary's terms in new work.
   TODO: remove these two sentences once those issues are closed and no avoided
   word is left in its avoided sense.
 - `docs/adr/` records decisions that are hard to reverse, surprising without

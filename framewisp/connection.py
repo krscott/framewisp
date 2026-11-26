@@ -1,4 +1,4 @@
-"""Session socket messages; no desktop libraries required."""
+"""Command socket messages; no desktop libraries required."""
 
 import json
 import socket
@@ -19,13 +19,15 @@ REJECTED_REQUEST = (ValueError, TypeError, OverflowError, OSError)
 Request = TypeVar("Request")
 
 
-def request_attached(session: Path, action: str, parameters: dict[str, object]) -> int:
+def request_attached(
+    session_dir: Path, action: str, parameters: dict[str, object]
+) -> int:
     try:
-        state = json.loads((session / "session.json").read_text())
+        state = json.loads((session_dir / "session.json").read_text())
         if state.get("kind") != "attached":
             print("This command requires an attached desktop session.", file=sys.stderr)
             return 1
-        endpoint = Path(state["runtime_directory"]) / "control.sock"
+        endpoint = Path(state["command_socket"])
         if action in {"key", "type"} and state.get("input_caption_options") is not True:
             print(
                 "This attachment uses an older keyboard input policy. Ask the user to reconnect.",
@@ -113,7 +115,7 @@ def parse_command(line: bytes) -> dict[str, object]:
     except (ValueError, RecursionError) as failure:
         raise ValueError(f"Session request is not valid JSON: {failure}") from None
     if not isinstance(raw, dict):
-        raise ValueError("Expected a session command object.")
+        raise ValueError("Expected a session request object.")
     return cast(dict[str, object], raw)
 
 
@@ -164,7 +166,7 @@ def receive_request(
         )
         try:
             # The message is left out because it can quote typed text.
-            print(f"Bug validating a control request: {name}", file=sys.stderr)
+            print(f"Bug validating a session request: {name}", file=sys.stderr)
             traceback.print_tb(failure.__traceback__)
         except (OSError, ValueError):
             # A closed stderr must not turn a rejected request into a failure.

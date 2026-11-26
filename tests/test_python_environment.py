@@ -1,4 +1,4 @@
-"""Installed entry points must ignore Python settings needed by target apps."""
+"""Installed entry points must ignore Python settings that the app needs."""
 
 import json
 import os
@@ -38,7 +38,7 @@ def foreign_python(tmp_path: Path) -> Path:
 def test_packaged_demo_ignores_caller_python_settings(
     tmp_path: Path, foreign_python: Path, x11: bool
 ) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     runner_log = tmp_path / "runner.log"
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
@@ -47,7 +47,7 @@ def test_packaged_demo_ignores_caller_python_settings(
         "PYTHONPATH": str(foreign_python),
         "PYTHONHOME": str(tmp_path / "missing Python home"),
     }
-    command = [framewisp, str(session), "run"]
+    command = [framewisp, str(session_dir), "run"]
     if x11:
         command.append("--x11")
     command.extend(["--", "framewisp-demo"])
@@ -63,13 +63,13 @@ def test_packaged_demo_ignores_caller_python_settings(
             time.sleep(0.05)
         # Wait for GTK initialization, since runner readiness precedes rendering.
         backend = "X11Display" if x11 else "WaylandDisplay"
-        while "Demo ready" not in (session / "app.log").read_text():
-            assert process.poll() is None, (session / "app.log").read_text()
-            assert time.monotonic() < deadline, (session / "app.log").read_text()
+        while "Demo ready" not in (session_dir / "app.log").read_text():
+            assert process.poll() is None, (session_dir / "app.log").read_text()
+            assert time.monotonic() < deadline, (session_dir / "app.log").read_text()
             time.sleep(0.05)
-        assert backend in (session / "app.log").read_text()
+        assert backend in (session_dir / "app.log").read_text()
         result = subprocess.run(
-            [framewisp, str(session), "stop"],
+            [framewisp, str(session_dir), "stop"],
             env=env,
             capture_output=True,
             text=True,
@@ -77,8 +77,8 @@ def test_packaged_demo_ignores_caller_python_settings(
         )
         assert result.returncode == 0, result.stderr
         assert process.wait(timeout=20) == 0, runner_log.read_text()
-        assert not (session / "session.json").exists()
-        assert not (session / ".headless-owner.json").exists()
+        assert not (session_dir / "session.json").exists()
+        assert not (session_dir / ".headless-owner.json").exists()
     finally:
         if process.poll() is None:
             process.terminate()
@@ -87,10 +87,10 @@ def test_packaged_demo_ignores_caller_python_settings(
 
 # R-ENV-3
 @pytest.mark.parametrize("pythonpath", ["unset", "empty", "foreign"])
-def test_target_app_inherits_caller_pythonpath(
+def test_app_inherits_caller_pythonpath(
     tmp_path: Path, foreign_python: Path, pythonpath: str
 ) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     env = os.environ.copy()
     value = {"unset": None, "empty": "", "foreign": str(foreign_python)}[pythonpath]
     if value is None:
@@ -105,7 +105,7 @@ def test_target_app_inherits_caller_pythonpath(
     )
     if pythonpath == "foreign":
         script += "; import caller_only; print(caller_only.VALUE, flush=True)"
-    command = ["framewisp", str(session), "run"]
+    command = ["framewisp", str(session_dir), "run"]
     # Skip sitecustomize in the probe while retaining PYTHONPATH imports.
     command.extend(["--", sys.executable, "-S", "-c", script])
     result = subprocess.run(
@@ -113,21 +113,19 @@ def test_target_app_inherits_caller_pythonpath(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Session ready:" in result.stdout
-    lines = (session / "app.log").read_text().splitlines()
+    lines = (session_dir / "app.log").read_text().splitlines()
     observed = json.loads(lines[0])
     assert observed["PYTHONPATH"] == value
     assert observed["GI_TYPELIB_PATH"] == str(foreign_python)
     if pythonpath == "foreign":
         assert lines[1] == "caller module"
-    assert not (session / "session.json").exists()
-    assert not (session / ".headless-owner.json").exists()
+    assert not (session_dir / "session.json").exists()
+    assert not (session_dir / ".headless-owner.json").exists()
 
 
 # R-ENV-1
 @pytest.mark.parametrize("value", [None, "", "/caller/sentinel"])
-def test_target_app_preserves_wrapper_variables(
-    tmp_path: Path, value: str | None
-) -> None:
+def test_app_preserves_wrapper_variables(tmp_path: Path, value: str | None) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
     keys = (
@@ -146,8 +144,8 @@ def test_target_app_preserves_wrapper_variables(
             env.pop(key, None)
         else:
             env[key] = value
-    session = tmp_path / "session"
-    command = [framewisp, str(session), "run"]
+    session_dir = tmp_path / "session"
+    command = [framewisp, str(session_dir), "run"]
     command.extend(
         [
             "--",
@@ -162,20 +160,20 @@ def test_target_app_preserves_wrapper_variables(
         command, env=env, capture_output=True, text=True, timeout=30
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    observed = json.loads((session / "app.log").read_text())
+    observed = json.loads((session_dir / "app.log").read_text())
     assert observed.pop("FRAMEWISP_CALLER_ENV_FD") is None
     assert observed == dict.fromkeys(keys, value)
 
 
 @pytest.mark.parametrize("value", [None, "0", ""])
-def test_target_app_accessibility_default(tmp_path: Path, value: str | None) -> None:
+def test_app_accessibility_default(tmp_path: Path, value: str | None) -> None:
     env = os.environ.copy()
     if value is None:
         env.pop("ACCESSIBILITY_ENABLED", None)
     else:
         env["ACCESSIBILITY_ENABLED"] = value
-    session = tmp_path / "session"
-    command = ["framewisp", str(session), "run"]
+    session_dir = tmp_path / "session"
+    command = ["framewisp", str(session_dir), "run"]
     command.extend(
         [
             "--",
@@ -189,13 +187,13 @@ def test_target_app_accessibility_default(tmp_path: Path, value: str | None) -> 
         command, env=env, capture_output=True, text=True, timeout=30
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (session / "app.log").read_text().strip() == repr(
+    assert (session_dir / "app.log").read_text().strip() == repr(
         "1" if value is None else value
     )
 
 
 # R-ENV-1
-def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
+def test_app_resolves_caller_venv_python(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
     venv = tmp_path / "caller venv"
@@ -206,9 +204,9 @@ def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
         timeout=20,
     )
     (tmp_path / "myapp.py").write_text("import sys; print(sys.prefix)\n")
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     result = subprocess.run(
-        [framewisp, str(session), "run", "--", "python", "-m", "myapp"],
+        [framewisp, str(session_dir), "run", "--", "python", "-m", "myapp"],
         env=os.environ | {"PATH": str(venv / "bin")},
         cwd=tmp_path,
         capture_output=True,
@@ -216,14 +214,14 @@ def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (session / "app.log").read_text().strip() == str(venv)
+    assert (session_dir / "app.log").read_text().strip() == str(venv)
 
 
 # R-ENV-1
-def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
+def test_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     script = (
         "import json, os; from pathlib import Path; "
         "entries = Path('/proc/self/environ').read_bytes().split(b'\\0'); "
@@ -233,7 +231,7 @@ def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             framewisp,
-            str(session),
+            str(session_dir),
             "run",
             "--",
             str(Path("/proc/self/exe").resolve()),
@@ -247,7 +245,7 @@ def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    observed = json.loads((session / "app.log").read_text())
+    observed = json.loads((session_dir / "app.log").read_text())
     for key in ("PATH", "LC_CTYPE", "GI_TYPELIB_PATH", "XDG_DATA_DIRS"):
         assert key not in observed
     assert not any(key.startswith("FRAMEWISP_") for key in observed)

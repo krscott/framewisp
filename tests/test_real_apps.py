@@ -27,12 +27,12 @@ pytestmark = [
 @dataclass(frozen=True)
 class RealApp:
     directory: Path
-    session: Path
+    session_dir: Path
     runtime: Path
 
     def cli(self, *arguments: str, returncode: int = 0) -> str:
         result = subprocess.run(
-            ["framewisp", str(self.session), *arguments],
+            ["framewisp", str(self.session_dir), *arguments],
             capture_output=True,
             text=True,
             timeout=30,
@@ -77,9 +77,7 @@ class RealApp:
 def wait_until(predicate: Callable[[], bool]) -> None:
     deadline = time.monotonic() + 20
     while not predicate():
-        assert (
-            time.monotonic() < deadline
-        ), "Application did not reach the expected state"
+        assert time.monotonic() < deadline, "App did not reach the expected state"
         time.sleep(0.1)
 
 
@@ -133,7 +131,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
         ["flatpak", "info", app_id], capture_output=True, text=True, check=True
     )
     (tmp_path / "flatpak-info.txt").write_text(info.stdout)
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     # Keep user installs visible; the app's private data directory hides them.
     data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))
     target = [
@@ -165,7 +163,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
                 "--factory-startup",
             ]
         )
-    command = ["framewisp", str(session), "run"]
+    command = ["framewisp", str(session_dir), "run"]
     if backend == "x11":
         command.append("--x11")
     command.extend(["--", *target])
@@ -184,8 +182,8 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
             return "Session ready:" in runner_log.read_text()
 
         wait_until(ready)
-        state = json.loads((session / "session.json").read_text())
-        app = RealApp(tmp_path, session, Path(state["runtime_directory"]))
+        state = json.loads((session_dir / "session.json").read_text())
+        app = RealApp(tmp_path, session_dir, Path(state["runtime_directory"]))
         pids.update(state["processes"].values())
         if state["x11_display"] is not None:
             path = Path("/tmp/.X11-unix") / f"X{state['x11_display'][1:]}"
@@ -230,7 +228,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
                 raise
         if app is not None:
             assert not app.runtime.exists()
-            assert not (session / "session.json").exists()
+            assert not (session_dir / "session.json").exists()
             for pid in pids:
                 wait_until(lambda: not Path(f"/proc/{pid}").exists())
             if x11_socket is not None:

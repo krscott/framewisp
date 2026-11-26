@@ -27,9 +27,9 @@ def test_cli_help() -> None:
     assert "--agent-skill" in result.stdout
 
 
-def framewisp(session: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def framewisp(session_dir: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "framewisp", str(session), *arguments],
+        [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
         capture_output=True,
         text=True,
         check=False,
@@ -50,10 +50,10 @@ def framewisp(session: Path, *arguments: str) -> subprocess.CompletedProcess[str
     ],
 )
 def test_console_options_require_console(tmp_path: Path, command: list[str]) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     tail = ["--", "framewisp-demo"] if command[0] == "run" else []
     result = framewisp(
-        session,
+        session_dir,
         *[str(tmp_path / part) if part == "clip.mp4" else part for part in command],
         *tail,
     )
@@ -62,18 +62,18 @@ def test_console_options_require_console(tmp_path: Path, command: list[str]) -> 
         "--console-position, --console-size and --console-cell-scale require --console"
         in result.stderr
     )
-    assert not session.exists()
+    assert not session_dir.exists()
     assert not (tmp_path / "clip.mp4").exists()
 
 
 def test_console_options_with_console_still_require_recording(tmp_path: Path) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     result = framewisp(
-        session, "run", "--console", "--console-position", "left", "--", "app"
+        session_dir, "run", "--console", "--console-position", "left", "--", "app"
     )
     assert result.returncode == 2
     assert "--console requires --record" in result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()
 
 
 # R-REC-16
@@ -105,17 +105,17 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
 def test_recording_rejects_invalid_panels_before_any_clip(
     tmp_path: Path, action: str, options: list[str], message: str
 ) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     clip = tmp_path / "clip.mp4"
     command = (
         ["run", "--record", str(clip), "--console", *options, "--", "framewisp-demo"]
         if action == "run"
         else ["record-start", "--console", *options, str(clip)]
     )
-    result = framewisp(session, *command)
+    result = framewisp(session_dir, *command)
     assert result.returncode == 2
     assert message in result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()
     assert not clip.exists()
 
 
@@ -134,10 +134,10 @@ def test_recording_rejects_invalid_panels_before_any_clip(
 def test_run_rejects_a_panel_the_display_cannot_hold(
     tmp_path: Path, options: list[str], named: list[str]
 ) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     clip = tmp_path / "clip.mp4"
     result = framewisp(
-        session,
+        session_dir,
         "run",
         "--record",
         str(clip),
@@ -148,7 +148,7 @@ def test_run_rejects_a_panel_the_display_cannot_hold(
     )
     assert result.returncode == 2
     assert all(text in result.stderr for text in named), result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()
     assert not clip.exists()
 
 
@@ -198,7 +198,7 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
 
 def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps({"control_protocol": 1, "input_caption_options": True})
+        json.dumps({"command_protocol": 1, "input_caption_options": True})
     )
     result = subprocess.run(
         [
@@ -225,7 +225,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
     tmp_path: Path, capability: object
 ) -> None:
     state: dict[str, object] = {
-        "control_protocol": 1,
+        "command_protocol": 1,
         "input_caption_options": True,
         "console_recording": True,
     }
@@ -280,25 +280,25 @@ def test_record_start_sends_console_only_for_a_panel(
 
     # Pytest's own paths can exceed the Unix socket path limit.
     with tempfile.TemporaryDirectory() as directory:
-        session = Path(directory)
-        (session / "session.json").write_text(
+        session_dir = Path(directory)
+        (session_dir / "session.json").write_text(
             json.dumps(
                 {
-                    "control_protocol": 1,
+                    "command_protocol": 1,
                     "input_caption_options": True,
                     "click_pings_recording": True,
                     "console_cell_scale": True,
-                    "runtime_directory": directory,
+                    "command_socket": str(session_dir / "command.sock"),
                 }
             )
         )
         with socket.socket(socket.AF_UNIX) as server:
-            server.bind(str(session / "control.sock"))
+            server.bind(str(session_dir / "command.sock"))
             server.listen()
             thread = threading.Thread(target=runner, args=(server,), daemon=True)
             thread.start()
             result = session_command(
-                session, "record-start", session / "clip.mp4", console=panel
+                session_dir, "record-start", session_dir / "clip.mp4", console=panel
             )
             thread.join(timeout=5)
     assert result == 0
@@ -312,9 +312,9 @@ def test_default_clip_rejects_runner_without_click_pings(
     tmp_path: Path, capability: object
 ) -> None:
     state: dict[str, object] = {
-        "control_protocol": 1,
+        "command_protocol": 1,
         "input_caption_options": True,
-        "runtime_directory": str(tmp_path),
+        "command_socket": str(tmp_path / "command.sock"),
     }
     if capability is not None:
         state["click_pings_recording"] = capability
@@ -356,7 +356,7 @@ def test_default_clip_rejects_runner_without_click_pings(
 def test_caption_modes_reject_unsupported_runner_before_connecting(
     tmp_path: Path, capability: object, arguments: tuple[str, ...]
 ) -> None:
-    state: dict[str, object] = {"control_protocol": 1, "persistent_input": True}
+    state: dict[str, object] = {"command_protocol": 1, "persistent_input": True}
     if capability is not None:
         state["input_caption_options"] = capability
     (tmp_path / "session.json").write_text(json.dumps(state))
@@ -504,7 +504,7 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("action", ["status", "stop", "record-stop"])
-def test_control_commands_reject_legacy_session_before_connecting(
+def test_session_commands_reject_legacy_session_before_connecting(
     tmp_path: Path, action: str
 ) -> None:
     # A legacy runner treats any request with destination=null as record-stop.
@@ -518,7 +518,7 @@ def test_control_commands_reject_legacy_session_before_connecting(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "older or unsupported control protocol" in result.stderr
+    assert "older or unsupported command protocol" in result.stderr
     assert "start a new session" in result.stderr
     assert "Traceback" not in result.stderr
 
@@ -622,14 +622,14 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     ],
 )
 def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None:
-    session = tmp_path / "session"
-    destination = session / name
+    session_dir = tmp_path / "session"
+    destination = session_dir / name
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "framewisp",
-            str(session),
+            str(session_dir),
             "run",
             "--record",
             str(destination),
@@ -645,7 +645,7 @@ def test_recording_does_not_use_session_files(tmp_path: Path, name: str) -> None
     )
     assert result.returncode != 0
     assert "reserved for session files" in result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()
 
 
 # R-INPUT-3
@@ -820,13 +820,13 @@ def test_invalid_pointer_gesture(
 @pytest.mark.parametrize("option", ["--width", "--height"])
 @pytest.mark.parametrize("value", ["0", "-1", "1.5", "nope"])
 def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "framewisp",
-            str(session),
+            str(session_dir),
             "run",
             f"{option}={value}",
             "--",
@@ -839,20 +839,20 @@ def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
     )
     assert result.returncode == 2
     assert option in result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()
 
 
 # R-REC-2
 @pytest.mark.parametrize("option", ["--width", "--height"])
 def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     recording = tmp_path / "recording.mp4"
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "framewisp",
-            str(session),
+            str(session_dir),
             "run",
             option,
             "901",
@@ -868,7 +868,7 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     )
     assert result.returncode == 2
     assert "even" in result.stderr
-    assert not session.exists()
+    assert not session_dir.exists()
     assert not recording.exists()
 
 

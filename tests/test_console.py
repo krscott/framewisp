@@ -30,16 +30,16 @@ def test_capture_preserves_bytes_and_partial_unicode(capture: ConsoleCapture) ->
             sink.flush()
         # Output without a newline must reach the log while the app is running.
         deadline = time.monotonic() + 5
-        while (capture.session / "app.log").stat().st_size < sum(map(len, pieces)):
+        while (capture.session_dir / "app.log").stat().st_size < sum(map(len, pieces)):
             capture.check()
             assert time.monotonic() < deadline
             time.sleep(0.01)
-        capture.snapshot(capture.session / "snapshot.jsonl")
-        assert (capture.session / "snapshot.jsonl").read_text().endswith("\n")
-    assert (capture.session / "app.log").read_bytes() == b"".join(pieces)
+        capture.snapshot(capture.session_dir / "snapshot.jsonl")
+        assert (capture.session_dir / "snapshot.jsonl").read_text().endswith("\n")
+    assert (capture.session_dir / "app.log").read_bytes() == b"".join(pieces)
     events = [
         json.loads(line)
-        for line in (capture.session / "console.jsonl").read_text().splitlines()
+        for line in (capture.session_dir / "console.jsonl").read_text().splitlines()
     ]
     assert "".join(event["text"] for event in events) == b"".join(pieces).decode(
         "utf-8", errors="replace"
@@ -68,7 +68,7 @@ def test_capture_shutdown_is_bounded(
             sink.write(b"no newline")
             sink.flush()
     assert time.monotonic() - started < 2
-    assert (capture.session / "app.log").read_bytes() == b"no newline"
+    assert (capture.session_dir / "app.log").read_bytes() == b"no newline"
 
 
 def test_text_handles_split_ansi_progress_and_unicode() -> None:

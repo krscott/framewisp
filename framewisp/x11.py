@@ -14,22 +14,22 @@ UNICODE_CAPACITY_ERROR = (
 )
 
 
-def mapped_characters(session: Path) -> set[str]:
-    state = json.loads((session / "session.json").read_text())
+def mapped_characters(session_dir: Path) -> set[str]:
+    state = json.loads((session_dir / "session.json").read_text())
     path = Path(state["runtime_directory"]) / "x11-keymap.json"
     codes: dict[str, int] = json.loads(path.read_text()) if path.exists() else {}
     return set(codes)
 
 
 def type_text(
-    session: Path,
+    session_dir: Path,
     text: str,
     *,
     interval: float,
     env: dict[str, str],
     cancelled: Callable[[], bool] | None = None,
 ) -> int:
-    # Applications resolve queued keycodes later. Never reuse a code for a
+    # Apps resolve queued keycodes later. Never reuse a code for a
     # different character, even across completed commands while an app is busy.
     path = Path(env["XDG_RUNTIME_DIR"]) / "x11-keymap.json"
     codes: dict[str, int] = json.loads(path.read_text()) if path.exists() else {}
@@ -49,7 +49,7 @@ def type_text(
             f"keycode {code} = U{ord(char):04X}\n" for char, code in added.items()
         )
         display_command(
-            session,
+            session_dir,
             ["xmodmap", "-"],
             input_text=mapping,
             env=env,
@@ -70,7 +70,7 @@ def type_text(
         arguments.extend(["key", "--delay", "0", key])
     try:
         return display_command(
-            session,
+            session_dir,
             arguments,
             env=env,
             display=env["DISPLAY"],

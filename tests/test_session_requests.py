@@ -1,4 +1,4 @@
-"""How the runner tells a bad control request from a runner bug."""
+"""How the runner tells a bad session request from a runner bug."""
 
 import errno
 import json
@@ -55,7 +55,7 @@ def recordings(tmp_path: Path) -> Recordings:
 @pytest.fixture
 def listener(tmp_path: Path) -> Iterator[socket.socket]:
     with socket.socket(socket.AF_UNIX) as server:
-        server.bind(str(tmp_path / "control.sock"))
+        server.bind(str(tmp_path / "command.sock"))
         server.listen()
         yield server
 
@@ -87,7 +87,7 @@ def handle(
     request: dict[str, object],
     status: Callable[[], dict[str, object]] = dict,
 ) -> dict[str, object]:
-    message = {"session": str(recordings.session)} | request
+    message = {"session_directory": str(recordings.session_dir)} | request
     encoded = (json.dumps(message) + "\n").encode()
     return handle_bytes(listener, recordings, encoded, status)
 

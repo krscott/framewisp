@@ -148,7 +148,7 @@ remain connected. Its path appears in `artifacts`; capture errors appear in
 on cancellation. Successful batches use only the ordinary final `capture`.
 
 The batch retains the serialized input worker while checking. Status and stop
-remain on the runner's independent control loop. A cancellation watcher interrupts
+remain on the runner's independent command loop. A cancellation watcher interrupts
 in-flight D-Bus calls on client disconnect, session stop, or app exit; polling
 pauses are interruptible too. Checks create no input logs or captions.
 

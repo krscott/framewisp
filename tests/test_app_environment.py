@@ -1,4 +1,4 @@
-"""What a target app can see of its caller, measured through real sessions."""
+"""What the app can see of its caller, measured through real sessions."""
 
 import json
 import os
@@ -233,25 +233,25 @@ def session_env(
     options: tuple[str, ...] = (),
 ) -> str:
     """Run a command that exits by itself and return what it printed."""
-    session = tmp_path / f"session-{name}"
+    session_dir = tmp_path / f"session-{name}"
     result = subprocess.run(
-        ["framewisp", str(session), "run", *options, "--", *app],
+        ["framewisp", str(session_dir), "run", *options, "--", *app],
         env=os.environ | caller,
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    return (session / "app.log").read_text()
+    return (session_dir / "app.log").read_text()
 
 
-def stable_screenshot(session: Path, path: Path) -> Image.Image:
+def stable_screenshot(session_dir: Path, path: Path) -> Image.Image:
     """Wait for the window to map and settle before trusting a capture."""
     previous: bytes | None = None
 
     def settled() -> bool:
         nonlocal previous
-        cli(session, "screenshot", str(path))
+        cli(session_dir, "screenshot", str(path))
         current = path.read_bytes()
         with Image.open(path) as image:
             mapped = (
@@ -264,8 +264,8 @@ def stable_screenshot(session: Path, path: Path) -> Image.Image:
 
     wait_until(settled)
     # The compositor draws its own cursor on the bare desktop beside the window.
-    cli(session, "move", "100", "100")
-    cli(session, "screenshot", "--delay", "1", str(path))
+    cli(session_dir, "move", "100", "100")
+    cli(session_dir, "screenshot", "--delay", "1", str(path))
     with Image.open(path) as image:
         return image.convert("RGB")
 
@@ -278,9 +278,9 @@ def qt_probe_capture(
     x11: bool = False,
     record: bool = False,
 ) -> Image.Image:
-    session = tmp_path / f"session-{name}"
+    session_dir = tmp_path / f"session-{name}"
     log = tmp_path / f"runner-{name}.log"
-    command = ["framewisp", str(session), "run"]
+    command = ["framewisp", str(session_dir), "run"]
     if x11:
         command.append("--x11")
     if record:
@@ -296,7 +296,7 @@ def qt_probe_capture(
         )
     try:
         wait_until(lambda: "Session ready:" in log.read_text())
-        return stable_screenshot(session, tmp_path / f"{name}.png")
+        return stable_screenshot(session_dir, tmp_path / f"{name}.png")
     finally:
         process.terminate()
         process.wait(timeout=30)
@@ -627,14 +627,14 @@ def has_text(frame: Image.Image, region: tuple[int, int, int, int]) -> bool:
 
 def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Image:
     """Record a caption over a console panel and return a frame showing both."""
-    session = tmp_path / f"session-{name}"
+    session_dir = tmp_path / f"session-{name}"
     clip = tmp_path / f"{name}.mp4"
     log = tmp_path / f"runner-{name}.log"
     with log.open("w") as output:
         process = subprocess.Popen(
             [
                 "framewisp",
-                str(session),
+                str(session_dir),
                 "run",
                 "--record",
                 str(clip),
@@ -651,10 +651,10 @@ def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Im
         )
     try:
         wait_until(lambda: "Session ready:" in log.read_text())
-        wait_until(lambda: "Console text" in (session / "app.log").read_text())
+        wait_until(lambda: "Console text" in (session_dir / "app.log").read_text())
         # A paced clip gives the console text time to appear beside a caption.
         for _ in range(6):
-            cli(session, "key", "F5")
+            cli(session_dir, "key", "F5")
             time.sleep(0.4)
     finally:
         process.terminate()

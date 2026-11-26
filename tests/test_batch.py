@@ -161,7 +161,7 @@ def test_batch_rejects_attached_session(tmp_path: Path) -> None:
 
 def test_batch_rejects_older_runner_before_connecting(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps({"control_protocol": 1, "persistent_input": True})
+        json.dumps({"command_protocol": 1, "persistent_input": True})
     )
     plan = tmp_path / "batch.json"
     plan.write_text(json.dumps({"actions": [{"action": "key", "chord": "a"}]}))

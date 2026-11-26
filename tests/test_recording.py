@@ -50,12 +50,12 @@ cp '{written}' "$1"
 while :; do sleep 0.01; done
 """)
     recorder.chmod(0o755)
-    session = tmp_path / "session"
-    session.mkdir()
-    (session / "inputs.jsonl").touch()
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    (session_dir / "inputs.jsonl").touch()
     environment = os.environ | {"PATH": f"{tools}:{os.environ['PATH']}"}
     recordings = Recordings(
-        session, environment, Event(), (1280, 720), ConsoleCapture(session)
+        session_dir, environment, Event(), (1280, 720), ConsoleCapture(session_dir)
     )
     destination = tmp_path / "clip.mp4"
     error = recordings.start(destination, compact=compact, console=console)
@@ -156,18 +156,20 @@ def test_filesystem_without_hard_links_rejects_recording_at_start(
         raise OSError(errno.EPERM, "Operation not permitted")
 
     monkeypatch.setattr(Path, "hardlink_to", refuse)
-    session = tmp_path / "session"
-    session.mkdir()
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
     output = tmp_path / "output"
     output.mkdir()
-    recordings = Recordings(session, {}, Event(), (1280, 720), ConsoleCapture(session))
+    recordings = Recordings(
+        session_dir, {}, Event(), (1280, 720), ConsoleCapture(session_dir)
+    )
     error = recordings.start(output / "clip.mp4")
     assert error is not None
     assert "hard links" in error
     assert "another filesystem" in error
     assert recordings.process is None
     assert list(output.iterdir()) == []
-    assert not (session / "recorder.log").exists()
+    assert not (session_dir / "recorder.log").exists()
 
 
 # R-REC-20

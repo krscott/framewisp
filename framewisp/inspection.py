@@ -192,9 +192,9 @@ def wait_for_registry(address: str, stop: Event) -> None:
 
 
 def inspect_session(
-    session: Path, query: Query, *, cancelled: Callable[[], bool] | None = None
+    session_dir: Path, query: Query, *, cancelled: Callable[[], bool] | None = None
 ) -> dict[str, object]:
-    state = json.loads((session / "session.json").read_text())
+    state = json.loads((session_dir / "session.json").read_text())
     if state.get("kind") == "attached":
         raise SessionError(
             "inspect supports headless sessions only; use screenshot for attached desktops"

@@ -29,9 +29,9 @@ def main() -> None:
     command = [sys.executable, "-m", "framewisp"]
     samples: dict[str, list[float]] = {}
 
-    def run(session: Path, *arguments: str) -> None:
+    def run(session_dir: Path, *arguments: str) -> None:
         subprocess.run(
-            [*command, str(session), *arguments],
+            [*command, str(session_dir), *arguments],
             env=env,
             cwd=args.source,
             capture_output=True,
@@ -41,13 +41,13 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="framewisp-bench-") as temporary:
         for cold in range(6):
-            session = Path(temporary) / str(cold)
+            session_dir = Path(temporary) / str(cold)
             started = time.perf_counter()
             with (Path(temporary) / "runner.log").open("w+") as log:
                 runner = subprocess.Popen(
                     [
                         *command,
-                        str(session),
+                        str(session_dir),
                         "run",
                         *(["--x11"] if args.x11 else []),
                         "--",
@@ -61,7 +61,7 @@ def main() -> None:
                     stderr=subprocess.STDOUT,
                 )
                 try:
-                    while not (session / "session.json").exists():
+                    while not (session_dir / "session.json").exists():
                         if runner.poll() is not None:
                             log.seek(0)
                             raise RuntimeError(log.read())
@@ -70,7 +70,7 @@ def main() -> None:
                     samples.setdefault("cold_ready", []).append(
                         time.perf_counter() - started
                     )
-                    app_log = session / "app.log"
+                    app_log = session_dir / "app.log"
                     while "Demo ready" not in app_log.read_text():
                         assert time.perf_counter() - started < 20
                         time.sleep(0.005)
@@ -81,20 +81,20 @@ def main() -> None:
                         "key": ("key", "Right"),
                         "ascii": ("type", "--interval", "0", "HelloGUI"),
                     }.items():
-                        run(session, *arguments)
+                        run(session_dir, *arguments)
                         values: list[float] = []
                         for _ in range(args.samples):
                             if name == "ascii":
-                                run(session, "key", "Ctrl+a")
+                                run(session_dir, "key", "Ctrl+a")
                             start = time.perf_counter()
-                            run(session, *arguments)
+                            run(session_dir, *arguments)
                             values.append(time.perf_counter() - start)
                         samples[name] = values
                     plan = Path(temporary) / "batch.json"
                     for name in ("sequence_separate", "sequence_batch"):
                         values = []
                         for index in range(args.samples + 1):
-                            run(session, "click", "700", "513")
+                            run(session_dir, "click", "700", "513")
                             offset = app_log.stat().st_size
                             capture = Path(temporary) / f"{name}-{index}.png"
                             plan.write_text(
@@ -115,12 +115,12 @@ def main() -> None:
                             )
                             start = time.perf_counter()
                             if name == "sequence_batch":
-                                run(session, "batch", "--file", str(plan))
+                                run(session_dir, "batch", "--file", str(plan))
                             else:
-                                run(session, "click", "120", "100")
-                                run(session, "type", "--interval", "0", "HelloGUI")
-                                run(session, "key", "Return")
-                                run(session, "screenshot", str(capture))
+                                run(session_dir, "click", "120", "100")
+                                run(session_dir, "type", "--interval", "0", "HelloGUI")
+                                run(session_dir, "key", "Return")
+                                run(session_dir, "screenshot", str(capture))
                             deadline = time.monotonic() + 2
                             while (
                                 b"Entered: HelloGUI\n"

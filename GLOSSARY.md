@@ -16,7 +16,8 @@ _Avoid_: run (as a noun), instance
 **Session directory**:
 The lasting directory a session works in. It keeps the logs of its most recent
 session and is reused by later ones.
-_Avoid_: session (for the directory), session path
+_Avoid_: session (for the directory, except the CLI's `SESSION` argument, which
+takes a session name or the directory's path), session path
 
 **Session name**:
 The short name a caller gives in place of a session directory's path, scoped by

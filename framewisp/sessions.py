@@ -26,7 +26,7 @@ def project_directory() -> Path:
         )
     except FileNotFoundError:
         raise ValueError(
-            "Git is required to resolve session names. Install git or use an explicit session path."
+            "Git is required to resolve session names. Install git or give the session directory's path."
         ) from None
     if result.returncode == 0:
         return Path(os.fsdecode(result.stdout.removesuffix(b"\n"))).resolve()
@@ -35,11 +35,11 @@ def project_directory() -> Path:
     raise ValueError(
         "Cannot determine project directory: "
         + os.fsdecode(result.stderr).strip()
-        + ". Fix Git configuration or use an explicit session path."
+        + ". Fix Git configuration or give the session directory's path."
     )
 
 
-def resolve_session(argument: str) -> Path:
+def resolve_session_dir(argument: str) -> Path:
     if not argument or "\0" in argument or argument in {".", ".."}:
         raise ValueError(
             "Session name must be nonempty and cannot be '.' or '..'. "

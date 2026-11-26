@@ -52,43 +52,43 @@ def wait_for(path: Path) -> None:
 def test_killed_startup_recovers(
     tmp_path: Path, stage: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = tmp_path / "session"
-    session.mkdir()
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
     ready = tmp_path / "ready"
-    runtime = runtime_path(session)
+    runtime = runtime_path(session_dir)
     script = """
 import os, shutil, sys, time
 from pathlib import Path
 from framewisp.ownership import session_lease, headless_runtime, write_journal, runtime_path
 from framewisp.processes import managed_process
-session, ready, stage, probe = map(Path, sys.argv[1:])
-with session_lease(session) as lease:
+session_dir, ready, stage, probe = map(Path, sys.argv[1:])
+with session_lease(session_dir) as lease:
     if str(stage) == 'lease':
         ready.touch()
         time.sleep(60)
     if str(stage) == 'partial-journal':
-        (session / '.headless-owner.tmp').write_text('{')
+        (session_dir / '.headless-owner.tmp').write_text('{')
         ready.touch()
         time.sleep(60)
     if str(stage) in {'journal', 'mkdir'}:
-        write_journal(session, runtime_path(session), lease, created=False)
+        write_journal(session_dir, runtime_path(session_dir), lease, created=False)
         if str(stage) == 'mkdir':
-            runtime_path(session).mkdir(mode=0o700)
+            runtime_path(session_dir).mkdir(mode=0o700)
         ready.touch()
         time.sleep(60)
-    with headless_runtime(session, lease) as runtime:
+    with headless_runtime(session_dir, lease) as runtime:
         if str(stage) in {'shutdown-runtime', 'shutdown-metadata'}:
-            (session / 'session.json').write_text('{}')
+            (session_dir / 'session.json').write_text('{}')
             shutil.rmtree(runtime)
             if str(stage) == 'shutdown-metadata':
-                (session / 'session.json').unlink()
+                (session_dir / 'session.json').unlink()
             ready.touch()
             time.sleep(60)
         if str(stage) == 'runtime':
             ready.touch()
             time.sleep(60)
         env = os.environ | {'FRAMEWISP_OWNER_FD': str(lease), 'FRAMEWISP_OWNER_RUNTIME': str(runtime)}
-        with managed_process([sys.executable, str(probe), str(session / 'tree')], log=session / 'app.log', env=env):
+        with managed_process([sys.executable, str(probe), str(session_dir / 'tree')], log=session_dir / 'app.log', env=env):
             ready.touch()
             time.sleep(60)
 """
@@ -97,7 +97,7 @@ with session_lease(session) as lease:
             sys.executable,
             "-c",
             script,
-            str(session),
+            str(session_dir),
             str(ready),
             stage,
             str(Path(__file__).with_name("descendants_probe.py")),
@@ -108,7 +108,7 @@ with session_lease(session) as lease:
             pids: list[int] = []
             if stage == "children":
                 for name in ("app", "helper", "detached"):
-                    path = session / "tree" / name
+                    path = session_dir / "tree" / name
                     wait_for(path)
                     pids.append(int(path.read_text()))
             runner.kill()
@@ -118,21 +118,22 @@ with session_lease(session) as lease:
             deadline = time.monotonic() + 10
             while True:
                 try:
-                    assert recover_session(session) == 0
+                    assert recover_session(session_dir) == 0
                     break
                 except SessionError as error:
                     assert "still live" in str(error)
                     assert time.monotonic() < deadline
                     time.sleep(0.05)
             assert not runtime.exists()
-            assert not (session / JOURNAL).exists()
+            assert not (session_dir / JOURNAL).exists()
+            assert not (session_dir / "session.json").exists()
             assert all(not Path(f"/proc/{pid}").exists() for pid in pids)
             if stage == "children":
-                assert (session / "app.log").exists()
+                assert (session_dir / "app.log").exists()
             monkeypatch.undo()
             with (
-                session_lease(session) as lease,
-                headless_runtime(session, lease) as runtime,
+                session_lease(session_dir) as lease,
+                headless_runtime(session_dir, lease) as runtime,
             ):
                 assert runtime.is_dir()
         finally:
@@ -143,25 +144,28 @@ with session_lease(session) as lease:
 
 # R-LIFE-5
 def test_live_owner_and_copied_or_damaged_metadata(tmp_path: Path) -> None:
-    session = tmp_path / "session"
-    session.mkdir()
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
     copied = tmp_path / "copy"
-    with session_lease(session) as lease, headless_runtime(session, lease) as runtime:
-        (session / "session.json").write_text(
+    with (
+        session_lease(session_dir) as lease,
+        headless_runtime(session_dir, lease) as runtime,
+    ):
+        (session_dir / "session.json").write_text(
             json.dumps(
                 {"runtime_directory": str(runtime), "processes": {"app": os.getpid()}}
             )
         )
         (runtime / "important").write_text("live resource")
-        shutil.copytree(session, copied)
+        shutil.copytree(session_dir, copied)
         with pytest.raises(SessionError, match="still live"):
-            recover_session(session)
+            recover_session(session_dir)
         with pytest.raises(SessionError, match="does not belong"):
             recover_session(copied)
         assert (runtime / "important").read_text() == "live resource"
         # Neither runtime paths nor process IDs in session.json authorize recovery.
-        (session / "session.json").write_text("not even valid JSON")
-    assert recover_session(session) == 0
+        (session_dir / "session.json").write_text("not even valid JSON")
+    assert recover_session(session_dir) == 0
     assert (copied / "session.json").exists()
 
 
@@ -224,10 +228,10 @@ def test_runtime_replacement_refused(
     recover_session(tmp_path)
 
 
-def replace_lock(session: Path) -> Path:
-    original = session / "original.lock"
-    (session / LOCK).rename(original)
-    os.close(os.open(session / LOCK, os.O_CREAT | os.O_WRONLY, 0o600))
+def replace_lock(session_dir: Path) -> Path:
+    original = session_dir / "original.lock"
+    (session_dir / LOCK).rename(original)
+    os.close(os.open(session_dir / LOCK, os.O_CREAT | os.O_WRONLY, 0o600))
     return original
 
 
@@ -252,17 +256,17 @@ def run_commands(message: str, prefix: str) -> str:
 @pytest.fixture
 def abandoned(tmp_path: Path) -> Generator[tuple[Path, Path], None, None]:
     """A session whose owner exited without cleanup, leaving journal and runtime."""
-    session = tmp_path / "session with spaces"
-    session.mkdir()
-    runtime = runtime_path(session)
-    with session_lease(session) as lease:
-        write_journal(session, runtime, lease, created=False)
+    session_dir = tmp_path / "session with spaces"
+    session_dir.mkdir()
+    runtime = runtime_path(session_dir)
+    with session_lease(session_dir) as lease:
+        write_journal(session_dir, runtime, lease, created=False)
         runtime.mkdir(mode=0o700)
-        write_journal(session, runtime, lease, created=True)
+        write_journal(session_dir, runtime, lease, created=True)
     (runtime / "kept").write_text("preserve")
-    (session / "session.json").write_text("{}")
-    (session / "app.log").write_text("diagnostic")
-    yield session, runtime
+    (session_dir / "session.json").write_text("{}")
+    (session_dir / "app.log").write_text("diagnostic")
+    yield session_dir, runtime
     shutil.rmtree(runtime, ignore_errors=True)
 
 
@@ -345,10 +349,10 @@ def test_unusable_replacement_lock_refused_while_session_live(
 def test_permissive_chmod_does_not_block_recovery(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
-    subprocess.run(["chmod", "-R", "go+rX", session], check=True)
-    assert stat.S_IMODE((session / LOCK).stat().st_mode) & 0o044
-    assert recover_session(session) == 0
+    session_dir, runtime = abandoned
+    subprocess.run(["chmod", "-R", "go+rX", session_dir], check=True)
+    assert stat.S_IMODE((session_dir / LOCK).stat().st_mode) & 0o044
+    assert recover_session(session_dir) == 0
     assert not runtime.exists()
 
 
@@ -356,15 +360,15 @@ def test_permissive_chmod_does_not_block_recovery(
 def test_hard_linked_copy_refused_and_original_recovers(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     copied = tmp_path / "copy"
-    subprocess.run(["cp", "-al", session, copied], check=True)
-    assert (session / LOCK).stat().st_nlink == 2
-    assert (copied / JOURNAL).stat().st_ino == (session / JOURNAL).stat().st_ino
+    subprocess.run(["cp", "-al", session_dir, copied], check=True)
+    assert (session_dir / LOCK).stat().st_nlink == 2
+    assert (copied / JOURNAL).stat().st_ino == (session_dir / JOURNAL).stat().st_ino
     with pytest.raises(SessionError, match="does not belong"):
         recover_session(copied)
     assert (runtime / "kept").read_text() == "preserve"
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
     assert not runtime.exists()
     with pytest.raises(SessionError, match="does not belong"):
         recover_session(copied)
@@ -374,25 +378,25 @@ def test_hard_linked_copy_refused_and_original_recovers(
 def test_replaced_lock_refused_after_permissive_chmod(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
-    replace_lock(session)
-    subprocess.run(["chmod", "-R", "go+rX", session], check=True)
+    session_dir, runtime = abandoned
+    replace_lock(session_dir)
+    subprocess.run(["chmod", "-R", "go+rX", session_dir], check=True)
     with pytest.raises(SessionError, match="was replaced"):
-        recover_session(session)
+        recover_session(session_dir)
     assert (runtime / "kept").read_text() == "preserve"
 
 
 # R-LIFE-5, R-LIFE-7
 @pytest.mark.skipif(os.getuid() == 0, reason="Root can open any file")
 def test_lock_the_owner_cannot_open_gives_steps(abandoned: tuple[Path, Path]) -> None:
-    session, runtime = abandoned
-    (session / LOCK).chmod(0)
+    session_dir, runtime = abandoned
+    (session_dir / LOCK).chmod(0)
     with pytest.raises(SessionError, match="is unusable") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert "chmod 600" in str(refusal.value)
     assert (runtime / "kept").read_text() == "preserve"
-    (session / LOCK).chmod(0o600)
-    assert recover_session(session) == 0
+    (session_dir / LOCK).chmod(0o600)
+    assert recover_session(session_dir) == 0
 
 
 def test_unwritable_session_is_not_blamed_on_lock(tmp_path: Path) -> None:
@@ -418,54 +422,54 @@ def test_deleted_lock_refused_while_session_live(tmp_path: Path) -> None:
 def test_restoring_original_lock_allows_recovery(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
-    original = replace_lock(session)
+    session_dir, runtime = abandoned
+    original = replace_lock(session_dir)
     with pytest.raises(SessionError, match="move it back"):
-        recover_session(session)
+        recover_session(session_dir)
     assert (runtime / "kept").exists()
-    original.replace(session / LOCK)
-    assert recover_session(session) == 0
+    original.replace(session_dir / LOCK)
+    assert recover_session(session_dir) == 0
     assert not runtime.exists()
 
 
 # R-LIFE-5, R-LIFE-7
 def test_lost_lock_manual_cleanup_commands_work(abandoned: tuple[Path, Path]) -> None:
-    session, runtime = abandoned
-    replace_lock(session).unlink()
+    session_dir, runtime = abandoned
+    replace_lock(session_dir).unlink()
     with pytest.raises(SessionError, match="was replaced") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     message = str(refusal.value)
     assert run_commands(message, "grep ") == ""
     run_commands(message, "rm ")
     assert not runtime.exists()
-    assert (session / "app.log").read_text() == "diagnostic"
-    assert recover_session(session) == 0
+    assert (session_dir / "app.log").read_text() == "diagnostic"
+    assert recover_session(session_dir) == 0
 
 
-def rewrite_journal(session: Path, /, **fields: object) -> None:
-    journal = json.loads((session / JOURNAL).read_text())
-    (session / JOURNAL).write_text(json.dumps(journal | fields))
+def rewrite_journal(session_dir: Path, /, **fields: object) -> None:
+    journal = json.loads((session_dir / JOURNAL).read_text())
+    (session_dir / JOURNAL).write_text(json.dumps(journal | fields))
 
 
-def replace_journal_with_directory(session: Path, _: Path) -> None:
-    (session / JOURNAL).unlink()
-    (session / JOURNAL).mkdir()
+def replace_journal_with_directory(session_dir: Path, _: Path) -> None:
+    (session_dir / JOURNAL).unlink()
+    (session_dir / JOURNAL).mkdir()
 
 
-def replace_journal_with_symlink(session: Path, _: Path) -> None:
-    (session / JOURNAL).unlink()
-    (session / JOURNAL).symlink_to(session / "app.log")
+def replace_journal_with_symlink(session_dir: Path, _: Path) -> None:
+    (session_dir / JOURNAL).unlink()
+    (session_dir / JOURNAL).symlink_to(session_dir / "app.log")
 
 
-def pad_journal(session: Path, _: Path) -> None:
-    with (session / JOURNAL).open("a") as journal:
+def pad_journal(session_dir: Path, _: Path) -> None:
+    with (session_dir / JOURNAL).open("a") as journal:
         journal.write(" " * (1 << 16))
 
 
-def remove_journal_field(session: Path, field: str) -> None:
-    journal = json.loads((session / JOURNAL).read_text())
+def remove_journal_field(session_dir: Path, field: str) -> None:
+    journal = json.loads((session_dir / JOURNAL).read_text())
     del journal[field]
-    (session / JOURNAL).write_text(json.dumps(journal))
+    (session_dir / JOURNAL).write_text(json.dumps(journal))
 
 
 DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
@@ -474,13 +478,13 @@ DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
         "[" * 60_000
     ),
     "empty": lambda s, _: (s / JOURNAL).write_text(""),
-    "truncated": lambda s, _: (s / JOURNAL).write_text('{"session": ['),
+    "truncated": lambda s, _: (s / JOURNAL).write_text('{"session_directory": ['),
     "binary": lambda s, _: (s / JOURNAL).write_bytes(b"\xff\xfe\x00"),
     "not-an-object": lambda s, _: (s / JOURNAL).write_text("[]"),
     "oversized": pad_journal,
     "directory": replace_journal_with_directory,
     "symlink": replace_journal_with_symlink,
-    "foreign-session": lambda s, _: rewrite_journal(s, session=[0, 0]),
+    "foreign-session": lambda s, _: rewrite_journal(s, session_directory=[0, 0]),
     "unencodable-runtime": lambda s, r: rewrite_journal(
         s, runtime_path=f"/tmp/\ud800/{r.name}"
     ),
@@ -501,33 +505,33 @@ DAMAGED_JOURNALS: dict[str, Callable[[Path, Path], object]] = {
 def test_unreadable_journal_refused_with_working_manual_steps(
     abandoned: tuple[Path, Path], kind: str
 ) -> None:
-    session, runtime = abandoned
-    DAMAGED_JOURNALS[kind](session, runtime)
+    session_dir, runtime = abandoned
+    DAMAGED_JOURNALS[kind](session_dir, runtime)
     with pytest.raises(SessionError, match="Cannot verify ownership") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     message = str(refusal.value)
     assert "Nothing was removed" in message and " stop`" in message
     assert (runtime / "kept").read_text() == "preserve"
-    assert (session / "session.json").exists()
-    assert (session / JOURNAL).exists() or (session / JOURNAL).is_symlink()
+    assert (session_dir / "session.json").exists()
+    assert (session_dir / JOURNAL).exists() or (session_dir / JOURNAL).is_symlink()
     assert run_commands(message, "grep ") == ""
     run_commands(message, "rm ")
     assert not runtime.exists()
-    assert (session / "app.log").read_text() == "diagnostic"
-    assert recover_session(session) == 0
+    assert (session_dir / "app.log").read_text() == "diagnostic"
+    assert recover_session(session_dir) == 0
 
 
 # R-LIFE-5, R-LIFE-7
 def test_fifo_journal_with_a_writer_refused_with_steps(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
-    (session / JOURNAL).unlink()
-    os.mkfifo(session / JOURNAL, 0o600)
-    writer = os.open(session / JOURNAL, os.O_RDWR)
+    session_dir, runtime = abandoned
+    (session_dir / JOURNAL).unlink()
+    os.mkfifo(session_dir / JOURNAL, 0o600)
+    writer = os.open(session_dir / JOURNAL, os.O_RDWR)
     try:
         with pytest.raises(SessionError, match="must be a regular file"):
-            recover_session(session)
+            recover_session(session_dir)
     finally:
         os.close(writer)
     assert (runtime / "kept").read_text() == "preserve"
@@ -537,12 +541,12 @@ def test_fifo_journal_with_a_writer_refused_with_steps(
 def test_unreadable_journal_steps_find_session_under_another_tmpdir(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
-    (session / JOURNAL).write_text("{")
+    session_dir, runtime = abandoned
+    (session_dir / JOURNAL).write_text("{")
     monkeypatch.setenv("TMPDIR", str(tmp_path))
     monkeypatch.setattr(tempfile, "tempdir", None)
     with pytest.raises(SessionError, match="TMPDIR") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     environment = os.environ | {"XDG_RUNTIME_DIR": str(runtime)}
     with subprocess.Popen(["sleep", "60"], env=environment) as survivor:
         try:
@@ -557,19 +561,19 @@ def test_journal_without_runtime_path_refused_outside_default_tmpdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    session = tmp_path / "session"
-    session.mkdir()
-    runtime = runtime_path(session)
-    with session_lease(session) as lease:
-        write_journal(session, runtime, lease, created=False)
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime = runtime_path(session_dir)
+    with session_lease(session_dir) as lease:
+        write_journal(session_dir, runtime, lease, created=False)
         runtime.mkdir(mode=0o700)
-        write_journal(session, runtime, lease, created=True)
+        write_journal(session_dir, runtime, lease, created=True)
     (runtime / "owner-123.json").write_text("{}")
-    remove_journal_field(session, "runtime_path")
+    remove_journal_field(session_dir, "runtime_path")
     with pytest.raises(SessionError, match="no runtime path") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert str(runtime) in str(refusal.value)
-    assert (session / JOURNAL).exists()
+    assert (session_dir / JOURNAL).exists()
     assert (runtime / "owner-123.json").exists()
 
 
@@ -577,25 +581,25 @@ def test_journal_without_runtime_path_refused_outside_default_tmpdir(
 def test_missing_journal_refused_with_working_manual_steps(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
-    (session / JOURNAL).unlink()
+    session_dir, runtime = abandoned
+    (session_dir / JOURNAL).unlink()
     with pytest.raises(SessionError, match="journal is missing") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert (runtime / "kept").read_text() == "preserve"
     run_commands(str(refusal.value), "rm ")
     assert not runtime.exists()
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
 
 
-def replace_runtime(session: Path, runtime: Path) -> None:
-    runtime.rename(session / "moved-runtime")
+def replace_runtime(session_dir: Path, runtime: Path) -> None:
+    runtime.rename(session_dir / "moved-runtime")
     runtime.mkdir(mode=0o700)
     (runtime / "kept").write_text("preserve")
 
 
-def symlink_runtime(session: Path, runtime: Path) -> None:
-    runtime.rename(session / "moved-runtime")
-    runtime.symlink_to(session / "moved-runtime")
+def symlink_runtime(session_dir: Path, runtime: Path) -> None:
+    runtime.rename(session_dir / "moved-runtime")
+    runtime.symlink_to(session_dir / "moved-runtime")
 
 
 def open_runtime_permissions(_: Path, runtime: Path) -> None:
@@ -614,30 +618,30 @@ def test_changed_runtime_refused_with_working_manual_steps(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, runtime = abandoned
-    change(session, runtime)
+    session_dir, runtime = abandoned
+    change(session_dir, runtime)
     # The journal's verified path applies even under another TMPDIR.
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with pytest.raises(SessionError, match="Nothing was removed") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     message = str(refusal.value)
     assert " stop`" in message and shlex.quote(str(runtime)) in message
-    assert (session / JOURNAL).exists()
+    assert (session_dir / JOURNAL).exists()
     assert (runtime / "kept").read_text() == "preserve"
     assert run_commands(message, "grep ") == ""
     run_commands(message, "rm ")
     assert not runtime.exists() and not runtime.is_symlink()
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
 
 
 # R-LIFE-7
 def test_supervisor_record_names_cannot_add_manual_steps(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     (runtime / "owner-x\n  rm -rf -- planted\n.json").write_text("{}")
     with pytest.raises(SessionError, match="Cleanup is incomplete") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert "  rm -rf -- planted" not in str(refusal.value).splitlines()
 
 
@@ -645,17 +649,17 @@ def test_supervisor_record_names_cannot_add_manual_steps(
 def test_null_runtime_identity_steps_use_the_journal_path(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
-    rewrite_journal(session, runtime=None)
+    session_dir, runtime = abandoned
+    rewrite_journal(session_dir, runtime=None)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with pytest.raises(SessionError, match="no runtime identity") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     message = str(refusal.value)
     assert " stop`" in message and (runtime / "kept").read_text() == "preserve"
-    assert (session / JOURNAL).exists()
+    assert (session_dir / JOURNAL).exists()
     run_commands(message, "rm ")
     assert not runtime.exists()
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
 
 
 # R-LIFE-7
@@ -695,8 +699,8 @@ def test_unreadable_session_metadata_cannot_hang_recovery(
 def test_lock_path_changed_after_flock_recovers_the_held_lock(
     abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
-    lock = session / LOCK
+    session_dir, runtime = abandoned
+    lock = session_dir / LOCK
     real_flock = fcntl.flock
 
     def change_lock_then_flock(descriptor: int, operation: int) -> None:
@@ -706,7 +710,7 @@ def test_lock_path_changed_after_flock_recovers_the_held_lock(
 
     # flock excluded every holder of the journal's lock, so no owner can remain.
     monkeypatch.setattr(fcntl, "flock", change_lock_then_flock)
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
     assert not runtime.exists()
 
 
@@ -730,10 +734,10 @@ def run_missing_session_commands(message: str, runtime: Path) -> None:
 def test_deleted_session_refusal_says_what_is_left_to_check(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session, runtime = abandoned
-    shutil.rmtree(session)
+    session_dir, runtime = abandoned
+    shutil.rmtree(session_dir)
     with pytest.raises(SessionError, match="does not exist") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert (runtime / "kept").read_text() == "preserve"
     run_missing_session_commands(str(refusal.value), runtime)
 
@@ -742,11 +746,11 @@ def test_deleted_session_refusal_says_what_is_left_to_check(
 def test_moved_session_recovers_at_its_new_path(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     moved = tmp_path / "moved"
-    session.rename(moved)
+    session_dir.rename(moved)
     with pytest.raises(SessionError, match="does not exist") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert "moved" in str(refusal.value)
     assert recover_session(moved) == 0
     assert not runtime.exists()
@@ -756,17 +760,17 @@ def test_moved_session_recovers_at_its_new_path(
 def test_session_deleted_during_shutdown_keeps_runtime_and_gives_steps(
     tmp_path: Path,
 ) -> None:
-    session = tmp_path / "session"
-    session.mkdir()
-    runtime = runtime_path(session)
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime = runtime_path(session_dir)
     try:
         with pytest.raises(SessionError, match="does not exist") as refusal:
             with (
-                session_lease(session) as lease,
-                headless_runtime(session, lease),
+                session_lease(session_dir) as lease,
+                headless_runtime(session_dir, lease),
             ):
                 (runtime / "kept").write_text("preserve")
-                shutil.rmtree(session)
+                shutil.rmtree(session_dir)
         assert (runtime / "kept").read_text() == "preserve"
         run_missing_session_commands(str(refusal.value), runtime)
     finally:
@@ -777,17 +781,17 @@ def test_session_deleted_during_shutdown_keeps_runtime_and_gives_steps(
 def test_session_vanishing_during_lease_gets_steps(
     abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     real_open = os.open
 
     def remove_session_then_open(path: Path, flags: int, mode: int = 0o777) -> int:
-        session.rename(session.with_name("moved"))
+        session_dir.rename(session_dir.with_name("moved"))
         return real_open(path, flags, mode)
 
     with monkeypatch.context() as patch:
         patch.setattr(os, "open", remove_session_then_open)
         with pytest.raises(SessionError, match="does not exist") as refusal:
-            recover_session(session)
+            recover_session(session_dir)
     run_missing_session_commands(str(refusal.value), runtime)
 
 
@@ -801,23 +805,23 @@ def test_read_only_tmpdir_is_still_checked_for_runtime(
     temporary.mkdir()
     monkeypatch.setenv("TMPDIR", str(temporary))
     monkeypatch.setattr(tempfile, "tempdir", None)
-    session = tmp_path / "session"
-    session.mkdir()
-    runtime = runtime_path(session)
-    with session_lease(session) as lease:
-        write_journal(session, runtime, lease, created=False)
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime = runtime_path(session_dir)
+    with session_lease(session_dir) as lease:
+        write_journal(session_dir, runtime, lease, created=False)
         runtime.mkdir(mode=0o700)
-        write_journal(session, runtime, lease, created=True)
+        write_journal(session_dir, runtime, lease, created=True)
     (runtime / "owner-1.json").write_text("{}")
     if journal == "missing":
-        (session / JOURNAL).unlink()
+        (session_dir / JOURNAL).unlink()
     else:
-        (session / JOURNAL).write_text("{")
+        (session_dir / JOURNAL).write_text("{")
     temporary.chmod(0o500)
     monkeypatch.setattr(tempfile, "tempdir", None)
     try:
         with pytest.raises(SessionError, match="Nothing was removed") as refusal:
-            recover_session(session)
+            recover_session(session_dir)
         assert f"find {runtime} -type d -exec chmod u+rwx {{}} +\n" in str(
             refusal.value
         )
@@ -838,13 +842,13 @@ def test_runtime_found_when_tmpdir_was_read_only_from_the_start(
     fallback.mkdir()
     monkeypatch.setenv("TMPDIR", str(configured))
     monkeypatch.setattr(tempfile, "tempdir", str(fallback))
-    session = tmp_path / "session"
-    session.mkdir()
-    runtime = runtime_path(session)
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime = runtime_path(session_dir)
     runtime.mkdir(mode=0o700)
     (runtime / "owner-1.json").write_text("{}")
     with pytest.raises(SessionError, match="journal is missing") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert f"rm -rf -- {runtime}" in str(refusal.value)
 
 
@@ -853,15 +857,15 @@ def test_runtime_found_when_tmpdir_was_read_only_from_the_start(
 def test_inaccessible_tmpdir_still_gives_steps(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
-    (session / JOURNAL).write_text("{")
+    session_dir, runtime = abandoned
+    (session_dir / JOURNAL).write_text("{")
     closed = tmp_path / "closed"
     (closed / "temporary").mkdir(parents=True)
     monkeypatch.setenv("TMPDIR", str(closed / "temporary"))
     closed.chmod(0)
     try:
         with pytest.raises(SessionError, match="Nothing was removed") as refusal:
-            recover_session(session)
+            recover_session(session_dir)
         assert " stop`" in str(refusal.value) and str(runtime) in str(refusal.value)
     finally:
         closed.chmod(0o700)
@@ -872,21 +876,21 @@ def test_inaccessible_tmpdir_still_gives_steps(
 def test_recovery_refuses_when_a_temporary_location_cannot_be_checked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = tmp_path / "session"
-    session.mkdir()
-    (session / ".headless-owner.tmp").write_text("{")
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    (session_dir / ".headless-owner.tmp").write_text("{")
     closed = tmp_path / "closed"
     (closed / "temporary").mkdir(parents=True)
     monkeypatch.setenv("TMPDIR", str(closed / "temporary"))
     closed.chmod(0)
     try:
         with pytest.raises(SessionError, match="journal is missing") as refusal:
-            recover_session(session)
-        assert (session / ".headless-owner.tmp").exists()
+            recover_session(session_dir)
+        assert (session_dir / ".headless-owner.tmp").exists()
         assert "Restore access, then" in " ".join(str(refusal.value).split())
         # Nothing ran under this TMPDIR, so the printed alternative applies.
         monkeypatch.delenv("TMPDIR")
-        assert recover_session(session) == 0
+        assert recover_session(session_dir) == 0
     finally:
         closed.chmod(0o700)
 
@@ -900,15 +904,15 @@ def test_relative_read_only_tmpdir_is_still_checked(
     (tmp_path / "relative").mkdir()
     monkeypatch.setenv("TMPDIR", "relative")
     monkeypatch.setattr(tempfile, "tempdir", None)
-    session = tmp_path / "session"
-    session.mkdir()
-    runtime = tmp_path / "relative" / runtime_path(session).name
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime = tmp_path / "relative" / runtime_path(session_dir).name
     runtime.mkdir(mode=0o700)
     (tmp_path / "relative").chmod(0o500)
     monkeypatch.setattr(tempfile, "tempdir", None)
     try:
         with pytest.raises(SessionError, match="journal is missing") as refusal:
-            recover_session(session)
+            recover_session(session_dir)
         assert str(runtime) in str(refusal.value)
     finally:
         (tmp_path / "relative").chmod(0o700)
@@ -924,13 +928,13 @@ def test_missing_session_listing_follows_symlinked_tmpdir(
     link.symlink_to(real)
     monkeypatch.setenv("TMPDIR", str(link))
     monkeypatch.setattr(tempfile, "tempdir", None)
-    session = tmp_path / "session"
-    session.mkdir()
-    runtime = runtime_path(session)
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime = runtime_path(session_dir)
     runtime.mkdir(mode=0o700)
-    shutil.rmtree(session)
+    shutil.rmtree(session_dir)
     with pytest.raises(SessionError, match="does not exist") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert runtime.name in run_commands(str(refusal.value), "find ").splitlines()
 
 
@@ -938,8 +942,8 @@ def test_missing_session_listing_follows_symlinked_tmpdir(
 def test_relative_tmpdir_with_deleted_cwd_still_gives_steps(
     abandoned: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
-    (session / JOURNAL).write_text("{")
+    session_dir, runtime = abandoned
+    (session_dir / JOURNAL).write_text("{")
     monkeypatch.setenv("TMPDIR", "relative")
     monkeypatch.setattr(tempfile, "tempdir", str(runtime.parent))
     cwd = tmp_path / "cwd"
@@ -947,7 +951,7 @@ def test_relative_tmpdir_with_deleted_cwd_still_gives_steps(
     monkeypatch.chdir(cwd)
     cwd.rmdir()
     with pytest.raises(SessionError, match="Nothing was removed") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert str(runtime) in str(refusal.value)
 
 
@@ -960,33 +964,33 @@ def refuse_tempdir() -> str:
 def test_unusable_tempdir_refusal_gives_working_manual_steps(
     abandoned: tuple[Path, Path], journal: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     if journal == "missing":
-        (session / JOURNAL).unlink()
+        (session_dir / JOURNAL).unlink()
     else:
-        (session / JOURNAL).write_text("{")
+        (session_dir / JOURNAL).write_text("{")
     monkeypatch.setenv("TMPDIR", str(runtime.parent))
     monkeypatch.setattr(tempfile, "gettempdir", refuse_tempdir)
     with pytest.raises(SessionError, match="Nothing was removed") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     message = str(refusal.value)
     assert (runtime / "kept").read_text() == "preserve"
     assert run_commands(message, "grep ") == ""
     run_commands(message, "rm ")
     assert not runtime.exists()
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
 
 
-def damage_journal(session: Path, _: Path) -> None:
-    (session / JOURNAL).write_text("{")
+def damage_journal(session_dir: Path, _: Path) -> None:
+    (session_dir / JOURNAL).write_text("{")
 
 
-def remove_journal(session: Path, _: Path) -> None:
-    (session / JOURNAL).unlink()
+def remove_journal(session_dir: Path, _: Path) -> None:
+    (session_dir / JOURNAL).unlink()
 
 
-def lose_lock(session: Path, _: Path) -> None:
-    replace_lock(session).unlink()
+def lose_lock(session_dir: Path, _: Path) -> None:
+    replace_lock(session_dir).unlink()
 
 
 def leave_supervisor_record(_: Path, runtime: Path) -> None:
@@ -1010,41 +1014,41 @@ def test_refusal_reports_and_keeps_interrupted_recording(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     clip = tmp_path / "private clip" / "recording.mp4"
     clip.parent.mkdir()
     clip.write_text("frames")
-    link = session / ACTIVE_RECORDING
+    link = session_dir / ACTIVE_RECORDING
     link.symlink_to(clip)
-    refuse(session, runtime)
+    refuse(session_dir, runtime)
     with pytest.raises(
         SessionError, match="Nothing was removed|nothing was removed"
     ) as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     message = str(refusal.value)
     assert repr(str(clip)) in message
     assert link.readlink() == clip
     run_commands(message, "rm ")
     assert link.is_symlink() and clip.read_text() == "frames"
     capsys.readouterr()
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["interrupted_recording"] == str(clip)
     assert clip.read_text() == "frames"
 
 
-def corrupt_lock(session: Path) -> None:
-    (session / LOCK).unlink()
-    (session / LOCK).mkdir()
+def corrupt_lock(session_dir: Path) -> None:
+    (session_dir / LOCK).unlink()
+    (session_dir / LOCK).mkdir()
 
 
-def open_session_permissions(session: Path) -> None:
-    session.chmod(0o777)
+def open_session_permissions(session_dir: Path) -> None:
+    session_dir.chmod(0o777)
 
 
-def record_stale_attachment(session: Path) -> None:
-    (session / JOURNAL).unlink()
-    (session / "session.json").write_text('{"kind": "attached"}')
+def record_stale_attachment(session_dir: Path) -> None:
+    (session_dir / JOURNAL).unlink()
+    (session_dir / "session.json").write_text('{"kind": "attached"}')
 
 
 # R-LIFE-7, R-REC-20
@@ -1056,15 +1060,15 @@ def test_early_refusals_report_interrupted_recording(
     refuse: Callable[[Path], object],
     tmp_path: Path,
 ) -> None:
-    session, _ = abandoned
+    session_dir, _ = abandoned
     clip = tmp_path / "recording.mp4"
     clip.write_text("frames")
-    link = session / ACTIVE_RECORDING
+    link = session_dir / ACTIVE_RECORDING
     link.symlink_to(clip)
-    refuse(session)
+    refuse(session_dir)
     with pytest.raises(SessionError) as refusal:
-        recover_session(session)
-    session.chmod(0o700)
+        recover_session(session_dir)
+    session_dir.chmod(0o700)
     assert repr(str(clip)) in str(refusal.value)
     assert link.readlink() == clip and clip.read_text() == "frames"
 
@@ -1073,13 +1077,13 @@ def test_early_refusals_report_interrupted_recording(
 def test_recording_link_cannot_add_manual_steps(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    session, _ = abandoned
+    session_dir, _ = abandoned
     clip = tmp_path / "clip\n  rm -rf -- planted\n"
     clip.write_text("frames")
-    (session / ACTIVE_RECORDING).symlink_to(clip)
-    (session / JOURNAL).write_text("{")
+    (session_dir / ACTIVE_RECORDING).symlink_to(clip)
+    (session_dir / JOURNAL).write_text("{")
     with pytest.raises(SessionError) as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert "  rm -rf -- planted" not in str(refusal.value).splitlines()
 
 
@@ -1088,17 +1092,17 @@ def test_recording_link_cannot_add_manual_steps(
 def test_unusable_recording_link_cannot_break_refusal(
     abandoned: tuple[Path, Path], tmp_path: Path, kind: str
 ) -> None:
-    session, _ = abandoned
-    link = session / ACTIVE_RECORDING
+    session_dir, _ = abandoned
+    link = session_dir / ACTIVE_RECORDING
     if kind == "regular-file":
         link.write_text("not a link")
     elif kind == "directory":
         link.mkdir()
     else:
         link.symlink_to(tmp_path / "removed" / "recording.mp4")
-    (session / JOURNAL).write_text("{")
+    (session_dir / JOURNAL).write_text("{")
     with pytest.raises(SessionError, match="Nothing was removed"):
-        recover_session(session)
+        recover_session(session_dir)
     assert link.exists() or link.is_symlink()
 
 
@@ -1106,10 +1110,10 @@ def test_unusable_recording_link_cannot_break_refusal(
 def test_process_check_finds_session_under_non_utf8_tmpdir(
     abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
-    (session / JOURNAL).write_text("{")
+    session_dir, runtime = abandoned
+    (session_dir / JOURNAL).write_text("{")
     with pytest.raises(SessionError) as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     environment = os.environb | {
         b"XDG_RUNTIME_DIR": b"/tmp/x\xff/" + os.fsencode(runtime.name),
     }
@@ -1126,10 +1130,10 @@ def test_process_check_finds_session_under_non_utf8_tmpdir(
 def test_foreign_journal_steps_leave_its_runtime_alone(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     copied = tmp_path / "copy"
     copied.mkdir()
-    shutil.copy(session / JOURNAL, copied / JOURNAL)
+    shutil.copy(session_dir / JOURNAL, copied / JOURNAL)
     with pytest.raises(SessionError, match="does not belong") as refusal:
         recover_session(copied)
     run_commands(str(refusal.value), "rm ")
@@ -1177,32 +1181,32 @@ def test_journal_commit_tolerates_filesystem_without_directory_sync(
 def test_journal_without_valid_lock_identity_refused(
     abandoned: tuple[Path, Path], lock: object
 ) -> None:
-    session, runtime = abandoned
-    journal = json.loads((session / JOURNAL).read_text())
+    session_dir, runtime = abandoned
+    journal = json.loads((session_dir / JOURNAL).read_text())
     if lock is None:
         del journal["lock"]
     else:
         journal["lock"] = lock
-    (session / JOURNAL).write_text(json.dumps(journal))
-    before = (session / JOURNAL).read_bytes()
+    (session_dir / JOURNAL).write_text(json.dumps(journal))
+    before = (session_dir / JOURNAL).read_bytes()
     with pytest.raises(SessionError, match="no valid session lock") as refusal:
-        recover_session(session)
+        recover_session(session_dir)
     assert " stop`" in str(refusal.value)
     assert (runtime / "kept").read_text() == "preserve"
-    assert (session / "session.json").exists()
-    assert (session / JOURNAL).read_bytes() == before
+    assert (session_dir / "session.json").exists()
+    assert (session_dir / JOURNAL).read_bytes() == before
     message = str(refusal.value)
     assert run_commands(message, "grep ") == ""
     run_commands(message, "rm ")
     assert not runtime.exists()
-    assert recover_session(session) == 0
+    assert recover_session(session_dir) == 0
 
 
 # R-LIFE-5
 def test_runtime_of_another_user_refused(
     abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session, runtime = abandoned
+    session_dir, runtime = abandoned
     real_lstat = Path.lstat
 
     def foreign_lstat(path: Path) -> os.stat_result:
@@ -1217,7 +1221,7 @@ def test_runtime_of_another_user_refused(
     # the owner check can refuse.
     monkeypatch.setattr(Path, "lstat", foreign_lstat)
     with pytest.raises(SessionError, match="ownership or permissions changed"):
-        recover_session(session)
+        recover_session(session_dir)
     assert (runtime / "kept").read_text() == "preserve"
 
 
@@ -1272,11 +1276,11 @@ def test_symlinked_runtime_refused(
 def test_run_refuses_writable_session_without_creating_files(
     tmp_path: Path, mode: int
 ) -> None:
-    session = tmp_path / "session"
-    session.mkdir()
-    session.chmod(mode)
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    session_dir.chmod(mode)
     result = subprocess.run(
-        [sys.executable, "-m", "framewisp", str(session), "run", "--", "true"],
+        [sys.executable, "-m", "framewisp", str(session_dir), "run", "--", "true"],
         capture_output=True,
         text=True,
         check=False,
@@ -1284,7 +1288,7 @@ def test_run_refuses_writable_session_without_creating_files(
     )
     assert result.returncode == 1
     assert "Unsafe session directory" in result.stderr
-    assert list(session.iterdir()) == []
+    assert list(session_dir.iterdir()) == []
 
 
 # R-SESSION-6

@@ -198,7 +198,7 @@ def test_stale_attach_socket(
         json.dumps(
             {
                 "kind": "attached",
-                "runtime_directory": str(missing),
+                "command_socket": str(missing / "command.sock"),
             }
         )
     )
@@ -213,7 +213,7 @@ def test_keyboard_input_requires_current_attachment_policy(
         json.dumps(
             {
                 "kind": "attached",
-                "runtime_directory": str(tmp_path),
+                "command_socket": str(tmp_path / "command.sock"),
                 "attachment": "old",
             }
         )
@@ -457,7 +457,7 @@ def test_attached_cli_input_retention(
     assert attach_process.stdout is not None
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     for arguments in [
         ("type", "--interval", "0", "café 日本語 😀"),
         ("key", "Shift+a"),
@@ -465,13 +465,13 @@ def test_attached_cli_input_retention(
         ("key", "--private", "Ctrl+Shift+a"),
     ]:
         result = subprocess.run(
-            [sys.executable, "-m", "framewisp", str(session), *arguments],
+            [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
             capture_output=True,
             text=True,
             timeout=5,
         )
         assert result.returncode == 0, result.stderr
-    raw = (session / "inputs.jsonl").read_text()
+    raw = (session_dir / "inputs.jsonl").read_text()
     events = [json.loads(line) for line in raw.splitlines()]
     assert "café 日本語 😀" not in raw
     assert "Shift+a" not in raw
@@ -481,13 +481,13 @@ def test_attached_cli_input_retention(
     assert all(event["returncode"] == 0 for event in events if event["event"] == "end")
     (tmp_path / "fail").touch()
     result = subprocess.run(
-        [sys.executable, "-m", "framewisp", str(session), "type", "secret"],
+        [sys.executable, "-m", "framewisp", str(session_dir), "type", "secret"],
         capture_output=True,
         text=True,
         timeout=5,
     )
     assert result.returncode == 1
-    raw = (session / "inputs.jsonl").read_text()
+    raw = (session_dir / "inputs.jsonl").read_text()
     assert "secret" not in raw
     assert attach_process.wait(timeout=5) == 1
 
@@ -503,13 +503,13 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
     assert (tmp_path / "lesson/frames/000000.png").exists()
-    session = tmp_path / "session"
+    session_dir = tmp_path / "session"
     note = subprocess.run(
         [
             sys.executable,
             "-m",
             "framewisp",
-            str(session),
+            str(session_dir),
             "teach-note",
             "This is the expected outcome",
         ],
@@ -518,10 +518,12 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         timeout=5,
     )
     assert note.returncode == 0, note.stderr
-    assert request_attached(session, "click", {"x": 20, "y": 20}) == 1
+    assert request_attached(session_dir, "click", {"x": 20, "y": 20}) == 1
     assert (
         request_attached(
-            session, "screenshot", {"path": str(tmp_path / "lesson/demonstration.webm")}
+            session_dir,
+            "screenshot",
+            {"path": str(tmp_path / "lesson/demonstration.webm")},
         )
         == 1
     )
@@ -537,7 +539,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         in (tmp_path / "lesson/timeline.jsonl").read_text()
     )
     assert (tmp_path / "closed").exists()
-    assert not (session / "session.json").exists()
+    assert not (session_dir / "session.json").exists()
 
 
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
@@ -679,8 +681,8 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
     tmp_path: Path,
     attach_process: subprocess.Popen[str],
 ) -> None:
-    session = tmp_path / "session"
-    assert request_attached(session, "key", {"chord": "a"}) == 1
+    session_dir = tmp_path / "session"
+    assert request_attached(session_dir, "key", {"chord": "a"}) == 1
     assert not (tmp_path / "events").exists()
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
@@ -691,7 +693,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
             sys.executable,
             "-m",
             "framewisp",
-            str(session),
+            str(session_dir),
             "type",
             "AB",
             "--interval",
@@ -708,7 +710,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
         assert time.monotonic() - started < 3
         assert command.wait(timeout=5) == 1
         assert (tmp_path / "closed").exists()
-        assert not (session / "session.json").exists()
+        assert not (session_dir / "session.json").exists()
         assert "66" not in (tmp_path / "events").read_text()
         assert attach_process.wait(timeout=5) == 0
     finally:
@@ -975,7 +977,7 @@ def test_guard_releases_presses_that_land_after_the_owner_exits(
         holder.wait(timeout=5)
 
 
-def test_old_session_cannot_control_new_attachment(
+def test_old_session_metadata_cannot_command_new_attachment(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     old = tmp_path / "old"
@@ -989,11 +991,11 @@ def test_old_session_cannot_control_new_attachment(
     assert attach_process.poll() is None
 
 
-def control_reply(session: Path, message: bytes) -> dict[str, object]:
-    state = json.loads((session / "session.json").read_text())
+def request_reply(session_dir: Path, message: bytes) -> dict[str, object]:
+    state = json.loads((session_dir / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(10)
-        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        connection.connect(state["command_socket"])
         connection.sendall(message)
         connection.shutdown(socket.SHUT_WR)
         return cast(dict[str, object], json.loads(connection.makefile().readline()))
@@ -1007,8 +1009,8 @@ def test_malformed_requests_leave_the_attachment_running(
     assert attach_process.stdout is not None
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
-    session = tmp_path / "session"
-    token = json.loads((session / "session.json").read_text())["attachment"]
+    session_dir = tmp_path / "session"
+    token = json.loads((session_dir / "session.json").read_text())["attachment"]
     os.mkfifo(tmp_path / "fifo")
     requests: list[dict[str, object]] = [
         {},
@@ -1048,15 +1050,15 @@ def test_malformed_requests_leave_the_attachment_running(
         b"[" * 100000 + b"\n",
         *((json.dumps({"attachment": token} | r) + "\n").encode() for r in requests),
     ):
-        response = control_reply(session, message)
+        response = request_reply(session_dir, message)
         assert response["status"] == 1
         assert isinstance(response["error"], str) and response["error"]
         assert attach_process.poll() is None
     assert not (tmp_path / "events").exists()
-    assert request_attached(session, "key", {"chord": "a"}) == 0
+    assert request_attached(session_dir, "key", {"chord": "a"}) == 0
     assert (tmp_path / "events").exists()
     click: dict[str, object] = {"x": 10, "y": 20, "button": "left", "count": 1}
-    assert request_attached(session, "click", click) == 0
+    assert request_attached(session_dir, "click", click) == 0
     assert attach_process.poll() is None
 
 
@@ -1068,17 +1070,17 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
     assert attach_process.stdout is not None
     while "Attached:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
-    session = tmp_path / "session"
-    state = json.loads((session / "session.json").read_text())
+    session_dir = tmp_path / "session"
+    state = json.loads((session_dir / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(Path(state["runtime_directory"]) / "control.sock"))
+        connection.connect(state["command_socket"])
         started = time.monotonic()
         while not select.select([connection], [], [], 0.3)[0]:
             # Without a total deadline, this client is never answered.
             assert time.monotonic() - started < 10
             connection.sendall(b" ")
         assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
-    assert request_attached(session, "key", {"chord": "a"}) == 0
+    assert request_attached(session_dir, "key", {"chord": "a"}) == 0
     assert attach_process.poll() is None
 
 
@@ -1334,16 +1336,16 @@ def test_invalid_session_metadata_fails_clearly(
 def test_attachment_refuses_headless_ownership(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    session = tmp_path / "session"
-    session.mkdir()
-    with session_lease(session) as lease:
-        assert run_attachment(session, None) == 1
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    with session_lease(session_dir) as lease:
+        assert run_attachment(session_dir, None) == 1
         assert "still live" in capsys.readouterr().err
-        write_journal(session, runtime_path(session), lease, created=False)
-    assert run_attachment(session, None) == 1
+        write_journal(session_dir, runtime_path(session_dir), lease, created=False)
+    assert run_attachment(session_dir, None) == 1
     assert "recover first" in capsys.readouterr().err
-    assert not (session / "session.json").exists()
-    recover_session(session)
+    assert not (session_dir / "session.json").exists()
+    recover_session(session_dir)
 
 
 def test_recovery_refuses_live_attachment(

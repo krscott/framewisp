@@ -13,7 +13,7 @@ Checked on NixOS x86_64, Linux 6.18.52, Python 3.14.7, GTK 4.22.4,
 AT-SPI 2.60.6, and the repository's pinned Qt 6. The display is Sway 1.12 with
 wlroots 0.20.2 and Pixman at 1280x720, without recording.
 
-| Application/toolkit | Wayland | Private Xwayland | Observations and limits |
+| App/toolkit | Wayland | Private Xwayland | Observations and limits |
 | --- | --- | --- | --- |
 | Bundled GTK 4 demo | Tested | Tested | Entry/button discovery, changed entry/result text, checkbox state, slider value, action names, window-relative bounds, and display bounds. |
 | Qt Quick QML probe | Tested | Tested | Ordinary button name and state work. The separate `Popup.Window` menu item is absent, even while visible. |
@@ -24,7 +24,7 @@ wlroots 0.20.2 and Pixman at 1280x720, without recording.
 | GTK 4 Flatpak and other toolkits/custom canvases | Not tested | Not tested | Writer GTK 3 and Blender coverage does not establish support for these targets. Use screenshots until useful accessible content is demonstrated. |
 | Attached desktop | Unsupported | Unsupported | No connection to the user's desktop accessibility bus. |
 
-The matrix describes these applications, not all controls from each toolkit.
+The matrix describes these apps, not all controls from each toolkit.
 An `ok` result means the exposed tree was traversed within the limits. It cannot
 detect widgets omitted by a toolkit. For example, the Qt popup search returns
 an empty complete result while its window remains visible. The prototype must
@@ -41,7 +41,7 @@ Real GUI tests locate the demo's entry/button, type and apply text, read the
 result and changed checkbox state, and inspect the slider value without opening
 a screenshot. They run on Wayland and Xwayland. Additional tests cover duplicate
 names, complete missing matches, all traversal caps, 1024-character truncation,
-a paused application (SIGSTOP), fresh queries after state changes, and Qt
+a paused app (SIGSTOP), fresh queries after state changes, and Qt
 coverage. A D-Bus I/O test removes an object between enumeration and its read
 and requires a partial response.
 
@@ -84,7 +84,7 @@ the end of the regression run and package checks overlapped part of sampling. Se
 query discovers the Apply control, a label query reads `Applied: HelloGUI`, and
 a screenshot contains both. Complete CLI timings include Python/Gio startup,
 D-Bus connection, traversal, JSON serialization, and process exit. They exclude
-Nix environment startup, application startup, model inference, and tool scheduling.
+Nix environment startup, app startup, model inference, and tool scheduling.
 The raw samples are in the [PR benchmark comment](https://github.com/krscott/framewisp/pull/62#issuecomment-5751650842).
 
 ```sh
