@@ -128,7 +128,7 @@ def video_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture
-def raw_video(tmp_path: Path, video_seed: Path) -> Path:
+def raw_clip(tmp_path: Path, video_seed: Path) -> Path:
     video = tmp_path / "clip with spaces.mp4"
     shutil.copyfile(video_seed, video)
     return video
@@ -220,11 +220,11 @@ def test_clip_keeps_click_pings_inside_its_bounds_and_skips_partial_lines(
 # R-REC-6
 @pytest.mark.parametrize("second", [1.01, 1.03])
 def test_click_ping_is_centred_and_starts_within_the_tolerance(
-    raw_video: Path, log: Path, second: float
+    raw_clip: Path, log: Path, second: float
 ) -> None:
     log.write_text(button_line(second, 300, 200))
-    render(raw_video, log, captions=CaptionOptions())
-    decoded = frames(raw_video, 28, 50)
+    render(raw_clip, log, captions=CaptionOptions())
+    decoded = frames(raw_clip, 28, 50)
     shown = [
         (28 + index, box)
         for index, frame in enumerate(decoded)
@@ -244,11 +244,11 @@ def test_click_ping_is_centred_and_starts_within_the_tolerance(
 
 # R-REC-5
 def test_double_click_draws_two_concurrent_click_pings(
-    raw_video: Path, log: Path
+    raw_clip: Path, log: Path
 ) -> None:
     log.write_text(button_line(1, 300, 200) + button_line(1.2, 300, 200))
-    render(raw_video, log, captions=CaptionOptions())
-    frame = frames(raw_video, 37, 37)[0]
+    render(raw_clip, log, captions=CaptionOptions())
+    frame = frames(raw_clip, 37, 37)[0]
     # Left of the centre, each click ping's stroke adds two edges to this row.
     row = [frame.getpixel((x, 200)) for x in range(240, 301)]
     edges = [
@@ -307,11 +307,11 @@ def assert_hold_disc(
 
 # R-REC-5, R-REC-6
 def test_hold_disc_follows_the_pointer_and_fades_after_the_release(
-    raw_video: Path, log: Path
+    raw_clip: Path, log: Path
 ) -> None:
     log.write_text(drag_lines(1, (300, 200), 2, (700, 200)))
-    render(raw_video, log, captions=CaptionOptions())
-    decoded = dict(zip(range(29, 77), frames(raw_video, 29, 76)))
+    render(raw_clip, log, captions=CaptionOptions())
+    decoded = dict(zip(range(29, 77), frames(raw_clip, 29, 76)))
     assert red_box(decoded[29]) is None
     # A filled hold disc, unlike the click ping, tints the pointer position at once.
     assert is_tinted(decoded[31], 313, 200)
@@ -329,22 +329,22 @@ def test_hold_disc_follows_the_pointer_and_fades_after_the_release(
 
 # R-REC-5
 def test_hold_from_before_the_clip_shows_from_its_first_frame(
-    raw_video: Path, log: Path
+    raw_clip: Path, log: Path
 ) -> None:
     log.write_text(drag_lines(-1, (100, 200), 1, (500, 200)))
-    render(raw_video, log, captions=CaptionOptions())
-    decoded = frames(raw_video, 0, 15)
+    render(raw_clip, log, captions=CaptionOptions())
+    decoded = frames(raw_clip, 0, 15)
     assert_hold_disc(decoded[0], 300, 200)
     assert_hold_disc(decoded[15], 400, 200)
 
 
 # R-REC-5
-def test_instant_drag_fades_at_its_release_position(raw_video: Path, log: Path) -> None:
+def test_instant_drag_fades_at_its_release_position(raw_clip: Path, log: Path) -> None:
     log.write_text(drag_lines(1, (300, 200), 1, (500, 200)))
-    render(raw_video, log, captions=CaptionOptions())
+    render(raw_clip, log, captions=CaptionOptions())
     # The click ping stays at x=300; crop it away to measure only the hold disc while
     # it is still clearly tinted.
-    for frame in frames(raw_video, 33, 36):
+    for frame in frames(raw_clip, 33, 36):
         box = red_box(frame.crop((420, 100, 580, 300)))
         assert box is not None
         assert (box[0] + box[2]) / 2 == pytest.approx(80, abs=2)
@@ -373,7 +373,7 @@ def click_ping_centre(
 # R-REC-8, R-REC-9
 @pytest.mark.parametrize("position", [None, "right", "left", "bottom"])
 def test_compaction_maps_click_pings_to_retained_frames(
-    raw_video: Path, log: Path, tmp_path: Path, position: ConsolePosition | None
+    raw_clip: Path, log: Path, tmp_path: Path, position: ConsolePosition | None
 ) -> None:
     (tmp_path / "console.jsonl").write_text("")
     (tmp_path / "activity.jsonl").write_text("")
@@ -383,24 +383,24 @@ def test_compaction_maps_click_pings_to_retained_frames(
         (log, tmp_path / "activity.jsonl"),
         origin=ORIGIN,
         stopped=STOPPED,
-        duration=clip_duration(raw_video, env=dict(os.environ)),
+        duration=clip_duration(raw_clip, env=dict(os.environ)),
     )
     source = [frame for first, last in ranges for frame in range(first, last)]
     render(
-        raw_video,
+        raw_clip,
         log,
         captions=CaptionOptions(),
         compact=True,
         layout=layout,
     )
     size = (layout.width, layout.height)
-    shown = compacted_click_ping_frames(raw_video, size=size)
+    shown = compacted_click_ping_frames(raw_clip, size=size)
     first = source.index(math.ceil(4.25 * 30))
     # The render keeps the whole animation, not only its opening frames.
     assert source[first + 14] == source[first] + 14
-    assert round(clip_duration(raw_video, env=dict(os.environ)) * 30) == len(source)
+    assert round(clip_duration(raw_clip, env=dict(os.environ)) * 30) == len(source)
     assert first <= min(shown) <= first + 1
-    assert click_ping_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
+    assert click_ping_centre(raw_clip, min(shown) + 2, size=size) == pytest.approx(
         (layout.gui.x + 600, layout.gui.y + 300), abs=1
     )
     assert source[max(shown)] / 30 > 4.25 + 0.3
@@ -421,26 +421,26 @@ def test_padding_retains_every_click_ping_frame(log: Path) -> None:
 
 
 # R-REC-8
-def test_clip_end_cuts_a_late_click_ping_short(raw_video: Path, log: Path) -> None:
+def test_clip_end_cuts_a_late_click_ping_short(raw_clip: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(5.7, 5.71) + button_line(5.8, 300, 200))
-    render(raw_video, log, captions=CaptionOptions(), compact=True)
-    shown = compacted_click_ping_frames(raw_video, size=SIZE)
+    render(raw_clip, log, captions=CaptionOptions(), compact=True)
+    shown = compacted_click_ping_frames(raw_clip, size=SIZE)
     assert 4 <= len(shown) < 15
-    assert max(shown) == round(clip_duration(raw_video, env=dict(os.environ)) * 30) - 1
+    assert max(shown) == round(clip_duration(raw_clip, env=dict(os.environ)) * 30) - 1
 
 
 # R-REC-8
-def test_compaction_keeps_each_click_ping_whole(raw_video: Path, log: Path) -> None:
+def test_compaction_keeps_each_click_ping_whole(raw_clip: Path, log: Path) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(3, 3.01) + button_line(3.005, 300, 200))
     render(
-        raw_video,
+        raw_clip,
         log,
         captions=CaptionOptions(),
         compact=True,
     )
-    shown = compacted_click_ping_frames(raw_video, size=SIZE)
+    shown = compacted_click_ping_frames(raw_clip, size=SIZE)
     # The fading click ping outgrows its 28-pixel opening size only late in its animation.
     assert max(shown.values()) > 60
     assert max(shown) - min(shown) >= 10
@@ -457,7 +457,7 @@ def test_compaction_keeps_each_click_ping_whole(raw_video: Path, log: Path) -> N
     ],
 )
 def test_click_ping_clips_at_the_console_panel(
-    raw_video: Path,
+    raw_clip: Path,
     log: Path,
     tmp_path: Path,
     position: ConsolePosition,
@@ -469,10 +469,10 @@ def test_click_ping_clips_at_the_console_panel(
     log.write_text(button_line(1, x, y) + button_line(3, 600, 300))
     layout = console_panel_layout(position, pixels)
     assert layout.console_panel is not None
-    render(raw_video, log, captions=CaptionOptions(), layout=layout)
+    render(raw_clip, log, captions=CaptionOptions(), layout=layout)
     size = (layout.width, layout.height)
-    edge = frames(raw_video, 36, 36, size=size)[0]
-    inside = frames(raw_video, 96, 96, size=size)[0]
+    edge = frames(raw_clip, 36, 36, size=size)[0]
+    inside = frames(raw_clip, 96, 96, size=size)[0]
     gui, console_panel = layout.gui, layout.console_panel
     assert red_box(edge.crop((gui.x, gui.y, gui.right, gui.bottom))) is not None
     assert (
@@ -507,7 +507,7 @@ def test_click_ping_clips_at_the_console_panel(
 
 # R-REC-8
 def test_compaction_keeps_the_hold_path_and_fade(
-    raw_video: Path, log: Path, tmp_path: Path
+    raw_clip: Path, log: Path, tmp_path: Path
 ) -> None:
     (tmp_path / "activity.jsonl").write_text("")
     log.write_text(command_lines(3, 4) + drag_lines(3, (300, 200), 4, (700, 200)))
@@ -515,12 +515,12 @@ def test_compaction_keeps_the_hold_path_and_fade(
         (log, tmp_path / "activity.jsonl"),
         origin=ORIGIN,
         stopped=STOPPED,
-        duration=clip_duration(raw_video, env=dict(os.environ)),
+        duration=clip_duration(raw_clip, env=dict(os.environ)),
     )
     source = [frame for first, last in ranges for frame in range(first, last)]
     assert source[0] == 0 and 90 not in source[:30]  # The clip is cut before 3 s.
-    render(raw_video, log, captions=CaptionOptions(), compact=True)
-    decoded = frames(raw_video, 0, len(source) - 1)
+    render(raw_clip, log, captions=CaptionOptions(), compact=True)
+    decoded = frames(raw_clip, 0, len(source) - 1)
     for frame in range(108, 120):  # After the click ping, until the release.
         assert_hold_disc(
             decoded[source.index(frame)], 300 + 400 * (frame / 30 - 3), 200
@@ -540,7 +540,7 @@ def test_compaction_keeps_the_hold_path_and_fade(
     ],
 )
 def test_hold_disc_clips_at_the_console_panel(
-    raw_video: Path,
+    raw_clip: Path,
     log: Path,
     tmp_path: Path,
     position: ConsolePosition,
@@ -551,9 +551,9 @@ def test_hold_disc_clips_at_the_console_panel(
     log.write_text(drag_lines(1, (x, y), 2, (600, 300)))
     layout = console_panel_layout(position, 400)
     assert layout.console_panel is not None
-    render(raw_video, log, captions=CaptionOptions(), layout=layout)
+    render(raw_clip, log, captions=CaptionOptions(), layout=layout)
     gui, console_panel = layout.gui, layout.console_panel
-    decoded = frames(raw_video, 30, 75, size=(layout.width, layout.height))
+    decoded = frames(raw_clip, 30, 75, size=(layout.width, layout.height))
     for frame in decoded:
         assert (
             red_box(
@@ -590,58 +590,58 @@ CAPTION_OPTIONS = [
 # R-REC-11
 @pytest.mark.parametrize("captions", CAPTION_OPTIONS)
 def test_click_pings_ignore_the_caption_mode(
-    raw_video: Path, log: Path, captions: CaptionOptions
+    raw_clip: Path, log: Path, captions: CaptionOptions
 ) -> None:
     log.write_text(
         command_lines(1, 1.1)
         + button_line(1.05, 300, 200)
         + drag_lines(2, (300, 200), 3, (700, 200))
     )
-    render(raw_video, log, captions=captions)
-    click_ping = frames(raw_video, 36, 36)[0]
-    hold_disc = frames(raw_video, 78, 78)[0]
+    render(raw_clip, log, captions=captions)
+    click_ping = frames(raw_clip, 36, 36)[0]
+    hold_disc = frames(raw_clip, 78, 78)[0]
     assert red_box(click_ping) is not None
     assert_hold_disc(hold_disc, 540, 200)
 
 
 def test_default_mode_click_pings_a_clip_without_keyboard_input(
-    raw_video: Path, log: Path
+    raw_clip: Path, log: Path
 ) -> None:
     log.write_text(command_lines(1, 1.1) + button_line(1.05, 300, 200))
-    render(raw_video, log)
-    assert red_box(frames(raw_video, 36, 36)[0]) is not None
+    render(raw_clip, log)
+    assert red_box(frames(raw_clip, 36, 36)[0]) is not None
 
 
 # R-REC-7
 @pytest.mark.parametrize("captions", CAPTION_OPTIONS)
 def test_opt_out_applies_with_every_caption_mode(
-    raw_video: Path, log: Path, captions: CaptionOptions
+    raw_clip: Path, log: Path, captions: CaptionOptions
 ) -> None:
     log.write_text(
         command_lines(1, 1.1)
         + button_line(1.05, 300, 200)
         + drag_lines(2, (300, 200), 3, (700, 200))
     )
-    render(raw_video, log, captions=captions, click_pings=False)
-    assert red_box(frames(raw_video, 36, 36)[0]) is None
-    assert red_box(frames(raw_video, 78, 78)[0]) is None
+    render(raw_clip, log, captions=captions, click_pings=False)
+    assert red_box(frames(raw_clip, 36, 36)[0]) is None
+    assert red_box(frames(raw_clip, 78, 78)[0]) is None
 
 
 # R-REC-7
 def test_disabled_click_pings_leave_the_raw_clip_untouched(
-    raw_video: Path, log: Path
+    raw_clip: Path, log: Path
 ) -> None:
-    before = raw_video.read_bytes()
+    before = raw_clip.read_bytes()
     log.write_text(button_line(1, 300, 200))
-    render(raw_video, log, captions=CaptionOptions(), click_pings=False)
-    assert raw_video.read_bytes() == before
+    render(raw_clip, log, captions=CaptionOptions(), click_pings=False)
+    assert raw_clip.read_bytes() == before
 
 
-def test_clip_without_presses_is_not_encoded_again(raw_video: Path, log: Path) -> None:
-    before = raw_video.read_bytes()
+def test_clip_without_presses_is_not_encoded_again(raw_clip: Path, log: Path) -> None:
+    before = raw_clip.read_bytes()
     log.write_text("")
-    render(raw_video, log, captions=CaptionOptions())
-    assert raw_video.read_bytes() == before
+    render(raw_clip, log, captions=CaptionOptions())
+    assert raw_clip.read_bytes() == before
 
 
 def test_script_has_one_dialogue_per_click_ping() -> None:
@@ -659,7 +659,7 @@ def assert_raw_clip_survived(video: Path, before: bytes, error: str) -> None:
     assert str(video) in error
     assert "finalization.log" in error
     assert "inputs.jsonl" in error
-    assert "raw video remains" in error
+    assert "raw clip remains" in error
     assert not list(video.parent.glob(".framewisp-finalization-*"))
     # Decode every frame without transferring full RGB images into Python.
     decoded = subprocess.run(
@@ -675,13 +675,13 @@ def assert_raw_clip_survived(video: Path, before: bytes, error: str) -> None:
 # R-REC-10
 @pytest.mark.parametrize("captions", [CaptionOptions(), CaptionOptions(key="non-text")])
 def test_failed_encoder_leaves_click_pings_only_clip_playable(
-    raw_video: Path,
+    raw_clip: Path,
     log: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     captions: CaptionOptions,
 ) -> None:
-    before = raw_video.read_bytes()
+    before = raw_clip.read_bytes()
     log.write_text(button_line(1, 300, 200))
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -691,21 +691,21 @@ def test_failed_encoder_leaves_click_pings_only_clip_playable(
     with monkeypatch.context() as patch:
         patch.setenv("PATH", path)
         with pytest.raises(RuntimeError) as failure:
-            render(raw_video, log, captions=captions)
+            render(raw_clip, log, captions=captions)
     assert "status 3" in str(failure.value)
-    assert_raw_clip_survived(raw_video, before, str(failure.value))
+    assert_raw_clip_survived(raw_clip, before, str(failure.value))
 
 
 # R-REC-10
 @pytest.mark.parametrize("captions", [CaptionOptions(), CaptionOptions(key="non-text")])
 def test_malformed_log_leaves_click_pings_only_clip_playable(
-    raw_video: Path, log: Path, captions: CaptionOptions
+    raw_clip: Path, log: Path, captions: CaptionOptions
 ) -> None:
-    before = raw_video.read_bytes()
+    before = raw_clip.read_bytes()
     log.write_text("not json\n")
     with pytest.raises(RuntimeError) as failure:
-        render(raw_video, log, captions=captions)
-    assert_raw_clip_survived(raw_video, before, str(failure.value))
+        render(raw_clip, log, captions=captions)
+    assert_raw_clip_survived(raw_clip, before, str(failure.value))
 
 
 COMPLETE_RECORDS = (command_lines(1, 1.1) + button_line(1.05, 300, 200)).encode()
@@ -737,28 +737,28 @@ LOG_READERS = {
     ids=["text", "carriage-return", "not-an-object", "no-fields", "terminated-last"],
 )
 def test_malformed_complete_line_fails_every_reader_and_keeps_the_clip(
-    raw_video: Path, log: Path, reader: dict[str, object], bad_log: bytes
+    raw_clip: Path, log: Path, reader: dict[str, object], bad_log: bytes
 ) -> None:
-    before = raw_video.read_bytes()
+    before = raw_clip.read_bytes()
     (log.parent / "activity.jsonl").write_text("")
     log.write_bytes(bad_log)
     with pytest.raises(RuntimeError) as failure:
-        render(raw_video, log, **reader)
-    assert_raw_clip_survived(raw_video, before, str(failure.value))
+        render(raw_clip, log, **reader)
+    assert_raw_clip_survived(raw_clip, before, str(failure.value))
 
 
 # R-LOG-7
 @pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
 def test_unfinished_last_line_renders_with_every_reader(
-    raw_video: Path, log: Path, reader: dict[str, object]
+    raw_clip: Path, log: Path, reader: dict[str, object]
 ) -> None:
-    before = raw_video.read_bytes()
+    before = raw_clip.read_bytes()
     (log.parent / "activity.jsonl").write_text("")
     # The write stopped inside a multi-byte character.
     log.write_bytes(COMPLETE_RECORDS + b'{"id": "next", "text": "\xe6')
-    render(raw_video, log, **reader)
-    assert raw_video.read_bytes() != before
-    assert frames(raw_video, 0, 0)
+    render(raw_clip, log, **reader)
+    assert raw_clip.read_bytes() != before
+    assert frames(raw_clip, 0, 0)
 
 
 # R-LOG-7
@@ -769,23 +769,23 @@ def test_unfinished_last_line_renders_with_every_reader(
     ids=["json-fragment", "split-utf8", "json-without-newline"],
 )
 def test_append_after_interrupted_write_renders_with_every_reader(
-    raw_video: Path, log: Path, reader: dict[str, object], tail: bytes
+    raw_clip: Path, log: Path, reader: dict[str, object], tail: bytes
 ) -> None:
     (log.parent / "activity.jsonl").write_text("")
     log.write_bytes(COMPLETE_RECORDS + tail)
     with log_input(log.parent, "key", {"chord": "Ctrl+s"}) as result:
         result.returncode = 0
     assert log.read_bytes().startswith(COMPLETE_RECORDS)
-    render(raw_video, log, **reader)
-    assert frames(raw_video, 0, 0)
+    render(raw_clip, log, **reader)
+    assert frames(raw_clip, 0, 0)
 
 
 # R-LOG-8, R-REC-10
 @pytest.mark.parametrize("reader", LOG_READERS.values(), ids=LOG_READERS)
 def test_append_preserves_complete_corruption_and_render_failure(
-    raw_video: Path, log: Path, reader: dict[str, object]
+    raw_clip: Path, log: Path, reader: dict[str, object]
 ) -> None:
-    before = raw_video.read_bytes()
+    before = raw_clip.read_bytes()
     (log.parent / "activity.jsonl").write_text("")
     corrupt = COMPLETE_RECORDS + b"not json\n"
     log.write_bytes(corrupt + UNFINISHED)
@@ -793,5 +793,5 @@ def test_append_preserves_complete_corruption_and_render_failure(
         pass
     assert log.read_bytes().startswith(corrupt)
     with pytest.raises(RuntimeError) as failure:
-        render(raw_video, log, **reader)
-    assert_raw_clip_survived(raw_video, before, str(failure.value))
+        render(raw_clip, log, **reader)
+    assert_raw_clip_survived(raw_clip, before, str(failure.value))

@@ -19,7 +19,8 @@ from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
 JOURNAL = ".headless-owner.json"
-# Symlink to the private clip of the active recording, kept if it is interrupted.
+# Symlink to the private clip of the active recording. It stays while that clip
+# remains, after an interruption or a failed finalization or publish.
 ACTIVE_RECORDING = ".active-recording"
 # Far above any journal, whose runtime path fits in a 108-byte socket address, or
 # any session.json that recovery reads.

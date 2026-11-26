@@ -786,11 +786,12 @@ timestamps and content.
 
 Finalization applies compaction and draws the console panel and overlays in one
 FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
-that pass fails, the raw GUI video remains playable. It stays at the clip destination
-unless framewisp cannot publish it there, and the error names its path and
-`finalization.log` (R-REC-10). If the pass succeeds but a file takes the clip
-destination first, the finished clip stays in the hidden directory and the error
-names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
+that pass fails, the raw clip remains playable at the clip destination, and the
+error names its path and `finalization.log` (R-REC-10). If framewisp cannot
+publish the clip there, for example because a file takes the clip destination
+first or its directory is no longer writable, it leaves any file there intact.
+The rendered clip, or the raw clip if the pass failed, stays in the hidden
+directory and the error names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
 triggered it.
 
 ## Share media in GitHub comments
