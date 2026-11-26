@@ -434,8 +434,8 @@ The desktop controls indicator placement, overflow, panel auto-hide, and visibil
 Registration does not guarantee a visible sharing indicator. If no compatible host is available,
 the terminal reports that the indicator is unavailable and gives the shortcut
 and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a sharing
-indicator: its menu requires a responsive owner. The indicator disappears when the
-desktop share ends or its owner exits; a new desktop share registers a new one.
+indicator: its menu requires a responsive runner. The indicator disappears when the
+session ends, and framewisp registers a new one for the next attached or teaching session.
 See [sharing indicator verification](docs/sharing-indicator.md) for setup and verification status.
 
 Ctrl+Alt+Escape runs `framewisp --stop-sharing`. Ctrl+C, loss of the controlling terminal,
@@ -1239,7 +1239,9 @@ processes manually; their PIDs are diagnostic, not safe signal targets. Resource
 and ownership metadata remain so recovery cannot claim success. Recovery also
 refuses missing or unverifiable journals and replaced runtimes. It removes nothing
 and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
-not recover attached or teaching sessions; use `framewisp --stop-sharing` for those. Attached and teaching sessions take
+not recover attached or teaching sessions: it names the steps to start the session
+again with attach or teach or to delete its metadata. `framewisp --stop-sharing` is the
+emergency stop for the active desktop share. Attached and teaching sessions take
 the same session metadata lock as headless sessions and refuse directories with abandoned headless ownership.
 
 Headless sessions start private D-Bus session and accessibility buses plus an

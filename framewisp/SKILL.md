@@ -612,10 +612,10 @@ enabled StatusNotifierItem/AppIndicator extension. The desktop controls placemen
 overflow, panel auto-hide, and visibility, so registration does not guarantee a
 visible indicator. If no compatible host is available, the attach terminal reports
 that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
-The indicator ends with the desktop share's owner; reconnecting needs fresh portal
-approval and creates a new indicator. Keep emergency shortcuts configured. The
-indicator's menu needs a responsive owner, while `--stop-sharing` can stop a
-suspended owner.
+The indicator disappears when the session ends, and framewisp registers a new one
+for the next attached or teaching session, which needs fresh portal approval. Keep
+emergency shortcuts configured. The indicator's menu needs a responsive runner, while
+`--stop-sharing` can stop a suspended runner.
 
 The stop command is `framewisp --stop-sharing`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also
