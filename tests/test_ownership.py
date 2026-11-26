@@ -670,6 +670,7 @@ def test_stale_attachment_gets_attachment_steps(tmp_path: Path, kind: str) -> No
         recover_session(tmp_path)
     message = str(refusal.value)
     assert " run -- APP" not in message
+    assert "attach again" not in message
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0

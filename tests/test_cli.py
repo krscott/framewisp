@@ -411,6 +411,9 @@ def test_session_commands_refuse_another_command_protocol(
         metadata.get("kind") in {"attached", "teaching"}
     )
     assert "again with this version" in result.stderr
+    assert ("a new lesson directory" in result.stderr) is (
+        metadata.get("kind") == "teaching"
+    )
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "screenshot.png").exists()
 

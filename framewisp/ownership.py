@@ -335,7 +335,7 @@ def stale_attachment(session_dir: Path) -> str:
         f"{session_dir} records a desktop attachment, which recover does not clean up. "
         "Nothing was removed.\n"
         "If the attachment is running, stop it with `framewisp --detach`.\n"
-        f"Otherwise attach again, or delete its metadata:\n  {metadata}"
+        f"Otherwise start it again with attach or teach, or delete its metadata:\n  {metadata}"
     ) + kept_recording_note(session_dir)
 
 
