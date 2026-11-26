@@ -1023,7 +1023,9 @@ def test_guard_releases_presses_that_land_after_the_owner_exits(
 
 
 def test_old_session_metadata_cannot_command_new_desktop_share(
-    tmp_path: Path, attach_process: subprocess.Popen[str]
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = tmp_path / "old"
     old.mkdir()
@@ -1032,6 +1034,9 @@ def test_old_session_metadata_cannot_command_new_desktop_share(
     state["share_token"] = "previous-owner"
     (old / "session.json").write_text(json.dumps(state))
     assert request_desktop(old, "key", {"chord": "a"}) == 1
+    error = capsys.readouterr().err
+    assert "addressed to has ended" in error
+    assert "run attach" not in error
     assert not (tmp_path / "events").exists()
     assert attach_process.poll() is None
 
