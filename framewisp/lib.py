@@ -31,6 +31,7 @@ from framewisp.captions import (
 )
 from framewisp.compact import ffprobe
 from framewisp.connection import (
+    COMMAND_PROTOCOL,
     capture_path_error,
     parse_command,
     receive_request,
@@ -702,60 +703,17 @@ def session_command(
     parameters: dict[str, object] | None = None,
 ) -> int:
     state = json.loads((session_dir / "session.json").read_text())
-    if state.get("command_protocol") != 1:
-        raise SessionError(
-            "This session uses an older or unsupported command protocol. "
-            "Stop its original runner with Ctrl+C or SIGTERM, then start a new session "
-            "with this version of framewisp."
-        )
-    if parameters is not None and state.get("persistent_input") is not True:
-        raise SessionError(
-            "This runner does not support persistent input. Restart the session with this version of framewisp."
-        )
-    if action == "batch" and state.get("batch_input") is not True:
-        raise SessionError(
-            "This runner does not support batches. Restart the session with this version of framewisp."
-        )
-    if (
-        action in {"record-start", "key", "type", "batch"}
-        and state.get("input_caption_options") is not True
-    ):
-        raise SessionError(
-            "This runner does not support this version's caption modes or private input. "
-            "Restart the session with this version of framewisp."
-        )
-    if console is not None and state.get("console_cell_scale") is not True:
-        raise SessionError(
-            "This runner does not support this version's console panels. Restart the "
-            "session with this version of framewisp."
-        )
-    if compact and state.get("compact_recording") is not True:
-        raise SessionError(
-            "This runner does not support compact recordings. Restart the session "
-            "with this version of framewisp."
-        )
-    if (
-        action == "record-start"
-        and click_pings
-        and state.get("click_pings_recording") is not True
-    ):
-        raise SessionError(
-            "This runner does not support click pings. Restart the session with "
-            "this version of framewisp, or pass --no-click-pings."
-        )
     request: dict[str, object] = {
         "action": action,
         "session_directory": str(session_dir),
         "destination": str(destination.resolve()) if destination else None,
         "click_pings": click_pings,
         "compact": compact,
+        "console": console.parameters() if console is not None else None,
         "parameters": parameters,
     }
     if action == "record-start":
         request.update(pointer_captions=captions.pointer, key_captions=captions.key)
-    # An older runner rejects this key even when it is null.
-    if console is not None:
-        request["console"] = console.parameters()
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
         raise SessionError("Session request exceeds the 1 MiB limit.")
@@ -1138,15 +1096,8 @@ def _run_session(
                 temporary.write_text(
                     json.dumps(
                         {
-                            "command_protocol": 1,
-                            "console_cell_scale": True,
-                            "compact_recording": True,
-                            "click_pings_recording": True,
-                            "input_caption_options": True,
-                            "persistent_input": True,
-                            "inspection_protocol": 1,
+                            "command_protocol": COMMAND_PROTOCOL,
                             "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
-                            "batch_input": True,
                             "command_socket": command_socket,
                             "runtime_directory": directory,
                             "wayland_display": display,
@@ -1266,8 +1217,7 @@ def screenshot(
     if str(destination) != "-":
         # Read the active clip's destination from session metadata, not from the
         # runner: record-stop renders in the runner's command loop, so asking
-        # the runner would wait for it. A runner from an older framewisp
-        # publishes no recording key.
+        # the runner would wait for it.
         recording = json.loads((session_dir / "session.json").read_text()).get(
             "recording"
         )
@@ -1282,17 +1232,7 @@ def screenshot(
     display_width = display_height = 0
     if region is not None or metadata:
         state = json.loads((session_dir / "session.json").read_text())
-        display_width, display_height = state.get("width"), state.get("height")
-        if (
-            type(display_width) is not int
-            or type(display_height) is not int
-            or display_width <= 0
-            or display_height <= 0
-        ):
-            raise SessionError(
-                "Screenshot metadata requires display dimensions. "
-                "Restart the session with this version of framewisp."
-            )
+        display_width, display_height = state["width"], state["height"]
         x, y, width, height = region or (0, 0, display_width, display_height)
         if x < 0 or y < 0 or width <= 0 or height <= 0:
             raise SessionError(

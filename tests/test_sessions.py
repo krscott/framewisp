@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from framewisp.connection import COMMAND_PROTOCOL
 from framewisp.sessions import resolve_session_dir
 
 
@@ -182,7 +183,9 @@ def test_cli_resolves_named_session_without_legacy_fallback(
     monkeypatch.chdir(tmp_path)
     session_dir = resolve_session_dir("browser")
     session_dir.mkdir(parents=True)
-    state = {"kind": "attached"} if attached else {}
+    state = (
+        {"kind": "attached", "command_protocol": COMMAND_PROTOCOL} if attached else {}
+    )
     (session_dir / "session.json").write_text(json.dumps(state))
     legacy = tmp_path / "browser"
     legacy.mkdir()
@@ -200,7 +203,7 @@ def test_cli_resolves_named_session_without_legacy_fallback(
             assert result.returncode == 1
             assert str(session_dir) in result.stderr
             assert (
-                "Use framewisp --detach" if attached else "older or unsupported"
+                "Use framewisp --detach" if attached else "another version of framewisp"
             ) in result.stderr
         (session_dir / "session.json").unlink()
         result = subprocess.run(

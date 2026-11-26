@@ -11,6 +11,10 @@ from typing import TypeVar, cast
 
 from framewisp.batch import MAX_REQUEST_BYTES
 
+# The version of what a session command and a runner exchange: session metadata,
+# requests and replies. A session command refuses a session that publishes
+# another value, so bump it in any change to their fields or meaning.
+COMMAND_PROTOCOL = 2
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -28,12 +32,6 @@ def request_attached(
             print("This command requires an attached desktop session.", file=sys.stderr)
             return 1
         endpoint = Path(state["command_socket"])
-        if action in {"key", "type"} and state.get("input_caption_options") is not True:
-            print(
-                "This attachment uses an older keyboard input policy. Ask the user to reconnect.",
-                file=sys.stderr,
-            )
-            return 1
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))
             connection.sendall(

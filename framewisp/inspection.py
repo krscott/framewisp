@@ -199,10 +199,6 @@ def inspect_session(
         raise SessionError(
             "inspect supports headless sessions only; use screenshot for attached desktops"
         )
-    if state.get("inspection_protocol") != 1:
-        raise SessionError(
-            "Session has no inspection support; start a new headless session"
-        )
     # Only the exact private socket created by this runner is eligible. Never fall
     # back to the caller's desktop bus or AT_SPI_BUS_ADDRESS environment variable.
     expected = unix_bus_address(Path(state["runtime_directory"]) / "accessibility.sock")

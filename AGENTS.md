@@ -105,8 +105,8 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 
 ## Command protocol
 
-When a change lets a newer CLI ask for something that a session's older runner
-would accept but not do, make the CLI refuse clearly: the runner advertises the
-feature in session metadata (`session.json`), and the CLI checks that before it
-relies on it. A session command that the older runner already rejects needs no
-check.
+A session command refuses a session whose metadata (`session.json`) publishes
+another `command_protocol` than its own `COMMAND_PROTOCOL` (R-CONTROL-3). Bump
+`COMMAND_PROTOCOL` in `framewisp/connection.py` in any change to the fields or
+meaning of session metadata, a request or a reply. Do not add a flag or a check
+for one feature.

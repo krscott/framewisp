@@ -32,6 +32,7 @@ from gi.repository import GLib, Gst
 from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
+    COMMAND_PROTOCOL,
     parse_command,
     receive_request,
     resolved_request_path,
@@ -671,7 +672,7 @@ def _run_attachment(
                         state,
                         {
                             "kind": "attached",
-                            "input_caption_options": True,
+                            "command_protocol": COMMAND_PROTOCOL,
                             "attachment": attachment,
                             "command_socket": command_socket,
                             "processes": {"attach": os.getpid()},

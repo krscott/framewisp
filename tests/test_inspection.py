@@ -46,9 +46,7 @@ def test_query_rejects_unbounded_arguments(field: str, value: object) -> None:
     "state",
     [
         {"kind": "attached"},
-        {},
         {
-            "inspection_protocol": 1,
             "runtime_directory": "/tmp/private",
             "accessibility_bus": "unix:path=/run/user/1000/at-spi/bus",
         },

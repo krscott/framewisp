@@ -10,7 +10,7 @@ from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions, log_input
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
-from framewisp.connection import request_attached
+from framewisp.connection import COMMAND_PROTOCOL, request_attached
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError, recorded_app_exit
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
@@ -488,26 +488,33 @@ def main() -> None:
             parser.error(
                 f"Teaching output parent must be an existing writable directory: {parent}"
             )
+    attached = False
     if args.action not in {"run", "attach", "teach", "recover"}:
         exit_message = recorded_app_exit(session_dir)
         if exit_message is not None:
             parser.exit(1, exit_message + "\n")
-    if (
-        args.action not in {"run", "attach", "teach", "recover"}
-        and not state_path.exists()
-    ):
-        parser.exit(
-            1,
-            "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
-        )
-    try:
-        attached = (
-            args.action != "recover"
-            and state_path.exists()
-            and json.loads(state_path.read_text()).get("kind") == "attached"
-        )
-    except (OSError, ValueError, AttributeError) as error:
-        parser.exit(1, f"Cannot read session metadata: {error}\n")
+        if not state_path.exists():
+            parser.exit(
+                1,
+                "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
+            )
+        try:
+            metadata = json.loads(state_path.read_text())
+            protocol = metadata.get("command_protocol")
+            attached = metadata.get("kind") == "attached"
+        except (OSError, ValueError, AttributeError) as error:
+            parser.exit(1, f"Cannot read session metadata: {error}\n")
+        # Every session command passes here, so none needs its own check
+        # (R-CONTROL-3).
+        if protocol != COMMAND_PROTOCOL:
+            parser.exit(
+                1,
+                f"Session {session_dir} was started by another version of framewisp "
+                f"(command protocol {protocol!r}; this version uses {COMMAND_PROTOCOL}). "
+                "Stop its runner with Ctrl+C or SIGTERM, or with framewisp --detach "
+                "for an attached or teaching session, then start the session again "
+                "with this version.\n",
+            )
     try:
         result = dispatch(session_dir, args, attached=attached)
     except (SessionError, OSError, subprocess.TimeoutExpired) as error:
