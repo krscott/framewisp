@@ -167,7 +167,7 @@ def frames(
 
 
 def red_box(frame: Image.Image) -> tuple[int, int, int, int] | None:
-    """Bound the pixels a fading red ring tints, on a white or dark background."""
+    """Bound the pixels a red overlay tints, on a white or dark background."""
     red, green, blue = frame.split()
     # Saturated subtraction is equivalent for a strictly positive threshold.
     threshold = [0] * 41 + [255] * 215
@@ -219,7 +219,7 @@ def test_clip_keeps_click_pings_inside_its_bounds_and_skips_partial_lines(
 
 # R-REC-6
 @pytest.mark.parametrize("second", [1.01, 1.03])
-def test_ring_is_centred_and_starts_within_the_tolerance(
+def test_click_ping_is_centred_and_starts_within_the_tolerance(
     raw_video: Path, log: Path, second: float
 ) -> None:
     log.write_text(button_line(second, 300, 200))
@@ -243,10 +243,13 @@ def test_ring_is_centred_and_starts_within_the_tolerance(
 
 
 # R-REC-5
-def test_double_click_draws_two_concurrent_rings(raw_video: Path, log: Path) -> None:
+def test_double_click_draws_two_concurrent_click_pings(
+    raw_video: Path, log: Path
+) -> None:
     log.write_text(button_line(1, 300, 200) + button_line(1.2, 300, 200))
     render(raw_video, log, captions=CaptionOptions())
     frame = frames(raw_video, 37, 37)[0]
+    # Left of the centre, each click ping's stroke adds two edges to this row.
     row = [frame.getpixel((x, 200)) for x in range(240, 301)]
     edges = [
         x
@@ -292,7 +295,7 @@ def green(frame: Image.Image, x: int, y: int) -> int:
 def assert_hold_disc(
     frame: Image.Image, x: float, y: float, *, offset: tuple[int, int] = (0, 0)
 ) -> None:
-    """Check for only a filled hold disc, no wider ring, centred on (x, y) in the GUI."""
+    """Check for only a filled hold disc, no wider click ping, centred on (x, y) in the GUI."""
     box = red_box(frame)
     assert box is not None
     left, top, right, bottom = box
@@ -312,11 +315,11 @@ def test_hold_disc_follows_the_pointer_and_fades_after_the_release(
     assert red_box(decoded[29]) is None
     # A filled hold disc, unlike the click ping, tints the pointer position at once.
     assert is_tinted(decoded[31], 313, 200)
-    for index in range(46, 60):  # After the ring, until the release.
+    for index in range(46, 60):  # After the click ping, until the release.
         assert_hold_disc(decoded[index], 300 + 400 * (index / 30 - 1), 200)
     for index in range(60, 64):  # The hold disc stays at the release.
         assert_hold_disc(decoded[index], 700, 200)
-    for index in range(64, 77):  # No ring grows out of the release.
+    for index in range(64, 77):  # No click ping grows out of the release.
         box = red_box(decoded[index])
         assert box is None or box[2] - box[0] <= 2 * HOLD_RADIUS + 2
     # Fading starts within 0.05 seconds of the release.
@@ -347,8 +350,10 @@ def test_instant_drag_fades_at_its_release_position(raw_video: Path, log: Path) 
         assert (box[0] + box[2]) / 2 == pytest.approx(80, abs=2)
 
 
-def compacted_ring_frames(video: Path, *, size: tuple[int, int]) -> dict[int, int]:
-    """Map frames showing a ring in the GUI area to that ring's width."""
+def compacted_click_ping_frames(
+    video: Path, *, size: tuple[int, int]
+) -> dict[int, int]:
+    """Map frames showing a click ping in the GUI area to its width."""
     shown: dict[int, tuple[int, int, int, int]] = {}
     for index, frame in enumerate(frames(video, 0, 200, size=size)):
         box = red_box(frame.crop((0, 0, SIZE[0], SIZE[1])))
@@ -357,7 +362,7 @@ def compacted_ring_frames(video: Path, *, size: tuple[int, int]) -> dict[int, in
     return {index: box[2] - box[0] for index, box in shown.items()}
 
 
-def ring_centre(
+def click_ping_centre(
     video: Path, index: int, *, size: tuple[int, int]
 ) -> tuple[float, float]:
     box = red_box(frames(video, index, index, size=size)[0])
@@ -389,13 +394,13 @@ def test_compaction_maps_click_pings_to_retained_frames(
         layout=layout,
     )
     size = (layout.width, layout.height)
-    shown = compacted_ring_frames(raw_video, size=size)
+    shown = compacted_click_ping_frames(raw_video, size=size)
     first = source.index(math.ceil(4.25 * 30))
     # The render keeps the whole animation, not only its opening frames.
     assert source[first + 14] == source[first] + 14
     assert round(clip_duration(raw_video, env=dict(os.environ)) * 30) == len(source)
     assert first <= min(shown) <= first + 1
-    assert ring_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
+    assert click_ping_centre(raw_video, min(shown) + 2, size=size) == pytest.approx(
         (layout.gui.x + 600, layout.gui.y + 300), abs=1
     )
     assert source[max(shown)] / 30 > 4.25 + 0.3
@@ -420,7 +425,7 @@ def test_clip_end_cuts_a_late_click_ping_short(raw_video: Path, log: Path) -> No
     (log.parent / "activity.jsonl").write_text("")
     log.write_text(command_lines(5.7, 5.71) + button_line(5.8, 300, 200))
     render(raw_video, log, captions=CaptionOptions(), compact=True)
-    shown = compacted_ring_frames(raw_video, size=SIZE)
+    shown = compacted_click_ping_frames(raw_video, size=SIZE)
     assert 4 <= len(shown) < 15
     assert max(shown) == round(clip_duration(raw_video, env=dict(os.environ)) * 30) - 1
 
@@ -435,8 +440,8 @@ def test_compaction_keeps_each_click_ping_whole(raw_video: Path, log: Path) -> N
         captions=CaptionOptions(),
         compact=True,
     )
-    shown = compacted_ring_frames(raw_video, size=SIZE)
-    # The fading ring outgrows the 28-pixel opening ring only late in its animation.
+    shown = compacted_click_ping_frames(raw_video, size=SIZE)
+    # The fading click ping outgrows its 28-pixel opening size only late in its animation.
     assert max(shown.values()) > 60
     assert max(shown) - min(shown) >= 10
 
@@ -451,7 +456,7 @@ def test_compaction_keeps_each_click_ping_whole(raw_video: Path, log: Path) -> N
         ("bottom", 400, 600, SIZE[1] - 5),
     ],
 )
-def test_ring_clips_at_the_console_panel(
+def test_click_ping_clips_at_the_console_panel(
     raw_video: Path,
     log: Path,
     tmp_path: Path,
@@ -471,7 +476,7 @@ def test_ring_clips_at_the_console_panel(
     gui, panel = layout.gui, layout.panel
     assert red_box(edge.crop((gui.x, gui.y, gui.right, gui.bottom))) is not None
     assert red_box(edge.crop((panel.x, panel.y, panel.right, panel.bottom))) is None
-    # The ring reaches the shared edge, so the clip sits on it rather than inside it.
+    # The click ping reaches the shared edge, so the clip sits on it rather than inside it.
     box = red_box(edge)
     assert box is not None
     if position == "left":
@@ -504,7 +509,7 @@ def test_compaction_keeps_the_hold_path_and_fade(
     assert source[0] == 0 and 90 not in source[:30]  # The clip is cut before 3 s.
     render(raw_video, log, captions=CaptionOptions(), compact=True)
     decoded = frames(raw_video, 0, len(source) - 1)
-    for frame in range(108, 120):  # After the ring, until the release.
+    for frame in range(108, 120):  # After the click ping, until the release.
         assert_hold_disc(
             decoded[source.index(frame)], 300 + 400 * (frame / 30 - 3), 200
         )
@@ -571,8 +576,9 @@ def test_click_pings_ignore_the_caption_mode(
         + drag_lines(2, (300, 200), 3, (700, 200))
     )
     render(raw_video, log, captions=captions)
-    ring, hold_disc = frames(raw_video, 36, 36)[0], frames(raw_video, 78, 78)[0]
-    assert red_box(ring) is not None
+    click_ping = frames(raw_video, 36, 36)[0]
+    hold_disc = frames(raw_video, 78, 78)[0]
+    assert red_box(click_ping) is not None
     assert_hold_disc(hold_disc, 540, 200)
 
 
