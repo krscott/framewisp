@@ -261,7 +261,9 @@ def open_destination(destination: Path) -> int:
     raise ValueError(f"{failure}: {reason}")
 
 
-def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+def save_screenshot(
+    portal: DesktopPortal, destination: Path, stop: Event, log: Path
+) -> None:
     output = open_destination(destination)
     try:
         # Capture lives in the owner process: even SIGKILL closes every capture FD.
@@ -276,7 +278,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         finally:
             os.close(descriptor)
     except BaseException:
-        # A close failure must not hide why the capture failed.
+        # A close failure must not hide why the screenshot failed.
         with suppress(OSError):
             os.close(output)
         raise
@@ -290,8 +292,8 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
 # Mutter can hand a new PipeWire connection a frame left from an earlier one
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
-CAPTURE_TIMEOUT = 10
-CAPTURE_CANCELLED = "The session disconnected; screenshot cancelled."
+SCREENSHOT_TIMEOUT = 10
+SCREENSHOT_CANCELLED = "The session disconnected; screenshot cancelled."
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -309,7 +311,7 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
     with playing(encoder):
         source_element.emit("push-sample", frame)
         source_element.emit("end-of-stream")
-        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        deadline = time.monotonic() + SCREENSHOT_TIMEOUT
         while not finished(encoder, sink, stop, log, deadline):
             pass
 
@@ -325,7 +327,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
     sink = pipeline.get_by_name("frames")
     assert sink is not None
     with playing(pipeline):
-        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        deadline = time.monotonic() + SCREENSHOT_TIMEOUT
         while (frame := sink.emit("try-pull-sample", 0)) is None:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
@@ -333,7 +335,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
                     raise ValueError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
-            raise InterruptedError(CAPTURE_CANCELLED)
+            raise InterruptedError(SCREENSHOT_CANCELLED)
         frame = sink.emit("try-pull-sample", 0) or frame
         assert isinstance(frame, Gst.Sample)
         # Stopping the source may release the memory behind its buffers.
@@ -361,7 +363,7 @@ def finished(
 ) -> bool:
     """Wait briefly for end of stream. Raise on failure, timeout, or stop."""
     if stop.is_set():
-        raise InterruptedError(CAPTURE_CANCELLED)
+        raise InterruptedError(SCREENSHOT_CANCELLED)
     if time.monotonic() >= deadline:
         raise RuntimeError("Desktop capture timed out.")
     bus = pipeline.get_bus()
@@ -618,7 +620,9 @@ def _share_desktop(
                     try:
                         inputs.wait()
                         if isinstance(request, Path):
-                            capture(portal, request, stop, session_dir / "capture.log")
+                            save_screenshot(
+                                portal, request, stop, session_dir / "capture.log"
+                            )
                         else:
                             inputs.perform(
                                 command, cast(InputParameters, request.parameters)
