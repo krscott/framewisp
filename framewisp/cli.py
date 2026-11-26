@@ -29,7 +29,7 @@ from framewisp.layout import (
     DEFAULT_CONSOLE_POSITION,
     DEFAULT_CONSOLE_SIZE,
     ConsolePanel,
-    video_layout,
+    clip_layout,
 )
 from framewisp.lib import (
     key_commands,
@@ -212,7 +212,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--console-position",
             choices=CONSOLE_POSITIONS,
-            help=f"video edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
+            help=f"clip edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
         )
         recording_parser.add_argument(
             "--console-size",
@@ -485,7 +485,7 @@ def main() -> None:
             parser.error("run requires an app command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
-        layout = video_layout((args.width, args.height), args.console_panel)
+        layout = clip_layout((args.width, args.height), args.console_panel)
         if isinstance(layout, str):
             parser.error(layout)
     state_path = session_dir / "session.json"

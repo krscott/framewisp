@@ -736,7 +736,7 @@ wider. `--console-cell-scale FACTOR` (default 1, from 1 to 58) makes framewisp a
 each text cell is FACTOR times larger in both directions, so fewer rows and columns
 fit and the minimum console panel size grows by the same factor. About 1.1 suits Thai,
 Devanagari and Vietnamese, and 1.5 suits Tamil (3.5 for text with many ஔ). The
-`--console-*` options require `--console` and can differ per clip. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
+`--console-*` options require `--console` and can differ per clip. The clip can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
 `record-start` leaves the app running.
 
 The GUI keeps its original size, coordinates, and screenshots. Console lines show
@@ -784,10 +784,12 @@ timestamps and content.
 
 Finalization applies compaction and draws the console panel and overlays in one
 FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
-finalization fails, the raw GUI video remains playable. It stays at the clip destination
+that pass fails, the raw GUI video remains playable. It stays at the clip destination
 unless framewisp cannot publish it there, and the error names its path and
-`finalization.log` (R-REC-10). A session that hits this failure stops,
-even when `record-stop` triggered it.
+`finalization.log` (R-REC-10). If the pass succeeds but publishing fails, the
+finished clip stays in the hidden directory and the error names its path
+(R-REC-18). A session that hits either failure stops, even when `record-stop`
+triggered it.
 
 ## Share media in GitHub comments
 
@@ -897,10 +899,10 @@ nothing else needs rendering. `run --no-click-pings` requires `--record`.
 Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for finalization to finish.
-This adds encoding time when stopping a captioned clip. If finalization fails, the
-command fails and leaves the uncaptioned MP4 playable. The MP4 is at the clip
-destination unless framewisp cannot publish it there. The error names its path and
-`finalization.log` for details.
+This adds encoding time when stopping a captioned clip. If drawing the captions
+fails, the command fails and leaves the uncaptioned MP4 playable. The MP4 is at the
+clip destination unless framewisp cannot publish it there. The error names its path
+and `finalization.log` for details (R-REC-10).
 
 The recorder log retains diagnostics and the first frame's timestamp used for
 caption alignment. Framewisp filters the remaining Wayland protocol trace as it

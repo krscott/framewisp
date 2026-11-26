@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from framewisp.compact import ActivityEvent, activity_events
-from framewisp.layout import VideoLayout
+from framewisp.layout import ClipLayout
 
 CLICK_PING_SECONDS = 0.5
 POINTER_STYLE = "Style: Pointer,Noto Sans,20,&HFF000000,&H00000000,1,0,0,5,0,0,0"
@@ -129,7 +129,7 @@ def pointer_overlays_for_clip(
     return markers
 
 
-def pointer_overlay_text(overlay: ClickPing | HoldDisc, layout: VideoLayout) -> str:
+def pointer_overlay_text(overlay: ClickPing | HoldDisc, layout: ClipLayout) -> str:
     """Draw a click ping or hold disc that the clip keeps inside the GUI area."""
     gui = layout.gui
     scale = gui.height / 720

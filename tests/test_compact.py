@@ -15,12 +15,12 @@ from framewisp.compact import (
 )
 from framewisp.console import ConsoleCapture
 from framewisp.finalization import CaptionOptions, render_clip
-from framewisp.layout import ConsolePanel, VideoLayout, video_layout
+from framewisp.layout import ClipLayout, ConsolePanel, clip_layout
 
 
-def clip_layout(panel: bool) -> VideoLayout:
-    layout = video_layout((320, 240), ConsolePanel() if panel else None)
-    assert isinstance(layout, VideoLayout)
+def layout_with(console_panel: bool) -> ClipLayout:
+    layout = clip_layout((320, 240), ConsolePanel() if console_panel else None)
+    assert isinstance(layout, ClipLayout)
     return layout
 
 
@@ -242,7 +242,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         captions=CaptionOptions(key="non-text" if overlays else None),
         console=ConsoleCapture(tmp_path),
         compact=True,
-        layout=clip_layout(overlays),
+        layout=layout_with(overlays),
         env=dict(os.environ),
     )
     summary = json.loads(
@@ -333,7 +333,7 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         captions=captions,
         console=ConsoleCapture(tmp_path),
         compact=True,
-        layout=clip_layout(console),
+        layout=layout_with(console),
         env=dict(os.environ),
     )
 

@@ -212,18 +212,19 @@ investigate or ask; never invent a rationale.
   retained frame. Each keeps its full duration unless the clip ends first.
 - **R-REC-9** [test] With `--console`, click pings and hold discs keep their GUI
   positions. They never draw on the console panel.
-- **R-REC-10** [test] When finalization fails, a playable MP4 of the raw
-  capture remains. It is at the clip destination, unless framewisp cannot
-  publish it there (R-REC-18). The error names the MP4's path and
-  `finalization.log`.
+- **R-REC-10** [test] When finalization cannot draw a clip's overlays, console
+  panel or compaction, a playable MP4 of the raw capture remains. It is at the
+  clip destination, unless framewisp cannot publish it there (R-REC-18). The
+  error names the MP4's path and `finalization.log`. When drawing succeeds but
+  publishing fails, R-REC-18 applies to the finished clip.
 - **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
-  right, top, or bottom edge of the video. The default is right.
+  right, top, or bottom edge of the clip. The default is right.
 - **R-REC-13** [test] `--console-size` sets the console panel width for `left`
   and `right`, and its height for `top` and `bottom`. The default is 640
   pixels.
 - **R-REC-14** [test] A console panel does not scale or crop the GUI in the
-  video. It does not change input coordinates or screenshots.
+  clip. It does not change input coordinates or screenshots.
 - **R-REC-15** [test] With `--console`, a caption stays centred on the GUI. It
   never draws on the console panel.
 - **R-REC-16** [test] Framewisp rejects a console panel that it cannot encode or
@@ -246,7 +247,7 @@ investigate or ask; never invent a rationale.
   font file. The caller's home directory and user font configuration do not
   change them.
 
-  Rationale: Agents in different environments should produce the same videos by
+  Rationale: Agents in different environments should produce the same clips by
   default, including the text framewisp draws on them.
 
 - **R-REC-24** [test] Printable ASCII text in a console panel stays inside the

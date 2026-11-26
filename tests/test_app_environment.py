@@ -616,7 +616,7 @@ print(json.dumps(dict(os.environ)))
 
 
 CAPTION_REGION = (0, 0, 1280, 720)
-# Skip the panel title and each line's timestamp, which depends on app startup.
+# Skip the console panel title and each line's timestamp, which depends on app startup.
 CONSOLE_TEXT_REGION = (1400, 48, 1920, 720)
 
 

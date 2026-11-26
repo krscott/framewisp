@@ -1,7 +1,7 @@
 """Where the GUI and console panel sit in a clip.
 
-Only this module depends on the panel's position. Everything else reads the
-rectangles of a `VideoLayout`, so each overlay and FFmpeg's `pad` agree for every
+Only this module depends on the console panel's position. Everything else reads the
+rectangles of a `ClipLayout`, so each overlay and FFmpeg's `pad` agree for every
 position.
 """
 
@@ -18,7 +18,7 @@ DEFAULT_CELL_SCALE = 1.0
 
 # libx264 and FFmpeg refuse anything larger, which would otherwise surface only
 # after capture. FFmpeg requires (width + 128) * (height + 128) below MAX_FRAME_CELLS.
-MAX_VIDEO_DIMENSION = 16384
+MAX_CLIP_DIMENSION = 16384
 MAX_FRAME_CELLS = 2**28
 # Console text is always DejaVu Sans Mono at this size (R-REC-23). Libass draws
 # its ASCII lines CONSOLE_FONT_SIZE pixels apart and its cells 9.30 pixels wide.
@@ -27,7 +27,7 @@ CONSOLE_FONT_SIZE = 18
 CELL_WIDTH_HUNDREDTHS = 931
 MIN_TEXT_COLUMNS = 20
 MIN_TEXT_ROWS = 3
-# Beyond this, no panel has room for MIN_TEXT_COLUMNS within MAX_VIDEO_DIMENSION.
+# Beyond this, no console panel has room for MIN_TEXT_COLUMNS within MAX_CLIP_DIMENSION.
 MAX_CELL_SCALE = 58
 # Side padding, and the title band plus bottom padding, around the text.
 TEXT_SIDES = 32
@@ -41,33 +41,33 @@ def _exact(cell_scale: float) -> Fraction:
     return Fraction(str(cell_scale))
 
 
-def text_columns(panel_width: int, cell_scale: float) -> int:
+def text_columns(console_panel_width: int, cell_scale: float) -> int:
     """Columns after the side padding and the `seconds | ` line prefix."""
     cell = CELL_WIDTH_HUNDREDTHS * _exact(cell_scale)
-    return math.floor((panel_width - TEXT_SIDES) * 100 / cell) - PREFIX_CELLS
+    return math.floor((console_panel_width - TEXT_SIDES) * 100 / cell) - PREFIX_CELLS
 
 
-def text_rows(panel_height: int, cell_scale: float) -> int:
-    """Rows below the panel title."""
+def text_rows(console_panel_height: int, cell_scale: float) -> int:
+    """Rows below the console panel title."""
     row = CONSOLE_FONT_SIZE * _exact(cell_scale)
-    return math.floor((panel_height - TEXT_ENDS) / row)
+    return math.floor((console_panel_height - TEXT_ENDS) / row)
 
 
-def min_panel_width(cell_scale: float) -> int:
-    """The narrowest panel with MIN_TEXT_COLUMNS columns."""
+def min_console_panel_width(cell_scale: float) -> int:
+    """The narrowest console panel with MIN_TEXT_COLUMNS columns."""
     cells = (MIN_TEXT_COLUMNS + PREFIX_CELLS) * CELL_WIDTH_HUNDREDTHS
     return TEXT_SIDES + math.ceil(cells * _exact(cell_scale) / 100)
 
 
-def min_panel_height(cell_scale: float) -> int:
-    """The shortest panel with MIN_TEXT_ROWS rows."""
+def min_console_panel_height(cell_scale: float) -> int:
+    """The shortest console panel with MIN_TEXT_ROWS rows."""
     rows = MIN_TEXT_ROWS * CONSOLE_FONT_SIZE
     return TEXT_ENDS + math.ceil(rows * _exact(cell_scale))
 
 
 @dataclass(frozen=True)
 class ConsolePanel:
-    """A requested panel. Its size is checked here; the display's in `video_layout`."""
+    """A requested console panel. Its size is checked here; the display's in `clip_layout`."""
 
     position: ConsolePosition = DEFAULT_CONSOLE_POSITION
     size: int = DEFAULT_CONSOLE_SIZE
@@ -80,16 +80,16 @@ class ConsolePanel:
             )
         if type(self.size) is not int or self.size <= 0:
             raise ValueError("--console-size must be a positive even integer.")
-        if self.size > MAX_VIDEO_DIMENSION:
+        if self.size > MAX_CLIP_DIMENSION:
             # A request can hold an integer too long to format into a message.
             raise ValueError(
-                f"--console-size must be at most {MAX_VIDEO_DIMENSION}, "
-                "the encoder's limit for a video dimension."
+                f"--console-size must be at most {MAX_CLIP_DIMENSION}, "
+                "the encoder's limit for a clip dimension."
             )
         if self.size % 2:
             # Yuv420p video needs even dimensions, and `pad` rounds odd offsets down.
             raise ValueError(
-                f"--console-size must be even so the video can be encoded; "
+                f"--console-size must be even so the clip can be encoded; "
                 f"use {self.size + 1} instead of {self.size}."
             )
         # Comparing rejects NaN and infinity without converting a huge integer.
@@ -100,7 +100,7 @@ class ConsolePanel:
                 f"--console-cell-scale must be a number from 1 to {MAX_CELL_SCALE}."
             )
         if self.position in ("left", "right"):
-            needed = min_panel_width(self.cell_scale)
+            needed = min_console_panel_width(self.cell_scale)
             if self.size < needed:
                 raise ValueError(
                     f"--console-size {self.size} is too narrow for {MIN_TEXT_COLUMNS} text "
@@ -108,7 +108,7 @@ class ConsolePanel:
                     f"{needed + needed % 2}."
                 )
         else:
-            needed = min_panel_height(self.cell_scale)
+            needed = min_console_panel_height(self.cell_scale)
             if self.size < needed:
                 raise ValueError(
                     f"--console-size {self.size} is too short for {MIN_TEXT_ROWS} text "
@@ -118,7 +118,7 @@ class ConsolePanel:
 
     @property
     def scale_note(self) -> str:
-        """Name a scale the caller chose in messages about the panel's size."""
+        """Name a scale the caller chose in messages about the console panel's size."""
         if self.cell_scale == DEFAULT_CELL_SCALE:
             return ""
         return f" at --console-cell-scale {self.cell_scale}"
@@ -170,77 +170,77 @@ class Rect:
 
 
 @dataclass(frozen=True)
-class VideoLayout:
+class ClipLayout:
     width: int
     height: int
     gui: Rect
-    panel: Rect | None = None
+    console_panel: Rect | None = None
     cell_scale: float = DEFAULT_CELL_SCALE
 
 
-def plain_layout(display: tuple[int, int]) -> VideoLayout:
+def plain_layout(display: tuple[int, int]) -> ClipLayout:
     width, height = display
-    return VideoLayout(width, height, Rect(0, 0, width, height))
+    return ClipLayout(width, height, Rect(0, 0, width, height))
 
 
-def video_layout(
+def clip_layout(
     display: tuple[int, int], console: ConsolePanel | None
-) -> VideoLayout | str:
-    """Lay out a clip, or say why this display can't show the requested panel."""
+) -> ClipLayout | str:
+    """Lay out a clip, or say why this display can't show the requested console panel."""
     if console is None:
         return plain_layout(display)
     width, height = display
     beside = console.position in ("left", "right")
-    panel_width = console.size if beside else width
-    panel_height = height if beside else console.size
+    console_panel_width = console.size if beside else width
+    console_panel_height = height if beside else console.size
     smaller = ", a smaller --console-cell-scale," if console.scale_note else ""
     # Clips need an even display, so name an even minimum.
-    needed = min_panel_height(console.cell_scale)
+    needed = min_console_panel_height(console.cell_scale)
     needed += needed % 2
-    if panel_height < needed:
+    if console_panel_height < needed:
         return (
             f"A console panel needs a display at least {needed} pixels tall "
             f"for {MIN_TEXT_ROWS} text rows{console.scale_note}, but this display "
             f"is {width}x{height}. Use a taller display{smaller} or "
             "--console-position top or bottom."
         )
-    needed = min_panel_width(console.cell_scale)
+    needed = min_console_panel_width(console.cell_scale)
     needed += needed % 2
-    if panel_width < needed:
+    if console_panel_width < needed:
         return (
             f"A console panel needs a display at least {needed} pixels wide "
             f"for {MIN_TEXT_COLUMNS} text columns{console.scale_note}, but this "
             f"display is {width}x{height}. Use a wider display{smaller} or "
             "--console-position left or right."
         )
-    video_width = width + panel_width if beside else width
-    video_height = height if beside else height + panel_height
-    if max(video_width, video_height) > MAX_VIDEO_DIMENSION:
+    clip_width = width + console_panel_width if beside else width
+    clip_height = height if beside else height + console_panel_height
+    if max(clip_width, clip_height) > MAX_CLIP_DIMENSION:
         return (
-            f"A {console.size}-pixel {console.position} console panel makes the video "
-            f"{video_width}x{video_height}, over the {MAX_VIDEO_DIMENSION}-pixel limit "
+            f"A {console.size}-pixel {console.position} console panel makes the clip "
+            f"{clip_width}x{clip_height}, over the {MAX_CLIP_DIMENSION}-pixel limit "
             f"of the encoder. Use a smaller --console-size."
         )
-    if (video_width + 128) * (video_height + 128) >= MAX_FRAME_CELLS:
+    if (clip_width + 128) * (clip_height + 128) >= MAX_FRAME_CELLS:
         return (
-            f"A {console.size}-pixel {console.position} console panel makes the video "
-            f"{video_width}x{video_height}, over FFmpeg's frame size limit. "
+            f"A {console.size}-pixel {console.position} console panel makes the clip "
+            f"{clip_width}x{clip_height}, over FFmpeg's frame size limit. "
             "Use a smaller --console-size."
         )
-    return VideoLayout(
-        video_width,
-        video_height,
+    return ClipLayout(
+        clip_width,
+        clip_height,
         Rect(
-            panel_width if console.position == "left" else 0,
-            panel_height if console.position == "top" else 0,
+            console_panel_width if console.position == "left" else 0,
+            console_panel_height if console.position == "top" else 0,
             width,
             height,
         ),
         Rect(
             width if console.position == "right" else 0,
             height if console.position == "bottom" else 0,
-            panel_width,
-            panel_height,
+            console_panel_width,
+            console_panel_height,
         ),
         console.cell_scale,
     )
