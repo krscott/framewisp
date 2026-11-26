@@ -206,22 +206,6 @@ def test_stale_attach_socket(
     assert "disconnected" in capsys.readouterr().err
 
 
-def test_keyboard_input_requires_current_attachment_policy(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (tmp_path / "session.json").write_text(
-        json.dumps(
-            {
-                "kind": "attached",
-                "command_socket": str(tmp_path / "command.sock"),
-                "attachment": "old",
-            }
-        )
-    )
-    assert request_attached(tmp_path, "key", {"chord": "Return", "private": True}) == 1
-    assert "older keyboard input policy" in capsys.readouterr().err
-
-
 _SERVER = """
 import os
 import sys
@@ -864,6 +848,28 @@ def test_x11_attach_refuses_without_release(
     assert run_attachment(tmp_path / "session", None) == 1
     error = capsys.readouterr().err
     assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
+
+
+@pytest.mark.parametrize(
+    "metadata", ["", "{", "[" * 10000, "[]", "null", "{}", '{"kind": "other"}']
+)
+def test_attach_refuses_metadata_of_another_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    metadata: str,
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    (session_dir / "session.json").write_text(metadata)
+
+    def no_portal(stop: Event) -> None:
+        raise AssertionError("The portal opened over another session's metadata.")
+
+    monkeypatch.setattr(attach, "DesktopPortal", no_portal)
+    assert run_attachment(session_dir, None) == 1
+    assert "belongs to another session" in capsys.readouterr().err
+    assert (session_dir / "session.json").read_text() == metadata
 
 
 def children(pid: int, name: str) -> list[int]:

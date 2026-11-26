@@ -554,8 +554,7 @@ ASCII, such as Thai, Devanagari or Vietnamese (taller rows) or Tamil (wider
 letters), and the panel's last row or line ends look cut off, add
 `--console-cell-scale 1.1` (Tamil: 1.5, or 3.5 for text with many ஔ). It trades
 rows and columns for room, and raises the minimum panel size by the same factor. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
-A rejected `record-start` leaves the app running. If `--console` reports an older
-runner, restart the session.
+A rejected `record-start` leaves the app running.
 The GUI and screenshots keep their original dimensions. Panel lines show seconds
 relative to the clip; negative timestamps identify earlier output kept for context.
 ANSI formatting is stripped and carriage returns replace progress lines. No
@@ -632,6 +631,9 @@ private display sockets. Launching outside a sandbox does not grant later
 sandboxed commands access. If the environment denies socket access, use its
 normal permission process for both launch and session commands. Connection
 errors can also mean the session exited; check the error and logs first.
+If a command reports that the session was started by another version of
+framewisp, `stop` is refused too. End the session as the message says, then
+start it again with the version you are running.
 If something goes wrong, ask the user for permission before filing an issue at
 https://github.com/krscott/framewisp/issues. Agree on the report and any logs or
 screenshots to include before submitting it.

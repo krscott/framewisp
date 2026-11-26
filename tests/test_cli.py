@@ -5,10 +5,13 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
 
+from framewisp import cli
+from framewisp.connection import COMMAND_PROTOCOL
 from framewisp.layout import ConsolePanel
 from framewisp.lib import session_command
 
@@ -196,63 +199,6 @@ def test_compact_requires_recording(tmp_path: Path) -> None:
     assert not (tmp_path / "session").exists()
 
 
-def test_compact_rejects_unsupported_runner(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text(
-        json.dumps({"command_protocol": 1, "input_caption_options": True})
-    )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "framewisp",
-            str(tmp_path),
-            "record-start",
-            "--compact",
-            str(tmp_path / "clip.mp4"),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=5,
-    )
-    assert result.returncode == 1
-    assert "does not support compact recordings. Restart" in result.stderr
-    assert "Traceback" not in result.stderr
-
-
-@pytest.mark.parametrize("capability", [None, False, 1])
-def test_console_rejects_unsupported_runner_before_connecting(
-    tmp_path: Path, capability: object
-) -> None:
-    state: dict[str, object] = {
-        "command_protocol": 1,
-        "input_caption_options": True,
-        "console_recording": True,
-    }
-    if capability is not None:
-        state["console_cell_scale"] = capability
-    (tmp_path / "session.json").write_text(json.dumps(state))
-    destination = tmp_path / "clip.mp4"
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "framewisp",
-            str(tmp_path),
-            "record-start",
-            "--console",
-            str(destination),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=5,
-    )
-    assert result.returncode == 1
-    assert "does not support this version's console panels. Restart" in result.stderr
-    assert "Traceback" not in result.stderr
-
-
 @pytest.mark.parametrize(
     ("panel", "expected"),
     [
@@ -267,7 +213,7 @@ def test_console_rejects_unsupported_runner_before_connecting(
         ),
     ],
 )
-def test_record_start_sends_console_only_for_a_panel(
+def test_record_start_sends_console_panel(
     panel: ConsolePanel | None, expected: dict[str, object] | None
 ) -> None:
     received: list[dict[str, object]] = []
@@ -282,15 +228,7 @@ def test_record_start_sends_console_only_for_a_panel(
     with tempfile.TemporaryDirectory() as directory:
         session_dir = Path(directory)
         (session_dir / "session.json").write_text(
-            json.dumps(
-                {
-                    "command_protocol": 1,
-                    "input_caption_options": True,
-                    "click_pings_recording": True,
-                    "console_cell_scale": True,
-                    "command_socket": str(session_dir / "command.sock"),
-                }
-            )
+            json.dumps({"command_socket": str(session_dir / "command.sock")})
         )
         with socket.socket(socket.AF_UNIX) as server:
             server.bind(str(session_dir / "command.sock"))
@@ -302,82 +240,7 @@ def test_record_start_sends_console_only_for_a_panel(
             )
             thread.join(timeout=5)
     assert result == 0
-    # An older runner rejects a null `console`.
-    assert ("console" in received[0]) is (panel is not None)
-    assert received[0].get("console") == expected
-
-
-@pytest.mark.parametrize("capability", [None, False, 1])
-def test_default_clip_rejects_runner_without_click_pings(
-    tmp_path: Path, capability: object
-) -> None:
-    state: dict[str, object] = {
-        "command_protocol": 1,
-        "input_caption_options": True,
-        "command_socket": str(tmp_path / "command.sock"),
-    }
-    if capability is not None:
-        state["click_pings_recording"] = capability
-    (tmp_path / "session.json").write_text(json.dumps(state))
-    destination = tmp_path / "clip.mp4"
-
-    def record(*options: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "framewisp",
-                str(tmp_path),
-                "record-start",
-                *options,
-                str(destination),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-
-    rejected = record()
-    assert rejected.returncode == 1
-    assert "does not support click pings" in rejected.stderr
-    assert "Restart the session" in rejected.stderr
-    assert "--no-click-pings" in rejected.stderr
-    assert "Traceback" not in rejected.stderr
-    # The opt-out reaches the runner's socket, which this directory lacks.
-    assert "click pings" not in record("--no-click-pings").stderr
-    assert not destination.exists()
-
-
-@pytest.mark.parametrize("capability", [None, False, 1])
-@pytest.mark.parametrize(
-    "arguments", [("record-start", "clip.mp4"), ("key", "--private", "Return")]
-)
-def test_caption_modes_reject_unsupported_runner_before_connecting(
-    tmp_path: Path, capability: object, arguments: tuple[str, ...]
-) -> None:
-    state: dict[str, object] = {"command_protocol": 1, "persistent_input": True}
-    if capability is not None:
-        state["input_caption_options"] = capability
-    (tmp_path / "session.json").write_text(json.dumps(state))
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "framewisp",
-            str(tmp_path),
-            *arguments,
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=5,
-    )
-    assert result.returncode == 1
-    assert "caption modes or private input. Restart the session" in result.stderr
-    assert "Traceback" not in result.stderr
-    assert not (tmp_path / "clip.mp4").exists()
+    assert received[0]["console"] == expected
 
 
 def test_run_no_click_pings_requires_record(tmp_path: Path) -> None:
@@ -503,24 +366,77 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("action", ["status", "stop", "record-stop"])
-def test_session_commands_reject_legacy_session_before_connecting(
-    tmp_path: Path, action: str
+# R-CONTROL-3
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"command_protocol": COMMAND_PROTOCOL - 1},
+        {"command_protocol": COMMAND_PROTOCOL + 1},
+        {"command_protocol": str(COMMAND_PROTOCOL)},
+        {"kind": "attached"},
+    ],
+)
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("status",),
+        ("stop",),
+        ("record-stop",),
+        ("click", "1", "1"),
+        ("type", "a"),
+        ("screenshot", "capture.png"),
+        ("inspect", "--json"),
+        ("teach-note", "a note"),
+    ],
+)
+def test_session_commands_refuse_another_command_protocol(
+    tmp_path: Path, metadata: dict[str, object], arguments: tuple[str, ...]
 ) -> None:
-    # A legacy runner treats any request with destination=null as record-stop.
-    # No runtime path is needed: rejection must precede even resolving its socket.
-    (tmp_path / "session.json").write_text(json.dumps({"processes": {"recorder": 123}}))
+    # The metadata names no socket or display, so a command that went on to use
+    # the session would fail in another way.
+    (tmp_path / "session.json").write_text(json.dumps(metadata))
     result = subprocess.run(
-        [sys.executable, "-m", "framewisp", str(tmp_path), action],
+        [sys.executable, "-m", "framewisp", str(tmp_path), *arguments],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
         timeout=5,
     )
     assert result.returncode == 1
-    assert "older or unsupported command protocol" in result.stderr
-    assert "start a new session" in result.stderr
+    assert "another version of framewisp" in result.stderr
+    assert ("Ask the user" in result.stderr) is (metadata.get("kind") == "attached")
+    assert "again with this version" in result.stderr
     assert "Traceback" not in result.stderr
+    assert not (tmp_path / "capture.png").exists()
+
+
+# R-CONTROL-3
+def test_screenshot_checks_the_command_protocol_after_its_delay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    metadata = tmp_path / "session.json"
+    metadata.write_text(json.dumps({"command_protocol": COMMAND_PROTOCOL}))
+    waits: list[float] = []
+
+    def another_version_takes_the_directory(seconds: float) -> None:
+        waits.append(seconds)
+        metadata.write_text(json.dumps({"command_protocol": COMMAND_PROTOCOL + 1}))
+
+    monkeypatch.setattr(time, "sleep", another_version_takes_the_directory)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["framewisp", str(tmp_path), "screenshot", "--delay", "3", "capture.png"],
+    )
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 1
+    assert waits == [3.0]
+    assert "another version of framewisp" in capsys.readouterr().err
+    assert not (tmp_path / "capture.png").exists()
 
 
 # R-INPUT-3
@@ -928,15 +844,13 @@ def test_compositor_failure_includes_log_excerpt(tmp_path: Path) -> None:
     assert not (tmp_path / "failed" / "session.json").exists()
 
 
-@pytest.mark.parametrize(
-    "state,expected",
-    [({"kind": "attached"}, "headless sessions only"), ({}, "Restart the session")],
-)
 @pytest.mark.parametrize("options", [["--json"], ["--region", "0", "0", "10", "10"]])
-def test_screenshot_options_reject_unsupported_sessions(
-    tmp_path: Path, state: dict[str, str], expected: str, options: list[str]
+def test_screenshot_options_reject_attached_sessions(
+    tmp_path: Path, options: list[str]
 ) -> None:
-    (tmp_path / "session.json").write_text(json.dumps(state))
+    (tmp_path / "session.json").write_text(
+        json.dumps({"kind": "attached", "command_protocol": COMMAND_PROTOCOL})
+    )
     destination = tmp_path / "capture.png"
     result = subprocess.run(
         [
@@ -953,13 +867,15 @@ def test_screenshot_options_reject_unsupported_sessions(
         timeout=5,
     )
     assert result.returncode == 1
-    assert expected in result.stderr
+    assert "headless sessions only" in result.stderr
     assert "Traceback" not in result.stderr
     assert not result.stdout and not destination.exists()
 
 
 def test_screenshot_json_rejects_png_stdout(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text("{}")
+    (tmp_path / "session.json").write_text(
+        json.dumps({"command_protocol": COMMAND_PROTOCOL})
+    )
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path), "screenshot", "--json", "-"],
         capture_output=True,

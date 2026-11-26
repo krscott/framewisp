@@ -358,3 +358,9 @@ investigate or ask; never invent a rationale.
   error reply.
 - **R-CONTROL-2** [test] A malformed request on the command socket leaves the
   session and its app running.
+- **R-CONTROL-3** [test] A session command refuses a session whose metadata
+  does not publish the command protocol version of the framewisp that runs the
+  command, and sends that session nothing.
+
+  Rationale: A runner from another version can accept a request and ignore the
+  part it does not know.

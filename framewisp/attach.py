@@ -32,6 +32,7 @@ from gi.repository import GLib, Gst
 from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
+    COMMAND_PROTOCOL,
     parse_command,
     receive_request,
     resolved_request_path,
@@ -651,13 +652,17 @@ def _run_attachment(
         with reserve_desktop() as directory:
             try:
                 session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                if (
-                    state.exists()
-                    and json.loads(state.read_text()).get("kind") != "attached"
-                ):
-                    raise RuntimeError(
-                        f"{state} belongs to another session. Use a different directory."
-                    )
+                if state.exists():
+                    try:
+                        existing: object = json.loads(state.read_text())
+                    except (ValueError, RecursionError):
+                        existing = None
+                    if not isinstance(existing, dict) or (
+                        cast(dict[str, object], existing).get("kind") != "attached"
+                    ):
+                        raise RuntimeError(
+                            f"{state} belongs to another session. Use a different directory."
+                        )
                 with (
                     socket.socket(socket.AF_UNIX) as listener,
                     socket.socket(socket.AF_UNIX) as emergency,
@@ -671,7 +676,7 @@ def _run_attachment(
                         state,
                         {
                             "kind": "attached",
-                            "input_caption_options": True,
+                            "command_protocol": COMMAND_PROTOCOL,
                             "attachment": attachment,
                             "command_socket": command_socket,
                             "processes": {"attach": os.getpid()},

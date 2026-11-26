@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from framewisp.batch import MAX_ACTIONS, MAX_REQUEST_BYTES, Batch
+from framewisp.connection import COMMAND_PROTOCOL
 
 
 @pytest.mark.parametrize(
@@ -138,7 +139,9 @@ def test_invalid_file_before_session_access(tmp_path: Path, content: bytes) -> N
 
 
 def test_batch_rejects_attached_session(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text(json.dumps({"kind": "attached"}))
+    (tmp_path / "session.json").write_text(
+        json.dumps({"kind": "attached", "command_protocol": COMMAND_PROTOCOL})
+    )
     path = tmp_path / "batch.json"
     path.write_text(json.dumps({"actions": [{"action": "key", "chord": "a"}]}))
     result = subprocess.run(
@@ -157,28 +160,3 @@ def test_batch_rejects_attached_session(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "headless sessions only" in result.stderr
-
-
-def test_batch_rejects_older_runner_before_connecting(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text(
-        json.dumps({"command_protocol": 1, "persistent_input": True})
-    )
-    plan = tmp_path / "batch.json"
-    plan.write_text(json.dumps({"actions": [{"action": "key", "chord": "a"}]}))
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "framewisp",
-            str(tmp_path),
-            "batch",
-            "--file",
-            str(plan),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    assert result.returncode == 1
-    assert "does not support batches" in result.stderr
-    assert "Traceback" not in result.stderr

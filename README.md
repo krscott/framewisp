@@ -736,8 +736,7 @@ each text cell is FACTOR times larger in both directions, so fewer rows and colu
 fit and the minimum panel size grows by the same factor. About 1.1 suits Thai,
 Devanagari and Vietnamese, and 1.5 suits Tamil (3.5 for text with many ஔ). The
 `--console-*` options require `--console` and can differ per clip. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
-`record-start` leaves the app running. Sessions started by an older framewisp version
-reject `--console`; restart the session to use it.
+`record-start` leaves the app running.
 
 The GUI keeps its original size, coordinates, and screenshots. Console lines show
 seconds relative to the clip's first frame. A short tail of earlier output provides
@@ -893,7 +892,6 @@ framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
 A clip with a click is encoded again to draw its pings, even when text captions
 are off. Add `--no-click-pings` to keep the recorder's output unprocessed when
 nothing else needs rendering. `run --no-click-pings` requires `--record`.
-Restart an older runner if `record-start` reports unsupported caption modes.
 
 Captions are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
@@ -1189,10 +1187,10 @@ last recording summary, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
 These commands manage headless sessions; use `framewisp --detach` for desktop
 attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
-A session command that sends a request to a headless session's runner first
-checks the command protocol in session metadata, and refuses a runner that does
-not publish this version's. Stop that runner with Ctrl+C or SIGTERM and start a
-fresh session.
+Session metadata publishes the runner's command protocol version. A session
+command refuses a session that publishes a different version from its own, or
+none, before it sends the session anything (R-CONTROL-3). Stop that runner with
+Ctrl+C or SIGTERM and start the session again.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
