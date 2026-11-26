@@ -1235,15 +1235,15 @@ def test_journal_commit_tolerates_filesystem_without_directory_sync(
 
 # R-LIFE-5, R-LIFE-7
 @pytest.mark.parametrize("lock", [None, "bad", [1], [True, 1]])
-def test_journal_without_valid_lock_identity_refused(
+def test_journal_without_valid_session_lock_identity_refused(
     abandoned: tuple[Path, Path], lock: object
 ) -> None:
     session_dir, runtime_dir = abandoned
     journal = json.loads((session_dir / JOURNAL).read_text())
     if lock is None:
-        del journal["lock_identity"]
+        del journal["session_lock_identity"]
     else:
-        journal["lock_identity"] = lock
+        journal["session_lock_identity"] = lock
     (session_dir / JOURNAL).write_text(json.dumps(journal))
     before = (session_dir / JOURNAL).read_bytes()
     with pytest.raises(SessionError, match="no valid session lock") as refusal:

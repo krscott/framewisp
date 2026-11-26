@@ -379,7 +379,7 @@ def read_journal(session_dir: Path, lock: int) -> Journal:
             and journal["runtime_directory_identity"] is not None
         ):
             raise ValueError("journal has an invalid runtime directory identity")
-        recorded_lock = parse_identity(journal.get("lock_identity"))
+        recorded_lock = parse_identity(journal.get("session_lock_identity"))
         if recorded_lock is None:
             raise ValueError("journal has no valid session lock identity")
     except (OSError, ValueError, RecursionError) as error:
@@ -410,7 +410,7 @@ def write_journal(
         json.dump(
             {
                 "session_directory_identity": identity(session_dir),
-                "lock_identity": lock_identity(lock),
+                "session_lock_identity": lock_identity(lock),
                 "runtime_directory": str(runtime_dir),
                 "runtime_directory_identity": (
                     identity(runtime_dir) if created else None

@@ -829,7 +829,7 @@ commit available; direct attachments avoid that maintenance.
 are 10 MB per image, 10 MB per video on free plans, and up to 100 MB per video on
 paid plans with the required access. Framewisp's H.264 MP4 matches GitHub's
 recommended codec. Uploaded files in public repositories are publicly accessible;
-private/internal attachments require repository access. Review screen content
+private/internal attachments require repository access. Review display content
 before publishing, even when input logs omit typed text.
 See [GitHub's CLI attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
 for Markdown placement and supported commands.
@@ -914,7 +914,7 @@ and monochrome emoji. Captions, console panels and apps use the same
 backslashes, so they draw as themselves and never act as subtitle formatting.
 Screenshots and clips
 can still show secrets displayed by apps. Omitting input content does not redact
-screen content or provide a general app-log redaction guarantee. Shell history,
+display content or provide a general app-log redaction guarantee. Shell history,
 batch files, app logs, and runtime input state are outside this policy.
 Review artifacts before sharing.
 
@@ -1193,10 +1193,11 @@ Ctrl+C in its terminal; `framewisp --stop-sharing` is the emergency stop for
 whichever session is sharing. Stop requires a responsive runner; it is not a forced crash-recovery command.
 Session metadata publishes the runner's command protocol version. A session
 command refuses a session that publishes a different version from its own, or
-none, before it sends the session anything (R-CONTROL-3). Stop that runner with
-Ctrl+C or SIGTERM and start the session again. If the runner has died, run
-`framewisp SESSION recover` with the framewisp version that started the session
-first.
+none, before it sends the session anything (R-CONTROL-3). Stop a headless
+session's runner with Ctrl+C or SIGTERM and start the session again; if the runner
+has died, first run `framewisp SESSION recover` with the framewisp version that
+started the session. End an attached or teaching session with Ctrl+C in its
+terminal and start it again; a teaching session needs a new lesson directory.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus

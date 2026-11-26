@@ -4,26 +4,30 @@ import signal
 import time
 
 import pytest
-from test_integration import Demo, cli, demo, wait_until
+from test_integration import HeadlessSession, cli, headless_session, wait_until
 
-__all__ = ["demo"]
+__all__ = ["headless_session"]
 
 
 # R-INSPECT-6
 @pytest.mark.integration
-def test_unresponsive_app_does_not_block_stop(demo: Demo) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
-    metadata = json.loads((demo.directory / "session.json").read_text())
+def test_unresponsive_app_does_not_block_stop(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     pid = metadata["processes"]["app"]
     os.kill(pid, signal.SIGSTOP)
     try:
         started = time.monotonic()
-        cli(demo.directory, "stop")
+        cli(headless_session.directory, "stop")
         assert time.monotonic() - started < 10
     finally:
         try:
             os.kill(pid, signal.SIGCONT)
         except ProcessLookupError:
             pass
-    assert demo.process.wait(timeout=5) == 0
-    assert not demo.runtime_dir.exists()
+    assert headless_session.process.wait(timeout=5) == 0
+    assert not headless_session.runtime_dir.exists()

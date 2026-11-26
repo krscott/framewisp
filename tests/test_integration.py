@@ -43,7 +43,7 @@ def console_options(position: str, pixels: int, captions: str) -> list[str]:
 
 
 @dataclass(frozen=True)
-class Demo:
+class HeadlessSession:
     directory: Path
     process: subprocess.Popen[bytes]
     runtime_dir: Path
@@ -120,9 +120,11 @@ def cli(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def wait_for_demo_frame(demo: Demo, screenshot: Path) -> None:
+def wait_for_demo_app_frame(
+    headless_session: HeadlessSession, screenshot: Path
+) -> None:
     def painted() -> bool:
-        cli(demo.directory, "screenshot", str(screenshot))
+        cli(headless_session.directory, "screenshot", str(screenshot))
         with Image.open(screenshot) as image:
             assert image.format == "PNG"
             assert image.size == (1280, 720)
@@ -133,7 +135,9 @@ def wait_for_demo_frame(demo: Demo, screenshot: Path) -> None:
 
 
 @pytest.fixture
-def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
+def headless_session(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[HeadlessSession]:
     directory = tmp_path / "session with spaces"
     runner_log = tmp_path / "runner.log"
     mode = getattr(request, "param", None)
@@ -307,7 +311,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                 wait_until(
                     lambda: "Display: X11Display" in (directory / "app.log").read_text()
                 )
-        yield Demo(
+        yield HeadlessSession(
             directory=directory,
             process=process,
             runtime_dir=Path(metadata["runtime_directory"]),
@@ -324,30 +328,34 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_agent_can_see_type_and_click(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     before = tmp_path / "before.png"
     after = tmp_path / "after.png"
 
-    wait_for_demo_frame(demo, before)
+    wait_for_demo_app_frame(headless_session, before)
     with Image.open(before) as image:
         original_entry = image.crop((50, 85, 400, 115))
         original_label = image.crop((40, 210, 440, 240))
 
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "Hello Wayland!")
-    cli(demo.directory, "key", "BackSpace")
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "type", "Hello Wayland!")
+    cli(headless_session.directory, "key", "BackSpace")
+    cli(headless_session.directory, "key", "Return")
     wait_until(
-        lambda: "Entered: Hello Wayland\n" in (demo.directory / "app.log").read_text()
+        lambda: "Entered: Hello Wayland\n"
+        in (headless_session.directory / "app.log").read_text()
     )
-    cli(demo.directory, "click", "120", "170")
+    cli(headless_session.directory, "click", "120", "170")
     wait_until(
-        lambda: "Applied: Hello Wayland\n" in (demo.directory / "app.log").read_text()
+        lambda: "Applied: Hello Wayland\n"
+        in (headless_session.directory / "app.log").read_text()
     )
 
     def result_is_visible() -> bool:
-        cli(demo.directory, "screenshot", str(after))
+        cli(headless_session.directory, "screenshot", str(after))
         with Image.open(after) as image:
             entry = image.crop((50, 85, 400, 115))
             label = image.crop((40, 210, 440, 240))
@@ -358,32 +366,39 @@ def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
 
     wait_until(result_is_visible)
     # Shift+Tab moves back from Apply to the entry and selects its text.
-    cli(demo.directory, "key", "Shift+Tab")
-    cli(demo.directory, "type", "?")
-    cli(demo.directory, "key", "Return")
-    wait_until(lambda: "Entered: ?\n" in (demo.directory / "app.log").read_text())
+    cli(headless_session.directory, "key", "Shift+Tab")
+    cli(headless_session.directory, "type", "?")
+    cli(headless_session.directory, "key", "Return")
+    wait_until(
+        lambda: "Entered: ?\n" in (headless_session.directory / "app.log").read_text()
+    )
 
     # Drag across the entry to select its text, then replace the selection.
-    cli(demo.directory, "type", "abcdef")
-    cli(demo.directory, "drag", "400", "100", "50", "100")
-    cli(demo.directory, "type", "dragged")
-    cli(demo.directory, "click", "120", "170")
-    wait_until(lambda: "Applied: dragged\n" in (demo.directory / "app.log").read_text())
+    cli(headless_session.directory, "type", "abcdef")
+    cli(headless_session.directory, "drag", "400", "100", "50", "100")
+    cli(headless_session.directory, "type", "dragged")
+    cli(headless_session.directory, "click", "120", "170")
+    wait_until(
+        lambda: "Applied: dragged\n"
+        in (headless_session.directory / "app.log").read_text()
+    )
 
-    demo.process.send_signal(signal.SIGTERM)
-    assert demo.process.wait(timeout=20) == 0
-    assert not (demo.directory / "session.json").exists()
-    assert not demo.runtime_dir.exists()
-    for pid in demo.child_pids:
+    headless_session.process.send_signal(signal.SIGTERM)
+    assert headless_session.process.wait(timeout=20) == 0
+    assert not (headless_session.directory / "session.json").exists()
+    assert not headless_session.runtime_dir.exists()
+    for pid in headless_session.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
 
 
 @pytest.mark.integration
-def test_screenshot_waits_before_capture(demo: Demo, tmp_path: Path) -> None:
+def test_screenshot_waits_before_capture(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     destination = tmp_path / "delayed.png"
     started = time.time()
-    cli(demo.directory, "screenshot", "--delay", "0.5", str(destination))
+    cli(headless_session.directory, "screenshot", "--delay", "0.5", str(destination))
     # Check the file's write time so sleeping after capture would fail this test.
     assert destination.stat().st_mtime >= started + 0.5
     with Image.open(destination) as image:
@@ -393,44 +408,44 @@ def test_screenshot_waits_before_capture(demo: Demo, tmp_path: Path) -> None:
 
 # R-LIFE-2
 @pytest.mark.integration
-def test_interrupt_stops_session(demo: Demo) -> None:
-    demo.process.send_signal(signal.SIGINT)
-    assert demo.process.wait(timeout=20) == 0
-    assert not demo.runtime_dir.exists()
-    for pid in demo.child_pids:
+def test_interrupt_stops_session(headless_session: HeadlessSession) -> None:
+    headless_session.process.send_signal(signal.SIGINT)
+    assert headless_session.process.wait(timeout=20) == 0
+    assert not headless_session.runtime_dir.exists()
+    for pid in headless_session.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
 
 
 # R-LIFE-2, R-REC-3
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True, "x11-record"], indirect=True)
-def test_status_and_stop_finalize_clip(demo: Demo) -> None:
-    assert demo.clip is not None
-    status = json.loads(cli(demo.directory, "status").stdout)
+@pytest.mark.parametrize("headless_session", [True, "x11-record"], indirect=True)
+def test_status_and_stop_finalize_clip(headless_session: HeadlessSession) -> None:
+    assert headless_session.clip is not None
+    status = json.loads(cli(headless_session.directory, "status").stdout)
     assert status["status"] == "running"
     assert status["backend"] in {"wayland", "x11"}
     assert status["app"]["running"]
     assert status["recording"]["running"]
-    assert status["recording"]["clip_destination"] == str(demo.clip)
-    cli(demo.directory, "type", "stop test")
-    stopped = json.loads(cli(demo.directory, "stop").stdout)
+    assert status["recording"]["clip_destination"] == str(headless_session.clip)
+    cli(headless_session.directory, "type", "stop test")
+    stopped = json.loads(cli(headless_session.directory, "stop").stdout)
     assert stopped["status"] == "stopped"
     summary = stopped["clip"]
-    assert summary["path"] == str(demo.clip)
+    assert summary["path"] == str(headless_session.clip)
     assert summary["width"] == 1280 and summary["height"] == 720
     assert summary["duration_seconds"] > 0
-    assert summary["size_bytes"] == demo.clip.stat().st_size
+    assert summary["size_bytes"] == headless_session.clip.stat().st_size
     # The reply comes after cleanup, rather than merely acknowledging the request.
-    assert not demo.runtime_dir.exists()
-    assert not (demo.directory / "session.json").exists()
-    for pid in demo.child_pids:
+    assert not headless_session.runtime_dir.exists()
+    assert not (headless_session.directory / "session.json").exists()
+    for pid in headless_session.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
-    assert demo.process.wait(timeout=5) == 0
-    clip_frames(demo.clip)
-    assert not private_directories(demo.clip.parent)
-    log = (demo.directory / "recorder.log").read_text()
+    assert headless_session.process.wait(timeout=5) == 0
+    clip_frames(headless_session.clip)
+    assert not private_directories(headless_session.clip.parent)
+    log = (headless_session.directory / "recorder.log").read_text()
     assert len(re.findall(r"zwlr_screencopy_frame_v1[#@]\d+\.ready", log)) == 1
     assert "get_registry" not in log
     assert "discarded wl_buffer" not in log
@@ -438,36 +453,37 @@ def test_status_and_stop_finalize_clip(demo: Demo) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["compact", "x11-compact"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["compact", "x11-compact"], indirect=True)
 def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    assert demo.clip is not None
-    wait_for_demo_frame(demo, tmp_path / "before.png")
+    assert headless_session.clip is not None
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
     started = time.monotonic()
     time.sleep(5)
-    cli(demo.directory, "type", "Compact demo", "--interval", "0.1")
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "type", "Compact demo", "--interval", "0.1")
+    cli(headless_session.directory, "key", "Return")
     wait_until(
-        lambda: "Entered: Compact demo" in (demo.directory / "app.log").read_text()
+        lambda: "Entered: Compact demo"
+        in (headless_session.directory / "app.log").read_text()
     )
     time.sleep(2)
-    summary = json.loads(cli(demo.directory, "stop").stdout)["clip"]
+    summary = json.loads(cli(headless_session.directory, "stop").stdout)["clip"]
     assert 4.5 <= summary["duration_seconds"] < time.monotonic() - started - 2
-    clip_frames(demo.clip)
-    assert demo.process.wait(timeout=5) == 0
+    clip_frames(headless_session.clip)
+    assert headless_session.process.wait(timeout=5) == 0
 
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
 def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_for_demo_frame(demo, tmp_path / "before.png")
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
     clip = tmp_path / "compact console.mp4"
     cli(
-        demo.directory,
+        headless_session.directory,
         "record-start",
         "--compact",
         "--console",
@@ -493,7 +509,7 @@ def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     plan = tmp_path / "wait.json"
     plan.write_text(json.dumps(batch))
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "batch", "--file", str(plan)],
+        ["framewisp", str(headless_session.directory), "batch", "--file", str(plan)],
         capture_output=True,
         text=True,
         check=False,
@@ -503,32 +519,39 @@ def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     assert json.loads(result.stdout)["failed_phase"] == "check"
     assert failure.exists()
     time.sleep(2)
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
     assert 6.5 <= summary["duration_seconds"] < 8.5
     assert summary["width"] == 1920
-    activity = (demo.directory / "activity.jsonl").read_text()
+    activity = (headless_session.directory / "activity.jsonl").read_text()
     assert "secret condition" not in activity
     assert len(activity.splitlines()) == 4
     clip_frames(clip, size=(1920, 720))
-    assert json.loads(cli(demo.directory, "status").stdout)["app"]["running"]
+    assert json.loads(cli(headless_session.directory, "status").stdout)["app"][
+        "running"
+    ]
 
     # A later ordinary clip must not inherit compaction from the previous clip.
     ordinary = tmp_path / "ordinary.mp4"
-    cli(demo.directory, "record-start", str(ordinary))
+    cli(headless_session.directory, "record-start", str(ordinary))
     time.sleep(1)
     assert (
-        json.loads(cli(demo.directory, "record-stop").stdout)["duration_seconds"] >= 1
+        json.loads(cli(headless_session.directory, "record-stop").stdout)[
+            "duration_seconds"
+        ]
+        >= 1
     )
 
 
 # R-LIFE-6
 @pytest.mark.integration
 def test_status_and_stop_reject_copied_session_metadata(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     other = tmp_path / "copied-session"
     other.mkdir()
-    (other / "session.json").write_bytes((demo.directory / "session.json").read_bytes())
+    (other / "session.json").write_bytes(
+        (headless_session.directory / "session.json").read_bytes()
+    )
     for command in ("status", "stop"):
         result = subprocess.run(
             ["framewisp", str(other), command],
@@ -539,17 +562,20 @@ def test_status_and_stop_reject_copied_session_metadata(
         )
         assert result.returncode == 1
         assert "different session" in result.stderr
-        assert demo.process.poll() is None
-    assert json.loads(cli(demo.directory, "status").stdout)["recording"] is None
+        assert headless_session.process.poll() is None
+    assert (
+        json.loads(cli(headless_session.directory, "status").stdout)["recording"]
+        is None
+    )
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True, "compact"], indirect=True)
-def test_stop_reports_finalization_failure(demo: Demo) -> None:
-    cli(demo.directory, "click", "120", "100")
-    (demo.directory / "finalization.log").mkdir()
+@pytest.mark.parametrize("headless_session", [True, "compact"], indirect=True)
+def test_stop_reports_finalization_failure(headless_session: HeadlessSession) -> None:
+    cli(headless_session.directory, "click", "120", "100")
+    (headless_session.directory / "finalization.log").mkdir()
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "stop"],
+        ["framewisp", str(headless_session.directory), "stop"],
         capture_output=True,
         text=True,
         check=False,
@@ -558,11 +584,11 @@ def test_stop_reports_finalization_failure(demo: Demo) -> None:
     assert result.returncode == 1
     assert "finalization.log" in result.stderr
     assert result.stdout == ""
-    assert demo.process.wait(timeout=5) == 1
-    assert not demo.runtime_dir.exists()
-    assert not (demo.directory / "session.json").exists()
-    assert demo.clip is not None
-    clip_frames(demo.clip)
+    assert headless_session.process.wait(timeout=5) == 1
+    assert not headless_session.runtime_dir.exists()
+    assert not (headless_session.directory / "session.json").exists()
+    assert headless_session.clip is not None
+    clip_frames(headless_session.clip)
 
 
 @pytest.mark.integration
@@ -627,18 +653,23 @@ def recorder_pid(parent: Path) -> int | None:
 
 @contextmanager
 def recorder_before_first_frame(
-    demo: Demo, destination: Path
+    headless_session: HeadlessSession, destination: Path
 ) -> Generator[tuple[subprocess.Popen[str], int]]:
     """Hold `record-start` after validation, before the recorder opens its file.
 
     The recorder cannot receive a frame from a stopped Sway, so this window stays
     open until the block ends. Yields the waiting command and the recorder's PID.
     """
-    metadata = json.loads((demo.directory / "session.json").read_text())
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     sway_pid = metadata["processes"]["sway"]
     os.kill(sway_pid, signal.SIGSTOP)
     with subprocess.Popen(
-        ["framewisp", str(demo.directory), "record-start", str(destination)],
+        [
+            "framewisp",
+            str(headless_session.directory),
+            "record-start",
+            str(destination),
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -682,26 +713,28 @@ def clip_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
 
 # R-REC-3
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True, "captions-all"], indirect=True)
+@pytest.mark.parametrize("headless_session", [True, "captions-all"], indirect=True)
 @pytest.mark.parametrize("stop_signal", [signal.SIGINT, signal.SIGTERM])
-def test_clip_finalizes_on_shutdown(demo: Demo, stop_signal: signal.Signals) -> None:
-    assert demo.clip is not None
-    screenshot = demo.directory / "visible.png"
+def test_clip_finalizes_on_shutdown(
+    headless_session: HeadlessSession, stop_signal: signal.Signals
+) -> None:
+    assert headless_session.clip is not None
+    screenshot = headless_session.directory / "visible.png"
 
     def app_is_visible() -> bool:
-        cli(demo.directory, "screenshot", str(screenshot))
+        cli(headless_session.directory, "screenshot", str(screenshot))
         with Image.open(screenshot) as image:
             return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
 
     wait_until(app_is_visible)
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "recorded")
-    cli(demo.directory, "key", "Return")
-    cli(demo.directory, "screenshot", "--delay", "0.2", str(screenshot))
-    demo.process.send_signal(stop_signal)
-    assert demo.process.wait(timeout=20) == 0
-    assert len(clip_frames(demo.clip)) > 1
-    assert not private_directories(demo.clip.parent)
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "type", "recorded")
+    cli(headless_session.directory, "key", "Return")
+    cli(headless_session.directory, "screenshot", "--delay", "0.2", str(screenshot))
+    headless_session.process.send_signal(stop_signal)
+    assert headless_session.process.wait(timeout=20) == 0
+    assert len(clip_frames(headless_session.clip)) > 1
+    assert not private_directories(headless_session.clip.parent)
     # Check a uniform background patch against the screenshot. A range mismatch
     # can produce a playable video with visibly shifted brightness.
     with Image.open(screenshot) as image:
@@ -712,7 +745,7 @@ def test_clip_finalizes_on_shutdown(demo: Demo, stop_signal: signal.Signals) -> 
             "-v",
             "error",
             "-i",
-            str(demo.clip),
+            str(headless_session.clip),
             "-vf",
             "fps=10,crop=2:2:1000:600",
             "-pix_fmt",
@@ -733,9 +766,9 @@ def test_clip_finalizes_on_shutdown(demo: Demo, stop_signal: signal.Signals) -> 
         <= 3
         for offset in range(0, len(samples), 12)
     )
-    assert not demo.runtime_dir.exists()
-    assert not (demo.directory / "session.json").exists()
-    for pid in demo.child_pids:
+    assert not headless_session.runtime_dir.exists()
+    assert not (headless_session.directory / "session.json").exists()
+    for pid in headless_session.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
 
@@ -933,20 +966,20 @@ def test_recording_into_new_session_directory(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
-def test_recorder_failure_stops_session(demo: Demo) -> None:
-    metadata = json.loads((demo.directory / "session.json").read_text())
+@pytest.mark.parametrize("headless_session", [True], indirect=True)
+def test_recorder_failure_stops_session(headless_session: HeadlessSession) -> None:
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     os.kill(metadata["processes"]["recorder"], signal.SIGKILL)
-    assert demo.process.wait(timeout=20) != 0
-    log = (demo.directory.parent / "runner.log").read_text()
+    assert headless_session.process.wait(timeout=20) != 0
+    log = (headless_session.directory.parent / "runner.log").read_text()
     assert "recorder.log" in log
-    assert demo.clip is not None
-    assert not demo.clip.exists()
-    kept = private_clip(demo.clip.parent)
+    assert headless_session.clip is not None
+    assert not headless_session.clip.exists()
+    kept = private_clip(headless_session.clip.parent)
     assert str(kept) in " ".join(log.split())
-    assert (demo.directory / ".active-recording").readlink() == kept
-    assert not demo.runtime_dir.exists()
-    for pid in demo.child_pids:
+    assert (headless_session.directory / ".active-recording").readlink() == kept
+    assert not headless_session.runtime_dir.exists()
+    for pid in headless_session.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
 
@@ -979,8 +1012,10 @@ def test_recording_startup_failure_does_not_launch_app(tmp_path: Path) -> None:
     assert not (session_dir / "session.json").exists()
 
 
-def input_events(demo: Demo) -> list[dict[str, str | float | bool]]:
-    return read_input_events(demo.directory / "app.log")
+def input_events(
+    headless_session: HeadlessSession,
+) -> list[dict[str, str | float | bool]]:
+    return read_input_events(headless_session.directory / "app.log")
 
 
 def read_input_events(log: Path) -> list[dict[str, str | float | bool]]:
@@ -992,17 +1027,23 @@ def read_input_events(log: Path) -> list[dict[str, str | float | bool]]:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_move_shows_tooltip_without_clicking(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_move_shows_tooltip_without_clicking(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     before, hovered, after = [
         tmp_path / name for name in ["before.png", "hovered.png", "after.png"]
     ]
-    cli(demo.directory, "move", "100", "600")
-    cli(demo.directory, "screenshot", "--delay", "0.5", str(before))
-    cli(demo.directory, "move", "500", "200")
-    cli(demo.directory, "screenshot", "--delay", "1", str(hovered))
-    events = input_events(demo)
+    cli(headless_session.directory, "move", "100", "600")
+    cli(headless_session.directory, "screenshot", "--delay", "0.5", str(before))
+    cli(headless_session.directory, "move", "500", "200")
+    cli(headless_session.directory, "screenshot", "--delay", "1", str(hovered))
+    events = input_events(headless_session)
     assert any(
         event["event"] == "motion"
         and event["x"] == 500
@@ -1014,8 +1055,8 @@ def test_move_shows_tooltip_without_clicking(demo: Demo, tmp_path: Path) -> None
         event["event"] == "tooltip" and not event["keyboard"] for event in events
     )
     assert not any(event["event"] in {"press", "release"} for event in events)
-    cli(demo.directory, "move", "100", "600")
-    cli(demo.directory, "screenshot", "--delay", "0.2", str(after))
+    cli(headless_session.directory, "move", "100", "600")
+    cli(headless_session.directory, "screenshot", "--delay", "0.2", str(after))
     with (
         Image.open(before) as original,
         Image.open(hovered) as tooltip,
@@ -1040,24 +1081,32 @@ def test_move_shows_tooltip_without_clicking(demo: Demo, tmp_path: Path) -> None
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("button", [None, "right"])
 @pytest.mark.parametrize("count", [None, 2])
 def test_click_delivers_button_and_recognized_count(
-    demo: Demo, button: str | None, count: int | None
+    headless_session: HeadlessSession, button: str | None, count: int | None
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     options = [] if button is None else ["--button", button]
     if count is not None:
         options.extend(["--count", str(count)])
-    cli(demo.directory, "click", *options, "200", "150")
+    cli(headless_session.directory, "click", *options, "200", "150")
     expected_count = count or 1
     wait_until(
-        lambda: sum(event["event"] == "release" for event in input_events(demo))
+        lambda: sum(
+            event["event"] == "release" for event in input_events(headless_session)
+        )
         == expected_count
     )
     events = [
-        event for event in input_events(demo) if event["event"] in {"press", "release"}
+        event
+        for event in input_events(headless_session)
+        if event["event"] in {"press", "release"}
     ]
     assert [event["event"] for event in events] == ["press", "release"] * expected_count
     assert [event["count"] for event in events] == [
@@ -1069,7 +1118,7 @@ def test_click_delivers_button_and_recognized_count(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 @pytest.mark.parametrize(
     "action,button,modifiers",
     [
@@ -1081,16 +1130,27 @@ def test_click_delivers_button_and_recognized_count(
     ],
 )
 def test_pointer_gesture_holds_and_releases_modifiers(
-    demo: Demo, action: str, button: str, modifiers: tuple[str, ...]
+    headless_session: HeadlessSession,
+    action: str,
+    button: str,
+    modifiers: tuple[str, ...],
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     options = ["--button", button]
     for modifier in modifiers:
         options.extend(["--modifier", modifier.upper()])
     coordinates = ["200", "150"] if action == "click" else ["100", "100", "500", "300"]
-    cli(demo.directory, action, *options, *coordinates)
-    wait_until(lambda: any(event["event"] == "release" for event in input_events(demo)))
-    events = input_events(demo)
+    cli(headless_session.directory, action, *options, *coordinates)
+    wait_until(
+        lambda: any(
+            event["event"] == "release" for event in input_events(headless_session)
+        )
+    )
+    events = input_events(headless_session)
     buttons = [event for event in events if event["event"] in {"press", "release"}]
     assert [event["event"] for event in buttons] == ["press", "release"]
     for event in buttons:
@@ -1114,48 +1174,73 @@ def test_pointer_gesture_holds_and_releases_modifiers(
             for modifier in ("ctrl", "shift", "alt"):
                 assert event[modifier] == (modifier in modifiers)
         assert (buttons[-1]["x"], buttons[-1]["y"]) == (500, 300)
-    cli(demo.directory, "click", "600", "100")
+    cli(headless_session.directory, "click", "600", "100")
     wait_until(
-        lambda: sum(event["event"] == "release" for event in input_events(demo)) == 2
+        lambda: sum(
+            event["event"] == "release" for event in input_events(headless_session)
+        )
+        == 2
     )
-    plain = [event for event in input_events(demo) if event["event"] == "press"][-1]
+    plain = [
+        event for event in input_events(headless_session) if event["event"] == "press"
+    ][-1]
     assert plain["button"] == 1
     assert not any(plain[modifier] for modifier in ("ctrl", "shift", "alt"))
 
 
 # R-INPUT-1
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_input_devices_remain_between_commands(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    ready = next(event for event in input_events(demo) if event["event"] == "ready")
-    assert ready["pointer"] and ready["keyboard"]
-    cli(demo.directory, "click", "--button", "right", "200", "150")
-    cli(demo.directory, "key", "a")
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_input_devices_remain_between_commands(
+    headless_session: HeadlessSession,
+) -> None:
     wait_until(
-        lambda: any(event["event"] == "key-release" for event in input_events(demo))
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    ready = next(
+        event for event in input_events(headless_session) if event["event"] == "ready"
+    )
+    assert ready["pointer"] and ready["keyboard"]
+    cli(headless_session.directory, "click", "--button", "right", "200", "150")
+    cli(headless_session.directory, "key", "a")
+    wait_until(
+        lambda: any(
+            event["event"] == "key-release" for event in input_events(headless_session)
+        )
     )
     cli(
-        demo.directory,
+        headless_session.directory,
         "screenshot",
         "--delay",
         "0.2",
-        str(demo.directory / "after.png"),
+        str(headless_session.directory / "after.png"),
     )
-    assert not any(event["event"] == "device-removed" for event in input_events(demo))
+    assert not any(
+        event["event"] == "device-removed" for event in input_events(headless_session)
+    )
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("duration", [None, 0, 0.6])
 def test_drag_delivers_paced_motion_and_release(
-    demo: Demo, duration: float | None
+    headless_session: HeadlessSession, duration: float | None
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     options = [] if duration is None else ["--duration", str(duration)]
-    cli(demo.directory, "drag", *options, "100", "100", "500", "300")
-    wait_until(lambda: any(event["event"] == "release" for event in input_events(demo)))
-    events = input_events(demo)
+    cli(headless_session.directory, "drag", *options, "100", "100", "500", "300")
+    wait_until(
+        lambda: any(
+            event["event"] == "release" for event in input_events(headless_session)
+        )
+    )
+    events = input_events(headless_session)
     press = next(event for event in events if event["event"] == "press")
     release = next(event for event in events if event["event"] == "release")
     assert (press["x"], press["y"]) == (100, 100)
@@ -1176,23 +1261,25 @@ def test_drag_delivers_paced_motion_and_release(
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "demo", ["probe", "x11-probe", "record-probe", "x11-record-probe"], indirect=True
+    "headless_session",
+    ["probe", "x11-probe", "record-probe", "x11-record-probe"],
+    indirect=True,
 )
 @pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
 @pytest.mark.parametrize("duration", [None, 0, 0.6])
 def test_pointer_approach_uses_tracked_position(
-    demo: Demo, action: str, duration: float | None
+    headless_session: HeadlessSession, action: str, duration: float | None
 ) -> None:
-    wait_for_input_probe_window(demo)
-    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+    wait_for_input_probe_window(headless_session)
+    cli(headless_session.directory, "move", "100", "100", "--move-duration", "0")
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 100
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
     # A batch drag's endpoint becomes the next standalone command's start.
-    plan = demo.directory / "position.json"
+    plan = headless_session.directory / "position.json"
     plan.write_text(
         json.dumps(
             {
@@ -1210,14 +1297,14 @@ def test_pointer_approach_uses_tracked_position(
             }
         )
     )
-    cli(demo.directory, "batch", "--file", str(plan))
+    cli(headless_session.directory, "batch", "--file", str(plan))
     wait_until(
         lambda: any(
             event["event"] == "release" and event["x"] == 200
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
-    before = len(input_events(demo))
+    before = len(input_events(headless_session))
     options = [] if duration is None else ["--move-duration", str(duration)]
     arguments = ["500", "300"]
     if action == "scroll":
@@ -1225,21 +1312,22 @@ def test_pointer_approach_uses_tracked_position(
     elif action == "drag":
         arguments += ["550", "325", "--duration", "0"]
     started = time.monotonic()
-    cli(demo.directory, action, *arguments, *options)
+    cli(headless_session.directory, action, *arguments, *options)
     elapsed = time.monotonic() - started
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 500
-            for event in input_events(demo)[before:]
+            for event in input_events(headless_session)[before:]
         )
     )
     if action in {"click", "drag"}:
         wait_until(
             lambda: any(
-                event["event"] == "release" for event in input_events(demo)[before:]
+                event["event"] == "release"
+                for event in input_events(headless_session)[before:]
             )
         )
-    events = input_events(demo)[before:]
+    events = input_events(headless_session)[before:]
     approach_events = events
     if action in {"click", "drag"}:
         press_index = next(
@@ -1271,41 +1359,51 @@ def test_pointer_approach_uses_tracked_position(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("action", ["move", "click", "scroll", "drag"])
-def test_first_pointer_action_has_no_animation_delay(demo: Demo, action: str) -> None:
-    wait_for_input_probe_window(demo)
+def test_first_pointer_action_has_no_animation_delay(
+    headless_session: HeadlessSession, action: str
+) -> None:
+    wait_for_input_probe_window(headless_session)
     arguments = ["200", "150", "--move-duration", "30"]
     if action == "scroll":
         arguments += ["down"]
     elif action == "drag":
         arguments += ["500", "300", "--duration", "0"]
     started = time.monotonic()
-    cli(demo.directory, action, *arguments)
+    cli(headless_session.directory, action, *arguments)
     assert time.monotonic() - started < 2
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 200
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
     if action in {"click", "drag"}:
         wait_until(
-            lambda: any(event["event"] == "press" for event in input_events(demo))
+            lambda: any(
+                event["event"] == "press" for event in input_events(headless_session)
+            )
         )
-        press = next(event for event in input_events(demo) if event["event"] == "press")
+        press = next(
+            event
+            for event in input_events(headless_session)
+            if event["event"] == "press"
+        )
         assert (press["x"], press["y"]) == (200, 150)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("action", ["move", "drag"])
-def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> None:
-    wait_for_input_probe_window(demo)
-    cli(demo.directory, "move", "500", "150", "--move-duration", "0")
+def test_outside_display_position_tracks_the_edge(
+    headless_session: HeadlessSession, action: str
+) -> None:
+    wait_for_input_probe_window(headless_session)
+    cli(headless_session.directory, "move", "500", "150", "--move-duration", "0")
     if action == "drag":
         cli(
-            demo.directory,
+            headless_session.directory,
             "drag",
             "500",
             "150",
@@ -1317,28 +1415,34 @@ def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> No
             "0",
         )
     else:
-        cli(demo.directory, "move", "65535", "150", "--move-duration", "0")
-    width = json.loads((demo.directory / "session.json").read_text())["width"]
+        cli(headless_session.directory, "move", "65535", "150", "--move-duration", "0")
+    width = json.loads((headless_session.directory / "session.json").read_text())[
+        "width"
+    ]
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == width - 1
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
     if action == "drag":
         wait_until(
-            lambda: any(event["event"] == "release" for event in input_events(demo))
+            lambda: any(
+                event["event"] == "release" for event in input_events(headless_session)
+            )
         )
-    before = len(input_events(demo))
-    cli(demo.directory, "move", "500", "150", "--move-duration", "1")
+    before = len(input_events(headless_session))
+    cli(headless_session.directory, "move", "500", "150", "--move-duration", "1")
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 500
-            for event in input_events(demo)[before:]
+            for event in input_events(headless_session)[before:]
         )
     )
     motion = [
-        event for event in input_events(demo)[before:] if event["event"] == "motion"
+        event
+        for event in input_events(headless_session)[before:]
+        if event["event"] == "motion"
     ]
     intermediate = [event for event in motion if 500 < float(event["x"]) < width - 1]
     assert len(intermediate) >= 3
@@ -1350,30 +1454,36 @@ def test_outside_display_position_tracks_the_edge(demo: Demo, action: str) -> No
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
-    wait_for_input_probe_window(demo)
-    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
+def test_recording_keeps_pointer_route_continuous(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_for_input_probe_window(headless_session)
+    cli(headless_session.directory, "move", "100", "100", "--move-duration", "0")
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 100
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
-    clip = demo.directory.parent / "continuous.mp4"
-    cli(demo.directory, "record-start", str(clip))
+    clip = headless_session.directory.parent / "continuous.mp4"
+    cli(headless_session.directory, "record-start", str(clip))
     start = (100, 100)
     for end in ((500, 300), (200, 250), (550, 100)):
-        before = len(input_events(demo))
-        cli(demo.directory, "move", *map(str, end), "--move-duration", "0.6")
+        before = len(input_events(headless_session))
+        cli(
+            headless_session.directory, "move", *map(str, end), "--move-duration", "0.6"
+        )
         wait_until(
             lambda: any(
                 event["event"] == "motion" and (event["x"], event["y"]) == end
-                for event in input_events(demo)[before:]
+                for event in input_events(headless_session)[before:]
             )
         )
         motion = [
-            event for event in input_events(demo)[before:] if event["event"] == "motion"
+            event
+            for event in input_events(headless_session)[before:]
+            if event["event"] == "motion"
         ]
         assert len(motion) >= 3
         for event in motion:
@@ -1385,33 +1495,47 @@ def test_recording_keeps_pointer_route_continuous(demo: Demo) -> None:
             )
             assert abs(y - expected_y) <= 1
         start = end
-    cli(demo.directory, "record-stop")
+    cli(headless_session.directory, "record-stop")
     assert clip.stat().st_size > 0
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize(
     ("text", "interval"),
     [("Ab c", None), ("Ab c", 0), ("é中🙂a", None), ("é中🙂a", 0), ("é中🙂a", 5.5)],
 )
 def test_typing_paces_received_characters(
-    demo: Demo, interval: float | None, text: str
+    headless_session: HeadlessSession, interval: float | None, text: str
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "click", "100", "425")
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "click", "100", "425")
     options = [] if interval is None else ["--interval", str(interval)]
-    cli(demo.directory, "type", *options, text)
+    cli(headless_session.directory, "type", *options, text)
     finished = time.monotonic()
-    wait_until(lambda: any(event.get("text") == text for event in input_events(demo)))
-    events = [event for event in input_events(demo) if event["event"] == "text"]
+    wait_until(
+        lambda: any(
+            event.get("text") == text for event in input_events(headless_session)
+        )
+    )
+    events = [
+        event for event in input_events(headless_session) if event["event"] == "text"
+    ]
     assert [event["text"] for event in events] == [
         text[:end] for end in range(1, len(text) + 1)
     ]
     expected_interval = 0.08 if interval is None else interval
     # Check key receipt separately from text updates. Both input tools send zero
     # protocol timestamps, so allow 30 ms of observed GTK callback jitter.
-    keys = [event for event in input_events(demo) if event["event"] == "key-press"]
+    keys = [
+        event
+        for event in input_events(headless_session)
+        if event["event"] == "key-press"
+    ]
     assert len(keys) == len(text)
     for previous, current in zip(keys, keys[1:]):
         elapsed = float(current["time"]) - float(previous["time"])
@@ -1422,33 +1546,36 @@ def test_typing_paces_received_characters(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_shortcuts_select_and_edit_text(demo: Demo) -> None:
-    screenshot_path = demo.directory / "ready.png"
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_shortcuts_select_and_edit_text(headless_session: HeadlessSession) -> None:
+    screenshot_path = headless_session.directory / "ready.png"
 
     def entry_is_visible() -> bool:
-        cli(demo.directory, "screenshot", str(screenshot_path))
+        cli(headless_session.directory, "screenshot", str(screenshot_path))
         with Image.open(screenshot_path) as image:
             return len(image.crop((40, 210, 440, 240)).getcolors() or []) > 1
 
     wait_until(entry_is_visible)
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "abcd")
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "type", "abcd")
     for chord in ["Left", "Left", "Delete", "BackSpace", "Shift+Right"]:
-        cli(demo.directory, "key", chord)
-    cli(demo.directory, "type", "Z")
-    cli(demo.directory, "key", "Return")
-    wait_until(lambda: "Entered: aZ\n" in (demo.directory / "app.log").read_text())
-    cli(demo.directory, "key", "Ctrl+A")
-    cli(demo.directory, "type", "replaced")
-    cli(demo.directory, "key", "Return")
+        cli(headless_session.directory, "key", chord)
+    cli(headless_session.directory, "type", "Z")
+    cli(headless_session.directory, "key", "Return")
     wait_until(
-        lambda: "Entered: replaced\n" in (demo.directory / "app.log").read_text()
+        lambda: "Entered: aZ\n" in (headless_session.directory / "app.log").read_text()
+    )
+    cli(headless_session.directory, "key", "Ctrl+A")
+    cli(headless_session.directory, "type", "replaced")
+    cli(headless_session.directory, "key", "Return")
+    wait_until(
+        lambda: "Entered: replaced\n"
+        in (headless_session.directory / "app.log").read_text()
     )
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 @pytest.mark.parametrize(
     "chord,key,modifiers",
     [
@@ -1465,11 +1592,15 @@ def test_shortcuts_select_and_edit_text(demo: Demo) -> None:
     ],
 )
 def test_key_combination_events(
-    demo: Demo, chord: str, key: str, modifiers: list[str]
+    headless_session: HeadlessSession, chord: str, key: str, modifiers: list[str]
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "click", "100", "425")
-    cli(demo.directory, "key", chord)
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "click", "100", "425")
+    cli(headless_session.directory, "key", chord)
     expected = [
         *(("key-press", modifier) for modifier in modifiers),
         ("key-press", key),
@@ -1480,7 +1611,7 @@ def test_key_combination_events(
     def keyboard_events() -> list[dict[str, str | float | bool]]:
         return [
             event
-            for event in input_events(demo)
+            for event in input_events(headless_session)
             if str(event["event"]).startswith("key-")
         ]
 
@@ -1492,7 +1623,7 @@ def test_key_combination_events(
     assert key_press["shift"] == ("Shift_L" in modifiers)
     assert key_press["alt"] == ("Alt_L" in modifiers)
     # A following unmodified key must arrive with no modifiers still held.
-    cli(demo.directory, "key", "q")
+    cli(headless_session.directory, "key", "q")
     wait_until(lambda: len(keyboard_events()) >= len(expected) + 2)
     final_press = keyboard_events()[-2]
     assert final_press["key"] == "q"
@@ -1501,18 +1632,28 @@ def test_key_combination_events(
 
 # R-INPUT-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["keys", "x11-keys"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["keys", "x11-keys"], indirect=True)
 def test_punctuation_navigation_and_function_shortcuts(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "click", "100", "200")
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "click", "100", "200")
     # Verify the reported Preferences shortcut through the single-command path.
-    cli(demo.directory, "key", "Ctrl+comma")
-    wait_until(lambda: any(event.get("key") == "comma" for event in input_events(demo)))
-    comma = next(event for event in input_events(demo) if event.get("key") == "comma")
+    cli(headless_session.directory, "key", "Ctrl+comma")
+    wait_until(
+        lambda: any(
+            event.get("key") == "comma" for event in input_events(headless_session)
+        )
+    )
+    comma = next(
+        event for event in input_events(headless_session) if event.get("key") == "comma"
+    )
     assert comma["ctrl"] and not comma["shift"] and not comma["alt"]
-    start = len(input_events(demo))
+    start = len(input_events(headless_session))
     cases: list[tuple[str, str, bool, bool]] = []
     for name, literal, shifted in [
         ("comma", ",", "less"),
@@ -1574,14 +1715,16 @@ def test_punctuation_navigation_and_function_shortcuts(
         )
     plan = tmp_path / "shortcuts.json"
     plan.write_text(json.dumps({"steps": actions}))
-    result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    result = json.loads(
+        cli(headless_session.directory, "batch", "--file", str(plan)).stdout
+    )
     assert result["status"] == "completed"
     assert result["completed_steps"] == len(actions)
 
     def presses() -> list[dict[str, str | float | bool]]:
         return [
             event
-            for event in input_events(demo)[start:]
+            for event in input_events(headless_session)[start:]
             if event["event"] == "key-press"
             and event["key"] not in {"Control_L", "Shift_L", "Alt_L"}
         ]
@@ -1602,20 +1745,24 @@ def test_punctuation_navigation_and_function_shortcuts(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["scroll"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["scroll"], indirect=True)
 @pytest.mark.parametrize(
     "direction,reverse,axis", [("down", "up", "y"), ("right", "left", "x")]
 )
 def test_scroll_targets_pane_and_returns_to_start(
-    demo: Demo, direction: str, reverse: str, axis: str
+    headless_session: HeadlessSession, direction: str, reverse: str, axis: str
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "scroll", "900", "300", direction, "--ticks", "3")
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "scroll", "900", "300", direction, "--ticks", "3")
 
     def position(pane: str) -> float:
         events = [
             event
-            for event in input_events(demo)
+            for event in input_events(headless_session)
             if event["event"] == "position"
             and event["pane"] == pane
             and event["axis"] == axis
@@ -1624,17 +1771,19 @@ def test_scroll_targets_pane_and_returns_to_start(
 
     wait_until(lambda: position("right") > 0)
     assert position("left") == 0
-    events = [event for event in input_events(demo) if event["event"] == "scroll"]
+    events = [
+        event for event in input_events(headless_session) if event["event"] == "scroll"
+    ]
     assert all(event["pane"] == "right" for event in events)
     assert sum(float(event[f"d{axis}"]) for event in events) == 3
-    cli(demo.directory, "scroll", "900", "300", reverse, "--ticks", "3")
+    cli(headless_session.directory, "scroll", "900", "300", reverse, "--ticks", "3")
     wait_until(lambda: position("right") == 0)
     # Move to the other pane and use the default one-tick count.
-    cli(demo.directory, "scroll", "300", "300", direction)
+    cli(headless_session.directory, "scroll", "300", "300", direction)
     wait_until(lambda: position("left") > 0)
     events = [
         event
-        for event in input_events(demo)
+        for event in input_events(headless_session)
         if event["event"] == "scroll" and event["pane"] == "left"
     ]
     assert sum(float(event[f"d{axis}"]) for event in events) == 1
@@ -1643,28 +1792,39 @@ def test_scroll_targets_pane_and_returns_to_start(
 
 # R-INPUT-6
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["clipboard", "x11-clipboard"], indirect=True)
-def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "click", "100", "425")
+@pytest.mark.parametrize(
+    "headless_session", ["clipboard", "x11-clipboard"], indirect=True
+)
+def test_clipboard_copy_paste_survives_input_connections(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "click", "100", "425")
     for text in ["one", "two", "three"]:
-        cli(demo.directory, "key", "Ctrl+a")
-        cli(demo.directory, "type", "--interval", "0", text)
+        cli(headless_session.directory, "key", "Ctrl+a")
+        cli(headless_session.directory, "type", "--interval", "0", text)
         for chord in ["Ctrl+a", "Ctrl+c"]:
-            cli(demo.directory, "key", chord)
+            cli(headless_session.directory, "key", chord)
         # Tear down clients while the app owns a clipboard selection. Each
         # client also tries to overwrite it through VNC clipboard forwarding.
         for _ in range(100):
-            disconnect_vnc_with_clipboard(demo.runtime_dir)
+            disconnect_vnc_with_clipboard(headless_session.runtime_dir)
         for chord in ["Right", "Ctrl+v"]:
-            cli(demo.directory, "key", chord)
+            cli(headless_session.directory, "key", chord)
         wait_until(
-            lambda: any(event.get("text") == text * 2 for event in input_events(demo))
+            lambda: any(
+                event.get("text") == text * 2
+                for event in input_events(headless_session)
+            )
         )
-    protocol_log = (demo.directory / "wayvnc.log").read_text()
+    protocol_log = (headless_session.directory / "wayvnc.log").read_text()
     assert "create_virtual_keyboard(" in protocol_log
     assert "get_data_device(" not in protocol_log
-    assert demo.process.poll() is None
+    assert headless_session.process.poll() is None
 
 
 def disconnect_vnc_with_clipboard(runtime_dir: Path) -> None:
@@ -1695,75 +1855,101 @@ def disconnect_vnc_with_clipboard(runtime_dir: Path) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "demo,size", [("large", (1600, 900)), ("odd", (1601, 901))], indirect=["demo"]
+    "headless_session,size",
+    [("large", (1600, 900)), ("odd", (1601, 901))],
+    indirect=["headless_session"],
 )
-def test_custom_display_size(demo: Demo, size: tuple[int, int], tmp_path: Path) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+def test_custom_display_size(
+    headless_session: HeadlessSession, size: tuple[int, int], tmp_path: Path
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     screenshot_path = tmp_path / "custom-size.png"
-    cli(demo.directory, "screenshot", str(screenshot_path))
+    cli(headless_session.directory, "screenshot", str(screenshot_path))
     with Image.open(screenshot_path) as image:
         assert image.size == size
     # This point is outside the default display. Check coordinates received by GTK.
-    cli(demo.directory, "click", "1500", "300")
-    wait_until(lambda: any(event["event"] == "release" for event in input_events(demo)))
-    release = next(event for event in input_events(demo) if event["event"] == "release")
-    assert (release["x"], release["y"]) == (1500, 300)
-    cli(demo.directory, "click", "100", "425")
-    cli(demo.directory, "type", "larger display")
+    cli(headless_session.directory, "click", "1500", "300")
     wait_until(
         lambda: any(
-            event.get("text") == "larger display" for event in input_events(demo)
+            event["event"] == "release" for event in input_events(headless_session)
         )
     )
-    demo.process.terminate()
-    assert demo.process.wait(timeout=20) == 0
-    if demo.clip is not None:
-        assert len(clip_frames(demo.clip, size=size)) > 1
+    release = next(
+        event for event in input_events(headless_session) if event["event"] == "release"
+    )
+    assert (release["x"], release["y"]) == (1500, 300)
+    cli(headless_session.directory, "click", "100", "425")
+    cli(headless_session.directory, "type", "larger display")
+    wait_until(
+        lambda: any(
+            event.get("text") == "larger display"
+            for event in input_events(headless_session)
+        )
+    )
+    headless_session.process.terminate()
+    assert headless_session.process.wait(timeout=20) == 0
+    if headless_session.clip is not None:
+        assert len(clip_frames(headless_session.clip, size=size)) > 1
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "click", "100", "425")
-    text = "-café Ελληνικά Русский 日本語 😀 e\u0301"
-    cli(demo.directory, "type", "--interval", "0", "--", text)
-    wait_until(lambda: any(event.get("text") == text for event in input_events(demo)))
-    cli(demo.directory, "type", " ASCII")
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
+def test_unicode_text_and_later_ascii_input(headless_session: HeadlessSession) -> None:
     wait_until(
         lambda: any(
-            event.get("text") == text + " ASCII" for event in input_events(demo)
+            event["event"] == "ready" for event in input_events(headless_session)
         )
     )
-    cli(demo.directory, "key", "Ctrl+a")
-    cli(demo.directory, "type", "replaced")
+    cli(headless_session.directory, "click", "100", "425")
+    text = "-café Ελληνικά Русский 日本語 😀 e\u0301"
+    cli(headless_session.directory, "type", "--interval", "0", "--", text)
     wait_until(
-        lambda: any(event.get("text") == "replaced" for event in input_events(demo))
+        lambda: any(
+            event.get("text") == text for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "type", " ASCII")
+    wait_until(
+        lambda: any(
+            event.get("text") == text + " ASCII"
+            for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "key", "Ctrl+a")
+    cli(headless_session.directory, "type", "replaced")
+    wait_until(
+        lambda: any(
+            event.get("text") == "replaced" for event in input_events(headless_session)
+        )
     )
 
 
 # R-REC-1
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, True, "x11-record"], indirect=True)
+@pytest.mark.parametrize("headless_session", [None, True, "x11-record"], indirect=True)
 def test_record_multiple_clips_without_restarting_app(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    metadata_path = demo.directory / "session.json"
+    metadata_path = headless_session.directory / "session.json"
     app_pid = json.loads(metadata_path.read_text())["processes"]["app"]
-    if demo.clip is not None:
-        cli(demo.directory, "record-stop")
-        clip_frames(demo.clip)
+    if headless_session.clip is not None:
+        cli(headless_session.directory, "record-stop")
+        clip_frames(headless_session.clip)
 
     def rejected(*arguments: str) -> str:
         result = subprocess.run(
-            ["framewisp", str(demo.directory), *arguments],
+            ["framewisp", str(headless_session.directory), *arguments],
             capture_output=True,
             text=True,
             check=False,
             timeout=20,
         )
         assert result.returncode == 1, result.stderr
-        assert demo.process.poll() is None
+        assert headless_session.process.poll() is None
         return result.stderr
 
     assert "No recording" in rejected("record-stop")
@@ -1781,23 +1967,27 @@ def test_record_multiple_clips_without_restarting_app(
     # Rendering has its own tests, and its time depends on machine load.
     unrendered = ("--no-click-pings",)
     for index in range(2):
-        cli(demo.directory, "click", "120", "100")
-        cli(demo.directory, "key", "Ctrl+a")
-        cli(demo.directory, "type", f"Setup {index}")
+        cli(headless_session.directory, "click", "120", "100")
+        cli(headless_session.directory, "key", "Ctrl+a")
+        cli(headless_session.directory, "type", f"Setup {index}")
         clip = tmp_path / f"clip {index}.mp4"
-        cli(demo.directory, "record-start", *unrendered, str(clip))
+        cli(headless_session.directory, "record-start", *unrendered, str(clip))
         assert not clip.exists()
         assert private_clip(tmp_path).stat().st_size > 0
         assert "recorder" in json.loads(metadata_path.read_text())["processes"]
         refused = tmp_path / "refused.mp4"
         assert "already active" in rejected("record-start", str(refused))
         assert not refused.exists()
-        cli(demo.directory, "type", " recording")
-        cli(demo.directory, "key", "Return")
+        cli(headless_session.directory, "type", " recording")
+        cli(headless_session.directory, "key", "Return")
         cli(
-            demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "during.png")
+            headless_session.directory,
+            "screenshot",
+            "--delay",
+            "0.2",
+            str(tmp_path / "during.png"),
         )
-        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
         assert summary["path"] == str(clip)
         assert summary["width"] == 1280 and summary["height"] == 720
         assert summary["duration_seconds"] > 0
@@ -1806,23 +1996,30 @@ def test_record_multiple_clips_without_restarting_app(
         metadata = json.loads(metadata_path.read_text())
         assert metadata["processes"]["app"] == app_pid
         assert "recorder" not in metadata["processes"]
-        assert demo.process.poll() is None
-        cli(demo.directory, "screenshot", str(tmp_path / "between.png"))
+        assert headless_session.process.poll() is None
+        cli(headless_session.directory, "screenshot", str(tmp_path / "between.png"))
 
     final_clip = tmp_path / "shutdown.mp4"
-    cli(demo.directory, "record-start", *unrendered, str(final_clip))
-    demo.process.terminate()
-    assert demo.process.wait(timeout=20) == 0
+    cli(headless_session.directory, "record-start", *unrendered, str(final_clip))
+    headless_session.process.terminate()
+    assert headless_session.process.wait(timeout=20) == 0
     clip_frames(final_clip)
 
 
 # R-REC-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["odd"], indirect=True)
-def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", ["odd"], indirect=True)
+def test_record_start_rejects_odd_display(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     destination = tmp_path / "odd.mp4"
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "record-start", str(destination)],
+        [
+            "framewisp",
+            str(headless_session.directory),
+            "record-start",
+            str(destination),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -1831,7 +2028,7 @@ def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "even" in result.stderr
     assert not destination.exists()
-    assert demo.process.poll() is None
+    assert headless_session.process.poll() is None
 
 
 def clip_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
@@ -1936,21 +2133,25 @@ def pointer_overlay_frames(
     return shown
 
 
-def clip_origin(demo: Demo) -> float:
+def clip_origin(headless_session: HeadlessSession) -> float:
     """Read the recorder's first captured-frame time; this file can't import framewisp."""
     timestamp = re.search(
         r"\.ready\((\d+), (\d+), (\d+)\)",
-        (demo.directory / "recorder.log").read_text(),
+        (headless_session.directory / "recorder.log").read_text(),
     )
     assert timestamp is not None
     high, low, nanos = map(int, timestamp.groups())
     return (high << 32) + low + nanos / 1e9
 
 
-def logged_buttons(demo: Demo) -> list[tuple[str, float, int, int]]:
+def logged_buttons(
+    headless_session: HeadlessSession,
+) -> list[tuple[str, float, int, int]]:
     events = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     return [
         (event["action"], event["time"], event["x"], event["y"])
@@ -1959,11 +2160,11 @@ def logged_buttons(demo: Demo) -> list[tuple[str, float, int, int]]:
     ]
 
 
-def perform_gestures(demo: Demo) -> None:
-    cli(demo.directory, "click", "200", "150")
-    cli(demo.directory, "click", "--count", "2", "500", "150")
-    cli(demo.directory, "click", "--button", "right", "800", "150")
-    cli(demo.directory, "drag", "200", "450", "700", "450")
+def perform_gestures(headless_session: HeadlessSession) -> None:
+    cli(headless_session.directory, "click", "200", "150")
+    cli(headless_session.directory, "click", "--count", "2", "500", "150")
+    cli(headless_session.directory, "click", "--button", "right", "800", "150")
+    cli(headless_session.directory, "drag", "200", "450", "700", "450")
     time.sleep(0.8)
 
 
@@ -1978,11 +2179,11 @@ GESTURE_BUTTONS = [
 
 
 def assert_click_pings_mark_gestures(
-    demo: Demo, clip: Path, *, timed: bool = True
+    headless_session: HeadlessSession, clip: Path, *, timed: bool = True
 ) -> None:
-    buttons = logged_buttons(demo)[-len(GESTURE_BUTTONS) :]
+    buttons = logged_buttons(headless_session)[-len(GESTURE_BUTTONS) :]
     assert [(action, x, y) for action, _, x, y in buttons] == GESTURE_BUTTONS
-    origin = clip_origin(demo)
+    origin = clip_origin(headless_session)
     *presses, release = buttons
     # The drag's hold disc stops at its release and fades there; the translucent
     # fill stays visible for fewer frames than a click ping.
@@ -2006,18 +2207,20 @@ def assert_click_pings_mark_gestures(
 
 # R-REC-5, R-REC-6
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["record-probe", "x11-record-probe"], indirect=True)
-def test_startup_clip_click_pings_gestures(demo: Demo) -> None:
-    assert demo.clip is not None
-    wait_for_input_probe_window(demo)
-    perform_gestures(demo)
-    cli(demo.directory, "stop")
-    assert_click_pings_mark_gestures(demo, demo.clip)
+@pytest.mark.parametrize(
+    "headless_session", ["record-probe", "x11-record-probe"], indirect=True
+)
+def test_startup_clip_click_pings_gestures(headless_session: HeadlessSession) -> None:
+    assert headless_session.clip is not None
+    wait_for_input_probe_window(headless_session)
+    perform_gestures(headless_session)
+    cli(headless_session.directory, "stop")
+    assert_click_pings_mark_gestures(headless_session, headless_session.clip)
 
 
 # R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize(
     "options",
     [
@@ -2029,40 +2232,40 @@ def test_startup_clip_click_pings_gestures(demo: Demo) -> None:
     ],
 )
 def test_mid_session_clip_click_pings_gestures(
-    demo: Demo, tmp_path: Path, options: list[str]
+    headless_session: HeadlessSession, tmp_path: Path, options: list[str]
 ) -> None:
     compact = "--compact" in options
-    wait_for_input_probe_window(demo)
+    wait_for_input_probe_window(headless_session)
     clip = tmp_path / "clip.mp4"
-    cli(demo.directory, "record-start", *options, str(clip))
+    cli(headless_session.directory, "record-start", *options, str(clip))
     started = time.monotonic()
     # Compaction cuts the gap between the opening and the first gesture's padding.
     time.sleep(4 if compact else 1.5)
-    perform_gestures(demo)
+    perform_gestures(headless_session)
     time.sleep(1.5)
     elapsed = time.monotonic() - started
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
     if compact:
         assert summary["duration_seconds"] < elapsed - 1
-    assert_click_pings_mark_gestures(demo, clip, timed=not compact)
+    assert_click_pings_mark_gestures(headless_session, clip, timed=not compact)
 
 
 # R-REC-7, R-LOG-3
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 def test_click_pings_are_per_clip_and_absent_from_screenshots(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_for_input_probe_window(demo)
+    wait_for_input_probe_window(headless_session)
     plain = tmp_path / "plain.mp4"
-    cli(demo.directory, "record-start", "--no-click-pings", str(plain))
-    cli(demo.directory, "click", "300", "200")
+    cli(headless_session.directory, "record-start", "--no-click-pings", str(plain))
+    cli(headless_session.directory, "click", "300", "200")
     time.sleep(0.8)
-    cli(demo.directory, "record-stop")
+    cli(headless_session.directory, "record-stop")
     assert pointer_overlay_frames(plain, 300, 200) == []
 
     pinged = tmp_path / "pinged.mp4"
-    cli(demo.directory, "record-start", str(pinged))
+    cli(headless_session.directory, "record-start", str(pinged))
     shot = tmp_path / "shot.png"
     plan = tmp_path / "click.json"
     plan.write_text(
@@ -2074,17 +2277,17 @@ def test_click_pings_are_per_clip_and_absent_from_screenshots(
         )
     )
     subprocess.run(
-        ["framewisp", str(demo.directory), "batch", "--file", str(plan)],
+        ["framewisp", str(headless_session.directory), "batch", "--file", str(plan)],
         check=True,
         capture_output=True,
         timeout=20,
     )
-    moment = logged_buttons(demo)[-1][1]
+    moment = logged_buttons(headless_session)[-1][1]
     time.sleep(0.8)
-    cli(demo.directory, "record-stop")
+    cli(headless_session.directory, "record-stop")
     # The batch captures 0.05 seconds after its press, inside the click ping the clip shows.
     click_pings = pointer_overlay_frames(pinged, 300, 200)
-    origin = clip_origin(demo)
+    origin = clip_origin(headless_session)
     assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in click_pings)
     with Image.open(shot) as screenshot:
         patch = screenshot.convert("RGB").crop((250, 150, 350, 250)).tobytes()
@@ -2093,26 +2296,31 @@ def test_click_pings_are_per_clip_and_absent_from_screenshots(
     )
 
 
-def exercise_console_clip(demo: Demo, tmp_path: Path) -> None:
+def exercise_console_clip(headless_session: HeadlessSession, tmp_path: Path) -> None:
     """Click and press a non-printing key, leaving time for its caption to end."""
     time.sleep(0.4)
-    presses = sum(event["event"] == "press" for event in input_events(demo))
-    cli(demo.directory, "click", "300", "200")
+    presses = sum(event["event"] == "press" for event in input_events(headless_session))
+    cli(headless_session.directory, "click", "300", "200")
     wait_until(
-        lambda: sum(event["event"] == "press" for event in input_events(demo)) > presses
+        lambda: sum(
+            event["event"] == "press" for event in input_events(headless_session)
+        )
+        > presses
     )
-    press = [event for event in input_events(demo) if event["event"] == "press"][-1]
+    press = [
+        event for event in input_events(headless_session) if event["event"] == "press"
+    ][-1]
     assert (press["x"], press["y"]) == (300, 200)
-    cli(demo.directory, "key", "F8")
+    cli(headless_session.directory, "key", "F8")
     shot = tmp_path / "console-clip.png"
-    cli(demo.directory, "screenshot", str(shot))
+    cli(headless_session.directory, "screenshot", str(shot))
     with Image.open(shot) as image:
         assert image.size == (1280, 720)
     time.sleep(1.2)
 
 
 def check_console_clip(
-    demo: Demo,
+    headless_session: HeadlessSession,
     clip: Path,
     summary: dict[str, Any],
     placement: tuple[str, int, str],
@@ -2125,10 +2333,10 @@ def check_console_clip(
         (1280 + pixels, 720) if position in {"left", "right"} else (1280, 720 + pixels)
     )
     assert len(pointer_overlay_frames(clip, gui_x + 300, gui_y + 200)) >= 8
-    origin = clip_origin(demo)
+    origin = clip_origin(headless_session)
     pressed = next(
         event["time"] - origin
-        for event in reversed(clip_inputs(demo, 0))
+        for event in reversed(clip_inputs(headless_session, 0))
         if event["event"] == "start" and event["action"] == "key"
     )
     shown = clip_patch(clip, pressed + 0.4, gui_x, gui_y)
@@ -2139,23 +2347,27 @@ def check_console_clip(
 # R-REC-12, R-REC-13, R-REC-14, R-REC-15
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("demo", "placement"), CONSOLE_STARTS.items(), indirect=["demo"]
+    ("headless_session", "placement"),
+    CONSOLE_STARTS.items(),
+    indirect=["headless_session"],
 )
 def test_startup_console_panel_extends_the_clip_around_the_gui(
-    demo: Demo, tmp_path: Path, placement: tuple[str, int, str]
+    headless_session: HeadlessSession, tmp_path: Path, placement: tuple[str, int, str]
 ) -> None:
-    assert demo.clip is not None
-    wait_for_input_probe_window(demo)
-    exercise_console_clip(demo, tmp_path)
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
-    check_console_clip(demo, demo.clip, summary, placement)
+    assert headless_session.clip is not None
+    wait_for_input_probe_window(headless_session)
+    exercise_console_clip(headless_session, tmp_path)
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
+    check_console_clip(headless_session, headless_session.clip, summary, placement)
 
 
 # R-REC-12, R-REC-13, R-REC-14, R-REC-15
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_later_clips_pick_their_own_console_panel(demo: Demo, tmp_path: Path) -> None:
-    wait_for_input_probe_window(demo)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_later_clips_pick_their_own_console_panel(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(headless_session)
     for index, placement in enumerate(
         [
             ("left", 640, "non-text"),
@@ -2166,29 +2378,29 @@ def test_later_clips_pick_their_own_console_panel(demo: Demo, tmp_path: Path) ->
     ):
         clip = tmp_path / f"clip-{index}.mp4"
         cli(
-            demo.directory,
+            headless_session.directory,
             "record-start",
             *console_options(*placement),
             str(clip),
         )
-        exercise_console_clip(demo, tmp_path)
-        summary = json.loads(cli(demo.directory, "record-stop").stdout)
-        check_console_clip(demo, clip, summary, placement)
+        exercise_console_clip(headless_session, tmp_path)
+        summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
+        check_console_clip(headless_session, clip, summary, placement)
 
 
 # R-REC-16, R-REC-17
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 def test_rejected_console_panel_leaves_the_app_running(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_for_input_probe_window(demo)
+    wait_for_input_probe_window(headless_session)
     rejected = tmp_path / "rejected.mp4"
     for size in ("16000", "9" * 4299 + "8"):
         result = subprocess.run(
             [
                 "framewisp",
-                str(demo.directory),
+                str(headless_session.directory),
                 "record-start",
                 "--console",
                 "--console-size",
@@ -2228,10 +2440,10 @@ def test_rejected_console_panel_leaves_the_app_running(
         ),
     ):
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(demo.runtime_dir / "command.sock"))
+            connection.connect(str(headless_session.runtime_dir / "command.sock"))
             request = {
                 "command": "record-start",
-                "session_directory": str(demo.directory.resolve()),
+                "session_directory": str(headless_session.directory.resolve()),
                 "clip_destination": str(rejected),
                 "key_captions": "non-text",
                 "console_panel": value,
@@ -2240,23 +2452,25 @@ def test_rejected_console_panel_leaves_the_app_running(
             reply = json.loads(connection.makefile().readline())
         assert message in reply["error"]
         assert not rejected.exists()
-    assert demo.process.poll() is None
-    cli(demo.directory, "status")
+    assert headless_session.process.poll() is None
+    cli(headless_session.directory, "status")
     accepted = tmp_path / "accepted.mp4"
-    cli(demo.directory, "record-start", "--console", str(accepted))
+    cli(headless_session.directory, "record-start", "--console", str(accepted))
     time.sleep(0.5)
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
     assert summary["width"] == 1920
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_runner_rejects_non_boolean_click_pings(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime_dir / "command.sock"))
+        connection.connect(str(headless_session.runtime_dir / "command.sock"))
         request = {
             "command": "record-start",
-            "session_directory": str(demo.directory.resolve()),
+            "session_directory": str(headless_session.directory.resolve()),
             "clip_destination": str(tmp_path / "rejected.mp4"),
             "key_captions": "non-text",
             "click_pings": "no",
@@ -2268,28 +2482,28 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
             )
 
 
-def request_reply(demo: Demo, message: bytes) -> bytes:
+def request_reply(headless_session: HeadlessSession, message: bytes) -> bytes:
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime_dir / "command.sock"))
+        connection.connect(str(headless_session.runtime_dir / "command.sock"))
         connection.sendall(message)
         connection.shutdown(socket.SHUT_WR)
         return connection.makefile("rb").readline()
 
 
-def assert_session_running(demo: Demo) -> None:
-    status = json.loads(cli(demo.directory, "status").stdout)
+def assert_session_running(headless_session: HeadlessSession) -> None:
+    status = json.loads(cli(headless_session.directory, "status").stdout)
     assert status["status"] == "running" and status["app"]["running"]
-    assert demo.process.poll() is None
+    assert headless_session.process.poll() is None
 
 
 # R-CONTROL-1, R-CONTROL-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 def test_unusable_clip_destination_leaves_the_app_running(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_for_input_probe_window(demo)
-    session_dir = str(demo.directory.resolve())
+    wait_for_input_probe_window(headless_session)
+    session_dir = str(headless_session.directory.resolve())
     for destination, message in (
         (f"{tmp_path}/nul\0.mp4", "clip_destination is not a usable path"),
         (f"{tmp_path}/\ud800.mp4", "clip_destination is not a usable path"),
@@ -2302,63 +2516,72 @@ def test_unusable_clip_destination_leaves_the_app_running(
             "clip_destination": destination,
             "key_captions": "non-text",
         }
-        line = request_reply(demo, (json.dumps(request) + "\n").encode())
-        assert_session_running(demo)
+        line = request_reply(headless_session, (json.dumps(request) + "\n").encode())
+        assert_session_running(headless_session)
         error = json.loads(line)["error"]
         assert error and message in error
     assert list(tmp_path.glob("*.mp4")) == []
     accepted = tmp_path / "accepted.mp4"
-    cli(demo.directory, "record-start", str(accepted))
+    cli(headless_session.directory, "record-start", str(accepted))
     time.sleep(0.5)
-    cli(demo.directory, "record-stop")
+    cli(headless_session.directory, "record-stop")
     assert accepted.stat().st_size > 0
 
 
 # R-CONTROL-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_non_utf8_clip_destination_records(demo: Demo, tmp_path: Path) -> None:
-    wait_for_input_probe_window(demo)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_non_utf8_clip_destination_records(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(headless_session)
     clip = tmp_path / "\udc80.mp4"
     request = {
         "command": "record-start",
-        "session_directory": str(demo.directory.resolve()),
+        "session_directory": str(headless_session.directory.resolve()),
         "clip_destination": str(clip),
         "key_captions": "non-text",
     }
-    line = request_reply(demo, (json.dumps(request) + "\n").encode())
-    assert_session_running(demo)
+    line = request_reply(headless_session, (json.dumps(request) + "\n").encode())
+    assert_session_running(headless_session)
     assert json.loads(line)["error"] is None
     time.sleep(0.5)
-    cli(demo.directory, "record-stop")
-    assert_session_running(demo)
+    cli(headless_session.directory, "record-stop")
+    assert_session_running(headless_session)
     assert clip.stat().st_size > 0
 
 
 # R-CONTROL-1, R-CONTROL-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_trickling_client_cannot_hold_the_command_loop(demo: Demo) -> None:
-    wait_for_input_probe_window(demo)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_trickling_client_cannot_hold_the_command_loop(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_for_input_probe_window(headless_session)
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime_dir / "command.sock"))
+        connection.connect(str(headless_session.runtime_dir / "command.sock"))
         started = time.monotonic()
         while not select.select([connection], [], [], 0.3)[0]:
             # Without a total deadline, this client is never answered.
             assert time.monotonic() - started < 10
             connection.sendall(b" ")
         assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
-    assert_session_running(demo)
-    assert json.loads(cli(demo.directory, "stop").stdout)["status"] == "stopped"
-    assert demo.process.wait(timeout=10) == 0
+    assert_session_running(headless_session)
+    assert (
+        json.loads(cli(headless_session.directory, "stop").stdout)["status"]
+        == "stopped"
+    )
+    assert headless_session.process.wait(timeout=10) == 0
 
 
 # R-CONTROL-1, R-CONTROL-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> None:
-    wait_for_input_probe_window(demo)
-    session_dir = str(demo.directory.resolve())
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_malformed_requests_get_an_error_reply(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(headless_session)
+    session_dir = str(headless_session.directory.resolve())
 
     def encoded(request: dict[str, object]) -> bytes:
         return (
@@ -2427,8 +2650,8 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         *other_session,
         *(encoded(command) for command in bad_commands),
     ):
-        line = request_reply(demo, message)
-        assert_session_running(demo)
+        line = request_reply(headless_session, message)
+        assert_session_running(headless_session)
         response = json.loads(line)
         assert isinstance(response["error"], str) and response["error"]
         assert response["data"] is None
@@ -2436,37 +2659,39 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
 
 # R-REC-7
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["no-click-pings"], indirect=True)
-def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) -> None:
-    assert demo.clip is not None
-    wait_for_demo_frame(demo, tmp_path / "before.png")
-    cli(demo.directory, "click", "300", "200")
+@pytest.mark.parametrize("headless_session", ["no-click-pings"], indirect=True)
+def test_startup_recording_honours_no_click_pings(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    assert headless_session.clip is not None
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
+    cli(headless_session.directory, "click", "300", "200")
     time.sleep(0.8)
-    assert logged_buttons(demo)
-    cli(demo.directory, "stop")
-    assert pointer_overlay_frames(demo.clip, 300, 200) == []
+    assert logged_buttons(headless_session)
+    cli(headless_session.directory, "stop")
+    assert pointer_overlay_frames(headless_session.clip, 300, 200) == []
 
 
 # R-REC-10
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 @pytest.mark.parametrize("failure", ["unwritable-log", "malformed-input-log"])
 @pytest.mark.parametrize("command", ["record-stop", "stop"])
 def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
-    demo: Demo, tmp_path: Path, failure: str, command: str
+    headless_session: HeadlessSession, tmp_path: Path, failure: str, command: str
 ) -> None:
-    wait_for_demo_frame(demo, tmp_path / "before.png")
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
     clip = tmp_path / "click pings only.mp4"
-    cli(demo.directory, "record-start", str(clip))
-    cli(demo.directory, "click", "120", "100")
+    cli(headless_session.directory, "record-start", str(clip))
+    cli(headless_session.directory, "click", "120", "100")
     time.sleep(0.3)
     if failure == "unwritable-log":
-        (demo.directory / "finalization.log").mkdir()
+        (headless_session.directory / "finalization.log").mkdir()
     else:
-        with (demo.directory / "inputs.jsonl").open("a") as log:
+        with (headless_session.directory / "inputs.jsonl").open("a") as log:
             log.write("not json\n")
     result = subprocess.run(
-        ["framewisp", str(demo.directory), command],
+        ["framewisp", str(headless_session.directory), command],
         capture_output=True,
         text=True,
         check=False,
@@ -2476,7 +2701,7 @@ def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
     assert "raw clip remains" in result.stderr
     assert str(clip) in " ".join(result.stderr.split())
     assert "finalization.log" in result.stderr
-    assert demo.process.wait(timeout=5) == 1
+    assert headless_session.process.wait(timeout=5) == 1
     assert not private_directories(clip.parent)
     assert len(clip_frames(clip)) > 1
     assert pointer_overlay_frames(clip, 120, 100) == []
@@ -2509,63 +2734,72 @@ def console_panel(path: Path, second: float) -> bytes:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["console", "x11-console"], indirect=True)
-def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", ["console", "x11-console"], indirect=True)
+def test_console_panel_startup_and_later_clips(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     screenshot = tmp_path / "gui.png"
-    wait_for_demo_frame(demo, screenshot)
-    assert demo.clip is not None
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    wait_for_demo_app_frame(headless_session, screenshot)
+    assert headless_session.clip is not None
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
     assert (summary["width"], summary["height"]) == (1920, 720)
-    assert len(clip_frames(demo.clip, size=(1920, 720))) > 1
-    assert (demo.directory / "console.jsonl").stat().st_size > 0
+    assert len(clip_frames(headless_session.clip, size=(1920, 720))) > 1
+    assert (headless_session.directory / "console.jsonl").stat().st_size > 0
     for captions in [False, True]:
         clip = tmp_path / f"console-{captions}.mp4"
         cli(
-            demo.directory,
+            headless_session.directory,
             "record-start",
             "--console",
             *(["--key-captions", "non-text"] if captions else []),
             str(clip),
         )
         time.sleep(0.4)
-        cli(demo.directory, "type", "console output")
-        cli(demo.directory, "key", "Return")
+        cli(headless_session.directory, "type", "console output")
+        cli(headless_session.directory, "key", "Return")
         wait_until(
             lambda: "Entered: console output"
-            in (demo.directory / "app.log").read_text()
+            in (headless_session.directory / "app.log").read_text()
         )
         time.sleep(0.5)
-        summary = json.loads(cli(demo.directory, "record-stop").stdout)
+        summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
         assert (summary["width"], summary["height"]) == (1920, 720)
         early = console_panel(clip, 0.1)
         late = console_panel(clip, summary["duration_seconds"] - 0.2)
         assert len(early) == len(late) == 640 * 720 * 3
         assert sum(abs(a - b) for a, b in zip(early, late, strict=True)) > 100000
-        cli(demo.directory, "screenshot", str(screenshot))
+        cli(headless_session.directory, "screenshot", str(screenshot))
         with Image.open(screenshot) as image:
             assert image.size == (1280, 720)
-        cli(demo.directory, "key", "Ctrl+a")
-        cli(demo.directory, "key", "BackSpace")
+        cli(headless_session.directory, "key", "Ctrl+a")
+        cli(headless_session.directory, "key", "BackSpace")
     plain = tmp_path / "plain.mp4"
-    cli(demo.directory, "record-start", str(plain))
+    cli(headless_session.directory, "record-start", str(plain))
     time.sleep(0.2)
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
     assert (summary["width"], summary["height"]) == (1280, 720)
-    cli(demo.directory, "record-start", "--console", str(tmp_path / "shutdown.mp4"))
-    stopped = json.loads(cli(demo.directory, "stop").stdout)
+    cli(
+        headless_session.directory,
+        "record-start",
+        "--console",
+        str(tmp_path / "shutdown.mp4"),
+    )
+    stopped = json.loads(cli(headless_session.directory, "stop").stdout)
     assert stopped["clip"]["width"] == 1920
-    assert demo.process.wait(timeout=20) == 0
+    assert headless_session.process.wait(timeout=20) == 0
 
 
 # R-LOG-1, R-LOG-2, R-LOG-9, R-REC-4
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
-    wait_for_demo_frame(demo, tmp_path / "before.png")
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "Setup outside the clip")
-    cli(demo.directory, "key", "Ctrl+a")
-    cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_captioned_clips_and_opt_out(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "type", "Setup outside the clip")
+    cli(headless_session.directory, "key", "Ctrl+a")
+    cli(headless_session.directory, "screenshot", str(tmp_path / "before.png"))
     # This region is below the demo app's controls and remains unchanged by input.
     with Image.open(tmp_path / "before.png") as screenshot:
         patch = screenshot.convert("RGB").crop((340, 644, 940, 708)).tobytes()
@@ -2574,12 +2808,18 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
     ):
         clip = tmp_path / f"clip-{index}.mp4"
         cli(
-            demo.directory,
+            headless_session.directory,
             "record-start",
             str(clip),
             *(["--key-captions", mode] if mode is not None else []),
         )
-        cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "idle.png"))
+        cli(
+            headless_session.directory,
+            "screenshot",
+            "--delay",
+            "0.2",
+            str(tmp_path / "idle.png"),
+        )
         if private:
             plan = tmp_path / "private-input.json"
             plan.write_text(
@@ -2596,17 +2836,31 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
                     }
                 )
             )
-            cli(demo.directory, "batch", "--file", str(plan))
-            cli(demo.directory, "key", "--private", "Return")
+            cli(headless_session.directory, "batch", "--file", str(plan))
+            cli(headless_session.directory, "key", "--private", "Return")
         else:
-            cli(demo.directory, "type", "--interval", "0.12", "café 日本語 😀")
-            cli(demo.directory, "key", "Return")
-        cli(demo.directory, "screenshot", "--delay", "1", str(tmp_path / "after.png"))
-        cli(demo.directory, "record-stop")
-        assert demo.process.poll() is None
+            cli(
+                headless_session.directory,
+                "type",
+                "--interval",
+                "0.12",
+                "café 日本語 😀",
+            )
+            cli(headless_session.directory, "key", "Return")
+        cli(
+            headless_session.directory,
+            "screenshot",
+            "--delay",
+            "1",
+            str(tmp_path / "after.png"),
+        )
+        cli(headless_session.directory, "record-stop")
+        assert headless_session.process.poll() is None
         events = [
             json.loads(line)
-            for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+            for line in (headless_session.directory / "inputs.jsonl")
+            .read_text()
+            .splitlines()
         ]
         typed_events = [event for event in events if event["action"] == "type"]
         assert all("text" not in event["parameters"] for event in typed_events)
@@ -2622,7 +2876,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             # Use the recorder's captured-frame timestamp, not the command's launch time.
             timestamp = re.search(
                 r"\.ready\((\d+), (\d+), (\d+)\)",
-                (demo.directory / "recorder.log").read_text(),
+                (headless_session.directory / "recorder.log").read_text(),
             )
             assert timestamp is not None
             high, low, nanos = map(int, timestamp.groups())
@@ -2653,23 +2907,26 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             assert (
                 screenshot.convert("RGB").crop((340, 644, 940, 708)).tobytes() == patch
             )
-        cli(demo.directory, "key", "Ctrl+a")
-        cli(demo.directory, "type", "Between clips")
-    assert "Entered: café 日本語 😀" in (demo.directory / "app.log").read_text()
+        cli(headless_session.directory, "key", "Ctrl+a")
+        cli(headless_session.directory, "type", "Between clips")
+    assert (
+        "Entered: café 日本語 😀"
+        in (headless_session.directory / "app.log").read_text()
+    )
 
 
-def exercise_caption_clip(demo: Demo) -> None:
+def exercise_caption_clip(headless_session: HeadlessSession) -> None:
     time.sleep(0.4)
-    cli(demo.directory, "move", "300", "300", "--move-duration", "0")
+    cli(headless_session.directory, "move", "300", "300", "--move-duration", "0")
     time.sleep(1.2)
-    cli(demo.directory, "click", "300", "300", "--modifier", "ctrl")
+    cli(headless_session.directory, "click", "300", "300", "--modifier", "ctrl")
     time.sleep(1.2)
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "key", "Return")
     time.sleep(1.2)
 
 
-def clip_inputs(demo: Demo, before: int) -> list[dict[str, Any]]:
-    lines = (demo.directory / "inputs.jsonl").read_text().splitlines()
+def clip_inputs(headless_session: HeadlessSession, before: int) -> list[dict[str, Any]]:
+    lines = (headless_session.directory / "inputs.jsonl").read_text().splitlines()
     return [json.loads(line) for line in lines[before:]]
 
 
@@ -2679,14 +2936,19 @@ def caption_differs(patch: bytes, other: bytes) -> bool:
 
 
 def check_clip_captions(
-    demo: Demo, clip: Path, before: int, *, pointer: str | None, keys: bool
+    headless_session: HeadlessSession,
+    clip: Path,
+    before: int,
+    *,
+    pointer: str | None,
+    keys: bool,
 ) -> list[tuple[object, ...]]:
     """Check each input's caption, and return the clip's log without timestamps."""
-    events = clip_inputs(demo, before)
+    events = clip_inputs(headless_session, before)
     if pointer is not None or keys:
         timestamp = re.search(
             r"\.ready\((\d+), (\d+), (\d+)\)",
-            (demo.directory / "recorder.log").read_text(),
+            (headless_session.directory / "recorder.log").read_text(),
         )
         assert timestamp is not None
         high, low, nanos = map(int, timestamp.groups())
@@ -2732,7 +2994,7 @@ def check_clip_captions(
 # R-LOG-4
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "demo,pointer,keys",
+    "headless_session,pointer,keys",
     [
         (True, None, False),
         ("captions-keys", None, True),
@@ -2740,25 +3002,27 @@ def check_clip_captions(
         ("captions-modifiers", "modifiers", False),
         ("captions-all", "all", True),
     ],
-    indirect=["demo"],
+    indirect=["headless_session"],
 )
 def test_startup_clip_captions_selected_inputs(
-    demo: Demo, tmp_path: Path, pointer: str | None, keys: bool
+    headless_session: HeadlessSession, tmp_path: Path, pointer: str | None, keys: bool
 ) -> None:
-    assert demo.clip is not None
-    wait_for_demo_frame(demo, tmp_path / "before.png")
-    exercise_caption_clip(demo)
-    cli(demo.directory, "record-stop")
-    check_clip_captions(demo, demo.clip, 0, pointer=pointer, keys=keys)
+    assert headless_session.clip is not None
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
+    exercise_caption_clip(headless_session)
+    cli(headless_session.directory, "record-stop")
+    check_clip_captions(
+        headless_session, headless_session.clip, 0, pointer=pointer, keys=keys
+    )
 
 
 # R-LOG-4, R-LOG-5
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_for_demo_frame(demo, tmp_path / "before.png")
+    wait_for_demo_app_frame(headless_session, tmp_path / "before.png")
     logged: list[list[tuple[object, ...]]] = []
     cases: list[tuple[list[str], str | None, bool]] = [
         ([], None, False),
@@ -2772,12 +3036,14 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     ]
     for index, (options, pointer, keys) in enumerate(cases):
         clip = tmp_path / f"clip-{index}.mp4"
-        before = len(clip_inputs(demo, 0))
-        cli(demo.directory, "record-start", *options, str(clip))
-        exercise_caption_clip(demo)
-        cli(demo.directory, "record-stop")
+        before = len(clip_inputs(headless_session, 0))
+        cli(headless_session.directory, "record-start", *options, str(clip))
+        exercise_caption_clip(headless_session)
+        cli(headless_session.directory, "record-stop")
         logged.append(
-            check_clip_captions(demo, clip, before, pointer=pointer, keys=keys)
+            check_clip_captions(
+                headless_session, clip, before, pointer=pointer, keys=keys
+            )
         )
     assert len(logged[0]) == 7
     assert all(entries == logged[0] for entries in logged)
@@ -2785,7 +3051,7 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     # Compaction treats an input as activity whether or not its clip captions it.
     clip = tmp_path / "compact.mp4"
     cli(
-        demo.directory,
+        headless_session.directory,
         "record-start",
         "--console",
         "--compact",
@@ -2794,15 +3060,15 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
         str(clip),
     )
     time.sleep(4)
-    cli(demo.directory, "move", "320", "320", "--move-duration", "0.6")
+    cli(headless_session.directory, "move", "320", "320", "--move-duration", "0.6")
     time.sleep(2)
-    summary = json.loads(cli(demo.directory, "record-stop").stdout)
+    summary = json.loads(cli(headless_session.directory, "record-stop").stdout)
     assert 3.5 <= summary["duration_seconds"] < 6
     assert summary["width"] == 1920
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 @pytest.mark.parametrize(
     "field,choices",
     [
@@ -2811,15 +3077,15 @@ def test_later_clips_caption_selected_inputs_and_keep_the_input_log(
     ],
 )
 def test_runner_rejects_invalid_caption_mode(
-    demo: Demo, tmp_path: Path, field: str, choices: str
+    headless_session: HeadlessSession, tmp_path: Path, field: str, choices: str
 ) -> None:
     destination = tmp_path / "clip.mp4"
     for value in (True, "mouse", ["all"]):
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(demo.runtime_dir / "command.sock"))
+            connection.connect(str(headless_session.runtime_dir / "command.sock"))
             request = {
                 "command": "record-start",
-                "session_directory": str(demo.directory),
+                "session_directory": str(headless_session.directory),
                 "clip_destination": str(destination),
                 field: value,
             }
@@ -2830,39 +3096,56 @@ def test_runner_rejects_invalid_caption_mode(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
-    log = demo.directory / "app.log"
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_demo_app_word_selection_and_text_menu(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    log = headless_session.directory / "app.log"
     wait_until(lambda: "Demo app ready" in log.read_text())
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "alpha beta")
-    cli(demo.directory, "click", "80", "100", "--count", "2")
-    cli(demo.directory, "type", "café")
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "type", "alpha beta")
+    cli(headless_session.directory, "click", "80", "100", "--count", "2")
+    cli(headless_session.directory, "type", "café")
     wait_until(lambda: "Text: café beta\n" in log.read_text())
-    cli(demo.directory, "click", "80", "100", "--button", "right")
-    cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "menu.png"))
+    cli(headless_session.directory, "click", "80", "100", "--button", "right")
+    cli(
+        headless_session.directory,
+        "screenshot",
+        "--delay",
+        "0.2",
+        str(tmp_path / "menu.png"),
+    )
     # GTK's entry menu opens at the pointer; Select All is below Delete.
-    cli(demo.directory, "click", "120", "265")
-    cli(demo.directory, "key", "BackSpace")
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "click", "120", "265")
+    cli(headless_session.directory, "key", "BackSpace")
+    cli(headless_session.directory, "key", "Return")
     wait_until(lambda: "Entered: \n" in log.read_text())
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
-    log = demo.directory / "app.log"
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_demo_app_slider_scroll_and_reset(headless_session: HeadlessSession) -> None:
+    log = headless_session.directory / "app.log"
     wait_until(lambda: "Demo app ready" in log.read_text())
-    cli(demo.directory, "click", "54", "266")
+    cli(headless_session.directory, "click", "54", "266")
     wait_until(lambda: "Option: True" in log.read_text())
-    cli(demo.directory, "drag", "147", "382", "350", "382", "--duration", "0.4")
+    cli(
+        headless_session.directory,
+        "drag",
+        "147",
+        "382",
+        "350",
+        "382",
+        "--duration",
+        "0.4",
+    )
 
     def value() -> int:
         return int(re.findall(r"Value: (\d+)", log.read_text())[-1])
 
     wait_until(lambda: "Value:" in log.read_text() and value() > 70)
     before = value()
-    cli(demo.directory, "key", "Right")
+    cli(headless_session.directory, "key", "Right")
     wait_until(lambda: value() == before + 1)
 
     def position() -> tuple[int, int]:
@@ -2873,42 +3156,74 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
         return int(x), int(y)
 
     for direction in ["down", "right"]:
-        cli(demo.directory, "scroll", "700", "250", direction, "--ticks", "3")
+        cli(
+            headless_session.directory,
+            "scroll",
+            "700",
+            "250",
+            direction,
+            "--ticks",
+            "3",
+        )
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
     for direction in ["up", "left"]:
-        cli(demo.directory, "scroll", "700", "250", direction, "--ticks", "8")
+        cli(
+            headless_session.directory,
+            "scroll",
+            "700",
+            "250",
+            direction,
+            "--ticks",
+            "8",
+        )
     wait_until(lambda: position() == (0, 0))
     # GTK can report zero during overshoot; move far enough back into the content.
     for direction in ["down", "right"]:
-        cli(demo.directory, "scroll", "700", "250", direction, "--ticks", "3")
+        cli(
+            headless_session.directory,
+            "scroll",
+            "700",
+            "250",
+            direction,
+            "--ticks",
+            "3",
+        )
     wait_until(lambda: all(coordinate > 0 for coordinate in position()))
-    cli(demo.directory, "click", "120", "100")
+    cli(headless_session.directory, "click", "120", "100")
     # Submitting a long result must not push the neighboring Reset offscreen.
     text = "W" * 150
-    cli(demo.directory, "type", "--interval", "0", text)
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "type", "--interval", "0", text)
+    cli(headless_session.directory, "key", "Return")
     wait_until(lambda: f"Entered: {text}\n" in log.read_text())
-    cli(demo.directory, "click", "700", "513")
+    cli(headless_session.directory, "click", "700", "513")
     wait_until(lambda: "Reset\n" in log.read_text())
     assert value() == 25
     assert position() == (0, 0)
     assert "Option: False\n" in log.read_text()
     assert "Text: \n" in log.read_text()
     # Reset returns focus to the entry, so the next keyboard-only action works.
-    cli(demo.directory, "type", "fresh")
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "type", "fresh")
+    cli(headless_session.directory, "key", "Return")
     wait_until(lambda: "Entered: fresh\n" in log.read_text())
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
-    log = demo.directory / "app.log"
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_demo_app_hover_tip_and_space_toggle(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    log = headless_session.directory / "app.log"
     wait_until(lambda: "Demo app ready" in log.read_text())
-    cli(demo.directory, "move", "1100", "600")
-    cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
-    cli(demo.directory, "move", "150", "266")
-    cli(demo.directory, "screenshot", "--delay", "1", str(tmp_path / "tip.png"))
+    cli(headless_session.directory, "move", "1100", "600")
+    cli(headless_session.directory, "screenshot", str(tmp_path / "before.png"))
+    cli(headless_session.directory, "move", "150", "266")
+    cli(
+        headless_session.directory,
+        "screenshot",
+        "--delay",
+        "1",
+        str(tmp_path / "tip.png"),
+    )
     with (
         Image.open(tmp_path / "before.png") as before,
         Image.open(tmp_path / "tip.png") as after,
@@ -2916,9 +3231,9 @@ def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
         # The tooltip appears below the option, outside the checkbox's hover styling.
         region = (20, 290, 480, 335)
         assert ImageChops.difference(before.crop(region), after.crop(region)).getbbox()
-    cli(demo.directory, "click", "54", "266")
+    cli(headless_session.directory, "click", "54", "266")
     wait_until(lambda: "Option: True\n" in log.read_text())
-    cli(demo.directory, "key", "Space")
+    cli(headless_session.directory, "key", "Space")
     wait_until(lambda: "Option: False\n" in log.read_text())
 
 
@@ -2991,13 +3306,20 @@ def test_x11_failed_app_startup_cleans_up(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["x11"], indirect=True)
-def test_x11_unicode_mapping_limit_and_reuse(demo: Demo) -> None:
-    log = demo.directory / "app.log"
-    cli(demo.directory, "click", "120", "100")
+@pytest.mark.parametrize("headless_session", ["x11"], indirect=True)
+def test_x11_unicode_mapping_limit_and_reuse(headless_session: HeadlessSession) -> None:
+    log = headless_session.directory / "app.log"
+    cli(headless_session.directory, "click", "120", "100")
     too_many = "".join(chr(0x4E00 + index) for index in range(129))
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "type", "--interval", "0", too_many],
+        [
+            "framewisp",
+            str(headless_session.directory),
+            "type",
+            "--interval",
+            "0",
+            too_many,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -3007,14 +3329,14 @@ def test_x11_unicode_mapping_limit_and_reuse(demo: Demo) -> None:
     assert "128 distinct" in result.stderr
     assert "Text:" not in log.read_text()
     for text in [too_many[:128], too_many[:3], too_many[3:6]]:
-        cli(demo.directory, "key", "Ctrl+a")
-        cli(demo.directory, "type", "--interval", "0", text)
-        cli(demo.directory, "key", "Return")
+        cli(headless_session.directory, "key", "Ctrl+a")
+        cli(headless_session.directory, "type", "--interval", "0", text)
+        cli(headless_session.directory, "key", "Return")
         wait_until(lambda: f"Entered: {text}\n" in log.read_text())
 
     before = log.read_text()
     rejected = subprocess.run(
-        ["framewisp", str(demo.directory), "type", "é"],
+        ["framewisp", str(headless_session.directory), "type", "é"],
         capture_output=True,
         text=True,
         check=False,
@@ -3026,32 +3348,34 @@ def test_x11_unicode_mapping_limit_and_reuse(demo: Demo) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["x11"], indirect=True)
-def test_x11_busy_app_keeps_queued_unicode(demo: Demo) -> None:
-    metadata = json.loads((demo.directory / "session.json").read_text())
+@pytest.mark.parametrize("headless_session", ["x11"], indirect=True)
+def test_x11_busy_app_keeps_queued_unicode(headless_session: HeadlessSession) -> None:
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     app_pid = metadata["processes"]["app"]
-    cli(demo.directory, "click", "120", "100")
+    cli(headless_session.directory, "click", "120", "100")
     os.kill(app_pid, signal.SIGSTOP)
     try:
-        cli(demo.directory, "type", "é", "--interval", "0")
-        cli(demo.directory, "type", "中", "--interval", "0")
+        cli(headless_session.directory, "type", "é", "--interval", "0")
+        cli(headless_session.directory, "type", "中", "--interval", "0")
     finally:
         os.kill(app_pid, signal.SIGCONT)
-    cli(demo.directory, "key", "Return")
-    wait_until(lambda: "Entered: é中\n" in (demo.directory / "app.log").read_text())
+    cli(headless_session.directory, "key", "Return")
+    wait_until(
+        lambda: "Entered: é中\n" in (headless_session.directory / "app.log").read_text()
+    )
 
 
 def input_request(
-    demo: Demo, action: str, parameters: dict[str, object]
+    headless_session: HeadlessSession, action: str, parameters: dict[str, object]
 ) -> socket.socket:
     connection = socket.socket(socket.AF_UNIX)
     connection.settimeout(5)
-    connection.connect(str(demo.runtime_dir / "command.sock"))
+    connection.connect(str(headless_session.runtime_dir / "command.sock"))
     connection.sendall(
         (
             json.dumps(
                 {
-                    "session_directory": str(demo.directory),
+                    "session_directory": str(headless_session.directory),
                     "command": action,
                     "parameters": parameters,
                 }
@@ -3063,19 +3387,21 @@ def input_request(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> None:
-    wait_for_input_probe_window(demo)
-    cli(demo.directory, "move", "100", "100", "--move-duration", "0")
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
+def test_cancel_approach_never_clicks_and_keeps_worker_available(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_for_input_probe_window(headless_session)
+    cli(headless_session.directory, "move", "100", "100", "--move-duration", "0")
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 100
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
-    before = len(input_events(demo))
+    before = len(input_events(headless_session))
     with input_request(
-        demo,
+        headless_session,
         "click",
         {
             "x": 500,
@@ -3089,33 +3415,37 @@ def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> 
         wait_until(
             lambda: any(
                 event["event"] == "motion" and float(event["x"]) >= 200
-                for event in input_events(demo)[before:]
+                for event in input_events(headless_session)[before:]
             )
         )
-        cli(demo.directory, "status")
+        cli(headless_session.directory, "status")
     # Drain the cancelled action before choosing the last received position.
-    cli(demo.directory, "key", "q")
+    cli(headless_session.directory, "key", "q")
     wait_until(
         lambda: any(
             event["event"] == "key-release" and event["key"] == "q"
-            for event in input_events(demo)[before:]
+            for event in input_events(headless_session)[before:]
         )
     )
     stopped = [
-        event for event in input_events(demo)[before:] if event["event"] == "motion"
+        event
+        for event in input_events(headless_session)[before:]
+        if event["event"] == "motion"
     ][-1]
-    resumed = len(input_events(demo))
-    cli(demo.directory, "move", "500", "300")
+    resumed = len(input_events(headless_session))
+    cli(headless_session.directory, "move", "500", "300")
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 500 and not event["shift"]
-            for event in input_events(demo)[resumed:]
+            for event in input_events(headless_session)[resumed:]
         )
     )
-    events = input_events(demo)[before:]
+    events = input_events(headless_session)[before:]
     assert not any(event["event"] == "press" for event in events)
     motions = [
-        event for event in input_events(demo)[resumed:] if event["event"] == "motion"
+        event
+        for event in input_events(headless_session)[resumed:]
+        if event["event"] == "motion"
     ]
     assert len(motions) >= 3
     for event in motions:
@@ -3125,47 +3455,65 @@ def test_cancel_approach_never_clicks_and_keeps_worker_available(demo: Demo) -> 
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize("action", ["click", "drag"])
 def test_unchanged_pointer_position_adds_no_animation_delay(
-    demo: Demo, action: str
+    headless_session: HeadlessSession, action: str
 ) -> None:
-    wait_for_input_probe_window(demo)
-    cli(demo.directory, "move", "500", "300", "--move-duration", "0")
+    wait_for_input_probe_window(headless_session)
+    cli(headless_session.directory, "move", "500", "300", "--move-duration", "0")
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 500
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
     # Even after an external warp, an unchanged tracked target must be sent.
-    response = sway_request(demo.runtime_dir, 0, b"seat seat0 cursor set 100 100")
+    response = sway_request(
+        headless_session.runtime_dir, 0, b"seat seat0 cursor set 100 100"
+    )
     assert response[0]["success"]
     wait_until(
         lambda: any(
             event["event"] == "motion" and event["x"] == 100
-            for event in input_events(demo)
+            for event in input_events(headless_session)
         )
     )
     arguments = ["500", "300", "--move-duration", "3"]
     if action == "drag":
         arguments += ["550", "325", "--duration", "0"]
     started = time.monotonic()
-    cli(demo.directory, action, *arguments)
+    cli(headless_session.directory, action, *arguments)
     assert time.monotonic() - started < 2
-    wait_until(lambda: any(event["event"] == "press" for event in input_events(demo)))
-    press = next(event for event in input_events(demo) if event["event"] == "press")
+    wait_until(
+        lambda: any(
+            event["event"] == "press" for event in input_events(headless_session)
+        )
+    )
+    press = next(
+        event for event in input_events(headless_session) if event["event"] == "press"
+    )
     assert (press["x"], press["y"]) == (500, 300)
 
 
 # R-INPUT-5
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
-def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "screenshot", str(demo.directory / "ready.png"))
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
+def test_concurrent_gestures_and_disconnect_release_input(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(
+        headless_session.directory,
+        "screenshot",
+        str(headless_session.directory / "ready.png"),
+    )
     with input_request(
-        demo,
+        headless_session,
         "drag",
         {
             "x1": 100,
@@ -3178,21 +3526,28 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
         },
     ) as drag:
         wait_until(
-            lambda: any(event["event"] == "press" for event in input_events(demo))
+            lambda: any(
+                event["event"] == "press" for event in input_events(headless_session)
+            )
         )
         with input_request(
-            demo,
+            headless_session,
             "click",
             {"x": 600, "y": 100, "button": "right", "count": 1, "modifier": []},
         ) as click:
             started = time.monotonic()
             assert (
-                json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+                json.loads(cli(headless_session.directory, "status").stdout)["status"]
+                == "running"
             )
             assert time.monotonic() - started < 2
             assert (
                 len(
-                    [event for event in input_events(demo) if event["event"] == "press"]
+                    [
+                        event
+                        for event in input_events(headless_session)
+                        if event["event"] == "press"
+                    ]
                 )
                 == 1
             )
@@ -3201,12 +3556,18 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
             assert response["error"] is None
         wait_until(
             lambda: len(
-                [event for event in input_events(demo) if event["event"] == "release"]
+                [
+                    event
+                    for event in input_events(headless_session)
+                    if event["event"] == "release"
+                ]
             )
             == 2
         )
     buttons = [
-        event for event in input_events(demo) if event["event"] in {"press", "release"}
+        event
+        for event in input_events(headless_session)
+        if event["event"] in {"press", "release"}
     ]
     assert [event["event"] for event in buttons] == [
         "press",
@@ -3219,7 +3580,9 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
     assert not buttons[2]["ctrl"] and not buttons[2]["shift"]
     logged = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
         ("drag", "start"),
@@ -3234,7 +3597,7 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize(
     "text",
     [
@@ -3244,28 +3607,48 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
         + "".join(chr(0x4E00 + index) for index in range(128)),
     ],
 )
-def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "click", "100", "425")
+def test_cancel_paced_typing_and_stop(
+    headless_session: HeadlessSession, text: str
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "click", "100", "425")
     with subprocess.Popen(
-        ["framewisp", str(demo.directory), "type", text, "--interval", "30"],
+        [
+            "framewisp",
+            str(headless_session.directory),
+            "type",
+            text,
+            "--interval",
+            "30",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     ) as typing:
         wait_until(
-            lambda: any(event.get("text") == text[0] for event in input_events(demo))
+            lambda: any(
+                event.get("text") == text[0] for event in input_events(headless_session)
+            )
         )
         started = time.monotonic()
         typing.terminate()
         typing.wait(timeout=2)
-        cli(demo.directory, "key", "b")
+        cli(headless_session.directory, "key", "b")
         assert time.monotonic() - started < 2
     wait_until(
-        lambda: any(event.get("text") == text[0] + "b" for event in input_events(demo))
+        lambda: any(
+            event.get("text") == text[0] + "b"
+            for event in input_events(headless_session)
+        )
     )
     logged = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert all("text" not in event["parameters"] for event in logged)
     assert all(
@@ -3275,7 +3658,7 @@ def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
     )
     assert any("cancelled" in (event["error"] or "") for event in logged)
     with input_request(
-        demo,
+        headless_session,
         "drag",
         {
             "x1": 100,
@@ -3290,21 +3673,27 @@ def test_cancel_paced_typing_and_stop(demo: Demo, text: str) -> None:
         wait_until(
             lambda: any(
                 event["event"] == "press" and event["ctrl"]
-                for event in input_events(demo)
+                for event in input_events(headless_session)
             )
         )
         started = time.monotonic()
-        cli(demo.directory, "stop")
+        cli(headless_session.directory, "stop")
         assert time.monotonic() - started < 3
         assert "cancelled" in json.loads(drag.recv(4096))["error"]
-    assert demo.process.wait(timeout=2) == 0
+    assert headless_session.process.wait(timeout=2) == 0
 
 
 # R-INPUT-3, R-INPUT-4
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_reject_invalid_input_without_poisoning_connection(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_reject_invalid_input_without_poisoning_connection(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     invalid: list[tuple[str, dict[str, object]]] = [
         ("key", {"chord": "ctrl+unsupported"}),
         (
@@ -3336,20 +3725,34 @@ def test_reject_invalid_input_without_poisoning_connection(demo: Demo) -> None:
         ),
     ]
     for action, parameters in invalid:
-        with input_request(demo, action, parameters) as connection:
+        with input_request(headless_session, action, parameters) as connection:
             assert json.loads(connection.recv(4096))["error"] is not None
-    cli(demo.directory, "key", "a")
-    wait_until(lambda: any(event.get("key") == "a" for event in input_events(demo)))
-    assert not any(event.get("key") == "Control_L" for event in input_events(demo))
+    cli(headless_session.directory, "key", "a")
+    wait_until(
+        lambda: any(event.get("key") == "a" for event in input_events(headless_session))
+    )
+    assert not any(
+        event.get("key") == "Control_L" for event in input_events(headless_session)
+    )
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_lost_vnc_connection_does_not_replay_input(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "screenshot", str(demo.directory / "ready.png"))
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_lost_vnc_connection_does_not_replay_input(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(
+        headless_session.directory,
+        "screenshot",
+        str(headless_session.directory / "ready.png"),
+    )
     with input_request(
-        demo,
+        headless_session,
         "drag",
         {
             "x1": 100,
@@ -3362,37 +3765,55 @@ def test_lost_vnc_connection_does_not_replay_input(demo: Demo) -> None:
         },
     ) as drag:
         wait_until(
-            lambda: any(event["event"] == "press" for event in input_events(demo))
+            lambda: any(
+                event["event"] == "press" for event in input_events(headless_session)
+            )
         )
-        with input_request(demo, "key", {"chord": "z"}) as queued:
-            metadata = json.loads((demo.directory / "session.json").read_text())
+        with input_request(headless_session, "key", {"chord": "z"}) as queued:
+            metadata = json.loads(
+                (headless_session.directory / "session.json").read_text()
+            )
             os.kill(metadata["processes"]["wayvnc"], signal.SIGTERM)
-            demo.process.wait(timeout=5)
+            headless_session.process.wait(timeout=5)
             assert json.loads(drag.recv(4096))["error"] is not None
             assert json.loads(queued.recv(4096))["error"] is not None
-    assert not any(event.get("key") == "z" for event in input_events(demo))
-    assert not (demo.directory / "session.json").exists()
+    assert not any(event.get("key") == "z" for event in input_events(headless_session))
+    assert not (headless_session.directory / "session.json").exists()
 
 
 # R-INPUT-1
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["qt", "x11-qt"], indirect=True)
-def test_qt_menu_survives_between_commands(demo: Demo, tmp_path: Path) -> None:
-    log = demo.directory / "app.log"
+@pytest.mark.parametrize("headless_session", ["qt", "x11-qt"], indirect=True)
+def test_qt_menu_survives_between_commands(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    log = headless_session.directory / "app.log"
     wait_until(lambda: "Menu probe ready" in log.read_text())
     # The QML component can finish before the compositor maps its window.
-    cli(demo.directory, "screenshot", "--delay", "0.3", str(tmp_path / "ready.png"))
-    cli(demo.directory, "click", "200", "150", "--button", "right")
+    cli(
+        headless_session.directory,
+        "screenshot",
+        "--delay",
+        "0.3",
+        str(tmp_path / "ready.png"),
+    )
+    cli(headless_session.directory, "click", "200", "150", "--button", "right")
     wait_until(lambda: "Menu opened" in log.read_text())
-    cli(demo.directory, "screenshot", "--delay", "0.3", str(tmp_path / "menu.png"))
+    cli(
+        headless_session.directory,
+        "screenshot",
+        "--delay",
+        "0.3",
+        str(tmp_path / "menu.png"),
+    )
     assert "Menu closed" not in log.read_text()
-    cli(demo.directory, "key", "Down")
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "key", "Down")
+    cli(headless_session.directory, "key", "Return")
     wait_until(lambda: "Item chosen" in log.read_text())
 
 
-def inspect(target: Demo | Path, *arguments: str) -> dict[str, Any]:
-    directory = target.directory if isinstance(target, Demo) else target
+def inspect(target: HeadlessSession | Path, *arguments: str) -> dict[str, Any]:
+    directory = target.directory if isinstance(target, HeadlessSession) else target
     result = subprocess.run(
         ["framewisp", str(directory), "inspect", "--json", *arguments],
         capture_output=True,
@@ -3405,7 +3826,7 @@ def inspect(target: Demo | Path, *arguments: str) -> dict[str, Any]:
     return observation
 
 
-def wait_for_control(target: Demo | Path, name: str) -> None:
+def wait_for_control(target: HeadlessSession | Path, name: str) -> None:
     # GTK and Qt can finish exporting the tree after the app logs that it is ready.
     # Until then, inspect correctly reports "unsupported".
     observation: dict[str, Any] = {}
@@ -3430,21 +3851,27 @@ def wait_for_control(target: Demo | Path, name: str) -> None:
 
 
 @pytest.fixture
-def exported_tree(demo: Demo) -> None:
+def exported_tree(headless_session: HeadlessSession) -> None:
     """Wait until the demo app has exported its accessibility tree.
 
     Use this in every test that inspects the tree or runs checks.
     """
-    assert demo.control is not None, "Name a control for this app in the demo fixture"
-    wait_for_control(demo, demo.control)
+    assert (
+        headless_session.control is not None
+    ), "Name a control for this app in the headless_session fixture"
+    wait_for_control(headless_session, headless_session.control)
 
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
-    button = inspect(demo, "--role", "button", "--name", "Apply text")
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_inspect_reads_demo_app_without_screenshots(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
+    button = inspect(headless_session, "--role", "button", "--name", "Apply text")
     assert button["status"] == "ok", button
     assert button["match_count"] == 1
     nodes = button["matches"]
@@ -3453,27 +3880,29 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
     assert "click" in nodes[0]["actions"]
     assert nodes[0]["bounds"]["coordinate_space"] == "window"
     assert nodes[0]["bounds"]["width"] == 400
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "type", "--interval", "0", "Inspected text")
-    cli(demo.directory, "click", "120", "170")
-    entry = inspect(demo, "--role", "text box", "--text", "Inspected text")
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "type", "--interval", "0", "Inspected text")
+    cli(headless_session.directory, "click", "120", "170")
+    entry = inspect(headless_session, "--role", "text box", "--text", "Inspected text")
     assert entry["status"] == "ok", entry
     assert entry["match_count"] == 1
-    label = inspect(demo, "--role", "label", "--text", "Applied: Inspected text")
+    label = inspect(
+        headless_session, "--role", "label", "--text", "Applied: Inspected text"
+    )
     assert label["status"] == "ok", label
     assert label["match_count"] == 1
-    cli(demo.directory, "click", "54", "266")
-    toggle = inspect(demo, "--role", "checkbox")
+    cli(headless_session.directory, "click", "54", "266")
+    toggle = inspect(headless_session, "--role", "checkbox")
     toggles = toggle["matches"]
     assert isinstance(toggles, list)
     assert "checked" in toggles[0]["states"]
-    slider = inspect(demo, "--role", "slider")
+    slider = inspect(headless_session, "--role", "slider")
     sliders = slider["matches"]
     assert isinstance(sliders, list)
     assert sliders[0]["value"] == 25
     # A fresh request rereads the app; observation IDs are never reusable selectors.
-    cli(demo.directory, "click", "700", "513")
-    reset = inspect(demo, "--text", "Applied: Inspected text")
+    cli(headless_session.directory, "click", "700", "513")
+    reset = inspect(headless_session, "--text", "Applied: Inspected text")
     assert reset["status"] == "ok", reset
     assert reset["match_count"] == 0
     assert reset["observation_id"] != label["observation_id"]
@@ -3481,10 +3910,14 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
+def test_inspect_bounds_and_duplicate_matches(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
     # GTK exposes both the button and its child label with the same name.
-    duplicates = inspect(demo, "--name", "Apply text")
+    duplicates = inspect(headless_session, "--name", "Apply text")
     assert duplicates["status"] == "ok", duplicates
     assert duplicates["match_count"] == 2
     for args, reason in (
@@ -3492,20 +3925,21 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
         (("--max-depth", "1"), "max-depth"),
         (("--max-nodes", "2"), "max-nodes"),
     ):
-        bounded = inspect(demo, *args)
+        bounded = inspect(headless_session, *args)
         assert bounded["status"] == "partial", bounded
         assert reason in bounded["reasons"]
         assert any(
             f"--{reason}" in hint and "maximum" in hint for hint in bounded["hints"]
         )
-    missing = inspect(demo, "--name", "No such widget")
+    missing = inspect(headless_session, "--name", "No such widget")
     assert missing["status"] == "ok", missing
     assert missing["matches"] == []
-    cli(demo.directory, "type", "--interval", "0", "z" * 1100)
+    cli(headless_session.directory, "type", "--interval", "0", "z" * 1100)
     wait_until(
-        lambda: "Text: " + "z" * 1100 + "\n" in (demo.directory / "app.log").read_text()
+        lambda: "Text: " + "z" * 1100 + "\n"
+        in (headless_session.directory / "app.log").read_text()
     )
-    truncated = inspect(demo, "--role", "text box")
+    truncated = inspect(headless_session, "--role", "text box")
     assert truncated["status"] == "partial", truncated
     assert "text-limit" in truncated["reasons"]
     nodes: list[dict[str, Any]] = truncated["matches"]
@@ -3518,43 +3952,55 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
 # R-INSPECT-5, R-INSPECT-6
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
-    assert inspect(demo, "--name", "Apply text")["status"] == "ok"
-    metadata = json.loads((demo.directory / "session.json").read_text())
+def test_inspect_unresponsive_app_does_not_block_runner(
+    headless_session: HeadlessSession,
+) -> None:
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
+    assert inspect(headless_session, "--name", "Apply text")["status"] == "ok"
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     pid = metadata["processes"]["app"]
     os.kill(pid, signal.SIGSTOP)
     try:
         started = time.monotonic()
-        timed_out = inspect(demo, "--timeout", "0.2")
+        timed_out = inspect(headless_session, "--timeout", "0.2")
         assert timed_out["status"] == "timeout", timed_out
         assert "app-unresponsive" in timed_out["reasons"], timed_out
         assert timed_out["longest_call_ms"] >= 160
         assert timed_out["errors"]
         assert time.monotonic() - started < 2
-        assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+        assert (
+            json.loads(cli(headless_session.directory, "status").stdout)["status"]
+            == "running"
+        )
     finally:
         os.kill(pid, signal.SIGCONT)
-    assert inspect(demo, "--name", "Apply text")["status"] == "ok"
+    assert inspect(headless_session, "--name", "Apply text")["status"] == "ok"
 
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["qt", "x11-qt"], indirect=True)
-def test_inspect_qt_controls_and_popup_gap(demo: Demo) -> None:
-    wait_until(lambda: "Menu probe ready" in (demo.directory / "app.log").read_text())
-    cli(demo.directory, "click", "--button", "right", "500", "300")
-    wait_until(lambda: "Menu opened" in (demo.directory / "app.log").read_text())
-    item = inspect(demo, "--name", "Inspection button")
+@pytest.mark.parametrize("headless_session", ["qt", "x11-qt"], indirect=True)
+def test_inspect_qt_controls_and_popup_gap(headless_session: HeadlessSession) -> None:
+    wait_until(
+        lambda: "Menu probe ready"
+        in (headless_session.directory / "app.log").read_text()
+    )
+    cli(headless_session.directory, "click", "--button", "right", "500", "300")
+    wait_until(
+        lambda: "Menu opened" in (headless_session.directory / "app.log").read_text()
+    )
+    item = inspect(headless_session, "--name", "Inspection button")
     assert item["status"] == "ok", item
     assert item["match_count"] == 1
     # The tested Qt Quick Popup.Window is omitted from the accessible tree.
-    popup = inspect(demo, "--name", "Choose this item")
+    popup = inspect(headless_session, "--name", "Choose this item")
     assert popup["status"] == "ok", popup
     assert popup["match_count"] == 0
-    cli(demo.directory, "key", "Escape")
-    cli(demo.directory, "click", "--button", "right", "500", "300")
-    again = inspect(demo, "--name", "Inspection button")
+    cli(headless_session.directory, "key", "Escape")
+    cli(headless_session.directory, "click", "--button", "right", "500", "300")
+    again = inspect(headless_session, "--name", "Inspection button")
     assert again["status"] == "ok", again
     assert again["observation_id"] != item["observation_id"]
 
@@ -3563,9 +4009,9 @@ def test_inspect_qt_controls_and_popup_gap(demo: Demo) -> None:
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("app", ["framewisp-demo", "sleep"])
 def test_inspection_private_buses_and_unsupported_apps(
-    demo: Demo, tmp_path: Path, app: str
+    headless_session: HeadlessSession, tmp_path: Path, app: str
 ) -> None:
-    first = json.loads((demo.directory / "session.json").read_text())
+    first = json.loads((headless_session.directory / "session.json").read_text())
     second = tmp_path / "second"
     log = tmp_path / "second-runner.log"
     command = (
@@ -3607,7 +4053,12 @@ def test_inspection_private_buses_and_unsupported_apps(
                 cli(second, "inspect", "--json", "--text", "Second session only").stdout
             )
             assert result["match_count"] == 1
-            assert inspect(demo, "--text", "Second session only")["match_count"] == 0
+            assert (
+                inspect(headless_session, "--text", "Second session only")[
+                    "match_count"
+                ]
+                == 0
+            )
         else:
             result = subprocess.run(
                 ["framewisp", str(second), "inspect", "--json"],
@@ -3623,7 +4074,10 @@ def test_inspection_private_buses_and_unsupported_apps(
         for pid in metadata["processes"].values():
             assert not Path(f"/proc/{pid}").exists()
         assert (
-            inspect(demo, "--role", "button", "--name", "Apply text")["status"] == "ok"
+            inspect(headless_session, "--role", "button", "--name", "Apply text")[
+                "status"
+            ]
+            == "ok"
         )
     finally:
         if runner.poll() is None:
@@ -3633,10 +4087,20 @@ def test_inspection_private_buses_and_unsupported_apps(
 
 # R-CHECK-3
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
-    cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "ready.png"))
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_batch_cli_unicode_screenshot_and_logs(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
+    cli(
+        headless_session.directory,
+        "screenshot",
+        "--delay",
+        "0.2",
+        str(tmp_path / "ready.png"),
+    )
     plan = tmp_path / "batch.json"
     screenshot_path = tmp_path / "result.png"
     actions = [
@@ -3648,7 +4112,9 @@ def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> No
     plan.write_text(
         json.dumps({"steps": actions, "screenshot": {"path": str(screenshot_path)}})
     )
-    result = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    result = json.loads(
+        cli(headless_session.directory, "batch", "--file", str(plan)).stdout
+    )
     assert result["status"] == "completed"
     assert result["verified"] is None
     assert result["completed_steps"] == 4
@@ -3662,11 +4128,14 @@ def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> No
     with Image.open(screenshot_path) as image:
         assert image.size == (1280, 720)
     wait_until(
-        lambda: "Entered: HelloGUI é中A\n" in (demo.directory / "app.log").read_text()
+        lambda: "Entered: HelloGUI é中A\n"
+        in (headless_session.directory / "app.log").read_text()
     )
     logged = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
         ("click", "start"),
@@ -3687,9 +4156,11 @@ def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> No
 
 # R-BATCH-1
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_validates_later_steps_and_screenshot_before_input(demo: Demo) -> None:
-    before = (demo.directory / "inputs.jsonl").read_text()
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
+def test_batch_validates_later_steps_and_screenshot_before_input(
+    headless_session: HeadlessSession,
+) -> None:
+    before = (headless_session.directory / "inputs.jsonl").read_text()
     invalid: list[dict[str, object]] = [
         {
             "steps": [
@@ -3699,11 +4170,13 @@ def test_batch_validates_later_steps_and_screenshot_before_input(demo: Demo) -> 
         },
         {
             "steps": [{"action": "key", "chord": "a"}],
-            "screenshot": {"path": str(demo.directory / "session.json")},
+            "screenshot": {"path": str(headless_session.directory / "session.json")},
         },
         {
             "steps": [{"action": "key", "chord": "a"}],
-            "screenshot": {"path": str(demo.directory / "missing" / "image.png")},
+            "screenshot": {
+                "path": str(headless_session.directory / "missing" / "image.png")
+            },
         },
         {
             "steps": [
@@ -3713,22 +4186,24 @@ def test_batch_validates_later_steps_and_screenshot_before_input(demo: Demo) -> 
         },
     ]
     for parameters in invalid:
-        with input_request(demo, "batch", parameters) as connection:
+        with input_request(headless_session, "batch", parameters) as connection:
             assert json.loads(connection.recv(4096))["error"] is not None
-    assert (demo.directory / "inputs.jsonl").read_text() == before
-    cli(demo.directory, "key", "a")
+    assert (headless_session.directory / "inputs.jsonl").read_text() == before
+    cli(headless_session.directory, "key", "a")
 
 
 # R-BATCH-2
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_batch_no_interleaving_through_final_screenshot(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
-    cli(demo.directory, "click", "120", "100")
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
+    cli(headless_session.directory, "click", "120", "100")
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [
@@ -3739,19 +4214,25 @@ def test_batch_no_interleaving_through_final_screenshot(
         },
     ) as first:
         wait_until(
-            lambda: '"action": "type"' in (demo.directory / "inputs.jsonl").read_text()
+            lambda: '"action": "type"'
+            in (headless_session.directory / "inputs.jsonl").read_text()
         )
         with input_request(
-            demo, "batch", {"steps": [{"action": "type", "text": "c", "interval": 0}]}
+            headless_session,
+            "batch",
+            {"steps": [{"action": "type", "text": "c", "interval": 0}]},
         ) as second:
             assert (
-                json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+                json.loads(cli(headless_session.directory, "status").stdout)["status"]
+                == "running"
             )
             assert json.loads(first.recv(8192))["error"] is None
             assert json.loads(second.recv(8192))["error"] is None
     logged = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert [event["action"] for event in logged if event["event"] == "start"] == [
         "click",
@@ -3760,20 +4241,27 @@ def test_batch_no_interleaving_through_final_screenshot(
         "type",
     ]
     assert logged[-2]["time"] - logged[-3]["time"] >= 0.3
-    wait_until(lambda: "Entered: ab\n" in (demo.directory / "app.log").read_text())
+    wait_until(
+        lambda: "Entered: ab\n" in (headless_session.directory / "app.log").read_text()
+    )
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["x11"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["x11"], indirect=True)
 @pytest.mark.parametrize(
     "existing,first,second,failed", [(0, 129, 0, 1), (0, 64, 65, 2), (1, 64, 64, 2)]
 )
 def test_batch_checks_x11_capacity_before_input(
-    demo: Demo, tmp_path: Path, existing: int, first: int, second: int, failed: int
+    headless_session: HeadlessSession,
+    tmp_path: Path,
+    existing: int,
+    first: int,
+    second: int,
+    failed: int,
 ) -> None:
     if existing:
-        cli(demo.directory, "type", "é", "--interval", "0")
-    before = (demo.directory / "inputs.jsonl").read_text()
+        cli(headless_session.directory, "type", "é", "--interval", "0")
+    before = (headless_session.directory / "inputs.jsonl").read_text()
     plan = tmp_path / "batch.json"
     plan.write_text(
         json.dumps(
@@ -3797,7 +4285,7 @@ def test_batch_checks_x11_capacity_before_input(
         )
     )
     response = subprocess.run(
-        ["framewisp", str(demo.directory), "batch", "--file", str(plan)],
+        ["framewisp", str(headless_session.directory), "batch", "--file", str(plan)],
         capture_output=True,
         text=True,
         timeout=10,
@@ -3809,22 +4297,22 @@ def test_batch_checks_x11_capacity_before_input(
     assert result["failed_index"] == failed
     assert result["failed_phase"] == "validation"
     assert result["results"] == []
-    assert (demo.directory / "inputs.jsonl").read_text() == before
+    assert (headless_session.directory / "inputs.jsonl").read_text() == before
     assert "per session" in result["error"]
     assert result["artifacts"] == []
     assert not (tmp_path / "never.png").exists()
-    cli(demo.directory, "key", "b")
+    cli(headless_session.directory, "key", "b")
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_batch_screenshot_failure_keeps_completed_results(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     parent = tmp_path / "removed"
     parent.mkdir()
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [{"action": "key", "chord": "a"}],
@@ -3832,7 +4320,8 @@ def test_batch_screenshot_failure_keeps_completed_results(
         },
     ) as connection:
         wait_until(
-            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+            lambda: '"event": "end"'
+            in (headless_session.directory / "inputs.jsonl").read_text()
         )
         parent.rmdir()
         response = json.loads(connection.recv(8192))
@@ -3842,18 +4331,22 @@ def test_batch_screenshot_failure_keeps_completed_results(
     assert result["failed_index"] is None
     assert result["failed_phase"] == "screenshot"
     assert result["artifacts"] == []
-    cli(demo.directory, "key", "b")
+    cli(headless_session.directory, "key", "b")
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe", "x11-probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 def test_batch_disconnect_releases_gesture_and_skips_tail(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "screenshot", str(tmp_path / "ready.png"))
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [
@@ -3872,29 +4365,38 @@ def test_batch_disconnect_releases_gesture_and_skips_tail(
         },
     ) as batch:
         wait_until(
-            lambda: any(event["event"] == "press" for event in input_events(demo))
+            lambda: any(
+                event["event"] == "press" for event in input_events(headless_session)
+            )
         )
         batch.close()
-        cli(demo.directory, "click", "600", "100", "--button", "right")
+        cli(headless_session.directory, "click", "600", "100", "--button", "right")
     wait_until(
-        lambda: len([e for e in input_events(demo) if e["event"] == "release"]) == 2
+        lambda: len(
+            [e for e in input_events(headless_session) if e["event"] == "release"]
+        )
+        == 2
     )
-    presses = [e for e in input_events(demo) if e["event"] == "press"]
+    presses = [e for e in input_events(headless_session) if e["event"] == "press"]
     assert not presses[1]["ctrl"] and not presses[1]["shift"]
-    assert not any(e.get("key") == "z" for e in input_events(demo))
+    assert not any(e.get("key") == "z" for e in input_events(headless_session))
     assert not (tmp_path / "never.png").exists()
     logged = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert [e["action"] for e in logged if e["event"] == "start"] == ["drag", "click"]
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_stop_cancels_batch_screenshot_delay(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
+def test_stop_cancels_batch_screenshot_delay(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [{"action": "key", "chord": "a"}],
@@ -3902,10 +4404,11 @@ def test_stop_cancels_batch_screenshot_delay(demo: Demo, tmp_path: Path) -> None
         },
     ) as connection:
         wait_until(
-            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+            lambda: '"event": "end"'
+            in (headless_session.directory / "inputs.jsonl").read_text()
         )
         start = time.monotonic()
-        cli(demo.directory, "stop")
+        cli(headless_session.directory, "stop")
         assert time.monotonic() - start < 3
         result = json.loads(connection.recv(8192))["data"]
     assert result["completed_steps"] == 1
@@ -3915,24 +4418,31 @@ def test_stop_cancels_batch_screenshot_delay(demo: Demo, tmp_path: Path) -> None
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
+def test_disconnect_queued_batch_sends_no_input(
+    headless_session: HeadlessSession,
+) -> None:
     with input_request(
-        demo, "batch", {"steps": [{"action": "type", "text": "ab", "interval": 30}]}
+        headless_session,
+        "batch",
+        {"steps": [{"action": "type", "text": "ab", "interval": 30}]},
     ) as first:
         wait_until(
-            lambda: '"event": "start"' in (demo.directory / "inputs.jsonl").read_text()
+            lambda: '"event": "start"'
+            in (headless_session.directory / "inputs.jsonl").read_text()
         )
         with input_request(
-            demo, "batch", {"steps": [{"action": "key", "chord": "z"}]}
+            headless_session, "batch", {"steps": [{"action": "key", "chord": "z"}]}
         ) as queued:
-            cli(demo.directory, "status")
+            cli(headless_session.directory, "status")
             queued.close()
         first.close()
-        cli(demo.directory, "key", "c")
+        cli(headless_session.directory, "key", "c")
     logged = [
         json.loads(line)
-        for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert [
         event["parameters"].get("chord")
@@ -3942,15 +4452,17 @@ def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_disconnect_during_screenshot(demo: Demo, tmp_path: Path) -> None:
-    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
-    metadata = json.loads((demo.directory / "session.json").read_text())
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
+def test_batch_disconnect_during_screenshot(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    cli(headless_session.directory, "screenshot", str(tmp_path / "ready.png"))
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     sway_pid = metadata["processes"]["sway"]
     os.kill(sway_pid, signal.SIGSTOP)
     try:
         with input_request(
-            demo,
+            headless_session,
             "batch",
             {
                 "steps": [{"action": "type", "text": "", "interval": 0}],
@@ -3965,16 +4477,18 @@ def test_batch_disconnect_during_screenshot(demo: Demo, tmp_path: Path) -> None:
     finally:
         os.kill(sway_pid, signal.SIGCONT)
     assert not (tmp_path / "cancelled.png").exists()
-    cli(demo.directory, "key", "a")
+    cli(headless_session.directory, "key", "a")
 
 
 # R-REC-1
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_screenshot_does_not_replace_new_file(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
+def test_batch_screenshot_does_not_replace_new_file(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     screenshot_path = tmp_path / "result.png"
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [{"action": "type", "text": "", "interval": 0}],
@@ -3982,7 +4496,8 @@ def test_batch_screenshot_does_not_replace_new_file(demo: Demo, tmp_path: Path) 
         },
     ) as connection:
         wait_until(
-            lambda: '"event": "end"' in (demo.directory / "inputs.jsonl").read_text()
+            lambda: '"event": "end"'
+            in (headless_session.directory / "inputs.jsonl").read_text()
         )
         screenshot_path.write_bytes(b"another client's artifact")
         response = json.loads(connection.recv(8192))
@@ -3994,14 +4509,14 @@ def test_batch_screenshot_does_not_replace_new_file(demo: Demo, tmp_path: Path) 
 
 # R-REC-1, R-REC-21
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_batch_screenshot_rejects_active_clip_destination(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
-    cli(demo.directory, "record-start", str(clip))
+    cli(headless_session.directory, "record-start", str(clip))
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [{"action": "type", "text": "", "interval": 0}],
@@ -4010,13 +4525,13 @@ def test_batch_screenshot_rejects_active_clip_destination(
     ) as connection:
         response = json.loads(connection.recv(8192))
     assert "active recording" in response["error"]
-    cli(demo.directory, "record-stop")
+    cli(headless_session.directory, "record-stop")
     clip_frames(clip)
 
 
-def rejected_screenshot(demo: Demo, path: Path) -> str:
+def rejected_screenshot(headless_session: HeadlessSession, path: Path) -> str:
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "screenshot", str(path)],
+        ["framewisp", str(headless_session.directory), "screenshot", str(path)],
         capture_output=True,
         text=True,
         check=False,
@@ -4028,13 +4543,13 @@ def rejected_screenshot(demo: Demo, path: Path) -> str:
 
 # R-REC-21
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_batch_screenshot_yields_to_a_recording_started_during_the_batch(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [{"action": "type", "text": "", "interval": 0}],
@@ -4043,44 +4558,46 @@ def test_batch_screenshot_yields_to_a_recording_started_during_the_batch(
         },
     ) as connection:
         connection.settimeout(20)
-        cli(demo.directory, "record-start", str(clip))
+        cli(headless_session.directory, "record-start", str(clip))
         response = json.loads(connection.makefile().readline())
     assert response["data"]["failed_phase"] == "screenshot"
     assert "active recording" in response["error"]
     assert not clip.exists()
-    cli(demo.directory, "record-stop")
-    assert demo.process.poll() is None
+    cli(headless_session.directory, "record-stop")
+    assert headless_session.process.poll() is None
     clip_frames(clip)
 
 
 # R-REC-21
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, True], indirect=True)
-def test_screenshot_rejects_active_clip_destination(demo: Demo, tmp_path: Path) -> None:
-    clip = demo.clip or tmp_path / "clip.mp4"
-    if demo.clip is None:
-        cli(demo.directory, "record-start", str(clip))
+@pytest.mark.parametrize("headless_session", [None, True], indirect=True)
+def test_screenshot_rejects_active_clip_destination(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    clip = headless_session.clip or tmp_path / "clip.mp4"
+    if headless_session.clip is None:
+        cli(headless_session.directory, "record-start", str(clip))
     alias = tmp_path / "alias.mp4"
     alias.symlink_to(clip)
     for path in (clip, alias):
-        assert "active recording" in rejected_screenshot(demo, path)
+        assert "active recording" in rejected_screenshot(headless_session, path)
         assert not clip.exists()
-    cli(demo.directory, "record-stop")
-    assert demo.process.poll() is None
+    cli(headless_session.directory, "record-stop")
+    assert headless_session.process.poll() is None
     clip_frames(clip)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
+@pytest.mark.parametrize("headless_session", [True], indirect=True)
 def test_screenshot_during_a_recording_keeps_plain_outputs(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     existing = tmp_path / "existing.png"
     existing.write_bytes(b"replace me")
-    cli(demo.directory, "screenshot", str(existing))
+    cli(headless_session.directory, "screenshot", str(existing))
     assert existing.read_bytes().startswith(b"\x89PNG")
     piped = subprocess.run(
-        ["framewisp", str(demo.directory), "screenshot", "-"],
+        ["framewisp", str(headless_session.directory), "screenshot", "-"],
         capture_output=True,
         check=True,
         timeout=20,
@@ -4090,17 +4607,17 @@ def test_screenshot_during_a_recording_keeps_plain_outputs(
 
 # R-REC-1, R-REC-18
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_recording_keeps_file_created_before_recorder_opens(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
-    with recorder_before_first_frame(demo, clip) as (start, _):
+    with recorder_before_first_frame(headless_session, clip) as (start, _):
         clip.write_bytes(b"another client's file")
     assert start.wait(timeout=20) == 0
-    cli(demo.directory, "type", "recorded")
+    cli(headless_session.directory, "type", "recorded")
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "record-stop"],
+        ["framewisp", str(headless_session.directory), "record-stop"],
         capture_output=True,
         text=True,
         check=False,
@@ -4108,7 +4625,7 @@ def test_recording_keeps_file_created_before_recorder_opens(
     )
     assert clip.read_bytes() == b"another client's file"
     assert result.returncode == 1
-    assert demo.process.wait(timeout=20) == 1
+    assert headless_session.process.wait(timeout=20) == 1
     kept = private_clip(tmp_path)
     assert str(kept) in " ".join(result.stderr.split())
     assert len(clip_frames(kept)) > 1
@@ -4116,21 +4633,21 @@ def test_recording_keeps_file_created_before_recorder_opens(
 
 # R-REC-1, R-REC-18
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_finalizing_keeps_a_file_moved_onto_the_destination(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     first = tmp_path / "first.mp4"
-    cli(demo.directory, "record-start", str(first))
-    cli(demo.directory, "click", "120", "100")
-    cli(demo.directory, "record-stop")
+    cli(headless_session.directory, "record-start", str(first))
+    cli(headless_session.directory, "click", "120", "100")
+    cli(headless_session.directory, "record-stop")
     other = first.read_bytes()
     clip = tmp_path / "clip.mp4"
-    cli(demo.directory, "record-start", str(clip))
-    cli(demo.directory, "click", "120", "100")
+    cli(headless_session.directory, "record-start", str(clip))
+    cli(headless_session.directory, "click", "120", "100")
     first.replace(clip)
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "stop"],
+        ["framewisp", str(headless_session.directory), "stop"],
         capture_output=True,
         text=True,
         check=False,
@@ -4146,17 +4663,17 @@ def test_finalizing_keeps_a_file_moved_onto_the_destination(
 
 # R-REC-1, R-REC-10, R-REC-18
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_collision_reports_render_failure_with_kept_clip(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
-    cli(demo.directory, "record-start", str(clip))
-    cli(demo.directory, "click", "120", "100")
+    cli(headless_session.directory, "record-start", str(clip))
+    cli(headless_session.directory, "click", "120", "100")
     clip.write_bytes(b"another client's file")
-    (demo.directory / "finalization.log").mkdir()
+    (headless_session.directory / "finalization.log").mkdir()
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "stop"],
+        ["framewisp", str(headless_session.directory), "stop"],
         capture_output=True,
         text=True,
         check=False,
@@ -4168,7 +4685,9 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {private_clip(tmp_path)}" in error
     assert "raw clip remains" in error
     assert "finalization.log" in error
-    assert (demo.directory / ".active-recording").readlink() == private_clip(tmp_path)
+    assert (
+        headless_session.directory / ".active-recording"
+    ).readlink() == private_clip(tmp_path)
     assert len(clip_frames(private_clip(tmp_path))) > 1
 
 
@@ -4184,18 +4703,18 @@ def output_directory(tmp_path: Path) -> Generator[Path, None, None]:
 # R-REC-10, R-REC-18
 @pytest.mark.integration
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 @pytest.mark.parametrize("command", ["record-stop", "stop"])
 def test_unpublishable_clip_reports_render_failure_with_kept_clip(
-    demo: Demo, output_directory: Path, command: str
+    headless_session: HeadlessSession, output_directory: Path, command: str
 ) -> None:
     clip = output_directory / "clip.mp4"
-    cli(demo.directory, "record-start", str(clip))
-    cli(demo.directory, "click", "120", "100")
-    (demo.directory / "finalization.log").mkdir()
+    cli(headless_session.directory, "record-start", str(clip))
+    cli(headless_session.directory, "click", "120", "100")
+    (headless_session.directory / "finalization.log").mkdir()
     output_directory.chmod(0o555)
     result = subprocess.run(
-        ["framewisp", str(demo.directory), command],
+        ["framewisp", str(headless_session.directory), command],
         capture_output=True,
         text=True,
         check=False,
@@ -4208,59 +4727,61 @@ def test_unpublishable_clip_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {kept}" in error
     assert f"raw clip remains at {kept}" in error
     assert "finalization.log" in error
-    assert (demo.directory / ".active-recording").readlink() == kept
+    assert (headless_session.directory / ".active-recording").readlink() == kept
     assert len(clip_frames(kept)) > 1
     assert pointer_overlay_frames(kept, 120, 100) == []
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_stop_during_recording_start_removes_private_directory(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
-    with recorder_before_first_frame(demo, clip):
-        demo.process.terminate()
-    assert demo.process.wait(timeout=20) == 0
+    with recorder_before_first_frame(headless_session, clip):
+        headless_session.process.terminate()
+    assert headless_session.process.wait(timeout=20) == 0
     assert not private_directories(tmp_path)
     assert not clip.exists()
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
 def test_failed_recording_start_removes_private_directory(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
-    with recorder_before_first_frame(demo, clip) as (start, recorder):
+    with recorder_before_first_frame(headless_session, clip) as (start, recorder):
         os.kill(recorder, signal.SIGKILL)
         _, error = start.communicate(timeout=20)
     assert start.returncode == 1
     assert "recorder.log" in error
-    assert demo.process.poll() is None
+    assert headless_session.process.poll() is None
     assert not private_directories(tmp_path)
     assert not clip.exists()
-    assert not (demo.directory / ".active-recording").is_symlink()
-    cli(demo.directory, "record-start", str(clip))
-    cli(demo.directory, "record-stop")
+    assert not (headless_session.directory / ".active-recording").is_symlink()
+    cli(headless_session.directory, "record-start", str(clip))
+    cli(headless_session.directory, "record-stop")
     clip_frames(clip)
 
 
 # R-REC-20
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [True], indirect=True)
-def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
-    assert demo.clip is not None
+@pytest.mark.parametrize("headless_session", [True], indirect=True)
+def test_recover_reports_interrupted_clip(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    assert headless_session.clip is not None
     interrupted = private_clip(tmp_path)
-    demo.process.kill()
-    demo.process.wait(timeout=5)
+    headless_session.process.kill()
+    headless_session.process.wait(timeout=5)
 
     attempts: list[subprocess.CompletedProcess[str]] = []
 
     def recovered() -> bool:
         attempts.append(
             subprocess.run(
-                ["framewisp", str(demo.directory), "recover"],
+                ["framewisp", str(headless_session.directory), "recover"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -4274,16 +4795,16 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
     assert report["status"] == "recovered"
     assert report["interrupted_clip"] == str(interrupted)
     assert interrupted.stat().st_size > 0
-    assert not demo.clip.exists()
-    assert not (demo.directory / ".active-recording").is_symlink()
+    assert not headless_session.clip.exists()
+    assert not (headless_session.directory / ".active-recording").is_symlink()
 
     rerun = subprocess.run(
         [
             "framewisp",
-            str(demo.directory),
+            str(headless_session.directory),
             "run",
             "--record",
-            str(demo.clip),
+            str(headless_session.clip),
             "--",
             sys.executable,
             "-c",
@@ -4295,19 +4816,23 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
         timeout=20,
     )
     assert rerun.returncode == 0, rerun.stderr
-    clip_frames(demo.clip)
+    clip_frames(headless_session.clip)
     assert private_clip(tmp_path) == interrupted
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["probe"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 def test_lost_vnc_during_batch_reports_partial_result(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
-    cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(headless_session.directory, "screenshot", str(tmp_path / "ready.png"))
     with input_request(
-        demo,
+        headless_session,
         "batch",
         {
             "steps": [
@@ -4327,24 +4852,30 @@ def test_lost_vnc_during_batch_reports_partial_result(
         },
     ) as connection:
         wait_until(
-            lambda: any(event["event"] == "press" for event in input_events(demo))
+            lambda: any(
+                event["event"] == "press" for event in input_events(headless_session)
+            )
         )
-        metadata = json.loads((demo.directory / "session.json").read_text())
+        metadata = json.loads((headless_session.directory / "session.json").read_text())
         os.kill(metadata["processes"]["wayvnc"], signal.SIGTERM)
-        demo.process.wait(timeout=5)
+        headless_session.process.wait(timeout=5)
         result = json.loads(connection.recv(8192))["data"]
     assert result["completed_steps"] == 1
     assert result["failed_index"] == 1
     assert result["status"] == "failed"
-    assert not any(event.get("key") == "z" for event in input_events(demo))
+    assert not any(event.get("key") == "z" for event in input_events(headless_session))
     assert not (tmp_path / "never.png").exists()
 
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
-def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
+@pytest.mark.parametrize("headless_session", [None, "x11"], indirect=True)
+def test_inspection_reads_state_after_batch(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_until(
+        lambda: "Demo app ready" in (headless_session.directory / "app.log").read_text()
+    )
     plan = tmp_path / "inspect-batch.json"
     plan.write_text(
         json.dumps(
@@ -4402,10 +4933,14 @@ def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
             }
         )
     )
-    batch = json.loads(cli(demo.directory, "batch", "--file", str(plan)).stdout)
+    batch = json.loads(
+        cli(headless_session.directory, "batch", "--file", str(plan)).stdout
+    )
     assert batch["status"] == "completed"
     assert batch["verified"] is True
-    result = inspect(demo, "--role", "label", "--text", "Applied: HelloBatch")
+    result = inspect(
+        headless_session, "--role", "label", "--text", "Applied: HelloBatch"
+    )
     assert result["status"] == "ok", result
     assert result["match_count"] == 1
 
@@ -4419,12 +4954,15 @@ def check_step(kind: str, text: str, timeout: float = 5) -> dict[str, object]:
 
 
 def checked_batch(
-    demo: Demo, tmp_path: Path, steps: list[dict[str, object]], **options: object
+    headless_session: HeadlessSession,
+    tmp_path: Path,
+    steps: list[dict[str, object]],
+    **options: object,
 ) -> dict[str, Any]:
     path = tmp_path / "checks.json"
     path.write_text(json.dumps({"steps": steps, **options}))
     response = subprocess.run(
-        ["framewisp", str(demo.directory), "batch", "--file", str(path)],
+        ["framewisp", str(headless_session.directory), "batch", "--file", str(path)],
         capture_output=True,
         text=True,
         timeout=20,
@@ -4437,14 +4975,17 @@ def checked_batch(
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["waits", "x11-waits"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["waits", "x11-waits"], indirect=True)
 @pytest.mark.parametrize("text", ["Done", "replace"])
 def test_checks_submit_delayed_and_replaced_widgets(
-    demo: Demo, tmp_path: Path, text: str
+    headless_session: HeadlessSession, tmp_path: Path, text: str
 ) -> None:
-    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    wait_until(
+        lambda: "Wait probe ready"
+        in (headless_session.directory / "app.log").read_text()
+    )
     data = checked_batch(
-        demo,
+        headless_session,
         tmp_path,
         [
             check_step("wait", "Waiting"),
@@ -4478,20 +5019,27 @@ def test_checks_submit_delayed_and_replaced_widgets(
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["large-waits", "x11-large-waits"], indirect=True)
-def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
-    default = inspect(demo, "--role", "label", "--name", "Result")
+@pytest.mark.parametrize(
+    "headless_session", ["large-waits", "x11-large-waits"], indirect=True
+)
+def test_large_tree_checks(headless_session: HeadlessSession, tmp_path: Path) -> None:
+    wait_until(
+        lambda: "Wait probe ready"
+        in (headless_session.directory / "app.log").read_text()
+    )
+    default = inspect(headless_session, "--role", "label", "--name", "Result")
     assert default["status"] == "partial", default
     assert "max-depth" in default["reasons"], default
     for kind in ("baseline", "wait", "assert"):
-        failed = checked_batch(demo, tmp_path, [check_step(kind, "Done", 0.5)])
+        failed = checked_batch(
+            headless_session, tmp_path, [check_step(kind, "Done", 0.5)]
+        )
         assert failed["verified"] is False, failed
         assert "limits.max_depth" in failed["error"], failed
         assert "longer check timeout alone" in failed["error"], failed
 
     depth_only = checked_batch(
-        demo,
+        headless_session,
         tmp_path,
         [check_step("assert", "Waiting") | {"limits": {"max_depth": 16}}],
     )
@@ -4507,7 +5055,7 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
         check_step("wait", "Done") | {"after": 0, "limits": limits},
         check_step("assert", "Done") | {"limits": limits},
     ]
-    passed = checked_batch(demo, tmp_path, steps)
+    passed = checked_batch(headless_session, tmp_path, steps)
     assert passed["verified"] is True, passed
     for index in (0, 3, 4):
         result = passed["results"][index]
@@ -4519,14 +5067,17 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
         == passed["results"][0]["baseline_observation_id"]
     )
 
-    cli(demo.directory, "key", "Ctrl+a")
-    cli(demo.directory, "type", "--interval", "0", "duplicate")
-    cli(demo.directory, "key", "Return")
+    cli(headless_session.directory, "key", "Ctrl+a")
+    cli(headless_session.directory, "type", "--interval", "0", "duplicate")
+    cli(headless_session.directory, "key", "Return")
     wait_until(
-        lambda: "Finished: duplicate" in (demo.directory / "app.log").read_text()
+        lambda: "Finished: duplicate"
+        in (headless_session.directory / "app.log").read_text()
     )
     duplicate = checked_batch(
-        demo, tmp_path, [check_step("wait", "duplicate") | {"limits": limits}]
+        headless_session,
+        tmp_path,
+        [check_step("wait", "duplicate") | {"limits": limits}],
     )
     assert duplicate["verified"] is False, duplicate
     assert "ambiguous" in duplicate["error"]
@@ -4535,18 +5086,25 @@ def test_large_tree_checks(demo: Demo, tmp_path: Path) -> None:
 # R-CHECK-4
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["deep", "x11-deep"], indirect=True)
-def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Deep probe ready" in (demo.directory / "app.log").read_text())
+@pytest.mark.parametrize("headless_session", ["deep", "x11-deep"], indirect=True)
+def test_checks_in_tree_deeper_than_32_levels(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_until(
+        lambda: "Deep probe ready"
+        in (headless_session.directory / "app.log").read_text()
+    )
     shallow = inspect(
-        demo, "--role", "button", "--name", "Shallow", "--max-depth", "32"
+        headless_session, "--role", "button", "--name", "Shallow", "--max-depth", "32"
     )
     assert shallow["status"] == "partial", shallow
     assert shallow["reasons"] == ["max-depth"], shallow
     assert shallow["match_count"] == 1, shallow
     assert any("maximum 64" in hint for hint in shallow["hints"]), shallow
 
-    deep = inspect(demo, "--role", "button", "--name", "Deep", "--max-depth", "64")
+    deep = inspect(
+        headless_session, "--role", "button", "--name", "Deep", "--max-depth", "64"
+    )
     assert deep["status"] == "ok", deep
     assert deep["match_count"] == 1, deep
     assert deep["matches"][0]["depth"] > 40, deep
@@ -4564,12 +5122,12 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
             "limits": {"max_depth": depth},
         }
 
-    failed = checked_batch(demo, tmp_path, [step("assert", "Shallow", 32)])
+    failed = checked_batch(headless_session, tmp_path, [step("assert", "Shallow", 32)])
     assert failed["verified"] is False, failed
     assert "maximum 64" in failed["error"], failed
 
     passed = checked_batch(
-        demo,
+        headless_session,
         tmp_path,
         [
             step(kind, name, 64)
@@ -4586,10 +5144,13 @@ def test_checks_in_tree_deeper_than_32_levels(demo: Demo, tmp_path: Path) -> Non
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["qt-tree", "x11-qt-tree"], indirect=True)
-def test_large_qt_check_limits_timeout(demo: Demo, tmp_path: Path) -> None:
+@pytest.mark.parametrize("headless_session", ["qt-tree", "x11-qt-tree"], indirect=True)
+def test_large_qt_check_limits_timeout(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     wait_until(
-        lambda: "Inspection probe ready" in (demo.directory / "app.log").read_text()
+        lambda: "Inspection probe ready"
+        in (headless_session.directory / "app.log").read_text()
     )
     condition = {
         "name": "Control 0",
@@ -4603,30 +5164,39 @@ def test_large_qt_check_limits_timeout(demo: Demo, tmp_path: Path) -> None:
         "limits": {"max_nodes": 1024, "timeout": 5},
     }
     exhausted = checked_batch(
-        demo, tmp_path, [step | {"limits": {"max_nodes": 1024, "timeout": 0.1}}]
+        headless_session,
+        tmp_path,
+        [step | {"limits": {"max_nodes": 1024, "timeout": 0.1}}],
     )
     assert exhausted["verified"] is False, exhausted
     assert exhausted["results"][0]["observation"]["status"] == "timeout"
     assert "limits.timeout" in exhausted["error"]
-    complete = checked_batch(demo, tmp_path, [step])
+    complete = checked_batch(headless_session, tmp_path, [step])
     assert complete["verified"] is True, complete
     assert complete["results"][0]["observation"]["visited"] >= 800
 
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["waits"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["waits"], indirect=True)
 @pytest.mark.parametrize(
     "kind,text,timeout",
     [("wait", "Never", 0.3), ("assert", "Never", 2), ("baseline", "Waiting", 2)],
 )
 def test_failed_checks_stop_and_take_failure_screenshot(
-    demo: Demo, tmp_path: Path, kind: str, text: str, timeout: float
+    headless_session: HeadlessSession,
+    tmp_path: Path,
+    kind: str,
+    text: str,
+    timeout: float,
 ) -> None:
-    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
+    wait_until(
+        lambda: "Wait probe ready"
+        in (headless_session.directory / "app.log").read_text()
+    )
     screenshot_path = tmp_path / "failed.png"
     data = checked_batch(
-        demo,
+        headless_session,
         tmp_path,
         [
             check_step("wait", "Waiting"),
@@ -4649,21 +5219,29 @@ def test_failed_checks_stop_and_take_failure_screenshot(
     assert data["artifacts"] == [str(screenshot_path)]
     with Image.open(screenshot_path) as image:
         assert image.size == (1280, 720)
-    assert (demo.directory / "inputs.jsonl").read_text() == ""
-    cli(demo.directory, "key", "a")
+    assert (headless_session.directory / "inputs.jsonl").read_text() == ""
+    cli(headless_session.directory, "key", "a")
 
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["waits"], indirect=True)
-def test_wait_duplicate_matches_fail(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
-    cli(demo.directory, "type", "--interval", "0", "duplicate")
-    cli(demo.directory, "key", "Return")
+@pytest.mark.parametrize("headless_session", ["waits"], indirect=True)
+def test_wait_duplicate_matches_fail(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     wait_until(
-        lambda: inspect(demo, "--role", "label", "--name", "Result")["match_count"] == 2
+        lambda: "Wait probe ready"
+        in (headless_session.directory / "app.log").read_text()
     )
-    data = checked_batch(demo, tmp_path, [check_step("wait", "duplicate")])
+    cli(headless_session.directory, "type", "--interval", "0", "duplicate")
+    cli(headless_session.directory, "key", "Return")
+    wait_until(
+        lambda: inspect(headless_session, "--role", "label", "--name", "Result")[
+            "match_count"
+        ]
+        == 2
+    )
+    data = checked_batch(headless_session, tmp_path, [check_step("wait", "duplicate")])
     assert data["verified"] is False
     assert "ambiguous" in data["error"]
     assert data["results"][-1]["observation"]["match_count"] == 2
@@ -4671,18 +5249,21 @@ def test_wait_duplicate_matches_fail(demo: Demo, tmp_path: Path) -> None:
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["waits"], indirect=True)
+@pytest.mark.parametrize("headless_session", ["waits"], indirect=True)
 @pytest.mark.parametrize("ending", ["disconnect", "stop", "exit"])
 def test_wait_cancellation_and_app_exit(
-    demo: Demo, tmp_path: Path, ending: str
+    headless_session: HeadlessSession, tmp_path: Path, ending: str
 ) -> None:
-    wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
-    metadata = json.loads((demo.directory / "session.json").read_text())
+    wait_until(
+        lambda: "Wait probe ready"
+        in (headless_session.directory / "app.log").read_text()
+    )
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     app = metadata["processes"]["app"]
     os.kill(app, signal.SIGSTOP)
     try:
         with input_request(
-            demo,
+            headless_session,
             "batch",
             {
                 "steps": [
@@ -4701,19 +5282,20 @@ def test_wait_cancellation_and_app_exit(
         ) as connection:
             time.sleep(0.15)
             assert (
-                json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
+                json.loads(cli(headless_session.directory, "status").stdout)["status"]
+                == "running"
             )
             started = time.monotonic()
             if ending == "disconnect":
                 connection.close()
                 # The following input must leave the queue even while AT-SPI is blocked.
-                cli(demo.directory, "key", "a")
+                cli(headless_session.directory, "key", "a")
             elif ending == "stop":
                 os.kill(app, signal.SIGCONT)
-                cli(demo.directory, "stop")
+                cli(headless_session.directory, "stop")
             else:
                 os.kill(app, signal.SIGKILL)
-                demo.process.wait(timeout=3)
+                headless_session.process.wait(timeout=3)
             assert time.monotonic() - started < 3
             if ending != "disconnect":
                 with connection.makefile("r") as response:
@@ -4725,38 +5307,49 @@ def test_wait_cancellation_and_app_exit(
         if Path(f"/proc/{app}").exists():
             os.kill(app, signal.SIGCONT)
     assert not (tmp_path / "never.png").exists()
-    assert '"chord": "z"' not in (demo.directory / "inputs.jsonl").read_text()
+    assert (
+        '"chord": "z"' not in (headless_session.directory / "inputs.jsonl").read_text()
+    )
 
 
 @pytest.fixture
-def frozen_demo(demo: Demo) -> Iterator[Demo]:
+def frozen_headless_session(
+    headless_session: HeadlessSession,
+) -> Iterator[HeadlessSession]:
     cli(
-        demo.directory,
+        headless_session.directory,
         "screenshot",
         "--delay",
         "0.5",
-        str(demo.directory / "ready.png"),
+        str(headless_session.directory / "ready.png"),
     )
-    metadata = json.loads((demo.directory / "session.json").read_text())
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
     app_pid = metadata["processes"]["app"]
     os.kill(app_pid, signal.SIGSTOP)
     try:
-        yield demo
+        yield headless_session
     finally:
         os.kill(app_pid, signal.SIGCONT)
 
 
 # R-INPUT-3
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None, "x11", "odd"], indirect=True)
-def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
-    demo = frozen_demo
-    status = json.loads(cli(demo.directory, "status").stdout)
+@pytest.mark.parametrize("headless_session", [None, "x11", "odd"], indirect=True)
+def test_screenshot_regions(
+    frozen_headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    headless_session = frozen_headless_session
+    status = json.loads(cli(headless_session.directory, "status").stdout)
     width, height = status["width"], status["height"]
     full_path = tmp_path / "full.png"
     full = json.loads(
         cli(
-            demo.directory, "screenshot", "--delay", "0.5", "--json", str(full_path)
+            headless_session.directory,
+            "screenshot",
+            "--delay",
+            "0.5",
+            "--json",
+            str(full_path),
         ).stdout
     )
     assert (full["x"], full["y"], full["width"], full["height"]) == (
@@ -4774,7 +5367,7 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
         crop_path = tmp_path / "crop.png"
         metadata = json.loads(
             cli(
-                demo.directory,
+                headless_session.directory,
                 "screenshot",
                 str(crop_path),
                 "--region",
@@ -4813,7 +5406,7 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
         result = subprocess.run(
             [
                 "framewisp",
-                str(demo.directory),
+                str(headless_session.directory),
                 "screenshot",
                 str(rejected),
                 "--region",
@@ -4829,13 +5422,21 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
         assert "Traceback" not in result.stderr
         assert not result.stdout and not rejected.exists()
     if width == 1280:
-        session_metadata = json.loads((demo.directory / "session.json").read_text())
+        session_metadata = json.loads(
+            (headless_session.directory / "session.json").read_text()
+        )
         os.kill(session_metadata["processes"]["app"], signal.SIGCONT)
         # The crop-local entry target (80, 20) maps back to display (120, 100).
-        cli(demo.directory, "click", str(metadata["x"] + 80), str(metadata["y"] + 20))
-        cli(demo.directory, "type", "crop mapping")
+        cli(
+            headless_session.directory,
+            "click",
+            str(metadata["x"] + 80),
+            str(metadata["y"] + 20),
+        )
+        cli(headless_session.directory, "type", "crop mapping")
         wait_until(
-            lambda: "Text: crop mapping" in (demo.directory / "app.log").read_text()
+            lambda: "Text: crop mapping"
+            in (headless_session.directory / "app.log").read_text()
         )
 
 
@@ -4888,32 +5489,34 @@ def test_app_exit_is_reported_after_cleanup(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", [None], indirect=True)
-def test_normal_stop_clears_previous_app_exit(demo: Demo) -> None:
-    cli(demo.directory, "stop")
-    demo.process.wait(timeout=10)
-    (demo.directory / "app-exit.json").write_text(
+@pytest.mark.parametrize("headless_session", [None], indirect=True)
+def test_normal_stop_clears_previous_app_exit(
+    headless_session: HeadlessSession,
+) -> None:
+    cli(headless_session.directory, "stop")
+    headless_session.process.wait(timeout=10)
+    (headless_session.directory / "app-exit.json").write_text(
         json.dumps({"returncode": -signal.SIGSEGV, "time": time.time()})
     )
     with subprocess.Popen(
-        ["framewisp", str(demo.directory), "run", "--", "framewisp-demo"],
+        ["framewisp", str(headless_session.directory), "run", "--", "framewisp-demo"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     ) as runner:
         try:
-            wait_until(lambda: (demo.directory / "session.json").exists())
-            assert not (demo.directory / "app-exit.json").exists()
-            cli(demo.directory, "status")
-            cli(demo.directory, "stop")
+            wait_until(lambda: (headless_session.directory / "session.json").exists())
+            assert not (headless_session.directory / "app-exit.json").exists()
+            cli(headless_session.directory, "status")
+            cli(headless_session.directory, "stop")
             assert runner.wait(timeout=10) == 0
         finally:
             if runner.poll() is None:
                 runner.terminate()
             runner.wait(timeout=10)
-    assert not (demo.directory / "app-exit.json").exists()
+    assert not (headless_session.directory / "app-exit.json").exists()
     result = subprocess.run(
-        ["framewisp", str(demo.directory), "status"],
+        ["framewisp", str(headless_session.directory), "status"],
         capture_output=True,
         text=True,
         timeout=5,
@@ -4925,44 +5528,60 @@ def test_normal_stop_clears_previous_app_exit(demo: Demo) -> None:
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["x11-qt-tree"], indirect=True)
-def test_inspect_large_qt_tree_and_blocked_main_loop(demo: Demo) -> None:
-    log = demo.directory / "app.log"
+@pytest.mark.parametrize("headless_session", ["x11-qt-tree"], indirect=True)
+def test_inspect_large_qt_tree_and_blocked_main_loop(
+    headless_session: HeadlessSession,
+) -> None:
+    log = headless_session.directory / "app.log"
     wait_until(lambda: "Inspection probe ready" in log.read_text())
-    complete = inspect(demo, "--name", "Absent control", "--max-nodes", "1024")
+    complete = inspect(
+        headless_session, "--name", "Absent control", "--max-nodes", "1024"
+    )
     assert complete["status"] == "ok", complete
     assert complete["visited"] >= 800, complete
     print(
         f"Qt tree: visited={complete['visited']} elapsed_ms={complete['elapsed_ms']} longest_call_ms={complete['longest_call_ms']}"
     )
     exhausted = inspect(
-        demo, "--name", "Absent control", "--max-nodes", "1024", "--timeout", "0.2"
+        headless_session,
+        "--name",
+        "Absent control",
+        "--max-nodes",
+        "1024",
+        "--timeout",
+        "0.2",
     )
     assert exhausted["status"] == "timeout", exhausted
     assert "app-unresponsive" not in exhausted["reasons"], exhausted
     assert any("--timeout" in hint and "10" in hint for hint in exhausted["hints"])
-    cli(demo.directory, "click", "40", "40")
+    cli(headless_session.directory, "click", "40", "40")
     wait_until(lambda: "Main loop blocked" in log.read_text())
-    blocked = inspect(demo, "--timeout", "0.5")
+    blocked = inspect(headless_session, "--timeout", "0.5")
     assert blocked["status"] == "timeout", blocked
     assert "app-unresponsive" in blocked["reasons"], blocked
     assert not any("Raise --timeout" in hint for hint in blocked["hints"])
     wait_until(lambda: "Main loop resumed" in log.read_text())
     assert (
-        inspect(demo, "--name", "Absent control", "--max-nodes", "1024")["status"]
+        inspect(headless_session, "--name", "Absent control", "--max-nodes", "1024")[
+            "status"
+        ]
         == "ok"
     )
 
 
-def wait_for_input_probe_window(demo: Demo) -> None:
-    wait_until(lambda: any(event["event"] == "ready" for event in input_events(demo)))
+def wait_for_input_probe_window(headless_session: HeadlessSession) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
     # GTK's map signal can precede Sway mapping the Xwayland window.
     tree: dict[str, Any] = {}
     windows: list[str | None] = []
 
     def mapped() -> bool:
         nonlocal tree
-        tree = sway_request(demo.runtime_dir, 4)
+        tree = sway_request(headless_session.runtime_dir, 4)
         windows.clear()
         nodes = [tree]
         while nodes:
@@ -4977,14 +5596,14 @@ def wait_for_input_probe_window(demo: Demo) -> None:
     try:
         wait_until(mapped)
     except AssertionError:
-        tree_path = demo.directory / "sway-tree.json"
+        tree_path = headless_session.directory / "sway-tree.json"
         tree_path.write_text(json.dumps(tree, indent=2))
         raise AssertionError(
             f"Sway showed no window titled 'Input probe' within "
             f"{time.monotonic() - started:.1f} s, although the app reported GTK "
             f"mapping it ('ready' in app.log). Sway windows: {windows or 'none'}. "
             f"Full tree: {tree_path}\napp.log:\n"
-            + (demo.directory / "app.log").read_text()
+            + (headless_session.directory / "app.log").read_text()
         ) from None
 
 
@@ -5014,18 +5633,20 @@ def sway_request(runtime_dir: Path, kind: int, payload: bytes = b"") -> Any:
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize(
-    "demo", [None, "x11", "qt-coordinates", "x11-qt-coordinates"], indirect=True
+    "headless_session",
+    [None, "x11", "qt-coordinates", "x11-qt-coordinates"],
+    indirect=True,
 )
 def test_inspect_display_bounds_activate_offset_controls(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    log = demo.directory / "app.log"
+    log = headless_session.directory / "app.log"
     qt = "Coordinates probe ready"
     wait_until(lambda: "Demo app ready" in log.read_text() or qt in log.read_text())
     is_qt = qt in log.read_text()
     title = "Coordinates dialog" if is_qt else "Framewisp demo app"
     name = "Activate dialog" if is_qt else "Apply text"
-    metadata = json.loads((demo.directory / "session.json").read_text())
+    metadata = json.loads((headless_session.directory / "session.json").read_text())
 
     # Move away from the origin and request compositor borders. Native Wayland
     # clients can negotiate their own decorations. Xwayland uses server title bars.
@@ -5037,7 +5658,8 @@ def test_inspect_display_bounds_activate_offset_controls(
             + "move position 200 50"
         ).encode()
         return all(
-            item["success"] for item in sway_request(demo.runtime_dir, 0, command)
+            item["success"]
+            for item in sway_request(headless_session.runtime_dir, 0, command)
         )
 
     wait_until(positioned)
@@ -5046,7 +5668,7 @@ def test_inspect_display_bounds_activate_offset_controls(
     def mapped() -> bool:
         nonlocal observation
         if is_qt:
-            pending = [sway_request(demo.runtime_dir, 4)]
+            pending = [sway_request(headless_session.runtime_dir, 4)]
             windows: list[dict[str, Any]] = []
             while pending:
                 window = pending.pop()
@@ -5077,7 +5699,11 @@ def test_inspect_display_bounds_activate_offset_controls(
                 positioned()
                 return False
         observation = inspect(
-            demo, "--role", "push button" if is_qt else "button", "--name", name
+            headless_session,
+            "--role",
+            "push button" if is_qt else "button",
+            "--name",
+            name,
         )
         return (
             observation["match_count"] == 1
@@ -5088,10 +5714,10 @@ def test_inspect_display_bounds_activate_offset_controls(
         wait_until(mapped)
     finally:
         (tmp_path / "positioned-tree.json").write_text(
-            json.dumps(sway_request(demo.runtime_dir, 4), indent=2)
+            json.dumps(sway_request(headless_session.runtime_dir, 4), indent=2)
         )
         print(f"Positioned control: {observation}")
-        cli(demo.directory, "screenshot", str(tmp_path / "positioned.png"))
+        cli(headless_session.directory, "screenshot", str(tmp_path / "positioned.png"))
     assert observation["status"] == "ok", observation
     node = observation["matches"][0]
     bounds = node["display_bounds"]
@@ -5102,7 +5728,7 @@ def test_inspect_display_bounds_activate_offset_controls(
     if metadata["x11_display"] is not None:
         assert bounds["y"] > node["bounds"]["y"] + 50
     cli(
-        demo.directory,
+        headless_session.directory,
         "click",
         str(bounds["x"] + bounds["width"] // 2),
         str(bounds["y"] + bounds["height"] // 2),
@@ -5115,14 +5741,18 @@ def test_inspect_display_bounds_activate_offset_controls(
 # R-INSPECT-2
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
-@pytest.mark.parametrize("demo", ["dialog", "dialog-untitled"], indirect=True)
-def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
-    log = demo.directory / "app.log"
+@pytest.mark.parametrize(
+    "headless_session", ["dialog", "dialog-untitled"], indirect=True
+)
+def test_inspect_embedded_dialog_bounds(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    log = headless_session.directory / "app.log"
     wait_until(lambda: "Dialog probe ready" in log.read_text())
 
     def control(role: str, name: str) -> dict[str, Any]:
         observation = inspect(
-            demo,
+            headless_session,
             "--role",
             role,
             "--name",
@@ -5138,17 +5768,24 @@ def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
 
     for position in ["tiled", "floating"]:
         if position == "floating":
-            metadata = json.loads((demo.directory / "session.json").read_text())
+            metadata = json.loads(
+                (headless_session.directory / "session.json").read_text()
+            )
             command = (
                 f'[pid={metadata["processes"]["app"]}] floating enable, '
                 "resize set 900 600, move position 180 60"
             ).encode()
             assert all(
-                item["success"] for item in sway_request(demo.runtime_dir, 0, command)
+                item["success"]
+                for item in sway_request(headless_session.runtime_dir, 0, command)
             )
             wait_until(lambda: control("window", "")["bounds"]["width"] == 900)
 
-        cli(demo.directory, "screenshot", str(tmp_path / f"dialog-{position}.png"))
+        cli(
+            headless_session.directory,
+            "screenshot",
+            str(tmp_path / f"dialog-{position}.png"),
+        )
         # The parent and dialog both map to the same compositor client.
         for role in ["window", "dialog"]:
             node = control(role, "")
@@ -5164,7 +5801,7 @@ def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
             assert bounds["y"] > button["bounds"]["y"]
         previous = log.read_text().count("Activated General")
         cli(
-            demo.directory,
+            headless_session.directory,
             "click",
             str(bounds["x"] + bounds["width"] // 2),
             str(bounds["y"] + bounds["height"] // 2),
@@ -5180,9 +5817,9 @@ def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize("ending", ["stop", "exit", "SIGINT", "SIGTERM"])
 def test_session_ends_detached_descendants(
-    demo: Demo, tmp_path: Path, ending: str
+    headless_session: HeadlessSession, tmp_path: Path, ending: str
 ) -> None:
-    # The demo fixture is an independent session which must survive this stop.
+    # The headless_session fixture is an independent session which must survive this stop.
     directory = tmp_path / "descendants-session"
     tree = tmp_path / "descendants-tree"
     log = tmp_path / "descendants-runner.log"
@@ -5231,8 +5868,8 @@ def test_session_ends_detached_descendants(
         )
         assert not Path(metadata["runtime_directory"]).exists()
         assert not (directory / "session.json").exists()
-        assert demo.process.poll() is None
-        cli(demo.directory, "status")
+        assert headless_session.process.poll() is None
+        cli(headless_session.directory, "status")
     finally:
         if runner.poll() is None:
             runner.terminate()
@@ -5242,20 +5879,20 @@ def test_session_ends_detached_descendants(
 # R-LIFE-5
 @pytest.mark.integration
 def test_replaced_lock_refused_and_live_session_still_stops(
-    demo: Demo, tmp_path: Path
+    headless_session: HeadlessSession, tmp_path: Path
 ) -> None:
-    lock_path = demo.directory / ".session.lock"
+    lock_path = headless_session.directory / ".session.lock"
     lock_path.rename(tmp_path / "original.lock")
     os.close(os.open(lock_path, os.O_CREAT | os.O_WRONLY, 0o600))
     refused = subprocess.run(
-        ["framewisp", str(demo.directory), "recover"],
+        ["framewisp", str(headless_session.directory), "recover"],
         capture_output=True,
         text=True,
         timeout=20,
     )
     assert refused.returncode == 1, refused
     assert "was replaced" in refused.stderr
-    assert demo.runtime_dir.is_dir()
+    assert headless_session.runtime_dir.is_dir()
 
     def process_checks() -> list[subprocess.CompletedProcess[str]]:
         return [
@@ -5271,38 +5908,45 @@ def test_replaced_lock_refused_and_live_session_still_stops(
     checks = process_checks()
     assert len(checks) == 2
     assert all(check.returncode < 126 and check.stdout for check in checks), checks
-    assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
-    cli(demo.directory, "stop")
-    assert demo.process.wait(timeout=20) == 0
-    assert not demo.runtime_dir.exists()
-    assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
+    assert (
+        json.loads(cli(headless_session.directory, "status").stdout)["status"]
+        == "running"
+    )
+    cli(headless_session.directory, "stop")
+    assert headless_session.process.wait(timeout=20) == 0
+    assert not headless_session.runtime_dir.exists()
+    assert all(not Path(f"/proc/{pid}").exists() for pid in headless_session.child_pids)
     checks = process_checks()
     assert all(check.returncode < 126 and not check.stdout for check in checks), checks
-    cli(demo.directory, "run", "--", sys.executable, "-c", "pass")
+    cli(headless_session.directory, "run", "--", sys.executable, "-c", "pass")
 
 
 # R-LIFE-4
 @pytest.mark.integration
-def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -> None:
+def test_recover_killed_runner_and_reuse_directory(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
     # Keep a second process alive to catch unsafe signalling from stale JSON.
     with subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"]
     ) as unrelated:
         try:
             for command in (["recover"], ["run", "--", sys.executable, "-c", "pass"]):
-                before = (demo.directory / "inputs.jsonl").read_bytes()
+                before = (headless_session.directory / "inputs.jsonl").read_bytes()
                 rejected = subprocess.run(
-                    ["framewisp", str(demo.directory), *command],
+                    ["framewisp", str(headless_session.directory), *command],
                     capture_output=True,
                     text=True,
                     timeout=20,
                 )
                 assert rejected.returncode != 0
                 assert "still live" in rejected.stderr
-                assert (demo.directory / "inputs.jsonl").read_bytes() == before
-            demo.process.kill()
-            demo.process.wait(timeout=5)
-            metadata_path = demo.directory / "session.json"
+                assert (
+                    headless_session.directory / "inputs.jsonl"
+                ).read_bytes() == before
+            headless_session.process.kill()
+            headless_session.process.wait(timeout=5)
+            metadata_path = headless_session.directory / "session.json"
             metadata_path.write_text(
                 json.dumps(
                     {
@@ -5315,7 +5959,7 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
             deadline = time.monotonic() + 15
             while True:
                 result = subprocess.run(
-                    ["framewisp", str(demo.directory), "recover"],
+                    ["framewisp", str(headless_session.directory), "recover"],
                     capture_output=True,
                     text=True,
                     timeout=20,
@@ -5326,17 +5970,19 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
                 assert time.monotonic() < deadline
                 time.sleep(0.05)
             assert json.loads(result.stdout)["status"] == "recovered"
-            assert not demo.runtime_dir.exists()
+            assert not headless_session.runtime_dir.exists()
             assert not metadata_path.exists()
-            assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
-            assert (demo.directory / "app.log").exists()
+            assert all(
+                not Path(f"/proc/{pid}").exists() for pid in headless_session.child_pids
+            )
+            assert (headless_session.directory / "app.log").exists()
             assert unrelated.poll() is None
             assert (tmp_path / "unrelated-file").read_text() == "preserve"
             with (tmp_path / "restart.log").open("w") as output:
                 with subprocess.Popen(
                     [
                         "framewisp",
-                        str(demo.directory),
+                        str(headless_session.directory),
                         "run",
                         "--",
                         sys.executable,
@@ -5348,7 +5994,7 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
                 ) as restarted:
                     try:
                         wait_until(lambda: metadata_path.exists())
-                        cli(demo.directory, "stop")
+                        cli(headless_session.directory, "stop")
                         assert restarted.wait(timeout=20) == 0
                     finally:
                         if restarted.poll() is None:

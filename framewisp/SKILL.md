@@ -505,7 +505,7 @@ framewisp demo record-stop
 ```
 
 Recording works only in headless sessions, so clips come only from them. It
-requires even display dimensions and produces silent MP4 video. Only one clip may be active. Normal runner
+requires even display dimensions and produces a silent MP4 clip. Only one clip may be active. Normal runner
 shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
 `.framewisp-clip-*` directory beside it, so the clip destination's

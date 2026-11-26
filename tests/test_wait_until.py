@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 import test_integration
-from test_integration import Demo, wait_for_input_probe_window, wait_until
+from test_integration import HeadlessSession, wait_for_input_probe_window, wait_until
 
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_input_probe_wait_keeps_its_own_timeout_message(
         return {}
 
     monkeypatch.setattr(test_integration, "sway_request", empty_tree)
-    demo = Demo(
+    headless_session = HeadlessSession(
         directory=tmp_path,
         process=cast("subprocess.Popen[bytes]", None),
         runtime_dir=tmp_path,
@@ -105,7 +105,7 @@ def test_input_probe_wait_keeps_its_own_timeout_message(
     )
 
     with pytest.raises(AssertionError) as failure:
-        wait_for_input_probe_window(demo)
+        wait_for_input_probe_window(headless_session)
 
     message = str(failure.value)
     assert message.startswith("Sway showed no window titled 'Input probe' within")

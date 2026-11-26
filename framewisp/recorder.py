@@ -1,4 +1,4 @@
-"""Draining the screen recorder's output into its log during recording."""
+"""Draining recorder output into its log during recording."""
 
 import os
 import re
