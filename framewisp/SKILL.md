@@ -63,9 +63,9 @@ timestamped note. Explain shortcuts, decisions, variable inputs, and expected
 outcomes that may not be evident visually. Notes must be nonblank and at most
 8000 characters. The agent can issue notes from its own shell so the user can
 keep focus on the app. Collect remaining clarifications after the teaching session
-and include them in the procedure. The user stops with Ctrl+C, the sharing indicator, or
-`framewisp --stop-sharing`; applications stay running. Shared display content and
-notes are unredacted. No audio, physical key events, or clipboard contents are recorded.
+and include them in the procedure. The user stops with Ctrl+C or the sharing indicator, or
+with the emergency stop described under Desktop share; applications stay running. Shared
+display content and notes are unredacted. No audio, physical key events, or clipboard contents are recorded.
 
 Read DIRECTORY/lesson.json for the goal and status, then timeline.jsonl for
 `frame` entries (`time`, relative PNG `path`) and `note` entries (`time`, `text`).
@@ -528,7 +528,10 @@ A click ping (a red ring) marks each click and drag press, and a translucent hol
 disc follows each completed drag while its button is held. `--no-click-pings`
 disables both for the clip. They appear only in clips. Wait about 0.5 seconds after a final
 click before `record-stop` to preserve the full click ping animation.
-Finalization adds time to stopping.
+Finalization adds time to stopping. If finalization fails, the raw clip remains
+at the clip destination and the error names its path and `finalization.log`. If
+framewisp cannot publish the clip there, it leaves any file there intact and the
+error names where the clip is. Either failure stops the session.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 `duration_seconds` is `null` for a clip with no measurable duration, and `width`
@@ -566,10 +569,7 @@ receives output, so buffered output can appear late. Output from separately
 activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the console panel. Console text follows the app-log policy,
-so the input-content policy does not redact it. Finalization draws the console panel when the clip stops. If drawing fails, the
-raw clip remains and the error names its path and `finalization.log`. If
-publishing the clip fails, the error names where the clip is. Either
-failure stops the session.
+so the input-content policy does not redact it. Finalization draws the console panel when the clip stops.
 
 ## Share evidence on GitHub
 

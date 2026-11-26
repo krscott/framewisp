@@ -16,7 +16,7 @@ from framewisp.finalization import capture_origin
 from framewisp.layout import ConsolePanel
 from framewisp.lib import Recording
 from framewisp.recorder import filter_recorder_output, recorder_output
-from framewisp.recovery import ACTIVE_RECORDING, interrupted_clip
+from framewisp.recovery import PRIVATE_CLIP, interrupted_clip
 
 # wf-recorder wrote this shape for a clip stopped right after record-start under
 # load. To keep it small, this is a 16x16 one-frame FFmpeg MP4 with the mvhd, tkhd,
@@ -224,17 +224,17 @@ def test_filesystem_without_hard_links_rejects_recording_at_start(
 def test_recover_removes_directory_of_a_clip_never_written(tmp_path: Path) -> None:
     directory = tmp_path / ".framewisp-clip-unused"
     directory.mkdir()
-    (tmp_path / ACTIVE_RECORDING).symlink_to(directory / "clip.mp4")
+    (tmp_path / PRIVATE_CLIP).symlink_to(directory / "clip.mp4")
     assert interrupted_clip(tmp_path) is None
     assert not directory.exists()
-    assert not (tmp_path / ACTIVE_RECORDING).is_symlink()
+    assert not (tmp_path / PRIVATE_CLIP).is_symlink()
 
 
 # R-REC-20
 def test_recover_ignores_a_link_to_a_removed_directory(tmp_path: Path) -> None:
-    (tmp_path / ACTIVE_RECORDING).symlink_to(tmp_path / "removed" / "clip.mp4")
+    (tmp_path / PRIVATE_CLIP).symlink_to(tmp_path / "removed" / "clip.mp4")
     assert interrupted_clip(tmp_path) is None
-    assert not (tmp_path / ACTIVE_RECORDING).is_symlink()
+    assert not (tmp_path / PRIVATE_CLIP).is_symlink()
 
 
 def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:

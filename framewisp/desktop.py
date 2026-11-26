@@ -119,7 +119,3 @@ def stop_sharing() -> int:
     except (OSError, RuntimeError) as error:
         print(f"Could not stop sharing: {error}", file=sys.stderr)
         return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(stop_sharing())

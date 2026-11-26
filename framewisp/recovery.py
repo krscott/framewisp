@@ -20,9 +20,9 @@ from framewisp.errors import SessionError
 LOCK = ".session.lock"
 JOURNAL = ".recovery-journal.json"
 JOURNAL_TEMPORARY = ".recovery-journal.tmp"
-# Symlink to the private clip of the active recording. It stays while that clip
-# remains, after an interruption or a failed finalization or publish.
-ACTIVE_RECORDING = ".active-recording"
+# Symlink to a recording's private clip. It stays while that clip remains,
+# after an interruption or a failed finalization or publish.
+PRIVATE_CLIP = ".private-clip"
 # Far above any journal, whose runtime directory path fits in a 108-byte socket address, or
 # any session.json that recovery reads.
 MAX_METADATA_BYTES = 1 << 16
@@ -338,7 +338,9 @@ def stale_desktop_session(session_dir: Path) -> str:
     return (
         f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
-        f"Start it again with attach or teach, or delete its metadata:\n  {metadata}"
+        "Start it again with attach or teach "
+        "(for teach, with a new lesson directory), "
+        f"or delete its metadata:\n  {metadata}"
     ) + kept_clip_note(session_dir)
 
 
@@ -559,18 +561,18 @@ def recover_session(session_dir: Path) -> int:
 
 
 def kept_clip(session_dir: Path) -> Path | None:
-    """Return the private clip that the active-recording link points at, if any."""
+    """Return the clip that the private clip link points at, if it remains."""
     # Refusals call this, so a damaged link must not raise.
     try:
-        clip = (session_dir / ACTIVE_RECORDING).readlink()
+        clip = (session_dir / PRIVATE_CLIP).readlink()
     except OSError:
         return None
     return None if path_status(clip) == "absent" else clip
 
 
 def interrupted_clip(session_dir: Path) -> Path | None:
-    """Clear the active-recording link, returning the clip it left behind."""
-    link = session_dir / ACTIVE_RECORDING
+    """Clear the private clip link, returning the clip it left behind."""
+    link = session_dir / PRIVATE_CLIP
     if not link.is_symlink():
         return None
     clip = link.readlink()
