@@ -214,7 +214,7 @@ def cleanup_steps(session_dir: Path, runtime_dir: Path, *process_checks: str) ->
     # would not match a TMPDIR that is not valid UTF-8.
     environment = shlex.quote(f"^XDG_RUNTIME_DIR=.*/{runtime_dir.name}$")
     checks = (*process_checks, f"LC_ALL=C grep -zlsE {environment} /proc/*/environ")
-    metadata = ("session.json", ".session.json", JOURNAL, JOURNAL_TEMPORARY)
+    files = ("session.json", ".session.json", JOURNAL, JOURNAL_TEMPORARY)
     lines = [
         "Confirm the session has exited. Run these outside any sandbox, in the PID "
         "namespace that started the session, because they cannot see processes "
@@ -223,19 +223,19 @@ def cleanup_steps(session_dir: Path, runtime_dir: Path, *process_checks: str) ->
         *(f"  {check}" for check in checks),
         "Inspect any supervisor records, which can report incomplete cleanup:",
         f"  cat {quoted}/supervisor-*.json",
-        "Then delete its runtime directory and metadata, keeping logs:",
+        "Then delete its runtime directory, session metadata and recovery journal, "
+        "keeping logs:",
         # find does not follow a symlinked start; rm needs only directory access.
         f"  find {quoted} -type d -exec chmod u+rwx {{}} +",
         f"  rm -rf -- {quoted}",
-        "  "
-        + shlex.join(["rm", "-rf", "--", *(str(session_dir / m) for m in metadata)]),
+        "  " + shlex.join(["rm", "-rf", "--", *(str(session_dir / m) for m in files)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
     return "\n".join(lines) + kept_clip_note(session_dir)
 
 
-def read_metadata(path: Path) -> object:
-    """Parse a session metadata file that may be damaged."""
+def read_json(path: Path) -> object:
+    """Parse session metadata or a recovery journal that may be damaged."""
     # Deeply nested JSON raises RecursionError, which callers must also handle.
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor) as source:
@@ -326,7 +326,7 @@ def unverified_runtime_dir(session_dir: Path, runtime_dir: Path, problem: str) -
 
 def records_desktop_session(session_dir: Path) -> bool:
     try:
-        metadata = read_metadata(session_dir / "session.json")
+        metadata = read_json(session_dir / "session.json")
     except (OSError, ValueError, RecursionError):
         return False
     return session_kind(metadata) in DESKTOP_KINDS
@@ -363,7 +363,7 @@ def read_journal(session_dir: Path, lock: int) -> Journal:
     """Return the verified journal, or refuse with manual cleanup steps."""
     path = session_dir / JOURNAL
     try:
-        value = read_metadata(path)
+        value = read_json(path)
         if not isinstance(value, dict):
             raise ValueError("journal must be an object")
         journal = cast(dict[str, object], value)
@@ -500,7 +500,8 @@ def refuse_unrecovered_session(session_dir: Path) -> None:
     if any(path_status(path) != "absent" for path in paths):
         raise SessionError(
             "A headless session's recovery journal or runtime directory remains. "
-            "Run framewisp SESSION recover first."
+            "Run `framewisp SESSION recover` first, with the framewisp version that "
+            "started that session."
         )
 
 

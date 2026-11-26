@@ -1413,7 +1413,7 @@ def test_desktop_share_refuses_unrecovered_headless_session(
         assert "still live" in capsys.readouterr().err
         write_journal(session_dir, runtime_dir_path(session_dir), lock, created=False)
     assert share_desktop(session_dir, None) == 1
-    assert "recover first" in capsys.readouterr().err
+    assert "recover` first, with the framewisp version" in capsys.readouterr().err
     assert not (session_dir / "session.json").exists()
     recover_session(session_dir)
 

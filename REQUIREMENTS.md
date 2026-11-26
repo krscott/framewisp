@@ -101,9 +101,10 @@ investigate or ask; never invent a rationale.
   `taskset -c 0,1`. In it, start `stress-ng --cpu 8` from
   `nix shell nixpkgs#stress-ng`, then run 300
   `framewisp SESSION run --x11 -- python tests/input_probe.py` sessions, four at
-  a time. After `app.log` shows `"event": "ready"`, read `runtime_directory`
-  from `session.json` as RUNTIME_DIR and run
-  `SWAYSOCK=$(ls RUNTIME_DIR/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
+  a time. After `app.log` shows `"event": "ready"`, set the shell variable
+  `RUNTIME_DIR` to the `runtime_directory` value in that session's
+  `session.json` and run
+  `SWAYSOCK=$(ls "$RUNTIME_DIR"/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
   must list a window named `Input probe` within 10 seconds.] An X11 app window
   always appears in Sway, even when the app never redraws after its first frame.
 

@@ -1227,8 +1227,8 @@ incomplete. Recovery leaves it in place, and it does not block later clips.
 Move what you want to keep and delete the directory.
 
 Recovery never signals PIDs from session metadata or follows its runtime directory path.
-The recovery journal is bound to the session directory's device and inode, so copied
-metadata cannot recover the original session. Keep `.session.lock` in place, including between sessions.
+The recovery journal is bound to the session directory's device and inode, so a copied
+recovery journal cannot recover the original session. Keep `.session.lock` in place, including between sessions.
 If it is deleted or replaced, recovery refuses, removes nothing (R-LIFE-5), and
 prints the steps to stop the session or clean up manually. `stop` still works. Use a private session directory. Startup and recovery reject session
 directories owned by another user or writable by the group or others. Same-user programs that deliberately

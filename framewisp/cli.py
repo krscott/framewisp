@@ -535,8 +535,8 @@ def main() -> None:
                 "running, then to start it again with this version."
                 if published_kind in DESKTOP_KINDS
                 else "Stop its runner with Ctrl+C or SIGTERM. If the runner has "
-                "died, run SESSION recover with the framewisp version that started "
-                "the session. Then start the session again with this version."
+                "died, run `framewisp SESSION recover` with the framewisp version "
+                "that started the session. Then start the session again with this version."
             )
             parser.exit(
                 1,
