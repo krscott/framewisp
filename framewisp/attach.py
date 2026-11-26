@@ -36,7 +36,6 @@ from framewisp.connection import (
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
     SessionKind,
-    disconnected,
     parse_request_fields,
     receive_request,
     resolved_request_path,
@@ -389,9 +388,13 @@ def parse_desktop_request(
     """Validate a request: a screenshot destination, or an input action."""
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
-    # accepting a command addressed to an earlier one.
+    # accepting a command addressed to an earlier one. The sender's kind may
+    # differ from this session's, so the message names neither.
     if fields.get("attachment") != attachment:
-        raise ValueError(disconnected(kind))
+        raise ValueError(
+            "The session this command was addressed to has ended. "
+            "Its session directory now holds another session."
+        )
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")

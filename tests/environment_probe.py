@@ -61,7 +61,7 @@ service_pid = bus.call_sync(
     None,
 ).unpack()[0]
 app_command = [os.environ["FRAMEWISP_TEST_GTK_APP"]]
-if "--demo" in sys.argv:
+if "--demo-app" in sys.argv:
     app_command = ["framewisp-demo"]
 app = subprocess.Popen(app_command, env=service_env)
 names = bus.call_sync(
