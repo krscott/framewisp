@@ -1629,7 +1629,7 @@ def test_scroll_targets_pane_and_returns_to_start(
     assert sum(float(event[f"d{axis}"]) for event in events) == 3
     cli(demo.directory, "scroll", "900", "300", reverse, "--ticks", "3")
     wait_until(lambda: position("right") == 0)
-    # Move to the other pane and use the default one-step count.
+    # Move to the other pane and use the default one-tick count.
     cli(demo.directory, "scroll", "300", "300", direction)
     wait_until(lambda: position("left") > 0)
     events = [
@@ -4454,6 +4454,17 @@ def test_checks_submit_delayed_and_replaced_widgets(
     )
     assert data["verified"] is True, data
     assert data["completed_steps"] == 6
+    steps = [
+        ("check", "wait"),
+        ("check", "baseline"),
+        ("action", "type"),
+        ("action", "key"),
+        ("check", "wait"),
+        ("check", "assert"),
+    ]
+    for result, (key, name) in zip(data["results"], steps, strict=True):
+        other = "action" if key == "check" else "check"
+        assert result[key] == name and other not in result, result
     assert data["results"][0]["observations"] == 1
     assert data["results"][4]["observations"] > 1
     baseline = data["results"][1]["observation"]["observation_id"]

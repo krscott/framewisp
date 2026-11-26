@@ -11,8 +11,8 @@ requires the user's session bus and portal, without root access.
 - GNOME: install and enable a compatible StatusNotifierItem/AppIndicator extension,
   such as AppIndicator and KStatusNotifierItem Support.
 
-The desktop controls placement, overflow, panel auto-hide, and icon visibility.
-A successful registration is not proof that the user can see an icon.
+The desktop controls placement, overflow, panel auto-hide, and visibility.
+A successful registration is not proof that the user can see the indicator.
 
 ## Verification status
 
@@ -40,7 +40,7 @@ Configure and test both emergency stop shortcuts described in the README.
 Start `framewisp SESSION attach` yourself in a foreground desktop terminal,
 type ATTACH, and approve sharing for one monitor. Never automate user consent.
 
-1. Confirm the icon, active-sharing label or tooltip, and "Stop sharing" menu.
+1. Confirm the indicator, active-sharing label or tooltip, and "Stop sharing" menu.
 2. Choose "Stop sharing" while idle. Verify screenshot and input requests fail and
    the user's apps stay open and usable.
 3. Reattach with fresh approval. Start a long drag with Ctrl and Shift held,

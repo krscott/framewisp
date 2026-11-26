@@ -1,7 +1,7 @@
 """Share an existing desktop without owning its app or compositor processes."""
 
 # pyright: reportMissingModuleSource=false
-# `parse_attached_request` validates required command fields before `perform`.
+# `parse_desktop_request` validates required command fields before `perform`.
 # pyright: reportTypedDictNotRequiredAccess=false
 
 import json
@@ -34,6 +34,7 @@ from framewisp.connection import (
     COMMAND_PROTOCOL,
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
+    SessionKind,
     disconnected,
     parse_request_fields,
     receive_request,
@@ -291,7 +292,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
 CAPTURE_TIMEOUT = 10
-CAPTURE_CANCELLED = "Attached session disconnected; capture cancelled."
+CAPTURE_CANCELLED = "The session disconnected; screenshot cancelled."
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -382,19 +383,19 @@ def finished(
     return True
 
 
-def parse_attached_request(
-    line: bytes, share_token: str, *, teaching: bool = False
+def parse_desktop_request(
+    line: bytes, share_token: str, kind: SessionKind
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one.
     if fields.get("share_token") != share_token:
-        raise ValueError(disconnected("teaching" if teaching else "attached"))
+        raise ValueError(disconnected(kind))
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
-    if teaching and command not in TEACHING_COMMANDS:
+    if kind == "teaching" and command not in TEACHING_COMMANDS:
         raise ValueError(teaching_refusal(command))
     if command.startswith("record-"):
         raise ValueError(
@@ -405,7 +406,7 @@ def parse_attached_request(
         raise ValueError("parameters must be an object.")
     parameters = cast(dict[str, object], raw)
     if command == "teach-note":
-        if not teaching:
+        if kind != "teaching":
             raise ValueError("teach-note requires a teaching session.")
         text = parameters.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > 8000:
@@ -477,6 +478,7 @@ def attach_session(
             "and send input without the desktop dialog. Approving it does not limit them.",
             flush=True,
         )
+    declined = "Teaching not started." if teaching is not None else "Not attached."
     try:
         confirmation = input(
             "Type ATTACH to confirm you understand and want to capture this lesson: "
@@ -484,14 +486,14 @@ def attach_session(
             else "Type ATTACH to confirm the bindings are configured and you understand this access: "
         )
     except (EOFError, KeyboardInterrupt):
-        print("\nNot attached.")
+        print(f"\n{declined}")
         return 1
     if confirmation != "ATTACH":
-        print("Not attached.")
+        print(declined)
         return 1
     if not foreground_terminal(sys.stdin.fileno()):
         print(
-            "Not attached: this command is no longer the terminal foreground job.",
+            f"{declined} This command is no longer the terminal foreground job.",
             file=sys.stderr,
         )
         return 1
@@ -520,7 +522,7 @@ def share_desktop(
                 teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
-        print(f"Could not attach: {failure}", file=sys.stderr)
+        print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
 
 
@@ -540,9 +542,11 @@ def _share_desktop(
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
     share_token = uuid.uuid4().hex
+    kind: SessionKind = "attached" if teaching is None else "teaching"
     state = session_dir / "session.json"
     owns_state = False
     capture_descriptor: int | None = None
+    shared = False
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -574,12 +578,12 @@ def _share_desktop(
                     pass
 
             def parse(line: bytes) -> InputAction | Path | str:
-                request = parse_attached_request(
-                    line, share_token, teaching=teaching is not None
-                )
+                request = parse_desktop_request(line, share_token, kind)
                 if not ready.is_set():
                     raise ValueError(
-                        "Attach is waiting for desktop permission or the first teaching frame."
+                        "The teaching session is waiting for desktop permission or its first frame."
+                        if teaching is not None
+                        else "The attached session is waiting for desktop permission."
                     )
                 if (
                     teaching is not None
@@ -677,7 +681,7 @@ def _share_desktop(
                     write_state(
                         state,
                         {
-                            "kind": "attached" if teaching is None else "teaching",
+                            "kind": kind,
                             "command_protocol": COMMAND_PROTOCOL,
                             "share_token": share_token,
                             "command_socket": command_socket,
@@ -696,10 +700,9 @@ def _share_desktop(
                     )
                     server.start()
                     try:
-                        if teaching is None:
-                            portal.open(allow_input=True)
-                        else:
-                            portal.open(allow_input=False)
+                        portal.open(allow_input=teaching is None)
+                        shared = True
+                        if teaching is not None:
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"
@@ -718,7 +721,7 @@ def _share_desktop(
                                 terminal
                             ):
                                 raise RuntimeError(
-                                    "The attach terminal is no longer in the foreground; disconnecting."
+                                    "This session's terminal is no longer in the foreground; disconnecting."
                                 )
                             if guard is not None and guard.poll() is not None:
                                 raise RuntimeError(
@@ -786,7 +789,7 @@ def _share_desktop(
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(f"Could not attach: {failure}", file=sys.stderr)
+        print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
     finally:
         stop.set()
@@ -796,5 +799,8 @@ def _share_desktop(
             os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-        print("Stopped sharing. Your apps and desktop are still running.", flush=True)
+        if shared:
+            print(
+                "Stopped sharing. Your apps and desktop are still running.", flush=True
+            )
     return int(bool(failures))
