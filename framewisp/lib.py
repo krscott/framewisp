@@ -47,16 +47,16 @@ from framewisp.errors import (
 from framewisp.finalization import (
     KEY_CAPTIONS,
     POINTER_CAPTIONS,
-    CaptionCapture,
     CaptionOptions,
     capture_origin,
-    recorder_output,
     render_clip,
 )
+from framewisp.input_log import CaptionCapture
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 from framewisp.processes import ManagedProcess, managed_process, run_managed
+from framewisp.recorder import recorder_output
 from framewisp.recovery import (
     ACTIVE_RECORDING,
     JOURNAL,
@@ -492,7 +492,12 @@ def publish_clip(clip: Path, destination: Path, failure: Exception | None) -> No
         raise RuntimeError(str(failure).replace(str(clip), str(destination)))
 
 
-def clip_destination_error(session_dir: Path, destination: Path) -> str | None:
+def new_file_error(
+    session_dir: Path,
+    path: Path,
+    kind: Literal["clip destination", "screenshot path"],
+) -> str | None:
+    """Refuse a path for a new file that exists or that the session uses."""
     reserved = {
         (session_dir / name).resolve()
         for name in (
@@ -517,10 +522,10 @@ def clip_destination_error(session_dir: Path, destination: Path) -> str | None:
             "registry.log",
         )
     }
-    if destination in reserved:
-        return f"{destination} is reserved for session files. Choose a new clip destination."
-    if destination.exists():
-        return f"{destination} already exists. Choose a new clip destination."
+    if path in reserved:
+        return f"{path} is reserved for session files. Choose a new {kind}."
+    if path.exists():
+        return f"{path} already exists. Choose a new {kind}."
     return None
 
 
@@ -645,7 +650,7 @@ class Clips:
         if isinstance(layout, str):
             return layout
         try:
-            error = clip_destination_error(self.session_dir, destination)
+            error = new_file_error(self.session_dir, destination, "clip destination")
             if error is not None:
                 return error
             self.process = self.resources.enter_context(
@@ -695,7 +700,7 @@ class Clips:
 def session_command(
     session_dir: Path,
     command: str,
-    destination: Path | None = None,
+    clip_destination: Path | None = None,
     *,
     captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
@@ -707,7 +712,9 @@ def session_command(
     request: dict[str, object] = {
         "command": command,
         "session_directory": str(session_dir),
-        "destination": str(destination.resolve()) if destination else None,
+        "clip_destination": (
+            str(clip_destination.resolve()) if clip_destination else None
+        ),
         "click_pings": click_pings,
         "compact": compact,
         "console": console.parameters() if console is not None else None,
@@ -747,7 +754,7 @@ def session_command(
 
 @dataclass(frozen=True)
 class RecordStart:
-    destination: Path
+    clip_destination: Path
     captions: CaptionOptions
     click_pings: bool
     console: ConsolePanel | None
@@ -756,13 +763,13 @@ class RecordStart:
     @staticmethod
     def parse(command: dict[str, object]) -> "RecordStart":
         console = ConsolePanel.parse(command.get("console"))
-        destination = command.get("destination")
+        clip_destination = command.get("clip_destination")
         pointer_captions = command.get("pointer_captions")
         key_captions = command.get("key_captions")
         click_pings = command.get("click_pings", True)
         compact = command.get("compact", False)
-        if not isinstance(destination, str):
-            raise ValueError("record-start requires a destination")
+        if not isinstance(clip_destination, str):
+            raise ValueError("record-start requires a clip_destination")
         if pointer_captions is not None and pointer_captions not in POINTER_CAPTIONS:
             raise ValueError(
                 f"pointer_captions must be one of {', '.join(POINTER_CAPTIONS)}"
@@ -773,11 +780,11 @@ class RecordStart:
             raise ValueError("click_pings must be true or false")
         if not isinstance(compact, bool):
             raise ValueError("compact must be true or false")
-        path = Path(destination)
+        path = Path(clip_destination)
         if not path.is_absolute():
-            raise ValueError("destination must be absolute in session requests.")
+            raise ValueError("clip_destination must be absolute in session requests.")
         return RecordStart(
-            resolved_request_path(path, "destination"),
+            resolved_request_path(path, "clip_destination"),
             CaptionOptions(
                 pointer=pointer_captions,
                 key=key_captions,
@@ -806,9 +813,9 @@ def parse_batch(raw: object, clips: Clips) -> Batch:
         if not screenshot.path.parent.is_dir():
             raise ValueError(f"{kind}.path requires an existing parent directory.")
         resolved = resolved_request_path(screenshot.path, f"{kind}.path")
-        path_error = clip_destination_error(clips.session_dir, resolved)
+        path_error = new_file_error(clips.session_dir, resolved, "screenshot path")
         if path_error is not None:
-            raise ValueError(path_error.replace("clip destination", "screenshot path"))
+            raise ValueError(path_error)
         error = screenshot_path_error(resolved, clips.destination)
         if error is not None:
             raise ValueError(error)
@@ -889,7 +896,7 @@ def handle_session_command(
                 data = clips.last_summary
         else:
             error = clips.start(
-                request.destination,
+                request.clip_destination,
                 captions=request.captions,
                 click_pings=request.click_pings,
                 console=request.console,
@@ -927,7 +934,7 @@ def run_session(
     session_dir = session_dir.resolve()
     if clip_destination is not None:
         clip_destination = clip_destination.resolve()
-        error = clip_destination_error(session_dir, clip_destination)
+        error = new_file_error(session_dir, clip_destination, "clip destination")
         if error is not None:
             raise SessionError(error)
     session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)

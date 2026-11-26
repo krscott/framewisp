@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path
 from threading import Event, RLock
-from typing import BinaryIO
+from typing import BinaryIO, Literal
 
 import gi
 
@@ -30,7 +30,11 @@ class Teaching:
         self.lock = RLock()
         self.closed = False
 
-    def manifest(self, status: str, error: str | None = None) -> None:
+    def manifest(
+        self,
+        status: Literal["capturing", "complete", "failed"],
+        error: str | None = None,
+    ) -> None:
         write_json(
             self.directory / "lesson.json",
             {

@@ -20,12 +20,8 @@ from framewisp.connection import (
 )
 from framewisp.desktop import stop_sharing
 from framewisp.errors import SessionError, recorded_app_exit
-from framewisp.finalization import (
-    KEY_CAPTIONS,
-    POINTER_CAPTIONS,
-    CaptionOptions,
-    log_input,
-)
+from framewisp.finalization import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions
+from framewisp.input_log import log_input
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.layout import (
     CONSOLE_POSITIONS,
@@ -175,7 +171,11 @@ def main() -> None:
         "between hosts",
     )
     run.add_argument(
-        "--record", type=Path, metavar="FILE", help="record the session to MP4"
+        "--record",
+        type=Path,
+        metavar="FILE",
+        help="record a clip to FILE, starting before the app launches; record-stop "
+        "or the end of the session finishes it",
     )
     run.add_argument(
         "--width",

@@ -12,31 +12,34 @@ POINTER_STYLE = "Style: Pointer,Noto Sans,20,&HFF000000,&H00000000,1,0,0,5,0,0,0
 
 # A circle of this radius, scaled by percentages equal to the pixel radius.
 # libass centres a drawing on its bounding box only when coordinates are positive.
-RING_RADIUS = 100
-RING_START_RADIUS = 10
-RING_END_RADIUS = 40
-RING_STROKE = 4
+CIRCLE_RADIUS = 100
+
+# A click ping grows from its start radius to its end radius as it fades.
+CLICK_PING_START_RADIUS = 10
+CLICK_PING_END_RADIUS = 40
+CLICK_PING_STROKE = 4
 
 # A completed drag adds a translucent, borderless hold disc to its click ping.
 # The hold disc follows the pointer while the button is held and fades after the release.
 HOLD_RADIUS = 24
 HOLD_OPACITY = 0.3
-# Grow at the ring's rate, so the hold disc fills the ring until it reaches its size.
+# Grow at the click ping's rate, so the hold disc fills the click ping until it
+# reaches its size.
 HOLD_GROW_SECONDS = (
     CLICK_PING_SECONDS
-    * (HOLD_RADIUS - RING_START_RADIUS)
-    / (RING_END_RADIUS - RING_START_RADIUS)
+    * (HOLD_RADIUS - CLICK_PING_START_RADIUS)
+    / (CLICK_PING_END_RADIUS - CLICK_PING_START_RADIUS)
 )
 
 
-def ring_path() -> str:
+def circle_path() -> str:
     near, far = 45, 155  # Bezier control points for a circle of radius 100.
-    edge = 2 * RING_RADIUS
+    edge = 2 * CIRCLE_RADIUS
     return (
-        f"m {RING_RADIUS} 0 b {far} 0 {edge} {near} {edge} {RING_RADIUS} "
-        f"{edge} {far} {far} {edge} {RING_RADIUS} {edge} "
-        f"{near} {edge} 0 {far} 0 {RING_RADIUS} "
-        f"0 {near} {near} 0 {RING_RADIUS} 0"
+        f"m {CIRCLE_RADIUS} 0 b {far} 0 {edge} {near} {edge} {CIRCLE_RADIUS} "
+        f"{edge} {far} {far} {edge} {CIRCLE_RADIUS} {edge} "
+        f"{near} {edge} 0 {far} 0 {CIRCLE_RADIUS} "
+        f"0 {near} {near} 0 {CIRCLE_RADIUS} 0"
     )
 
 
@@ -130,7 +133,7 @@ def pointer_overlay_text(overlay: ClickPing | HoldDisc, layout: VideoLayout) -> 
     """Draw a click ping or hold disc that the clip keeps inside the GUI area."""
     gui = layout.gui
     scale = gui.height / 720
-    first, last = RING_START_RADIUS * scale, RING_END_RADIUS * scale
+    first, last = CLICK_PING_START_RADIUS * scale, CLICK_PING_END_RADIUS * scale
     if isinstance(overlay, HoldDisc):
         # libass moves over the whole line, fade included, when both \move
         # times are zero (ass_parse.c in libass 0.17.4).
@@ -149,11 +152,11 @@ def pointer_overlay_text(overlay: ClickPing | HoldDisc, layout: VideoLayout) -> 
             f"{gui.x + overlay.x2},{gui.y + overlay.y2},0,{held}){gui.clip}\\p1"
             f"\\bord0\\1c&H0000FF&\\1a{alpha}{grow}"
             f"\\t({held},{fade},\\1a&HFF&)}}"
-            f"{ring_path()}{{\\p0}}"
+            f"{circle_path()}{{\\p0}}"
         )
     return (
         f"{{\\pos({gui.x + overlay.x},{gui.y + overlay.y}){gui.clip}\\p1"
-        f"\\bord{RING_STROKE * scale}\\3c&H0000FF&\\3a&H00&\\1a&HFF&"
+        f"\\bord{CLICK_PING_STROKE * scale}\\3c&H0000FF&\\3a&H00&\\1a&HFF&"
         f"\\fscx{first}\\fscy{first}\\t(\\fscx{last}\\fscy{last}\\3a&HFF&)}}"
-        f"{ring_path()}{{\\p0}}"
+        f"{circle_path()}{{\\p0}}"
     )

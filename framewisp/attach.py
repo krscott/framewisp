@@ -42,7 +42,7 @@ from framewisp.connection import (
     teaching_refusal,
 )
 from framewisp.desktop import lock_desktop, write_json
-from framewisp.finalization import input_error
+from framewisp.input_log import input_error
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.portal import DesktopPortal, dispatch_events
 from framewisp.recovery import refuse_unrecovered_session, session_lock

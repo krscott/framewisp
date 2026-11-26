@@ -843,7 +843,7 @@ def test_terminal_interrupt_during_render_publishes_rendered_clip(
         signal.pidfd_send_signal(render, signal.SIGCONT)
         assert stop.wait(timeout=60) == 0
         assert runner.wait(timeout=60) == 0, (tmp_path / "runner.log").read_text()
-    assert len(ring_frames(tmp_path / "clip.mp4", 120, 100)) >= 8
+    assert len(pointer_overlay_frames(tmp_path / "clip.mp4", 120, 100)) >= 8
     assert not private_directories(tmp_path)
 
 
@@ -1885,15 +1885,17 @@ def caption_patches(path: Path) -> list[bytes]:
     return [data[offset : offset + size] for offset in range(0, len(data), size)]
 
 
-RING_CROP = 100
+OVERLAY_CROP = 100
 
 
-def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
+def pointer_overlay_frames(
+    path: Path, x: int, y: int, *, contrast: int = 40
+) -> list[int]:
     """List 30 fps frames with a centred click ping or hold disc around a display position.
 
     Red pixels exceed green and blue by more than `contrast`.
     """
-    crop = f"crop={RING_CROP}:{RING_CROP}:{x - RING_CROP // 2}:{y - RING_CROP // 2}"
+    crop = f"crop={OVERLAY_CROP}:{OVERLAY_CROP}:{x - OVERLAY_CROP // 2}:{y - OVERLAY_CROP // 2}"
     data = subprocess.run(
         [
             "ffmpeg",
@@ -1913,13 +1915,13 @@ def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
         check=True,
         timeout=60,
     ).stdout
-    size = RING_CROP * RING_CROP * 3
-    rings: list[int] = []
+    size = OVERLAY_CROP * OVERLAY_CROP * 3
+    shown: list[int] = []
     for index in range(len(data) // size):
         frame = data[index * size : (index + 1) * size]
         points = [
-            (offset % RING_CROP, offset // RING_CROP)
-            for offset in range(RING_CROP * RING_CROP)
+            (offset % OVERLAY_CROP, offset // OVERLAY_CROP)
+            for offset in range(OVERLAY_CROP * OVERLAY_CROP)
             if frame[offset * 3] - frame[offset * 3 + 1] > contrast
             and frame[offset * 3] - frame[offset * 3 + 2] > contrast
         ]
@@ -1927,11 +1929,11 @@ def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
             continue
         xs, ys = [point[0] for point in points], [point[1] for point in points]
         if (
-            abs((min(xs) + max(xs)) / 2 - RING_CROP / 2) <= 2
-            and abs((min(ys) + max(ys)) / 2 - RING_CROP / 2) <= 2
+            abs((min(xs) + max(xs)) / 2 - OVERLAY_CROP / 2) <= 2
+            and abs((min(ys) + max(ys)) / 2 - OVERLAY_CROP / 2) <= 2
         ):
-            rings.append(index)
-    return rings
+            shown.append(index)
+    return shown
 
 
 def clip_origin(demo: Demo) -> float:
@@ -1975,26 +1977,28 @@ GESTURE_BUTTONS = [
 ]
 
 
-def assert_rings_mark_gestures(demo: Demo, video: Path, *, timed: bool = True) -> None:
+def assert_click_pings_mark_gestures(
+    demo: Demo, video: Path, *, timed: bool = True
+) -> None:
     buttons = logged_buttons(demo)[-len(GESTURE_BUTTONS) :]
     assert [(action, x, y) for action, _, x, y in buttons] == GESTURE_BUTTONS
     origin = clip_origin(demo)
     *presses, release = buttons
     # The drag's hold disc stops at its release and fades there; the translucent
-    # fill stays visible for fewer frames than a ring.
-    hold_discs = ring_frames(video, release[2], release[3])
+    # fill stays visible for fewer frames than a click ping.
+    hold_discs = pointer_overlay_frames(video, release[2], release[3])
     assert (
         len(hold_discs) >= 3
     ), f"no hold disc at drag release ({release[2]}, {release[3]})"
     if timed:
         assert abs(hold_discs[0] / 30 - (release[1] - origin)) <= 0.05
     for action, moment, x, y in presses:
-        rings = ring_frames(video, x, y)
-        assert len(rings) >= 8, f"no ring for {action} at ({x}, {y})"
+        click_pings = pointer_overlay_frames(video, x, y)
+        assert len(click_pings) >= 8, f"no click ping for {action} at ({x}, {y})"
         if timed:
             # A drag's translucent hold disc leaves the crop over a few frames and
-            # skews the ring's bounds. Only the ring's early stroke is this red.
-            opaque = ring_frames(video, x, y, contrast=120)
+            # skews the click ping's bounds. Only its early stroke is this red.
+            opaque = pointer_overlay_frames(video, x, y, contrast=120)
             first = min(when for _, when, px, py in buttons if (px, py) == (x, y))
             assert abs(opaque[0] / 30 - (first - origin)) <= 0.05
             assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in opaque)
@@ -2008,7 +2012,7 @@ def test_startup_clip_click_pings_gestures(demo: Demo) -> None:
     wait_for_input_probe_window(demo)
     perform_gestures(demo)
     cli(demo.directory, "stop")
-    assert_rings_mark_gestures(demo, demo.clip)
+    assert_click_pings_mark_gestures(demo, demo.clip)
 
 
 # R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11
@@ -2040,7 +2044,7 @@ def test_mid_session_clip_click_pings_gestures(
     summary = json.loads(cli(demo.directory, "record-stop").stdout)
     if compact:
         assert summary["duration_seconds"] < elapsed - 1
-    assert_rings_mark_gestures(demo, clip, timed=not compact)
+    assert_click_pings_mark_gestures(demo, clip, timed=not compact)
 
 
 # R-REC-7, R-LOG-3
@@ -2055,7 +2059,7 @@ def test_click_pings_are_per_clip_and_absent_from_screenshots(
     cli(demo.directory, "click", "300", "200")
     time.sleep(0.8)
     cli(demo.directory, "record-stop")
-    assert ring_frames(plain, 300, 200) == []
+    assert pointer_overlay_frames(plain, 300, 200) == []
 
     pinged = tmp_path / "pinged.mp4"
     cli(demo.directory, "record-start", str(pinged))
@@ -2079,9 +2083,9 @@ def test_click_pings_are_per_clip_and_absent_from_screenshots(
     time.sleep(0.8)
     cli(demo.directory, "record-stop")
     # The batch captures 0.05 seconds after its press, inside the click ping the clip shows.
-    rings = ring_frames(pinged, 300, 200)
+    click_pings = pointer_overlay_frames(pinged, 300, 200)
     origin = clip_origin(demo)
-    assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
+    assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in click_pings)
     with Image.open(shot) as screenshot:
         patch = screenshot.convert("RGB").crop((250, 150, 350, 250)).tobytes()
     assert not any(
@@ -2120,7 +2124,7 @@ def check_console_clip(
     assert (summary["width"], summary["height"]) == (
         (1280 + pixels, 720) if position in {"left", "right"} else (1280, 720 + pixels)
     )
-    assert len(ring_frames(clip, gui_x + 300, gui_y + 200)) >= 8
+    assert len(pointer_overlay_frames(clip, gui_x + 300, gui_y + 200)) >= 8
     origin = clip_origin(demo)
     pressed = next(
         event["time"] - origin
@@ -2225,7 +2229,7 @@ def test_rejected_console_panel_leaves_the_app_running(
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory.resolve()),
-                "destination": str(rejected),
+                "clip_destination": str(rejected),
                 "key_captions": "non-text",
                 "console": value,
             }
@@ -2250,7 +2254,7 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
         request = {
             "command": "record-start",
             "session_directory": str(demo.directory.resolve()),
-            "destination": str(tmp_path / "rejected.mp4"),
+            "clip_destination": str(tmp_path / "rejected.mp4"),
             "key_captions": "non-text",
             "click_pings": "no",
         }
@@ -2284,15 +2288,15 @@ def test_unusable_clip_destination_leaves_the_app_running(
     wait_for_input_probe_window(demo)
     session_dir = str(demo.directory.resolve())
     for destination, message in (
-        (f"{tmp_path}/nul\0.mp4", "destination is not a usable path"),
-        (f"{tmp_path}/\ud800.mp4", "destination is not a usable path"),
+        (f"{tmp_path}/nul\0.mp4", "clip_destination is not a usable path"),
+        (f"{tmp_path}/\ud800.mp4", "clip_destination is not a usable path"),
         # The failing stage depends on the Python version.
         (f"{tmp_path}/{'a' * 300}.mp4", ""),
     ):
         request = {
             "command": "record-start",
             "session_directory": session_dir,
-            "destination": destination,
+            "clip_destination": destination,
             "key_captions": "non-text",
         }
         line = request_reply(demo, (json.dumps(request) + "\n").encode())
@@ -2316,7 +2320,7 @@ def test_non_utf8_clip_destination_records(demo: Demo, tmp_path: Path) -> None:
     request = {
         "command": "record-start",
         "session_directory": str(demo.directory.resolve()),
-        "destination": str(clip),
+        "clip_destination": str(clip),
         "key_captions": "non-text",
     }
     line = request_reply(demo, (json.dumps(request) + "\n").encode())
@@ -2379,11 +2383,19 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         {"command": 1},
         {"command": "unknown"},
         {"command": "record-start"},
-        {"command": "record-start", "destination": "x.mp4", "key_captions": "non-text"},
-        {"command": "record-start", "destination": "/tmp/x.mp4", "key_captions": []},
         {
             "command": "record-start",
-            "destination": "/tmp/x.mp4",
+            "clip_destination": "x.mp4",
+            "key_captions": "non-text",
+        },
+        {
+            "command": "record-start",
+            "clip_destination": "/tmp/x.mp4",
+            "key_captions": [],
+        },
+        {
+            "command": "record-start",
+            "clip_destination": "/tmp/x.mp4",
             "key_captions": "non-text",
             "compact": "yes",
         },
@@ -2429,7 +2441,7 @@ def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) ->
     time.sleep(0.8)
     assert logged_buttons(demo)
     cli(demo.directory, "stop")
-    assert ring_frames(demo.clip, 300, 200) == []
+    assert pointer_overlay_frames(demo.clip, 300, 200) == []
 
 
 # R-REC-10
@@ -2464,7 +2476,7 @@ def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
     assert demo.process.wait(timeout=5) == 1
     assert not private_directories(clip.parent)
     assert len(clip_frames(clip)) > 1
-    assert ring_frames(clip, 120, 100) == []
+    assert pointer_overlay_frames(clip, 120, 100) == []
 
 
 def console_panel(path: Path, second: float) -> bytes:
@@ -2807,7 +2819,7 @@ def test_runner_rejects_invalid_caption_mode(
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory),
-                "destination": str(destination),
+                "clip_destination": str(destination),
                 field: value,
             }
             connection.sendall((json.dumps(request) + "\n").encode())
@@ -4197,7 +4209,7 @@ def test_unpublishable_clip_reports_render_failure_with_kept_clip(
     assert "finalization.log" in error
     assert (demo.directory / ".active-recording").readlink() == kept
     assert len(clip_frames(kept)) > 1
-    assert ring_frames(kept, 120, 100) == []
+    assert pointer_overlay_frames(kept, 120, 100) == []
 
 
 @pytest.mark.integration

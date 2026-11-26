@@ -3,14 +3,18 @@
 import errno
 import os
 import subprocess
+import time
+from io import BytesIO
 from pathlib import Path
 from threading import Event
 
 import pytest
 
 from framewisp.console import ConsoleCapture
+from framewisp.finalization import capture_origin
 from framewisp.layout import ConsolePanel
 from framewisp.lib import Clips
+from framewisp.recorder import filter_recorder_output, recorder_output
 from framewisp.recovery import ACTIVE_RECORDING, interrupted_clip
 
 # wf-recorder wrote this shape for a clip stopped right after record-start under
@@ -185,3 +189,40 @@ def test_recover_ignores_a_link_to_a_removed_directory(tmp_path: Path) -> None:
     (tmp_path / ACTIVE_RECORDING).symlink_to(tmp_path / "removed" / "clip.mp4")
     assert interrupted_clip(tmp_path) is None
     assert not (tmp_path / ACTIVE_RECORDING).is_symlink()
+
+
+def test_recorder_filter_keeps_origin_and_diagnostics(tmp_path: Path) -> None:
+    origin = b"[00:15:39.8] {Default Queue} zwlr_screencopy_frame_v1#6.ready(0, 123, 250000000)\n"
+    later = b"[00:15:40.8] {Default Queue} zwlr_screencopy_frame_v1#7.ready(0, 124, 250000000)\n"
+    diagnostic = b"[libx264 @ 0x123] encoding diagnostic\nUnable to open output file\n"
+    trace = b"[00:15:39.7] {Default Queue}  -> wl_display#1.get_registry(new id wl_registry#2)\n"
+    discarded = b"[00:15:40.9] {Default Queue} discarded wl_buffer#12.release()\n"
+    output = BytesIO()
+    filter_recorder_output(
+        BytesIO(trace + origin + (later + discarded) * 10000 + diagnostic), output
+    )
+    assert output.getvalue() == origin + diagnostic
+    log = tmp_path / "recorder.log"
+    log.write_bytes(output.getvalue())
+    assert capture_origin(log) == 123.25
+
+
+@pytest.mark.parametrize("failure", [None, "cleanup failed: PID 123"])
+def test_recorder_output_does_not_wait_forever_for_inherited_writer(
+    tmp_path: Path, failure: str | None
+) -> None:
+    duplicate: int | None = None
+    started = time.monotonic()
+    try:
+        with pytest.raises(RuntimeError, match=failure or "inherited log pipe"):
+            with recorder_output(tmp_path / "recorder.log") as sink:
+                duplicate = os.dup(sink.fileno())
+                sink.write(b"partial diagnostic")
+                sink.flush()
+                if failure is not None:
+                    raise RuntimeError(failure)
+        assert time.monotonic() - started < 2
+        assert (tmp_path / "recorder.log").read_bytes() == b"partial diagnostic"
+    finally:
+        if duplicate is not None:
+            os.close(duplicate)

@@ -565,8 +565,9 @@ receives output, so buffered output can appear late. Output from separately
 activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the console panel. Console text follows the app-log policy,
-so the input-content policy does not redact it. Rendering waits until finalization; a failure preserves the
-raw GUI video, reports `finalization.log`, and stops the session.
+so the input-content policy does not redact it. Finalization draws the panel when the clip stops. If it fails, the
+raw GUI video remains, the error names its path and `finalization.log`, and the
+session stops.
 
 ## Share evidence on GitHub
 

@@ -19,7 +19,7 @@ from framewisp.checks import Check, perform_check
 from framewisp.compact import log_activity
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
-from framewisp.finalization import KEY_ACTIONS, CaptionCapture, input_error, log_input
+from framewisp.input_log import KEY_ACTIONS, CaptionCapture, input_error, log_input
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
 from framewisp.pointer import approach
 from framewisp.x11 import (
