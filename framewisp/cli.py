@@ -188,9 +188,9 @@ def main() -> None:
     )
     run.add_argument(
         "app_command",
-        metavar="command",
+        metavar="APP",
         nargs=argparse.REMAINDER,
-        help="-- executable [args...]",
+        help="-- APP [ARGS...]: the app executable and its arguments",
     )
 
     record_start = commands.add_parser("record-start", help="start recording a clip")
