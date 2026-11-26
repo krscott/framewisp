@@ -138,8 +138,9 @@ Each check retains its `condition`, `observation` (the last query's observation,
 which may be partial; `null` if the check stopped before its first query returned),
 `limits` (configured budgets), `observations` count, `verified`, and
 `duration_seconds`. The observation's `hints` describe standalone
-`inspect` flags; check failure messages describe the JSON `limits`. Baselines and transition
-waits also include `baseline_observation_id`. Failure stops subsequent steps and
+`inspect` flags; check failure messages describe the JSON `limits`. A successful baseline
+also includes `baseline_observation_id`, and a transition wait copies it from the baseline
+it references, even when the wait fails. Failure stops subsequent steps and
 preserves earlier results. It reports `failed_phase: "check"` and `failed_index`.
 CLI exit codes remain 0 for success, 1 for runtime failure, and 2 for invalid input.
 

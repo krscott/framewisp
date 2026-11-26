@@ -145,8 +145,8 @@ def app_command(command: list[str], env: dict[str, str]) -> list[str]:
         )
         is None
     ):
-        if demo := shutil.which("framewisp-demo"):
-            return [demo, *command[1:]]
+        if demo_app := shutil.which("framewisp-demo"):
+            return [demo_app, *command[1:]]
     return command
 
 

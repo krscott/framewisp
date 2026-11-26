@@ -334,8 +334,7 @@ def stale_desktop_session(session_dir: Path) -> str:
     return (
         f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
-        "If it is running, stop it with `framewisp --stop-sharing`.\n"
-        f"Otherwise start it again with attach or teach, or delete its metadata:\n  {metadata}"
+        f"Start it again with attach or teach, or delete its metadata:\n  {metadata}"
     ) + kept_clip_note(session_dir)
 
 
