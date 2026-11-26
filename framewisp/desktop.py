@@ -17,6 +17,10 @@ from pathlib import Path
 # Linux SO_PEERPIDFD, available since 6.5; not exposed by Python 3.14 yet.
 SO_PEERPIDFD = 77
 
+# The emergency stop socket in the desktop directory. Kept short because Unix
+# socket paths are limited to 108 bytes.
+STOP_SOCKET = "stop.sock"
+
 
 def desktop_directory() -> Path:
     root = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -64,12 +68,12 @@ def lock_desktop() -> Generator[Path]:
                 "A desktop share is already active. Run framewisp --stop-sharing to stop it."
             ) from None
         # Never unlink the lock file: all contenders must lock the same inode.
-        for name in ("command.sock", "stop-sharing.sock"):
+        for name in ("command.sock", STOP_SOCKET):
             (directory / name).unlink(missing_ok=True)
         try:
             yield directory
         finally:
-            for name in ("command.sock", "stop-sharing.sock"):
+            for name in ("command.sock", STOP_SOCKET):
                 (directory / name).unlink(missing_ok=True)
     finally:
         os.close(descriptor)
@@ -81,7 +85,7 @@ def stop_sharing() -> int:
         directory = desktop_directory()
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(0.5)
-            connection.connect(str(directory / "stop-sharing.sock"))
+            connection.connect(str(directory / STOP_SOCKET))
             _, uid, _ = struct.unpack(
                 "3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
             )

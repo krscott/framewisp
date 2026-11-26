@@ -63,7 +63,7 @@ def test_packaged_demo_ignores_caller_python_settings(
             time.sleep(0.05)
         # Wait for GTK initialization, since runner readiness precedes rendering.
         backend = "X11Display" if x11 else "WaylandDisplay"
-        while "Demo ready" not in (session_dir / "app.log").read_text():
+        while "Demo app ready" not in (session_dir / "app.log").read_text():
             assert process.poll() is None, (session_dir / "app.log").read_text()
             assert time.monotonic() < deadline, (session_dir / "app.log").read_text()
             time.sleep(0.05)

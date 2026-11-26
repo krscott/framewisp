@@ -71,7 +71,7 @@ def main() -> None:
                         time.perf_counter() - started
                     )
                     app_log = session_dir / "app.log"
-                    while "Demo ready" not in app_log.read_text():
+                    while "Demo app ready" not in app_log.read_text():
                         assert time.perf_counter() - started < 20
                         time.sleep(0.005)
                     if cold:

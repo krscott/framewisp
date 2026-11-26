@@ -21,12 +21,12 @@ def main() -> None:
     assert settings is not None
     settings.set_property("gtk-font-name", "DejaVu Sans 11")
     loop = GLib.MainLoop()
-    window = Gtk.Window(title="Framewisp demo")
+    window = Gtk.Window(title="Framewisp demo app")
     backend = type(window.get_display()).__name__
     print(f"Display: {backend}", flush=True)
     window.set_default_size(960, 640)
     window.connect("close-request", lambda *_: loop.quit())
-    window.connect("map", lambda *_: print("Demo ready", flush=True))
+    window.connect("map", lambda *_: print("Demo app ready", flush=True))
 
     columns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=40)
     content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
@@ -37,7 +37,7 @@ def main() -> None:
     content.set_halign(Gtk.Align.START)
     content.set_valign(Gtk.Align.START)
 
-    title = Gtk.Label(label=f"Framewisp demo ({backend})")
+    title = Gtk.Label(label=f"Framewisp demo app ({backend})")
     title.set_xalign(0)
     content.append(title)
 
@@ -130,7 +130,7 @@ def main() -> None:
         entry.grab_focus()
         print("Reset", flush=True)
 
-    reset_button = Gtk.Button(label="Reset demo")
+    reset_button = Gtk.Button(label="Reset demo app")
     reset_button.connect("clicked", reset)
     right.append(reset_button)
     columns.append(content)

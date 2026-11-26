@@ -86,20 +86,13 @@ def main() -> None:
             for sample in range(args.samples):
                 for mode in ("default", "explicit"):
                     for kind in ("inspect", "baseline", "wait", "assert"):
-                        request: dict[str, object] = {
-                            "check": kind,
-                            "timeout": 5,
-                            "condition": condition,
+                        measurement: dict[str, object] = {
+                            "sample": sample,
+                            "mode": mode,
+                            "kind": kind,
                         }
-                        if kind == "baseline":
-                            request["condition"] = condition | {
-                                "equals": "Never" if args.app == "gtk" else False
-                            }
-                        if mode == "explicit":
-                            request["limits"] = budgets
-                        plan.write_text(json.dumps({"steps": [request]}))
-                        arguments = (
-                            [
+                        if kind == "inspect":
+                            arguments = [
                                 "inspect",
                                 "--json",
                                 *(
@@ -122,9 +115,21 @@ def main() -> None:
                                     else []
                                 ),
                             ]
-                            if kind == "inspect"
-                            else ["batch", "--file", str(plan)]
-                        )
+                        else:
+                            request: dict[str, object] = {
+                                "check": kind,
+                                "timeout": 5,
+                                "condition": condition,
+                            }
+                            if kind == "baseline":
+                                request["condition"] = condition | {
+                                    "equals": "Never" if args.app == "gtk" else False
+                                }
+                            if mode == "explicit":
+                                request["limits"] = budgets
+                            plan.write_text(json.dumps({"steps": [request]}))
+                            measurement["request"] = request
+                            arguments = ["batch", "--file", str(plan)]
                         started = time.monotonic()
                         response = subprocess.run(
                             [*command, *arguments],
@@ -137,12 +142,9 @@ def main() -> None:
                             raise RuntimeError(response.stderr)
                         result = cast(dict[str, Any], json.loads(response.stdout))
                         measurements.append(
-                            {
-                                "sample": sample,
-                                "mode": mode,
-                                "kind": kind,
+                            measurement
+                            | {
                                 "cli_wall_seconds": wall,
-                                "request": request,
                                 "exit_code": response.returncode,
                                 "stderr": response.stderr,
                                 "arguments": arguments,

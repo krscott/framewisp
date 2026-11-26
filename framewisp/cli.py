@@ -147,7 +147,8 @@ def main() -> None:
         "attach", help="share an existing desktop through its permission dialog"
     )
     teach = commands.add_parser(
-        "teach", help="capture a screen-only lesson from your desktop"
+        "teach",
+        help="capture a lesson from your desktop without keyboard or pointer access",
     )
     teach.add_argument("directory", type=Path, help="new directory for the lesson")
     teach.add_argument("--goal", required=True, help="what the agent should learn")

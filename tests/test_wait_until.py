@@ -16,7 +16,7 @@ def short_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.usefixtures("short_timeout")
 def test_timeout_describes_multiline_lambda_and_elapsed_time(tmp_path: Path) -> None:
     log = tmp_path / "app.log"
-    log.write_text("Demo ready\n")
+    log.write_text("Demo app ready\n")
 
     with pytest.raises(AssertionError) as failure:
         wait_until(
