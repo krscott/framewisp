@@ -507,8 +507,8 @@ shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
 `.framewisp-clip-*` directory beside it, so the clip destination's
 directory must be writable and support hard links. If another file takes the clip destination first,
-framewisp leaves that file alone, ends the session with an error, and names the
-kept clip. After a killed runner, `recover` prints the interrupted clip's path as
+framewisp leaves that file intact, keeps the rendered clip, or the raw MP4 if
+rendering failed, ends the session with an error, and names the kept path. After a killed runner, `recover` prints the interrupted clip's path as
 `interrupted_clip`. Text captions are off by default. For a clip that needs
 them, use `--pointer-captions modifiers` for shortcuts such as Ctrl+Click or
 `--pointer-captions all` for every pointer action. Use `--key-captions non-text`
@@ -615,10 +615,10 @@ enabled StatusNotifierItem/AppIndicator extension. The desktop controls placemen
 overflow, panel auto-hide, and visibility, so registration does not guarantee a
 visible indicator. If no compatible host is available, the attach terminal reports
 that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
-The indicator ends with the desktop share's runner; reconnecting needs fresh portal
-approval and creates a new indicator. Keep emergency shortcuts configured. The
-indicator's menu needs a responsive runner, while `--stop-sharing` can stop a
-suspended runner.
+The indicator disappears when the session ends, and framewisp registers a new one
+for the next attached or teaching session, which needs fresh portal approval. Keep
+emergency shortcuts configured. The indicator's menu needs a responsive runner, while
+`--stop-sharing` can stop a suspended runner.
 
 The stop command is `framewisp --stop-sharing`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also

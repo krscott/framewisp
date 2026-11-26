@@ -127,8 +127,9 @@ def main() -> None:
                                 }
                             if mode == "explicit":
                                 request["limits"] = budgets
-                            plan.write_text(json.dumps({"steps": [request]}))
-                            measurement["request"] = request
+                            payload = {"steps": [request]}
+                            plan.write_text(json.dumps(payload))
+                            measurement["request"] = payload
                             arguments = ["batch", "--file", str(plan)]
                         started = time.monotonic()
                         response = subprocess.run(

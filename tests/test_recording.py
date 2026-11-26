@@ -40,7 +40,7 @@ def recorded_by_fake_recorder(
     written: Path,
     *,
     compact: bool = False,
-    console: ConsolePanel | None = None,
+    console_panel: ConsolePanel | None = None,
 ) -> dict[str, object]:
     """Finish a clip whose recorder writes `written`, and return the summary."""
     tools = tmp_path / "recorder-tools"
@@ -62,7 +62,7 @@ while :; do sleep 0.01; done
         session_dir, environment, Event(), (1280, 720), ConsoleCapture(session_dir)
     )
     destination = tmp_path / "clip.mp4"
-    error = recording.start(destination, compact=compact, console=console)
+    error = recording.start(destination, compact=compact, console_panel=console_panel)
     assert error is None
     assert recording.finish() is None
     assert destination.stat().st_size > 0
@@ -83,12 +83,12 @@ def test_clip_with_a_hidden_frame_is_finalized_as_playable(tmp_path: Path) -> No
 
 # R-REC-22
 @pytest.mark.parametrize(
-    ("compact", "console"),
+    ("compact", "console_panel"),
     [(False, None), (True, None), (False, ConsolePanel())],
     ids=["plain", "compact", "console"],
 )
 def test_clip_with_no_measurable_duration_reports_null(
-    tmp_path: Path, compact: bool, console: ConsolePanel | None
+    tmp_path: Path, compact: bool, console_panel: ConsolePanel | None
 ) -> None:
     written = tmp_path / "no-frames.mp4"
     subprocess.run(
@@ -112,7 +112,7 @@ def test_clip_with_no_measurable_duration_reports_null(
         timeout=10,
     )
     summary = recorded_by_fake_recorder(
-        tmp_path, written, compact=compact, console=console
+        tmp_path, written, compact=compact, console_panel=console_panel
     )
     assert summary["duration_seconds"] is None
     assert summary["width"] is None

@@ -601,7 +601,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
             clip_destination=args.record,
             captions=args.captions,
             click_pings=not args.no_click_pings,
-            console=args.console_panel,
+            console_panel=args.console_panel,
             compact=args.compact,
             size=(args.width, args.height),
             x11=args.x11,
@@ -621,7 +621,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
                 args.path if args.command == "record-start" else None,
                 captions=getattr(args, "captions", CaptionOptions()),
                 click_pings=not getattr(args, "no_click_pings", False),
-                console=getattr(args, "console_panel", None),
+                console_panel=getattr(args, "console_panel", None),
                 compact=getattr(args, "compact", False),
             )
         )

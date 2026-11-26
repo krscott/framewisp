@@ -436,7 +436,7 @@ Registration does not guarantee a visible sharing indicator. If no compatible ho
 the terminal reports that the indicator is unavailable and gives the shortcut
 and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a sharing
 indicator: its menu requires a responsive runner. The indicator disappears when the
-desktop share ends or its runner exits; a new desktop share registers a new one.
+session ends, and framewisp registers a new one for the next attached or teaching session.
 See [sharing indicator verification](docs/sharing-indicator.md) for setup and verification status.
 
 Ctrl+Alt+Escape runs `framewisp --stop-sharing`. Ctrl+C, loss of the controlling terminal,
@@ -703,8 +703,9 @@ on a filesystem with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exF
 when the clip starts (R-REC-19).
 
 If another file appears at the clip destination during a clip, framewisp leaves that
-file alone, reports the path of the finished clip in the hidden directory, and
-ends the session like any other finalization failure (R-REC-18). If the recorder
+file intact, keeps the rendered clip in the hidden directory, or the raw MP4 if
+rendering failed (R-REC-10), reports the kept path, and ends the session like any
+other finalization failure (R-REC-18). If the recorder
 fails to finalize, the incomplete clip also stays there, and the error names it.
 
 The session runner manages the recorder and finalizes
@@ -1239,7 +1240,9 @@ processes manually; their PIDs are diagnostic, not safe signal targets. Resource
 and the recovery journal remain so recovery cannot claim success. Recovery also
 refuses missing or unverifiable journals and replaced runtime directories. It removes nothing
 and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
-not recover attached or teaching sessions; use `framewisp --stop-sharing` for those. Attached and teaching sessions take
+not recover attached or teaching sessions: it names the steps to start the session
+again with attach or teach or to delete its metadata. `framewisp --stop-sharing` is the
+emergency stop for the active desktop share. Attached and teaching sessions take
 the same session lock as headless sessions and refuse directories that a headless session left unrecovered.
 
 Headless sessions start private D-Bus session and accessibility buses plus an

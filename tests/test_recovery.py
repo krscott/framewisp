@@ -702,10 +702,11 @@ def test_stale_desktop_session_gets_desktop_session_steps(
     tmp_path: Path, kind: str
 ) -> None:
     (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
-    with pytest.raises(SessionError, match="--stop-sharing") as refusal:
+    with pytest.raises(SessionError, match="attach or teach") as refusal:
         recover_session(tmp_path)
     message = str(refusal.value)
     assert " run -- APP" not in message
+    assert "--stop-sharing" not in message
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0

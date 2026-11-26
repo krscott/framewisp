@@ -94,7 +94,7 @@ def test_gtk_app_ignores_conflicting_caller(
             ]
         )
         if demo:
-            command.append("--demo")
+            command.append("--demo-app")
         env = os.environ | {"FRAMEWISP_TEST_REPORT": str(report)}
         # Only the second caller conflicts, so a leak changes its pixels.
         if number == 1:
