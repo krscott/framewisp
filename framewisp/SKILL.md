@@ -566,7 +566,7 @@ activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the console panel. Console text follows the app-log policy,
 so the input-content policy does not redact it. Finalization draws the console panel when the clip stops. If drawing fails, the
-raw GUI video remains and the error names its path and `finalization.log`. If
+raw video remains and the error names its path and `finalization.log`. If
 publishing the clip fails, the error names where the finished clip is. Either
 failure stops the session.
 
