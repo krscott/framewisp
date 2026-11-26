@@ -389,12 +389,10 @@ def parse_desktop_request(
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one. The sender's kind may
-    # differ from this session's, so the message names neither.
+    # differ from this session's, and its session directory may differ too, so
+    # the message names neither.
     if fields.get("share_token") != share_token:
-        raise ValueError(
-            "The session this command was addressed to has ended. "
-            "Its session directory now holds another session."
-        )
+        raise ValueError("The session this command was addressed to has ended.")
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
@@ -550,6 +548,7 @@ def _share_desktop(
     wrote_metadata = False
     capture_descriptor: int | None = None
     shared = False
+    stopped = "Stopped sharing. Your apps and desktop are still running."
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -791,7 +790,11 @@ def _share_desktop(
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(f"Could not share the desktop: {failure}", file=sys.stderr)
+        if shared:
+            print(f"Stopped sharing: {failure}", file=sys.stderr)
+            stopped = "Your apps and desktop are still running."
+        else:
+            print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
     finally:
         stop.set()
@@ -802,7 +805,5 @@ def _share_desktop(
         for sig, handler in previous.items():
             signal.signal(sig, handler)
         if shared:
-            print(
-                "Stopped sharing. Your apps and desktop are still running.", flush=True
-            )
+            print(stopped, flush=True)
     return int(bool(failures))

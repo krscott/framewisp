@@ -410,10 +410,18 @@ def start_recording(
                 )
         if process.returncode != 0:
             raise log_failure(f"Recorder failed to finalize {destination}", log)
-        failure = None
+        failure: Exception | None = None
         try:
-            # A clip with no duration has no video to render on (R-REC-22).
-            if restore_hidden_frames(clip, log=log, env=env) and timed:
+            restored = restore_hidden_frames(clip, log=log, env=env)
+        except Exception as error:
+            restored = False
+            failure = RuntimeError(
+                f"Finalization failed; raw clip remains at {clip}. Cause: {error}"
+            )
+        # A clip with no duration has nothing to render on (R-REC-22).
+        if restored and timed:
+            # render_clip reports every failure as a RuntimeError naming the raw clip.
+            try:
                 render_clip(
                     clip,
                     input_log=log.parent / "inputs.jsonl",
@@ -428,8 +436,8 @@ def start_recording(
                     layout=layout,
                     env=env,
                 )
-        except (RuntimeError, subprocess.TimeoutExpired) as error:
-            failure = error
+            except RuntimeError as error:
+                failure = error
         publish_clip(clip, destination, failure)
     finally:
         if not capturing:
@@ -882,7 +890,7 @@ def handle_session_command(
             else:
                 reply(
                     connection,
-                    error="Input queue is full. Wait for pending actions to finish.",
+                    error="Input queue is full. Wait for queued input commands or batches to finish.",
                 )
             return None
         error = None

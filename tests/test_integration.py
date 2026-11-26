@@ -2473,7 +2473,7 @@ def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
         timeout=20,
     )
     assert result.returncode == 1
-    assert "raw video remains" in result.stderr
+    assert "raw clip remains" in result.stderr
     assert str(clip) in " ".join(result.stderr.split())
     assert "finalization.log" in result.stderr
     assert demo.process.wait(timeout=5) == 1
@@ -4166,7 +4166,7 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert result.returncode == 1
     error = " ".join(result.stderr.split())
     assert f"The clip remains at {private_clip(tmp_path)}" in error
-    assert "raw video remains" in error
+    assert "raw clip remains" in error
     assert "finalization.log" in error
     assert (demo.directory / ".active-recording").readlink() == private_clip(tmp_path)
     assert len(clip_frames(private_clip(tmp_path))) > 1
@@ -4181,7 +4181,7 @@ def output_directory(tmp_path: Path) -> Generator[Path, None, None]:
     directory.chmod(0o755)
 
 
-# R-REC-10
+# R-REC-10, R-REC-18
 @pytest.mark.integration
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
 @pytest.mark.parametrize("demo", [None], indirect=True)
@@ -4206,7 +4206,7 @@ def test_unpublishable_clip_reports_render_failure_with_kept_clip(
     kept = private_clip(output_directory)
     error = " ".join(result.stderr.split())
     assert f"The clip remains at {kept}" in error
-    assert f"raw video remains at {kept}" in error
+    assert f"raw clip remains at {kept}" in error
     assert "finalization.log" in error
     assert (demo.directory / ".active-recording").readlink() == kept
     assert len(clip_frames(kept)) > 1

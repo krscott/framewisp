@@ -187,7 +187,7 @@ Format: Layer, Start, End, Style, Text
 P = ParamSpec("P")
 
 
-def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
+def keeps_raw_clip(render: Callable[P, None]) -> Callable[P, None]:
     """Report any failure after capture with the clip it left behind."""
 
     @wraps(render)
@@ -196,7 +196,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
             render(*args, **kwargs)
         except Exception as error:
             raise RuntimeError(
-                f"Finalization failed; raw video remains at {args[0]} without "
+                f"Finalization failed; raw clip remains at {args[0]} without "
                 f"overlays, console panel or compaction. See {kwargs['log']} and "
                 f"{kwargs['input_log']}. Cause: {error}"
             ) from error
@@ -204,7 +204,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
     return rendered
 
 
-@keeps_raw_video
+@keeps_raw_clip
 def render_clip(
     clip: Path,
     /,

@@ -476,8 +476,8 @@ A state check may pass immediately on an existing value. To require a transition
 put `{"check": "baseline", "timeout": 2, "condition": ...}` before the input,
 then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
 Use the identical condition in both. The baseline must read a unique nonmatching
-value. Limits may differ between baseline and wait. The baseline
-must be complete, or the batch stops before input. The wait resolves the selector afresh,
+value. Limits may differ between baseline and wait. A failed or
+incomplete baseline stops the steps after it, so put it before the input it guards. The wait resolves the selector afresh,
 allowing a replacement control. Observation IDs are diagnostic, not reusable handles.
 This proves observed nonmatching then matching state, not input causation.
 
@@ -566,8 +566,8 @@ activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
 uses replacement characters in the console panel. Console text follows the app-log policy,
 so the input-content policy does not redact it. Finalization draws the console panel when the clip stops. If drawing fails, the
-raw video remains and the error names its path and `finalization.log`. If
-publishing the clip fails, the error names where the finished clip is. Either
+raw clip remains and the error names its path and `finalization.log`. If
+publishing the clip fails, the error names where the clip is. Either
 failure stops the session.
 
 ## Share evidence on GitHub

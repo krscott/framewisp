@@ -146,7 +146,7 @@ class SharingIndicator:
         if self.available != available:
             print(
                 (
-                    "Sharing indicator registered; the desktop controls icon visibility and placement."
+                    "Sharing indicator registered; the desktop controls its visibility and placement."
                     if available
                     else UNAVAILABLE
                 ),

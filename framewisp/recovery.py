@@ -20,7 +20,8 @@ from framewisp.errors import SessionError
 LOCK = ".session.lock"
 JOURNAL = ".recovery-journal.json"
 JOURNAL_TEMPORARY = ".recovery-journal.tmp"
-# Symlink to the private clip of the active recording, kept if it is interrupted.
+# Symlink to the private clip of the active recording. It stays while that clip
+# remains, after an interruption or a failed finalization or publish.
 ACTIVE_RECORDING = ".active-recording"
 # Far above any journal, whose runtime directory path fits in a 108-byte socket address, or
 # any session.json that recovery reads.

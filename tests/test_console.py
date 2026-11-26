@@ -271,11 +271,11 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
     assert data["streams"][0]["r_frame_rate"] == "30/1"
 
 
-def test_console_render_failure_preserves_raw_video(tmp_path: Path) -> None:
+def test_console_render_failure_preserves_raw_clip(tmp_path: Path) -> None:
     video = tmp_path / "invalid.mp4"
     video.write_bytes(b"raw file contents")
     (tmp_path / "console.jsonl").write_text("")
-    with pytest.raises(RuntimeError, match="raw video remains"):
+    with pytest.raises(RuntimeError, match="raw clip remains"):
         render_clip(
             video,
             input_log=tmp_path / "unused",
