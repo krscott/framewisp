@@ -306,7 +306,7 @@ def wait_file(path: Path) -> None:
 
 
 @pytest.fixture(autouse=True)
-def private_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+def private_xdg_runtime_dir(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="fw-attach-", dir="/tmp") as directory:
         monkeypatch.setenv("XDG_RUNTIME_DIR", directory)
         # Never send X11 releases to the developer's real display.
@@ -374,13 +374,13 @@ def test_background_process_group_cannot_attach(
 
 
 # R-ATTACH-2
-@pytest.mark.parametrize("target", ["runtime", "framewisp"])
+@pytest.mark.parametrize("target", ["xdg-runtime-dir", "framewisp"])
 def test_attach_refuses_shared_desktop_directory(
-    private_runtime: Path, target: str
+    private_xdg_runtime_dir: Path, target: str
 ) -> None:
-    directory = private_runtime / "framewisp"
+    directory = private_xdg_runtime_dir / "framewisp"
     directory.mkdir(mode=0o700)
-    shared = private_runtime if target == "runtime" else directory
+    shared = private_xdg_runtime_dir if target == "xdg-runtime-dir" else directory
     shared.chmod(0o755)
     try:
         with pytest.raises(RuntimeError, match="private"), lock_desktop():
@@ -394,14 +394,17 @@ def test_attach_refuses_shared_desktop_directory(
 @pytest.mark.parametrize(
     "target,message",
     [
-        ("runtime", "XDG_RUNTIME_DIR must be owned by you"),
+        ("xdg-runtime-dir", "XDG_RUNTIME_DIR must be owned by you"),
         ("framewisp", "must be a private directory owned by you"),
     ],
 )
 def test_attach_refuses_desktop_directory_of_another_user(
-    private_runtime: Path, target: str, message: str, monkeypatch: pytest.MonkeyPatch
+    private_xdg_runtime_dir: Path,
+    target: str,
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    directory = private_runtime / "framewisp"
+    directory = private_xdg_runtime_dir / "framewisp"
     directory.mkdir(mode=0o700)
     if target == "framewisp":
         monkeypatch.setattr("framewisp.desktop.desktop_directory", lambda: directory)
@@ -729,7 +732,9 @@ def test_stop_sharing_cancels_long_input_and_waits_for_cleanup(
 
 
 # R-ATTACH-1
-def test_attach_requires_user_terminal(tmp_path: Path, private_runtime: Path) -> None:
+def test_attach_requires_user_terminal(
+    tmp_path: Path, private_xdg_runtime_dir: Path
+) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path / "session"), "attach"],
         capture_output=True,
@@ -740,7 +745,7 @@ def test_attach_requires_user_terminal(tmp_path: Path, private_runtime: Path) ->
     assert result.returncode == 1
     assert "Agents: do not allocate a PTY" in result.stderr
     assert not (tmp_path / "session").exists()
-    assert not (private_runtime / "framewisp").exists()
+    assert not (private_xdg_runtime_dir / "framewisp").exists()
 
 
 def test_stop_sharing_cli_is_idempotent() -> None:

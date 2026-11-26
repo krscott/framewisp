@@ -499,7 +499,7 @@ def test_private_directories_hold_no_caller_data_and_are_removed(
     config.mkdir(parents=True)
     (home / "caller-file").touch()
     (config / "caller-file").touch()
-    # TMPDIR holds the runtime sockets, so it needs a short path.
+    # TMPDIR holds the runtime directory's sockets, so it needs a short path.
     temporary_directory = tempfile.TemporaryDirectory(dir="/tmp")
     request.addfinalizer(temporary_directory.cleanup)
     temporary = Path(temporary_directory.name)
@@ -552,13 +552,13 @@ def test_real_environment_reaches_app_and_survives_cleanup(
     tmp_path: Path, request: pytest.FixtureRequest
 ) -> None:
     home = tmp_path / "caller home"
-    # The symlink the app leaves in the runtime points here; cleanup must not
+    # The symlink the app leaves in the runtime directory points here; cleanup must not
     # follow it.
     target = home / "target"
     target.mkdir(parents=True)
     (target / "file").touch()
     target.chmod(0o555)
-    # TMPDIR holds the runtime sockets, so it needs a short path.
+    # TMPDIR holds the runtime directory's sockets, so it needs a short path.
     temporary_directory = tempfile.TemporaryDirectory(dir="/tmp")
     request.addfinalizer(temporary_directory.cleanup)
     temporary = Path(temporary_directory.name)
@@ -590,8 +590,8 @@ for name in ("HOME", "TMPDIR"):
     directory.mkdir()
     (directory / "file").touch()
     directory.chmod(0o555)
-runtime = Path(os.environ["XDG_RUNTIME_DIR"])
-(runtime / "link").symlink_to(Path(os.environ["HOME"]) / "target")
+runtime_dir = Path(os.environ["XDG_RUNTIME_DIR"])
+(runtime_dir / "link").symlink_to(Path(os.environ["HOME"]) / "target")
 print(json.dumps(dict(os.environ)))
 """
     output = session_env(
