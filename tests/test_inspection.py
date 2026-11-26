@@ -43,7 +43,7 @@ def test_query_rejects_unbounded_arguments(field: str, value: object) -> None:
 
 # R-INSPECT-1
 @pytest.mark.parametrize(
-    "state",
+    "metadata",
     [
         {"kind": "attached"},
         {"kind": "teaching"},
@@ -54,9 +54,9 @@ def test_query_rejects_unbounded_arguments(field: str, value: object) -> None:
     ],
 )
 def test_inspection_never_falls_back_to_desktop(
-    tmp_path: Path, state: dict[str, object]
+    tmp_path: Path, metadata: dict[str, object]
 ) -> None:
-    (tmp_path / "session.json").write_text(json.dumps(state))
+    (tmp_path / "session.json").write_text(json.dumps(metadata))
     with pytest.raises(SessionError):
         inspect_session(tmp_path, Query())
 
@@ -411,7 +411,7 @@ def test_optional_display_metadata_failure_keeps_observation_complete(
     monkeypatch.setattr(Bus, "call", call)
     monkeypatch.setattr(Bus, "close", close)
     monkeypatch.setattr("framewisp.inspection.read_windows", windows)
-    observation = inspect_bus("test", Query(role="button"), runtime=tmp_path)
+    observation = inspect_bus("test", Query(role="button"), runtime_dir=tmp_path)
     assert observation["status"] == "ok", observation
     assert observation["reasons"] == []
     nodes = cast(list[dict[str, object]], observation["matches"])
@@ -518,7 +518,7 @@ def test_filtered_control_checks_embedded_dialog_ancestors(
     monkeypatch.setattr(Bus, "close", close)
     monkeypatch.setattr("framewisp.inspection.read_windows", windows)
     observation = inspect_bus(
-        "test", Query(role="tab", name="Projects"), runtime=tmp_path
+        "test", Query(role="tab", name="Projects"), runtime_dir=tmp_path
     )
     assert observation["status"] == "ok", observation
     node = cast(list[dict[str, object]], observation["matches"])[0]

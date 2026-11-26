@@ -139,12 +139,12 @@ def windows_from_tree(tree: object) -> list[Window]:
 
 
 def read_windows(
-    runtime: Path, deadline: float, cancelled: Callable[[], bool] | None
+    runtime_dir: Path, deadline: float, cancelled: Callable[[], bool] | None
 ) -> tuple[list[Window], str | None]:
     """Never consult SWAYSOCK or launch a command against the caller's desktop."""
     deadline = min(deadline, time.monotonic() + 0.25)
     try:
-        paths = list(runtime.glob("sway-ipc.*.sock"))
+        paths = list(runtime_dir.glob("sway-ipc.*.sock"))
         if len(paths) != 1 or not paths[0].is_socket():
             return [], "private-compositor-unavailable"
         with socket.socket(socket.AF_UNIX) as connection:

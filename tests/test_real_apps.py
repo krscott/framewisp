@@ -28,7 +28,7 @@ pytestmark = [
 class RealApp:
     directory: Path
     session_dir: Path
-    runtime: Path
+    runtime_dir: Path
 
     def cli(self, *arguments: str, returncode: int = 0) -> str:
         result = subprocess.run(
@@ -81,10 +81,10 @@ def wait_until(predicate: Callable[[], bool]) -> None:
         time.sleep(0.1)
 
 
-def sway_tree(runtime: Path) -> dict[str, Any]:
+def sway_tree(runtime_dir: Path) -> dict[str, Any]:
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(5)
-        connection.connect(str(next(runtime.glob("sway-ipc.*.sock"))))
+        connection.connect(str(next(runtime_dir.glob("sway-ipc.*.sock"))))
         connection.sendall(b"i3-ipc" + struct.pack("=II", 0, 4))
 
         def receive(length: int) -> bytes:
@@ -171,7 +171,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
     runner_log = tmp_path / "runner.log"
     with runner_log.open("w") as output:
         process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT)
-    state: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     x11_socket: tuple[Path, list[int]] | None = None
     app: RealApp | None = None
     pids: set[int] = set()
@@ -182,16 +182,16 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
             return "Session ready:" in runner_log.read_text()
 
         wait_until(ready)
-        state = json.loads((session_dir / "session.json").read_text())
-        app = RealApp(tmp_path, session_dir, Path(state["runtime_directory"]))
-        pids.update(state["processes"].values())
-        if state["x11_display"] is not None:
-            path = Path("/tmp/.X11-unix") / f"X{state['x11_display'][1:]}"
+        metadata = json.loads((session_dir / "session.json").read_text())
+        app = RealApp(tmp_path, session_dir, Path(metadata["runtime_directory"]))
+        pids.update(metadata["processes"].values())
+        if metadata["x11_display"] is not None:
+            path = Path("/tmp/.X11-unix") / f"X{metadata['x11_display'][1:]}"
             started = path.stat()
             x11_socket = (path, [started.st_ino, started.st_ctime_ns])
 
         def visible() -> bool:
-            tree = sway_tree(app.runtime)
+            tree = sway_tree(app.runtime_dir)
             (tmp_path / "sway-tree.json").write_text(json.dumps(tree, indent=2))
             exposed = windows(tree)
             if not exposed:
@@ -227,7 +227,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
                 process.wait(timeout=10)
                 raise
         if app is not None:
-            assert not app.runtime.exists()
+            assert not app.runtime_dir.exists()
             assert not (session_dir / "session.json").exists()
             for pid in pids:
                 wait_until(lambda: not Path(f"/proc/{pid}").exists())

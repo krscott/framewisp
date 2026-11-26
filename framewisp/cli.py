@@ -41,8 +41,8 @@ from framewisp.lib import (
     screenshot,
     session_command,
 )
-from framewisp.ownership import recover_session
 from framewisp.pointer import DEFAULT_MOVE_DURATION
+from framewisp.recovery import recover_session
 from framewisp.sessions import resolve_session_dir
 
 
@@ -488,7 +488,7 @@ def main() -> None:
         layout = video_layout((args.width, args.height), args.console_panel)
         if isinstance(layout, str):
             parser.error(layout)
-    state_path = session_dir / "session.json"
+    metadata_path = session_dir / "session.json"
     if args.command == "teach":
         if not args.goal.strip():
             parser.error("--goal must not be blank")
@@ -510,13 +510,13 @@ def main() -> None:
         exit_message = recorded_app_exit(session_dir)
         if exit_message is not None:
             parser.exit(1, exit_message + "\n")
-        if not state_path.exists():
+        if not metadata_path.exists():
             parser.exit(
                 1,
                 "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
             )
         try:
-            metadata = json.loads(state_path.read_text())
+            metadata = json.loads(metadata_path.read_text())
             protocol = metadata.get("command_protocol")
             published_kind = session_kind(metadata)
         except (OSError, ValueError, RecursionError, AttributeError) as error:
@@ -546,7 +546,7 @@ def main() -> None:
         if published_kind is None:
             parser.exit(
                 1,
-                f"Cannot read session metadata: {state_path} publishes no known "
+                f"Cannot read session metadata: {metadata_path} publishes no known "
                 "session kind.\n",
             )
         kind = published_kind
@@ -578,7 +578,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
         batch: Batch = args.batch
         result = session_command(session_dir, "batch", parameters=batch.parameters())
     elif args.command in {"attach", "teach"}:
-        # Desktop portal imports are only needed by the foreground attach owner.
+        # Desktop portal imports are only needed by the runner of an attached or teaching session.
         from framewisp.attach import attach_session
 
         if args.command == "teach":

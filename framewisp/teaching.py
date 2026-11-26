@@ -13,7 +13,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
-from framewisp.desktop import write_state
+from framewisp.desktop import write_json
 
 
 class Teaching:
@@ -31,7 +31,7 @@ class Teaching:
         self.closed = False
 
     def manifest(self, status: str, error: str | None = None) -> None:
-        write_state(
+        write_json(
             self.directory / "lesson.json",
             {
                 "schema_version": 1,

@@ -46,7 +46,7 @@ def console_options(position: str, pixels: int, captions: str) -> list[str]:
 class Demo:
     directory: Path
     process: subprocess.Popen[bytes]
-    runtime: Path
+    runtime_dir: Path
     child_pids: list[int]
     clip: Path | None
     # Name of a control the app exports once its accessibility tree is ready.
@@ -270,7 +270,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             return "Session ready:" in runner_log.read_text()
 
         wait_until(ready)
-        state = json.loads((directory / "session.json").read_text())
+        metadata = json.loads((directory / "session.json").read_text())
         if x11:
             # wlroots double-forks Xwayland, so it is not a Sway child in /proc.
             for path in Path("/proc").glob("[0-9]*/cmdline"):
@@ -278,14 +278,14 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
                     argv = path.read_bytes().split(b"\0")
                 except OSError:
                     continue  # Other system processes can exit during enumeration.
-                if b"Xwayland" in argv[0] and state["x11_display"].encode() in argv:
+                if b"Xwayland" in argv[0] and metadata["x11_display"].encode() in argv:
                     x11_children.append(int(path.parent.name))
             assert len(x11_children) == 1
-            x11_socket = Path("/tmp/.X11-unix") / f"X{state['x11_display'][1:]}"
+            x11_socket = Path("/tmp/.X11-unix") / f"X{metadata['x11_display'][1:]}"
             assert x11_socket.is_socket()
-            assert state["x11_display"] != ":99999"
+            assert metadata["x11_display"] != ":99999"
             app_env = (
-                Path(f"/proc/{state['processes']['app']}/environ")
+                Path(f"/proc/{metadata['processes']['app']}/environ")
                 .read_bytes()
                 .split(b"\0")
             )
@@ -310,8 +310,8 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
         yield Demo(
             directory=directory,
             process=process,
-            runtime=Path(state["runtime_directory"]),
-            child_pids=list(state["processes"].values()),
+            runtime_dir=Path(metadata["runtime_directory"]),
+            child_pids=list(metadata["processes"].values()),
             clip=clip,
             control=control,
         )
@@ -373,7 +373,7 @@ def test_agent_can_see_type_and_click(demo: Demo, tmp_path: Path) -> None:
     demo.process.send_signal(signal.SIGTERM)
     assert demo.process.wait(timeout=20) == 0
     assert not (demo.directory / "session.json").exists()
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
@@ -396,7 +396,7 @@ def test_screenshot_waits_before_capture(demo: Demo, tmp_path: Path) -> None:
 def test_interrupt_stops_session(demo: Demo) -> None:
     demo.process.send_signal(signal.SIGINT)
     assert demo.process.wait(timeout=20) == 0
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
@@ -407,12 +407,12 @@ def test_interrupt_stops_session(demo: Demo) -> None:
 @pytest.mark.parametrize("demo", [True, "x11-record"], indirect=True)
 def test_status_and_stop_finalize_clip(demo: Demo) -> None:
     assert demo.clip is not None
-    state = json.loads(cli(demo.directory, "status").stdout)
-    assert state["status"] == "running"
-    assert state["backend"] in {"wayland", "x11"}
-    assert state["app"]["running"]
-    assert state["recording"]["running"]
-    assert state["recording"]["clip_destination"] == str(demo.clip)
+    status = json.loads(cli(demo.directory, "status").stdout)
+    assert status["status"] == "running"
+    assert status["backend"] in {"wayland", "x11"}
+    assert status["app"]["running"]
+    assert status["recording"]["running"]
+    assert status["recording"]["clip_destination"] == str(demo.clip)
     cli(demo.directory, "type", "stop test")
     stopped = json.loads(cli(demo.directory, "stop").stdout)
     assert stopped["status"] == "stopped"
@@ -422,7 +422,7 @@ def test_status_and_stop_finalize_clip(demo: Demo) -> None:
     assert summary["duration_seconds"] > 0
     assert summary["size_bytes"] == demo.clip.stat().st_size
     # The reply comes after cleanup, rather than merely acknowledging the request.
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     assert not (demo.directory / "session.json").exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -559,7 +559,7 @@ def test_stop_reports_finalization_failure(demo: Demo) -> None:
     assert "finalization.log" in result.stderr
     assert result.stdout == ""
     assert demo.process.wait(timeout=5) == 1
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     assert not (demo.directory / "session.json").exists()
     assert demo.clip is not None
     clip_frames(demo.clip)
@@ -574,7 +574,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
             {
                 "kind": "headless",
                 # COMMAND_PROTOCOL; this file cannot import framewisp.
-                "command_protocol": 6,
+                "command_protocol": 7,
                 "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
@@ -634,8 +634,8 @@ def recorder_before_first_frame(
     The recorder cannot receive a frame from a stopped Sway, so this window stays
     open until the block ends. Yields the waiting command and the recorder's PID.
     """
-    state = json.loads((demo.directory / "session.json").read_text())
-    sway_pid = state["processes"]["sway"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    sway_pid = metadata["processes"]["sway"]
     os.kill(sway_pid, signal.SIGSTOP)
     with subprocess.Popen(
         ["framewisp", str(demo.directory), "record-start", str(destination)],
@@ -733,7 +733,7 @@ def test_clip_finalizes_on_shutdown(demo: Demo, stop_signal: signal.Signals) -> 
         <= 3
         for offset in range(0, len(samples), 12)
     )
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     assert not (demo.directory / "session.json").exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -935,8 +935,8 @@ def test_recording_into_new_session_directory(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True], indirect=True)
 def test_recorder_failure_stops_session(demo: Demo) -> None:
-    state = json.loads((demo.directory / "session.json").read_text())
-    os.kill(state["processes"]["recorder"], signal.SIGKILL)
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    os.kill(metadata["processes"]["recorder"], signal.SIGKILL)
     assert demo.process.wait(timeout=20) != 0
     log = (demo.directory.parent / "runner.log").read_text()
     assert "recorder.log" in log
@@ -945,7 +945,7 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
     kept = private_clip(demo.clip.parent)
     assert str(kept) in " ".join(log.split())
     assert (demo.directory / ".active-recording").readlink() == kept
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
@@ -1655,7 +1655,7 @@ def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
         # Tear down clients while the app owns a clipboard selection. Each
         # client also tries to overwrite it through VNC clipboard forwarding.
         for _ in range(100):
-            disconnect_vnc_with_clipboard(demo.runtime)
+            disconnect_vnc_with_clipboard(demo.runtime_dir)
         for chord in ["Right", "Ctrl+v"]:
             cli(demo.directory, "key", chord)
         wait_until(
@@ -1667,11 +1667,11 @@ def test_clipboard_copy_paste_survives_input_connections(demo: Demo) -> None:
     assert demo.process.poll() is None
 
 
-def disconnect_vnc_with_clipboard(runtime: Path) -> None:
+def disconnect_vnc_with_clipboard(runtime_dir: Path) -> None:
     """Complete an RFB 3.8 handshake, send clipboard text, and disconnect."""
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(5)
-        connection.connect(str(runtime / "vnc.sock"))
+        connection.connect(str(runtime_dir / "vnc.sock"))
 
         def receive(count: int) -> bytes:
             data = b""
@@ -1748,8 +1748,8 @@ def test_unicode_text_and_later_ascii_input(demo: Demo) -> None:
 def test_record_multiple_clips_without_restarting_app(
     demo: Demo, tmp_path: Path
 ) -> None:
-    state_path = demo.directory / "session.json"
-    app_pid = json.loads(state_path.read_text())["processes"]["app"]
+    metadata_path = demo.directory / "session.json"
+    app_pid = json.loads(metadata_path.read_text())["processes"]["app"]
     if demo.clip is not None:
         cli(demo.directory, "record-stop")
         clip_frames(demo.clip)
@@ -1770,7 +1770,7 @@ def test_record_multiple_clips_without_restarting_app(
     assert "Cannot record to" in rejected(
         "record-start", str(tmp_path / "missing" / "bad.mp4")
     )
-    assert "reserved" in rejected("record-start", str(state_path))
+    assert "reserved" in rejected("record-start", str(metadata_path))
     assert "File name too long" in rejected(
         "record-start", str(tmp_path / f"{'x' * 300}.mp4")
     )
@@ -1788,7 +1788,7 @@ def test_record_multiple_clips_without_restarting_app(
         cli(demo.directory, "record-start", *unrendered, str(clip))
         assert not clip.exists()
         assert private_clip(tmp_path).stat().st_size > 0
-        assert "recorder" in json.loads(state_path.read_text())["processes"]
+        assert "recorder" in json.loads(metadata_path.read_text())["processes"]
         refused = tmp_path / "refused.mp4"
         assert "already active" in rejected("record-start", str(refused))
         assert not refused.exists()
@@ -1803,9 +1803,9 @@ def test_record_multiple_clips_without_restarting_app(
         assert summary["duration_seconds"] > 0
         assert summary["size_bytes"] == clip.stat().st_size
         assert len(clip_frames(clip)) > 1
-        state = json.loads(state_path.read_text())
-        assert state["processes"]["app"] == app_pid
-        assert "recorder" not in state["processes"]
+        metadata = json.loads(metadata_path.read_text())
+        assert metadata["processes"]["app"] == app_pid
+        assert "recorder" not in metadata["processes"]
         assert demo.process.poll() is None
         cli(demo.directory, "screenshot", str(tmp_path / "between.png"))
 
@@ -2221,7 +2221,7 @@ def test_rejected_console_panel_leaves_the_app_running(
         ),
     ):
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(demo.runtime / "command.sock"))
+            connection.connect(str(demo.runtime_dir / "command.sock"))
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory.resolve()),
@@ -2246,7 +2246,7 @@ def test_rejected_console_panel_leaves_the_app_running(
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
 def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> None:
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime / "command.sock"))
+        connection.connect(str(demo.runtime_dir / "command.sock"))
         request = {
             "command": "record-start",
             "session_directory": str(demo.directory.resolve()),
@@ -2263,7 +2263,7 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
 
 def request_reply(demo: Demo, message: bytes) -> bytes:
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime / "command.sock"))
+        connection.connect(str(demo.runtime_dir / "command.sock"))
         connection.sendall(message)
         connection.shutdown(socket.SHUT_WR)
         return connection.makefile("rb").readline()
@@ -2334,7 +2334,7 @@ def test_non_utf8_clip_destination_records(demo: Demo, tmp_path: Path) -> None:
 def test_trickling_client_cannot_hold_the_command_loop(demo: Demo) -> None:
     wait_for_input_probe_window(demo)
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.connect(str(demo.runtime / "command.sock"))
+        connection.connect(str(demo.runtime_dir / "command.sock"))
         started = time.monotonic()
         while not select.select([connection], [], [], 0.3)[0]:
             # Without a total deadline, this client is never answered.
@@ -2803,7 +2803,7 @@ def test_runner_rejects_invalid_caption_mode(
     destination = tmp_path / "clip.mp4"
     for value in (True, "mouse", ["all"]):
         with socket.socket(socket.AF_UNIX) as connection:
-            connection.connect(str(demo.runtime / "command.sock"))
+            connection.connect(str(demo.runtime_dir / "command.sock"))
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory),
@@ -2909,9 +2909,9 @@ def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
     wait_until(lambda: "Option: False\n" in log.read_text())
 
 
-def runtime_processes(runtime: Path) -> list[int]:
-    """Find processes started with `runtime` as their XDG_RUNTIME_DIR."""
-    marker = b"XDG_RUNTIME_DIR=" + os.fsencode(runtime)
+def runtime_dir_processes(runtime_dir: Path) -> list[int]:
+    """Find processes started with `runtime_dir` as their XDG_RUNTIME_DIR."""
+    marker = b"XDG_RUNTIME_DIR=" + os.fsencode(runtime_dir)
     found: list[int] = []
     for path in Path("/proc").glob("[0-9]*/environ"):
         try:
@@ -2939,7 +2939,7 @@ def test_x11_failed_app_startup_cleans_up(
                 "-c",
                 "import json, os; "
                 "s = os.stat(f\"/tmp/.X11-unix/X{os.environ['DISPLAY'][1:]}\"); "
-                "print(json.dumps({'runtime': os.environ['XDG_RUNTIME_DIR'], "
+                "print(json.dumps({'runtime_directory': os.environ['XDG_RUNTIME_DIR'], "
                 "'display': os.environ['DISPLAY'], 'socket': [s.st_ino, s.st_ctime_ns]}), flush=True); "
                 "raise SystemExit(7)",
             ]
@@ -2956,16 +2956,16 @@ def test_x11_failed_app_startup_cleans_up(
         # The runtime directory is named after the session directory's identity.
         # Every session process inherits it, so leftovers keep it in their environ.
         info = directory.stat()
-        runtime = Path(tempfile.gettempdir()) / (
+        runtime_dir = Path(tempfile.gettempdir()) / (
             f"framewisp-{os.getuid()}-{info.st_dev:x}-{info.st_ino:x}"
         )
-        assert not runtime.exists()
-        assert not runtime_processes(runtime)
+        assert not runtime_dir.exists()
+        assert not runtime_dir_processes(runtime_dir)
         if not missing_executable:
             started = json.loads((directory / "app.log").read_text())
-            # The app saw the same runtime, so the missing-executable case checks
+            # The app saw the same runtime directory, so the missing-executable case checks
             # the right path too.
-            assert Path(started["runtime"]) == runtime
+            assert Path(started["runtime_directory"]) == runtime_dir
             # Sway takes the lowest free X display number, so a concurrent
             # session may already own a new socket at this path.
             socket_path = Path("/tmp/.X11-unix") / f"X{started['display'][1:]}"
@@ -3015,8 +3015,8 @@ def test_x11_unicode_mapping_limit_and_reuse(demo: Demo) -> None:
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["x11"], indirect=True)
 def test_x11_busy_app_keeps_queued_unicode(demo: Demo) -> None:
-    state = json.loads((demo.directory / "session.json").read_text())
-    app_pid = state["processes"]["app"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    app_pid = metadata["processes"]["app"]
     cli(demo.directory, "click", "120", "100")
     os.kill(app_pid, signal.SIGSTOP)
     try:
@@ -3033,7 +3033,7 @@ def input_request(
 ) -> socket.socket:
     connection = socket.socket(socket.AF_UNIX)
     connection.settimeout(5)
-    connection.connect(str(demo.runtime / "command.sock"))
+    connection.connect(str(demo.runtime_dir / "command.sock"))
     connection.sendall(
         (
             json.dumps(
@@ -3126,7 +3126,7 @@ def test_unchanged_pointer_position_adds_no_animation_delay(
         )
     )
     # Even after an external warp, an unchanged tracked target must be sent.
-    response = sway_request(demo.runtime, 0, b"seat seat0 cursor set 100 100")
+    response = sway_request(demo.runtime_dir, 0, b"seat seat0 cursor set 100 100")
     assert response[0]["success"]
     wait_until(
         lambda: any(
@@ -3352,8 +3352,8 @@ def test_lost_vnc_connection_does_not_replay_input(demo: Demo) -> None:
             lambda: any(event["event"] == "press" for event in input_events(demo))
         )
         with input_request(demo, "key", {"chord": "z"}) as queued:
-            state = json.loads((demo.directory / "session.json").read_text())
-            os.kill(state["processes"]["wayvnc"], signal.SIGTERM)
+            metadata = json.loads((demo.directory / "session.json").read_text())
+            os.kill(metadata["processes"]["wayvnc"], signal.SIGTERM)
             demo.process.wait(timeout=5)
             assert json.loads(drag.recv(4096))["error"] is not None
             assert json.loads(queued.recv(4096))["error"] is not None
@@ -3508,8 +3508,8 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
 def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
     assert inspect(demo, "--name", "Apply text")["status"] == "ok"
-    state = json.loads((demo.directory / "session.json").read_text())
-    pid = state["processes"]["app"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    pid = metadata["processes"]["app"]
     os.kill(pid, signal.SIGSTOP)
     try:
         started = time.monotonic()
@@ -3584,8 +3584,8 @@ def test_inspection_private_buses_and_unsupported_apps(
             return "Session ready:" in log.read_text()
 
         wait_until(ready)
-        state = json.loads((second / "session.json").read_text())
-        assert state["accessibility_bus"] != first["accessibility_bus"]
+        metadata = json.loads((second / "session.json").read_text())
+        assert metadata["accessibility_bus"] != first["accessibility_bus"]
         if app == "framewisp-demo":
             wait_until(lambda: "Demo ready" in (second / "app.log").read_text())
             wait_for_control(second, "Apply text")
@@ -3606,8 +3606,8 @@ def test_inspection_private_buses_and_unsupported_apps(
             assert json.loads(result.stdout)["status"] == "unsupported"
         cli(second, "stop")
         assert runner.wait(timeout=10) == 0
-        assert not Path(state["runtime_directory"]).exists()
-        for pid in state["processes"].values():
+        assert not Path(metadata["runtime_directory"]).exists()
+        for pid in metadata["processes"].values():
             assert not Path(f"/proc/{pid}").exists()
         assert (
             inspect(demo, "--role", "button", "--name", "Apply text")["status"] == "ok"
@@ -3932,8 +3932,8 @@ def test_disconnect_queued_batch_sends_no_input(demo: Demo) -> None:
 @pytest.mark.parametrize("demo", [None], indirect=True)
 def test_batch_disconnect_during_screenshot(demo: Demo, tmp_path: Path) -> None:
     cli(demo.directory, "screenshot", str(tmp_path / "ready.png"))
-    state = json.loads((demo.directory / "session.json").read_text())
-    sway_pid = state["processes"]["sway"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    sway_pid = metadata["processes"]["sway"]
     os.kill(sway_pid, signal.SIGSTOP)
     try:
         with input_request(
@@ -4316,8 +4316,8 @@ def test_lost_vnc_during_batch_reports_partial_result(
         wait_until(
             lambda: any(event["event"] == "press" for event in input_events(demo))
         )
-        state = json.loads((demo.directory / "session.json").read_text())
-        os.kill(state["processes"]["wayvnc"], signal.SIGTERM)
+        metadata = json.loads((demo.directory / "session.json").read_text())
+        os.kill(metadata["processes"]["wayvnc"], signal.SIGTERM)
         demo.process.wait(timeout=5)
         result = json.loads(connection.recv(8192))["data"]
     assert result["completed_steps"] == 1
@@ -4653,8 +4653,8 @@ def test_wait_cancellation_and_app_exit(
     demo: Demo, tmp_path: Path, ending: str
 ) -> None:
     wait_until(lambda: "Wait probe ready" in (demo.directory / "app.log").read_text())
-    state = json.loads((demo.directory / "session.json").read_text())
-    app = state["processes"]["app"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    app = metadata["processes"]["app"]
     os.kill(app, signal.SIGSTOP)
     try:
         with input_request(
@@ -4713,8 +4713,8 @@ def frozen_demo(demo: Demo) -> Iterator[Demo]:
         "0.5",
         str(demo.directory / "ready.png"),
     )
-    state = json.loads((demo.directory / "session.json").read_text())
-    app_pid = state["processes"]["app"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    app_pid = metadata["processes"]["app"]
     os.kill(app_pid, signal.SIGSTOP)
     try:
         yield demo
@@ -4805,8 +4805,8 @@ def test_screenshot_regions(frozen_demo: Demo, tmp_path: Path) -> None:
         assert "Traceback" not in result.stderr
         assert not result.stdout and not rejected.exists()
     if width == 1280:
-        state = json.loads((demo.directory / "session.json").read_text())
-        os.kill(state["processes"]["app"], signal.SIGCONT)
+        session_metadata = json.loads((demo.directory / "session.json").read_text())
+        os.kill(session_metadata["processes"]["app"], signal.SIGCONT)
         # The crop-local entry target (80, 20) maps back to display (120, 100).
         cli(demo.directory, "click", str(metadata["x"] + 80), str(metadata["y"] + 20))
         cli(demo.directory, "type", "crop mapping")
@@ -4938,7 +4938,7 @@ def wait_for_input_probe_window(demo: Demo) -> None:
 
     def mapped() -> bool:
         nonlocal tree
-        tree = sway_request(demo.runtime, 4)
+        tree = sway_request(demo.runtime_dir, 4)
         windows.clear()
         nodes = [tree]
         while nodes:
@@ -4964,11 +4964,11 @@ def wait_for_input_probe_window(demo: Demo) -> None:
         ) from None
 
 
-def sway_request(runtime: Path, kind: int, payload: bytes = b"") -> Any:
+def sway_request(runtime_dir: Path, kind: int, payload: bytes = b"") -> Any:
     # Direct IPC also works in the standalone package test's minimal PATH.
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(5)
-        connection.connect(str(next(runtime.glob("sway-ipc.*.sock"))))
+        connection.connect(str(next(runtime_dir.glob("sway-ipc.*.sock"))))
         connection.sendall(b"i3-ipc" + struct.pack("=II", len(payload), kind) + payload)
 
         def receive(length: int) -> bytes:
@@ -5001,7 +5001,7 @@ def test_inspect_display_bounds_activate_offset_controls(
     is_qt = qt in log.read_text()
     title = "Coordinates dialog" if is_qt else "Framewisp demo"
     name = "Activate dialog" if is_qt else "Apply text"
-    state = json.loads((demo.directory / "session.json").read_text())
+    metadata = json.loads((demo.directory / "session.json").read_text())
 
     # Move away from the origin and request compositor borders. Native Wayland
     # clients can negotiate their own decorations. Xwayland uses server title bars.
@@ -5012,7 +5012,9 @@ def test_inspect_display_bounds_activate_offset_controls(
             + ("resize set 480 240, " if is_qt else "resize set 960 640, ")
             + "move position 200 50"
         ).encode()
-        return all(item["success"] for item in sway_request(demo.runtime, 0, command))
+        return all(
+            item["success"] for item in sway_request(demo.runtime_dir, 0, command)
+        )
 
     wait_until(positioned)
     observation: dict[str, Any] = {}
@@ -5020,13 +5022,13 @@ def test_inspect_display_bounds_activate_offset_controls(
     def mapped() -> bool:
         nonlocal observation
         if is_qt:
-            pending = [sway_request(demo.runtime, 4)]
+            pending = [sway_request(demo.runtime_dir, 4)]
             windows: list[dict[str, Any]] = []
             while pending:
                 window = pending.pop()
                 if (
                     window.get("name") == title
-                    and window.get("pid") == state["processes"]["app"]
+                    and window.get("pid") == metadata["processes"]["app"]
                 ):
                     windows.append(window)
                 pending.extend(window.get("nodes", []))
@@ -5062,7 +5064,7 @@ def test_inspect_display_bounds_activate_offset_controls(
         wait_until(mapped)
     finally:
         (tmp_path / "positioned-tree.json").write_text(
-            json.dumps(sway_request(demo.runtime, 4), indent=2)
+            json.dumps(sway_request(demo.runtime_dir, 4), indent=2)
         )
         print(f"Positioned control: {observation}")
         cli(demo.directory, "screenshot", str(tmp_path / "positioned.png"))
@@ -5073,7 +5075,7 @@ def test_inspect_display_bounds_activate_offset_controls(
     assert bounds["coordinate_space"] == "display"
     assert bounds["x"] > node["bounds"]["x"] + 100
     assert bounds["y"] >= node["bounds"]["y"] + 50
-    if state["x11_display"] is not None:
+    if metadata["x11_display"] is not None:
         assert bounds["y"] > node["bounds"]["y"] + 50
     cli(
         demo.directory,
@@ -5112,13 +5114,13 @@ def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
 
     for position in ["tiled", "floating"]:
         if position == "floating":
-            state = json.loads((demo.directory / "session.json").read_text())
+            metadata = json.loads((demo.directory / "session.json").read_text())
             command = (
-                f'[pid={state["processes"]["app"]}] floating enable, '
+                f'[pid={metadata["processes"]["app"]}] floating enable, '
                 "resize set 900 600, move position 180 60"
             ).encode()
             assert all(
-                item["success"] for item in sway_request(demo.runtime, 0, command)
+                item["success"] for item in sway_request(demo.runtime_dir, 0, command)
             )
             wait_until(lambda: control("window", "")["bounds"]["width"] == 900)
 
@@ -5153,13 +5155,13 @@ def test_inspect_embedded_dialog_bounds(demo: Demo, tmp_path: Path) -> None:
 # R-LIFE-1
 @pytest.mark.integration
 @pytest.mark.parametrize("ending", ["stop", "exit", "SIGINT", "SIGTERM"])
-def test_session_owns_detached_descendants(
+def test_session_ends_detached_descendants(
     demo: Demo, tmp_path: Path, ending: str
 ) -> None:
     # The demo fixture is an independent session which must survive this stop.
-    directory = tmp_path / "owned-session"
-    tree = tmp_path / "owned-tree"
-    log = tmp_path / "owned-runner.log"
+    directory = tmp_path / "descendants-session"
+    tree = tmp_path / "descendants-tree"
+    log = tmp_path / "descendants-runner.log"
     with log.open("w") as output:
         runner = subprocess.Popen(
             [
@@ -5183,11 +5185,11 @@ def test_session_owns_detached_descendants(
             )
 
         wait_until(ready)
-        state = json.loads((directory / "session.json").read_text())
+        metadata = json.loads((directory / "session.json").read_text())
         pids = [
             int((tree / name).read_text()) for name in ("app", "helper", "detached")
         ]
-        assert state["processes"]["app"] == pids[0]
+        assert metadata["processes"]["app"] == pids[0]
         started = time.monotonic()
         if ending == "stop":
             cli(directory, "stop")
@@ -5201,9 +5203,9 @@ def test_session_owns_detached_descendants(
         assert time.monotonic() - started < 15
         assert all(not Path(f"/proc/{pid}").exists() for pid in pids)
         assert all(
-            not Path(f"/proc/{pid}").exists() for pid in state["processes"].values()
+            not Path(f"/proc/{pid}").exists() for pid in metadata["processes"].values()
         )
-        assert not Path(state["runtime_directory"]).exists()
+        assert not Path(metadata["runtime_directory"]).exists()
         assert not (directory / "session.json").exists()
         assert demo.process.poll() is None
         cli(demo.directory, "status")
@@ -5218,9 +5220,9 @@ def test_session_owns_detached_descendants(
 def test_replaced_lock_refused_and_live_session_still_stops(
     demo: Demo, tmp_path: Path
 ) -> None:
-    lock = demo.directory / ".headless.lock"
-    lock.rename(tmp_path / "original.lock")
-    os.close(os.open(lock, os.O_CREAT | os.O_WRONLY, 0o600))
+    lock_path = demo.directory / ".session.lock"
+    lock_path.rename(tmp_path / "original.lock")
+    os.close(os.open(lock_path, os.O_CREAT | os.O_WRONLY, 0o600))
     refused = subprocess.run(
         ["framewisp", str(demo.directory), "recover"],
         capture_output=True,
@@ -5229,7 +5231,7 @@ def test_replaced_lock_refused_and_live_session_still_stops(
     )
     assert refused.returncode == 1, refused
     assert "was replaced" in refused.stderr
-    assert demo.runtime.is_dir()
+    assert demo.runtime_dir.is_dir()
 
     def process_checks() -> list[subprocess.CompletedProcess[str]]:
         return [
@@ -5248,7 +5250,7 @@ def test_replaced_lock_refused_and_live_session_still_stops(
     assert json.loads(cli(demo.directory, "status").stdout)["status"] == "running"
     cli(demo.directory, "stop")
     assert demo.process.wait(timeout=20) == 0
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()
     assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
     checks = process_checks()
     assert all(check.returncode < 126 and not check.stdout for check in checks), checks
@@ -5276,8 +5278,8 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
                 assert (demo.directory / "inputs.jsonl").read_bytes() == before
             demo.process.kill()
             demo.process.wait(timeout=5)
-            state_path = demo.directory / "session.json"
-            state_path.write_text(
+            metadata_path = demo.directory / "session.json"
+            metadata_path.write_text(
                 json.dumps(
                     {
                         "runtime_directory": str(tmp_path),
@@ -5300,8 +5302,8 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
                 assert time.monotonic() < deadline
                 time.sleep(0.05)
             assert json.loads(result.stdout)["status"] == "recovered"
-            assert not demo.runtime.exists()
-            assert not state_path.exists()
+            assert not demo.runtime_dir.exists()
+            assert not metadata_path.exists()
             assert all(not Path(f"/proc/{pid}").exists() for pid in demo.child_pids)
             assert (demo.directory / "app.log").exists()
             assert unrelated.poll() is None
@@ -5321,7 +5323,7 @@ def test_recover_killed_runner_and_reuse_directory(demo: Demo, tmp_path: Path) -
                     stderr=subprocess.STDOUT,
                 ) as restarted:
                     try:
-                        wait_until(lambda: state_path.exists())
+                        wait_until(lambda: metadata_path.exists())
                         cli(demo.directory, "stop")
                         assert restarted.wait(timeout=20) == 0
                     finally:
@@ -5364,8 +5366,8 @@ def test_named_session_launch_commands_and_cleanup(tmp_path: Path) -> None:
         )
         assert session_dir.is_absolute()
         assert session_dir.name == "browser"
-        state = json.loads((session_dir / "session.json").read_text())
-        runtime = Path(state["runtime_directory"])
+        metadata = json.loads((session_dir / "session.json").read_text())
+        runtime_dir = Path(metadata["runtime_directory"])
 
         def named(*arguments: str) -> subprocess.CompletedProcess[str]:
             result = subprocess.run(
@@ -5393,12 +5395,12 @@ def test_named_session_launch_commands_and_cleanup(tmp_path: Path) -> None:
         )
         assert duplicate.returncode == 1
         assert process.poll() is None
-        assert "Session owner or descendant cleanup is still live" in duplicate.stderr
+        assert "runner or a supervisor is still live" in duplicate.stderr
         named("stop")
         assert process.wait(timeout=20) == 0
         assert not (session_dir / "session.json").exists()
-        assert not runtime.exists()
-        for pid in state["processes"].values():
+        assert not runtime_dir.exists()
+        for pid in metadata["processes"].values():
             assert not Path(f"/proc/{pid}").exists()
     finally:
         if process.poll() is None:

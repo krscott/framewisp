@@ -128,8 +128,8 @@ def indicator(
 def test_menu_and_active_text(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection], indicator: SharingIndicator
 ) -> None:
-    owner, client = buses
-    destination = owner.get_unique_name()
+    item_bus, client = buses
+    destination = item_bus.get_unique_name()
     assert destination is not None
     properties = call(
         client,
@@ -258,7 +258,7 @@ def test_watcher_registration_and_restart(
     indicator: SharingIndicator,
     delay_registration: bool,
 ) -> None:
-    owner, host = buses
+    item_bus, host = buses
     registrations: list[str] = []
     host_available = False
     pending: list[Gio.DBusMethodInvocation] = []
@@ -318,7 +318,7 @@ def test_watcher_registration_and_restart(
                     None,
                 )
             until(lambda: len(registrations) == count and indicator.available is True)
-            assert registrations[-1] == str(owner.get_unique_name()) + ITEM_PATH
+            assert registrations[-1] == str(item_bus.get_unique_name()) + ITEM_PATH
             host.call_sync(
                 "org.freedesktop.DBus",
                 "/org/freedesktop/DBus",
@@ -400,7 +400,7 @@ def test_menu_cancels_held_input(
 
 
 @pytest.mark.parametrize("forced", [False, True])
-def test_owner_exit_removes_item(
+def test_indicator_process_exit_removes_item(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection], forced: bool
 ) -> None:
     script = """
@@ -454,7 +454,7 @@ GLib.MainLoop().run()
         process.communicate(timeout=5)
 
 
-_OWNER = """
+_RUNNER = """
 import sys
 from pathlib import Path
 from gi.repository import Gio
@@ -480,26 +480,26 @@ raise SystemExit(attach.share_desktop(root / 'session', None))
 
 
 @pytest.fixture
-def start_owner(
+def start_runner(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> Iterator[Callable[[], subprocess.Popen[bytes]]]:
-    """Run the real attach owner against a stand-in portal on the isolated bus."""
+    """Run the real attach runner against a stand-in portal on the isolated bus."""
     processes: list[subprocess.Popen[bytes]] = []
 
     def start() -> subprocess.Popen[bytes]:
         with (tmp_path / "output").open("wb") as output:
             process = subprocess.Popen(
-                [sys.executable, "-c", _OWNER, str(tmp_path)],
+                [sys.executable, "-c", _RUNNER, str(tmp_path)],
                 stdout=output,
                 stderr=output,
             )
         processes.append(process)
         return process
 
-    with tempfile.TemporaryDirectory(prefix="fw-tray-", dir="/tmp") as runtime:
-        monkeypatch.setenv("XDG_RUNTIME_DIR", runtime)
+    with tempfile.TemporaryDirectory(prefix="fw-tray-", dir="/tmp") as xdg_runtime_dir:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", xdg_runtime_dir)
         # Never send X11 releases to the developer's real display.
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         monkeypatch.setenv("WAYLAND_DISPLAY", "framewisp-test-unused")
@@ -513,9 +513,9 @@ def start_owner(
 
 
 def registered_item(
-    host: Gio.DBusConnection, start_owner: Callable[[], subprocess.Popen[bytes]]
+    host: Gio.DBusConnection, start_runner: Callable[[], subprocess.Popen[bytes]]
 ) -> tuple[subprocess.Popen[bytes], str, dict[str, object]]:
-    """Start an owner beneath a watcher object and read its item as a host does."""
+    """Start an runner beneath a watcher object and read its item as a host does."""
     items: list[tuple[str, str]] = []
 
     def register(sender: str, path: str, invocation: Gio.DBusMethodInvocation) -> None:
@@ -524,8 +524,8 @@ def registered_item(
 
     with watcher_object(host, register, lambda: True):
         own_watcher_name(host)
-        owner = start_owner()
-        until(lambda: bool(items) or owner.poll() is not None, timeout=10)
+        runner = start_runner()
+        until(lambda: bool(items) or runner.poll() is not None, timeout=10)
         assert items, "attach exited or registered no sharing indicator"
     sender, path = items[0]
     properties = call(
@@ -536,20 +536,20 @@ def registered_item(
         "GetAll",
         GLib.Variant("(s)", (ITEM,)),
     ).unpack()[0]
-    return owner, sender, properties
+    return runner, sender, properties
 
 
 # R-ATTACH-3
 def test_desktop_share_offers_sharing_indicator_to_host(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
-    start_owner: Callable[[], subprocess.Popen[bytes]],
+    start_runner: Callable[[], subprocess.Popen[bytes]],
 ) -> None:
     host = buses[1]
-    owner, sender, properties = registered_item(host, start_owner)
+    runner, sender, properties = registered_item(host, start_runner)
     assert properties["Status"] == "Active"
     assert "desktop share is active" in str(properties["Title"])
     assert stop_sharing() == 0
-    assert owner.wait(timeout=5) == 0
+    assert runner.wait(timeout=5) == 0
     with pytest.raises(GLib.Error):
         call(
             host,
@@ -564,11 +564,11 @@ def test_desktop_share_offers_sharing_indicator_to_host(
 # R-ATTACH-4
 def test_sharing_indicator_stop_ends_desktop_share(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
-    start_owner: Callable[[], subprocess.Popen[bytes]],
+    start_runner: Callable[[], subprocess.Popen[bytes]],
     tmp_path: Path,
 ) -> None:
     host = buses[1]
-    owner, sender, properties = registered_item(host, start_owner)
+    runner, sender, properties = registered_item(host, start_runner)
     menu = str(properties["Menu"])
     layout = call(
         host, sender, menu, MENU, "GetLayout", GLib.Variant("(iias)", (0, -1, []))
@@ -584,7 +584,7 @@ def test_sharing_indicator_stop_ends_desktop_share(
         "Event",
         GLib.Variant("(isvu)", (node, "clicked", GLib.Variant("s", ""), 0)),
     )
-    assert owner.wait(timeout=5) == 0
+    assert runner.wait(timeout=5) == 0
     assert (tmp_path / "closed").exists()
     assert not (tmp_path / "session/session.json").exists()
 
@@ -592,7 +592,7 @@ def test_sharing_indicator_stop_ends_desktop_share(
 @pytest.mark.parametrize("tray", ["no watcher", "no host", "refuses item"])
 def test_attach_names_stop_methods_without_host(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
-    start_owner: Callable[[], subprocess.Popen[bytes]],
+    start_runner: Callable[[], subprocess.Popen[bytes]],
     tmp_path: Path,
     tray: str,
 ) -> None:
@@ -614,7 +614,7 @@ def test_attach_names_stop_methods_without_host(
     with watcher_object(host, refuse, lambda: tray == "refuses item"):
         if tray != "no watcher":
             own_watcher_name(host)
-        owner = start_owner()
+        runner = start_runner()
         until(diagnosed, timeout=10)
     assert "framewisp --stop-sharing" in lines[0] and "Ctrl+C" in lines[0]
-    assert owner.poll() is None
+    assert runner.poll() is None

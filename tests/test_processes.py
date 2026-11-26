@@ -159,13 +159,13 @@ def test_denied_signals_have_bounded_actionable_failure(
             app.wait(timeout=5)
 
 
-def test_unavailable_ownership_does_not_launch_app(
+def test_unavailable_supervision_does_not_launch_app(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def unavailable() -> None:
         raise PermissionError("prctl denied")
 
-    monkeypatch.setattr(_supervisor, "enable_ownership", unavailable)
+    monkeypatch.setattr(_supervisor, "become_subreaper", unavailable)
     marker = tmp_path / "launched"
     parent, child = socket.socketpair()
     with parent, child:
@@ -179,6 +179,6 @@ def test_unavailable_ownership_does_not_launch_app(
         )
         child.shutdown(socket.SHUT_WR)
         messages = parent.recv(4096).decode()
-    assert "Process ownership unavailable" in messages
+    assert "Process supervision unavailable" in messages
     assert "prctl denied" in messages
     assert not marker.exists()

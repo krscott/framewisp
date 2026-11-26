@@ -13,8 +13,8 @@ __all__ = ["demo"]
 @pytest.mark.integration
 def test_unresponsive_app_does_not_block_stop(demo: Demo) -> None:
     wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
-    state = json.loads((demo.directory / "session.json").read_text())
-    pid = state["processes"]["app"]
+    metadata = json.loads((demo.directory / "session.json").read_text())
+    pid = metadata["processes"]["app"]
     os.kill(pid, signal.SIGSTOP)
     try:
         started = time.monotonic()
@@ -26,4 +26,4 @@ def test_unresponsive_app_does_not_block_stop(demo: Demo) -> None:
         except ProcessLookupError:
             pass
     assert demo.process.wait(timeout=5) == 0
-    assert not demo.runtime.exists()
+    assert not demo.runtime_dir.exists()

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from framewisp.errors import SessionError
-from framewisp.processes import run_owned
+from framewisp.processes import run_managed
 
 # Seconds kept around each activity span and at each end of a clip. A click ping
 # starts inside its input's span, so PADDING_AFTER also keeps it whole (R-REC-8).
@@ -115,15 +115,15 @@ def compact_filter(ranges: list[tuple[int, int]]) -> str:
 
 
 def ffprobe(path: Path, *arguments: str, env: dict[str, str]) -> str:
-    """Return ffprobe's output for `path`, run with `run_owned`."""
+    """Return ffprobe's output for `path`, run with `run_managed`."""
     try:
         # In a session, `recover` removes what a killed runner leaves.
         with tempfile.TemporaryDirectory(
-            prefix="framewisp-ffprobe-", dir=env.get("FRAMEWISP_OWNER_RUNTIME")
+            prefix="framewisp-ffprobe-", dir=env.get("FRAMEWISP_RUNTIME_DIRECTORY")
         ) as directory:
             work = Path(directory)
             output = work / "output"
-            result = run_owned(
+            result = run_managed(
                 ["ffprobe", "-v", "error", *arguments, "-o", str(output), str(path)],
                 log=work / "ffprobe.log",
                 env=env,

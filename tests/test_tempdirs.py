@@ -12,13 +12,13 @@ from PIL import Image
 from test_integration import wait_for_control
 
 from framewisp.errors import SessionError
-from framewisp.ownership import (
+from framewisp.recovery import (
     JOURNAL,
     check_socket_paths,
-    headless_runtime,
+    headless_runtime_dir,
     recover_session,
-    runtime_path,
-    session_lease,
+    runtime_dir_path,
+    session_lock,
 )
 from framewisp.sessions import resolve_session_dir
 
@@ -46,16 +46,19 @@ def test_paths_follow_tmpdir(
     named = resolve_session_dir("demo")
     assert named.parent.parent == first
     assert resolve_session_dir("./demo") == tmp_path / "demo"
-    with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease) as runtime:
-        assert runtime.parent == first
-        assert json.loads((tmp_path / JOURNAL).read_text())["runtime_path"] == str(
-            runtime
-        )
+    with (
+        session_lock(tmp_path) as lock,
+        headless_runtime_dir(tmp_path, lock) as runtime_dir,
+    ):
+        assert runtime_dir.parent == first
+        assert json.loads((tmp_path / JOURNAL).read_text())[
+            "runtime_directory_path"
+        ] == str(runtime_dir)
         monkeypatch.setenv("TMPDIR", str(second))
         monkeypatch.setattr(tempfile, "tempdir", None)
         assert resolve_session_dir("demo") != named
-        assert runtime_path(tmp_path).parent == second
-    assert not runtime.exists()
+        assert runtime_dir_path(tmp_path).parent == second
+    assert not runtime_dir.exists()
 
 
 def test_default_paths_without_temporary_environment(
@@ -65,46 +68,48 @@ def test_default_paths_without_temporary_environment(
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.chdir(tmp_path)
-    assert runtime_path(tmp_path).parent == Path("/tmp")
+    assert runtime_dir_path(tmp_path).parent == Path("/tmp")
     assert resolve_session_dir("demo").parent.parent == Path("/tmp")
 
 
 @pytest.mark.parametrize("size", [107, 108, 109])
 def test_socket_length_counts_bytes_and_nul(size: int) -> None:
     suffix = f"/sway-ipc.{os.getuid()}.2147483647.sock"
-    runtime_bytes = size - len(os.fsencode(suffix)) - 1
-    runtime = Path("/é" + "a" * (runtime_bytes - 3))
+    runtime_dir_bytes = size - len(os.fsencode(suffix)) - 1
+    runtime_dir = Path("/é" + "a" * (runtime_dir_bytes - 3))
     if size <= 108:
-        check_socket_paths(runtime)
+        check_socket_paths(runtime_dir)
     else:
         with pytest.raises(SessionError, match="109 bytes.*108-byte limit.*TMPDIR"):
-            check_socket_paths(runtime)
+            check_socket_paths(runtime_dir)
 
 
-def test_long_tmpdir_fails_without_runtime_or_journal(
+def test_long_tmpdir_fails_without_runtime_directory_or_journal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / ("long" * 30)))
-    with session_lease(tmp_path) as lease:
+    with session_lock(tmp_path) as lock:
         with pytest.raises(SessionError, match="Set TMPDIR to a shorter directory"):
-            with headless_runtime(tmp_path, lease):
-                pytest.fail("Long runtime path was accepted")
+            with headless_runtime_dir(tmp_path, lock):
+                pytest.fail("Long runtime directory path was accepted")
     assert not (tmp_path / JOURNAL).exists()
-    assert not runtime_path(tmp_path).exists()
+    assert not runtime_dir_path(tmp_path).exists()
 
 
 # R-LIFE-5
 @pytest.mark.parametrize("path", [None, 123, "relative", "/", "/tmp/bad\0path"])
-def test_invalid_journal_runtime_path_refused(tmp_path: Path, path: object) -> None:
-    with pytest.raises(SessionError, match="runtime path"):
-        with session_lease(tmp_path) as lease, headless_runtime(tmp_path, lease):
+def test_invalid_journal_runtime_directory_path_refused(
+    tmp_path: Path, path: object
+) -> None:
+    with pytest.raises(SessionError, match="runtime directory path"):
+        with session_lock(tmp_path) as lock, headless_runtime_dir(tmp_path, lock):
             journal = json.loads((tmp_path / JOURNAL).read_text())
-            journal["runtime_path"] = path
+            journal["runtime_directory_path"] = path
             (tmp_path / JOURNAL).write_text(json.dumps(journal))
-    with pytest.raises(SessionError, match="runtime path"):
+    with pytest.raises(SessionError, match="runtime directory path"):
         recover_session(tmp_path)
     journal = json.loads((tmp_path / JOURNAL).read_text())
-    journal["runtime_path"] = str(runtime_path(tmp_path))
+    journal["runtime_directory_path"] = str(runtime_dir_path(tmp_path))
     (tmp_path / JOURNAL).write_text(json.dumps(journal))
     recover_session(tmp_path)
 
@@ -141,9 +146,9 @@ def test_session_commands_with_changed_tmpdir(
             assert runner.poll() is None, log.read_text()
             assert time.monotonic() < deadline, log.read_text()
             time.sleep(0.05)
-        state = json.loads((session_dir / "session.json").read_text())
-        runtime = Path(state["runtime_directory"])
-        assert runtime.parent == first
+        metadata = json.loads((session_dir / "session.json").read_text())
+        runtime_dir = Path(metadata["runtime_directory"])
+        assert runtime_dir.parent == first
         monkeypatch.setenv("TMPDIR", str(second))
         monkeypatch.setattr(tempfile, "tempdir", None)
 
@@ -181,11 +186,11 @@ def test_session_commands_with_changed_tmpdir(
                 assert "still live" in result.stderr, result
                 assert time.monotonic() < deadline, result
                 time.sleep(0.05)
-        assert not runtime.exists()
+        assert not runtime_dir.exists()
         assert not (session_dir / "session.json").exists()
         assert not (session_dir / JOURNAL).exists()
         assert all(
-            not Path(f"/proc/{pid}").exists() for pid in state["processes"].values()
+            not Path(f"/proc/{pid}").exists() for pid in metadata["processes"].values()
         )
     finally:
         if runner.poll() is None:

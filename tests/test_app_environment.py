@@ -119,7 +119,7 @@ def test_gtk_app_ignores_conflicting_caller(
             process = subprocess.Popen(
                 command, env=env, stdout=output, stderr=subprocess.STDOUT
             )
-        state: dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
         try:
 
             def ready() -> bool:
@@ -137,7 +137,7 @@ def test_gtk_app_ignores_conflicting_caller(
                 )
 
             wait_until(ready)
-            state = json.loads((directory / "session.json").read_text())
+            metadata = json.loads((directory / "session.json").read_text())
             observed = json.loads(report.read_text())
             assert observed["color"] == "red"
             assert observed["font"] == "DejaVu Sans 11"
@@ -149,7 +149,7 @@ def test_gtk_app_ignores_conflicting_caller(
             assert "ca.desrt.dconf" in observed["bus_names"]
             assert "org.freedesktop.portal.Desktop" not in observed["bus_names"]
             homes.append(Path(observed["home"]))
-            assert homes[-1].is_relative_to(Path(state["runtime_directory"]))
+            assert homes[-1].is_relative_to(Path(metadata["runtime_directory"]))
             time.sleep(1)
             if demo:
                 # Move focus off the entry so cursor blinking cannot change pixels.
@@ -177,7 +177,9 @@ def test_gtk_app_ignores_conflicting_caller(
             assert f"HOME={homes[-1]}".encode() in service_env
             assert b"INJECTED_FOR_SERVICE=1" in service_env
             display_key = "DISPLAY" if x11 else "WAYLAND_DISPLAY"
-            display_value = state["x11_display"] if x11 else state["wayland_display"]
+            display_value = (
+                metadata["x11_display"] if x11 else metadata["wayland_display"]
+            )
             assert f"{display_key}={display_value}".encode() in service_env
             # Activated services must retain the caller's dependency lookup paths.
             for key in (
@@ -200,8 +202,8 @@ def test_gtk_app_ignores_conflicting_caller(
                 )
                 assert observed_values == expected_values, key
             # Neither private bus includes default desktop activation directories.
-            runtime = Path(state["runtime_directory"])
-            assert "servicedir" not in (runtime / "bus.conf").read_text()
+            runtime_dir = Path(metadata["runtime_directory"])
+            assert "servicedir" not in (runtime_dir / "bus.conf").read_text()
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -211,7 +213,7 @@ def test_gtk_app_ignores_conflicting_caller(
         assert not Path(f"/proc/{observed['service_pid']}").exists()
         assert not Path(f"/proc/{observed['gui_pid']}").exists()
         assert all(
-            not Path(f"/proc/{pid}").exists() for pid in state["processes"].values()
+            not Path(f"/proc/{pid}").exists() for pid in metadata["processes"].values()
         )
     assert homes[0] != homes[1]
     assert text_sizes[0] == text_sizes[1]

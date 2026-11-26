@@ -38,7 +38,7 @@ from framewisp.pointer_overlays import (
     pointer_overlay_text,
     pointer_overlays_for_clip,
 )
-from framewisp.processes import run_owned
+from framewisp.processes import run_managed
 
 KeyCaptions = Literal["all", "non-text"]
 PointerCaptions = Literal["all", "modifiers"]
@@ -571,7 +571,7 @@ def render_clip(
             raise RuntimeError("FRAMEWISP_FONTCONFIG_FILE does not name a file.")
         # A long clip can have more cut ranges than fit in an exec argument.
         (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
-        result = run_owned(
+        result = run_managed(
             [
                 "ffmpeg",
                 "-nostdin",

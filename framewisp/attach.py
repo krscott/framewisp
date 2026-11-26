@@ -41,11 +41,11 @@ from framewisp.connection import (
     session_kind,
     teaching_refusal,
 )
-from framewisp.desktop import lock_desktop, write_state
+from framewisp.desktop import lock_desktop, write_json
 from framewisp.finalization import input_error
 from framewisp.keys import SHIFTED_KEYS, parse_chord
-from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
+from framewisp.recovery import refuse_unrecovered_session, session_lock
 from framewisp.release_guard import (
     finish_release_guard,
     start_release_guard,
@@ -264,7 +264,7 @@ def open_destination(destination: Path) -> int:
 def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
     output = open_destination(destination)
     try:
-        # Capture lives in the owner process: even SIGKILL closes every capture FD.
+        # Capture lives in the runner: even SIGKILL closes every capture FD.
         descriptor = portal.capture_fd()
         try:
             write_png(
@@ -512,8 +512,8 @@ def share_desktop(
     session_dir = session_dir.resolve()
     try:
         session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with session_lease(session_dir):
-            refuse_abandoned_ownership(session_dir)
+        with session_lock(session_dir):
+            refuse_unrecovered_session(session_dir)
             return _share_desktop(
                 session_dir,
                 terminal,
@@ -540,8 +540,8 @@ def _share_desktop(
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
     share_token = uuid.uuid4().hex
-    state = session_dir / "session.json"
-    owns_state = False
+    metadata_path = session_dir / "session.json"
+    wrote_metadata = False
     capture_descriptor: int | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
@@ -655,14 +655,14 @@ def _share_desktop(
         with lock_desktop() as directory:
             try:
                 session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                if state.exists():
+                if metadata_path.exists():
                     try:
-                        existing: object = json.loads(state.read_text())
+                        existing: object = json.loads(metadata_path.read_text())
                     except (ValueError, RecursionError):
                         existing = None
                     if session_kind(existing) not in DESKTOP_KINDS:
                         raise RuntimeError(
-                            f"{state} belongs to another session. Use a different directory."
+                            f"{metadata_path} belongs to another session. Use a different directory."
                         )
                 with (
                     socket.socket(socket.AF_UNIX) as listener,
@@ -673,17 +673,17 @@ def _share_desktop(
                     emergency.bind(str(directory / "stop-sharing.sock"))
                     listener.listen(32)
                     emergency.listen(32)
-                    write_state(
-                        state,
+                    write_json(
+                        metadata_path,
                         {
                             "kind": "attached" if teaching is None else "teaching",
                             "command_protocol": COMMAND_PROTOCOL,
                             "share_token": share_token,
                             "command_socket": command_socket,
-                            "processes": {"attach": os.getpid()},
+                            "processes": {"runner": os.getpid()},
                         },
                     )
-                    owns_state = True
+                    wrote_metadata = True
                     (session_dir / "app-exit.json").unlink(missing_ok=True)
                     (session_dir / "inputs.jsonl").write_text("", encoding="utf-8")
                     if teaching is None:
@@ -779,9 +779,9 @@ def _share_desktop(
                     portal.close()
                 if guard is not None:
                     finish_release_guard(guard)
-                if owns_state:
-                    state.unlink(missing_ok=True)
-                    owns_state = False
+                if wrote_metadata:
+                    metadata_path.unlink(missing_ok=True)
+                    wrote_metadata = False
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:

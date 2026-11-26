@@ -1,4 +1,4 @@
-"""Release held X11 desktop input after the attach owner exits, however it exits."""
+"""Release held X11 desktop input after the runner exits, however it exits."""
 
 import os
 import select
@@ -23,10 +23,10 @@ RELEASE = [
     *map(str, range(10, 256)),
     *[word for button in "123" for word in ("mouseup", button)],
 ]
-# Seconds between the two final releases, for presses the owner sent just
+# Seconds between the two final releases, for presses the runner sent just
 # before it died that the desktop has not yet applied.
 LATE_PRESS = 0.5
-# Releases once to prove it can. When the owner's pipe closes, it releases,
+# Releases once to prove it can. When the runner's pipe closes, it releases,
 # waits, and releases again. A new session keeps terminal signals, including
 # hangup, away from it.
 _GUARD = (

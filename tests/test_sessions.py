@@ -183,10 +183,10 @@ def test_cli_resolves_named_session_without_legacy_fallback(
     monkeypatch.chdir(tmp_path)
     session_dir = resolve_session_dir("browser")
     session_dir.mkdir(parents=True)
-    state = (
+    metadata = (
         {"kind": "attached", "command_protocol": COMMAND_PROTOCOL} if attached else {}
     )
-    (session_dir / "session.json").write_text(json.dumps(state))
+    (session_dir / "session.json").write_text(json.dumps(metadata))
     legacy = tmp_path / "browser"
     legacy.mkdir()
     (legacy / "session.json").write_text("invalid legacy metadata")

@@ -78,7 +78,7 @@ def test_packaged_demo_ignores_caller_python_settings(
         assert result.returncode == 0, result.stderr
         assert process.wait(timeout=20) == 0, runner_log.read_text()
         assert not (session_dir / "session.json").exists()
-        assert not (session_dir / ".headless-owner.json").exists()
+        assert not (session_dir / ".recovery-journal.json").exists()
     finally:
         if process.poll() is None:
             process.terminate()
@@ -120,7 +120,7 @@ def test_app_inherits_caller_pythonpath(
     if pythonpath == "foreign":
         assert lines[1] == "caller module"
     assert not (session_dir / "session.json").exists()
-    assert not (session_dir / ".headless-owner.json").exists()
+    assert not (session_dir / ".recovery-journal.json").exists()
 
 
 # R-ENV-1

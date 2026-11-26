@@ -11,7 +11,7 @@ import pytest
 from framewisp.console import ConsoleCapture
 from framewisp.layout import ConsolePanel
 from framewisp.lib import Clips
-from framewisp.ownership import ACTIVE_RECORDING, interrupted_clip
+from framewisp.recovery import ACTIVE_RECORDING, interrupted_clip
 
 # wf-recorder wrote this shape for a clip stopped right after record-start under
 # load. To keep it small, this is a 16x16 one-frame FFmpeg MP4 with the mvhd, tkhd,

@@ -111,19 +111,19 @@ def test_session_accessibility_default(tmp_path: Path, value: str | None) -> Non
 
 def test_bundled_demo_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     caller = tmp_path / "caller"
-    runtime = tmp_path / "runtime"
-    for directory in (caller, runtime):
+    framewisp_path = tmp_path / "framewisp"
+    for directory in (caller, framewisp_path):
         directory.mkdir()
         demo = directory / "framewisp-demo"
         demo.touch()
         demo.chmod(0o755)
-    monkeypatch.setenv("PATH", str(runtime))
+    monkeypatch.setenv("PATH", str(framewisp_path))
     command = ["framewisp-demo", "argument"]
     env = {"PATH": str(caller)}
     assert app_command(command, env) == command
     assert env == {"PATH": str(caller)}
     assert app_command(command, {"PATH": ""}) == [
-        str(runtime / "framewisp-demo"),
+        str(framewisp_path / "framewisp-demo"),
         "argument",
     ]
     assert app_command(["python"], {"PATH": ""}) == ["python"]

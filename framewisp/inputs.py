@@ -403,12 +403,12 @@ def type_unicode(
     interval: float,
     cancelled: Callable[[], bool] | None = None,
 ) -> int:
-    state = json.loads((session_dir / "session.json").read_text())
+    metadata = json.loads((session_dir / "session.json").read_text())
     env = os.environ | {
-        "XDG_RUNTIME_DIR": state["runtime_directory"],
-        "WAYLAND_DISPLAY": state["wayland_display"],
+        "XDG_RUNTIME_DIR": metadata["runtime_directory"],
+        "WAYLAND_DISPLAY": metadata["wayland_display"],
     }
-    if display := state.get("x11_display"):
+    if display := metadata.get("x11_display"):
         env = env | {
             "DISPLAY": display,
             "XAUTHORITY": "/dev/null",
