@@ -1194,7 +1194,9 @@ desktop share. Stop requires a responsive runner; it is not a forced crash-recov
 Session metadata publishes the runner's command protocol version. A session
 command refuses a session that publishes a different version from its own, or
 none, before it sends the session anything (R-CONTROL-3). Stop that runner with
-Ctrl+C or SIGTERM and start the session again.
+Ctrl+C or SIGTERM and start the session again. If the runner has died, run
+`framewisp SESSION recover` with the framewisp version that started the session
+first.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
@@ -1215,7 +1217,8 @@ permission for `prctl`, `pidfd_open`, and `pidfd_send_signal`. Startup checks th
 before launching apps and fails if supervision is unavailable. Neither root nor a
 systemd user service is required. Supervisors end forked processes; they do not restrict
 access to your files or end work launched by an existing external service.
-After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`,
+After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`
+with the framewisp version that started the session,
 then reuse the directory with `framewisp SESSION run -- APP`. Supervisors start
 cleanup on runner loss. Recovery refuses while the runner or any supervisor
 holds the session lock; wait a few seconds and retry. It removes the

@@ -406,7 +406,7 @@ def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
                     "--",
                     sys.executable,
                     "-m",
-                    "framewisp.demo",
+                    "framewisp.demo_app",
                 ],
                 env=environment,
                 stdout=output,

@@ -5,6 +5,7 @@ import json
 import os
 import pty
 import select
+import shlex
 import signal
 import socket
 import subprocess
@@ -644,8 +645,7 @@ def test_source_end_without_revocation_marks_teaching_failed(
     assert "ended unexpectedly" in manifest["error"]
     assert runner.stderr is not None
     assert (
-        "Stopped sharing: Teaching capture ended unexpectedly."
-        in runner.stderr.read()
+        "Stopped sharing: Teaching capture ended unexpectedly." in runner.stderr.read()
     )
 
 
@@ -1438,7 +1438,8 @@ def test_desktop_share_refuses_unrecovered_headless_session(
         assert "still live" in capsys.readouterr().err
         write_journal(session_dir, runtime_dir_path(session_dir), lock, created=False)
     assert share_desktop(session_dir, None) == 1
-    assert "recover` first, with the framewisp version" in capsys.readouterr().err
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    assert f"`{recover}` first, with the framewisp version" in capsys.readouterr().err
     assert not (session_dir / "session.json").exists()
     recover_session(session_dir)
 

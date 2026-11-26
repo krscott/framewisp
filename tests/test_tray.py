@@ -515,7 +515,7 @@ def start_runner(
 def registered_item(
     host: Gio.DBusConnection, start_runner: Callable[[], subprocess.Popen[bytes]]
 ) -> tuple[subprocess.Popen[bytes], str, dict[str, object]]:
-    """Start an runner beneath a watcher object and read its item as a host does."""
+    """Start a runner beneath a watcher object and read its item as a host does."""
     items: list[tuple[str, str]] = []
 
     def register(sender: str, path: str, invocation: Gio.DBusMethodInvocation) -> None:
@@ -576,14 +576,20 @@ def test_sharing_indicator_stop_ends_desktop_share(
     node, labels, _children = layout[1][2][0]
     assert labels["label"] == "Stop sharing"
     assert (tmp_path / "session/session.json").exists()
-    call(
-        host,
-        sender,
-        menu,
-        MENU,
-        "Event",
-        GLib.Variant("(isvu)", (node, "clicked", GLib.Variant("s", ""), 0)),
-    )
+    try:
+        call(
+            host,
+            sender,
+            menu,
+            MENU,
+            "Event",
+            GLib.Variant("(isvu)", (node, "clicked", GLib.Variant("s", ""), 0)),
+        )
+    except GLib.Error as error:
+        # The runner can stop sharing and leave the bus before its reply is sent.
+        remote = Gio.dbus_error_get_remote_error(error)
+        if remote != "org.freedesktop.DBus.Error.NoReply":
+            raise
     assert runner.wait(timeout=5) == 0
     assert (tmp_path / "closed").exists()
     assert not (tmp_path / "session/session.json").exists()

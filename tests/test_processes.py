@@ -45,7 +45,7 @@ def wait_for_tree(root: Path) -> list[int]:
 
 # R-LIFE-1
 @pytest.mark.parametrize("exit_app", [False, True])
-def test_owned_descendants_and_independent_trees(
+def test_supervised_descendants_and_independent_trees(
     tmp_path: Path, exit_app: bool
 ) -> None:
     probe = Path(__file__).with_name("descendants_probe.py")

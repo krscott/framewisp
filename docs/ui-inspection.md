@@ -94,7 +94,7 @@ python docs/benchmark_inspection.py /tmp/fw-inspection-bench /tmp/inspection.jso
 framewisp /tmp/fw-inspection-bench stop
 ```
 
-| Complete CLI operation | p50 | p95 | Median response bytes |
+| Complete CLI operation | p50 | p95 | Median bytes (observation JSON or screenshot file) |
 | --- | ---: | ---: | ---: |
 | Find Apply button | 570 ms | 624 ms | 516 |
 | Read applied result | 750 ms | 900 ms | 642 |
@@ -102,7 +102,7 @@ framewisp /tmp/fw-inspection-bench stop
 
 Queries currently read each object through several D-Bus calls. Inspection is
 slower than a screenshot in this small demo app. It exchanges much less data and lets
-an agent read text/state without an image-viewing step. Neither response size
+an agent read text/state without an image-viewing step. Neither these sizes
 nor these CLI measurements establish a model-latency speedup.
 
 One end-to-end agent trial at revision `bfb5c75` on September 20, 2026 used
@@ -123,7 +123,8 @@ excludes session setup and input because this comparison is a discovery/read
 task. No separate model-inference or upload timer is available. This is one
 illustrative trial, affected by scheduling and prior knowledge of the demo app,
 not a latency distribution or evidence of an agent speedup. Both paths took
-about 15.5 seconds despite the large difference in response size.
+about 15.5 seconds despite the large difference between observation JSON and
+screenshot file size.
 
 ## Decision for checks
 

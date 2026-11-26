@@ -499,10 +499,11 @@ def refuse_unrecovered_session(session_dir: Path) -> None:
         runtime_dir_path(session_dir),
     )
     if any(path_status(path) != "absent" for path in paths):
+        recover = shlex.join(["framewisp", str(session_dir), "recover"])
         raise SessionError(
             "A headless session's recovery journal or runtime directory remains. "
-            "Run `framewisp SESSION recover` first, with the framewisp version that "
-            "started that session."
+            f"Run `{recover}` first, with the framewisp version that started that "
+            "session."
         )
 
 

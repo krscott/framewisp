@@ -986,7 +986,9 @@ def _run_session(
     metadata_path = session_dir / "session.json"
     if metadata_path.exists():
         raise SessionError(
-            f"{metadata_path} already exists. Run `framewisp SESSION recover` after its runner exits."
+            f"{metadata_path} already exists. Run "
+            f"`{shlex.join(['framewisp', str(session_dir), 'recover'])}` after its "
+            "runner exits."
         )
 
     (session_dir / "app-exit.json").unlink(missing_ok=True)

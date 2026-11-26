@@ -53,7 +53,7 @@ def main() -> None:
                         "--",
                         sys.executable,
                         "-m",
-                        "framewisp.demo",
+                        "framewisp.demo_app",
                     ],
                     env=env,
                     cwd=args.source,

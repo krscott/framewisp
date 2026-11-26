@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -410,9 +411,10 @@ def test_session_commands_refuse_another_command_protocol(
     )
     assert result.returncode == 1
     assert "another version of framewisp" in result.stderr
-    assert ("Ask the user" in result.stderr) is (
-        metadata.get("kind") in {"attached", "teaching"}
-    )
+    desktop = metadata.get("kind") in {"attached", "teaching"}
+    assert ("Ask the user" in result.stderr) is desktop
+    recover = shlex.join(["framewisp", str(tmp_path), "recover"])
+    assert (f"`{recover}` with the framewisp version" in result.stderr) is not desktop
     assert "again with this version" in result.stderr
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "screenshot.png").exists()

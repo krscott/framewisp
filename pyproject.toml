@@ -23,7 +23,7 @@ dev = [
 
 [project.scripts]
 framewisp = "framewisp.__main__:main"
-framewisp-demo = "framewisp.demo:main"
+framewisp-demo = "framewisp.demo_app:main"
 
 [build-system]
 requires = ["setuptools >= 77.0.0"]

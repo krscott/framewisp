@@ -294,8 +294,9 @@ investigate or ask; never invent a rationale.
   session command that uses the command socket sends such a request when it is
   run from a copy of that session's metadata in another directory.
 - **R-LIFE-7** [test] When recovery cannot verify the session lock, the recovery
-  journal, or the runtime directory, or cannot confirm that every supervisor
-  finished cleanup, it removes nothing and its error gives manual cleanup steps.
+  journal, or the runtime directory, or holds the session lock but still cannot
+  confirm that every supervisor finished cleanup, it removes nothing and its
+  error gives manual cleanup steps.
 
 ## Desktop shares (ATTACH)
 
@@ -354,7 +355,7 @@ investigate or ask; never invent a rationale.
 - **R-TEACH-3** [test] A completed lesson contains a playable video,
   timestamped PNG frames, the stated goal, and timestamped notes.
 
-  Rationale: Agents need both what the screen showed and explanations of intent
+  Rationale: Agents need both what the shared display showed and explanations of intent
   to derive a reusable procedure.
 
 - **R-TEACH-4** [test] A capture failure marks the lesson as failed and
