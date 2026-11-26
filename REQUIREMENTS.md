@@ -155,7 +155,7 @@ investigate or ask; never invent a rationale.
 - **R-INSPECT-6** [test] An unresponsive app does not block runner `status` or
   `stop`.
 
-## Input logs and captions (LOG)
+## Input logs and overlays (LOG)
 
 - **R-LOG-1** [test] `inputs.jsonl` always omits typed text and literal key
   characters. Captions show those values only in clips with `--key-captions all`.
@@ -232,8 +232,8 @@ investigate or ask; never invent a rationale.
 - **R-REC-18** [test] When framewisp cannot publish a clip at its clip
   destination, such as when a file takes it first or its directory is no longer
   writable, framewisp leaves any file there intact. The clip remains at another
-  path with whatever finalization completed, raw if finalization failed
-  (R-REC-10), and the error names that path.
+  path with whatever finalization completed, raw if finalization failed before
+  publishing (R-REC-10), and the error names that path.
 - **R-REC-19** [test] Framewisp rejects a clip destination on a filesystem
   without hard links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports

@@ -944,7 +944,7 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
     assert not demo.clip.exists()
     kept = private_clip(demo.clip.parent)
     assert str(kept) in " ".join(log.split())
-    assert (demo.directory / ".active-recording").readlink() == kept
+    assert (demo.directory / ".private-clip").readlink() == kept
     assert not demo.runtime.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -4168,7 +4168,7 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {private_clip(tmp_path)}" in error
     assert "raw clip remains" in error
     assert "finalization.log" in error
-    assert (demo.directory / ".active-recording").readlink() == private_clip(tmp_path)
+    assert (demo.directory / ".private-clip").readlink() == private_clip(tmp_path)
     assert len(clip_frames(private_clip(tmp_path))) > 1
 
 
@@ -4208,7 +4208,7 @@ def test_unpublishable_clip_reports_render_failure_with_kept_clip(
     assert f"The clip remains at {kept}" in error
     assert f"raw clip remains at {kept}" in error
     assert "finalization.log" in error
-    assert (demo.directory / ".active-recording").readlink() == kept
+    assert (demo.directory / ".private-clip").readlink() == kept
     assert len(clip_frames(kept)) > 1
     assert pointer_overlay_frames(kept, 120, 100) == []
 
@@ -4240,7 +4240,7 @@ def test_failed_recording_start_removes_private_directory(
     assert demo.process.poll() is None
     assert not private_directories(tmp_path)
     assert not clip.exists()
-    assert not (demo.directory / ".active-recording").is_symlink()
+    assert not (demo.directory / ".private-clip").is_symlink()
     cli(demo.directory, "record-start", str(clip))
     cli(demo.directory, "record-stop")
     clip_frames(clip)
@@ -4275,7 +4275,7 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
     assert report["interrupted_clip"] == str(interrupted)
     assert interrupted.stat().st_size > 0
     assert not demo.clip.exists()
-    assert not (demo.directory / ".active-recording").is_symlink()
+    assert not (demo.directory / ".private-clip").is_symlink()
 
     rerun = subprocess.run(
         [

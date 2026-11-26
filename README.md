@@ -900,13 +900,13 @@ A clip with a click is encoded again to draw its click pings, even when text cap
 are off. Add `--no-click-pings` to keep the recorder's output unprocessed when
 nothing else needs rendering. `run --no-click-pings` requires `--record`.
 
-Captions are rendered into the video frames so
+Overlays are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for finalization to finish.
-This adds encoding time when stopping a captioned clip.
+This adds encoding time when stopping a clip that finalization draws on or compacts.
 
-The recorder log retains diagnostics and the first frame's timestamp used for
-caption alignment. Framewisp filters the remaining Wayland protocol trace as it
+The recorder log retains diagnostics and the first frame's timestamp used to
+align overlays, the console panel and compaction. Framewisp filters the remaining Wayland protocol trace as it
 arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,

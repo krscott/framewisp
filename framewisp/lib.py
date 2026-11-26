@@ -57,7 +57,7 @@ from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 from framewisp.layout import ClipLayout, ConsolePanel, clip_layout
 from framewisp.ownership import (
-    ACTIVE_RECORDING,
+    PRIVATE_CLIP,
     headless_runtime,
     kept_clip,
     refuse_abandoned_ownership,
@@ -339,7 +339,7 @@ def start_recording(
     `publish_clip` can touch the destination.
     """
     clip = private_clip(destination)
-    active = log.parent / ACTIVE_RECORDING
+    link = log.parent / PRIVATE_CLIP
     command = [
         "wf-recorder",
         "-o",
@@ -369,8 +369,8 @@ def start_recording(
     recorder_env = env | {"WAYLAND_DEBUG": "client"} if timed else env
     capturing = False
     try:
-        active.unlink(missing_ok=True)
-        active.symlink_to(clip)
+        link.unlink(missing_ok=True)
+        link.symlink_to(clip)
         with (
             caption_capture.clip(enabled=capture_literals) as literal_captions,
             recorder_output(log) as output,
@@ -443,7 +443,7 @@ def start_recording(
             shutil.rmtree(clip.parent, ignore_errors=True)
         # A clip that remains stays linked, in case a later error hides its path.
         if not clip.exists():
-            active.unlink(missing_ok=True)
+            link.unlink(missing_ok=True)
 
 
 def private_clip(destination: Path) -> Path:
@@ -513,7 +513,7 @@ def new_file_error(
             ".headless.lock",
             ".headless-owner.json",
             ".headless-owner.tmp",
-            ACTIVE_RECORDING,
+            PRIVATE_CLIP,
             "session.json",
             ".session.json",
             "app-exit.json",
