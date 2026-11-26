@@ -2818,7 +2818,7 @@ def test_runner_rejects_invalid_caption_mode(
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
-    wait_until(lambda: "Demo ready" in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text())
     cli(demo.directory, "click", "120", "100")
     cli(demo.directory, "type", "alpha beta")
     cli(demo.directory, "click", "80", "100", "--count", "2")
@@ -2837,7 +2837,7 @@ def test_demo_word_selection_and_text_menu(demo: Demo, tmp_path: Path) -> None:
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
     log = demo.directory / "app.log"
-    wait_until(lambda: "Demo ready" in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text())
     cli(demo.directory, "click", "54", "266")
     wait_until(lambda: "Option: True" in log.read_text())
     cli(demo.directory, "drag", "147", "382", "350", "382", "--duration", "0.4")
@@ -2889,7 +2889,7 @@ def test_demo_slider_scroll_and_reset(demo: Demo) -> None:
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_demo_hover_tip_and_space_toggle(demo: Demo, tmp_path: Path) -> None:
     log = demo.directory / "app.log"
-    wait_until(lambda: "Demo ready" in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text())
     cli(demo.directory, "move", "1100", "600")
     cli(demo.directory, "screenshot", str(tmp_path / "before.png"))
     cli(demo.directory, "move", "150", "266")
@@ -3428,7 +3428,7 @@ def exported_tree(demo: Demo) -> None:
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     button = inspect(demo, "--role", "button", "--name", "Apply text")
     assert button["status"] == "ok", button
     assert button["match_count"] == 1
@@ -3467,7 +3467,7 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     # GTK exposes both the button and its child label with the same name.
     duplicates = inspect(demo, "--name", "Apply text")
     assert duplicates["status"] == "ok", duplicates
@@ -3504,7 +3504,7 @@ def test_inspect_bounds_and_duplicate_matches(demo: Demo) -> None:
 @pytest.mark.integration
 @pytest.mark.usefixtures("exported_tree")
 def test_inspect_unresponsive_app_does_not_block_runner(demo: Demo) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     assert inspect(demo, "--name", "Apply text")["status"] == "ok"
     state = json.loads((demo.directory / "session.json").read_text())
     pid = state["processes"]["app"]
@@ -3585,7 +3585,7 @@ def test_inspection_private_buses_and_unsupported_apps(
         state = json.loads((second / "session.json").read_text())
         assert state["accessibility_bus"] != first["accessibility_bus"]
         if app == "framewisp-demo":
-            wait_until(lambda: "Demo ready" in (second / "app.log").read_text())
+            wait_until(lambda: "Demo app ready" in (second / "app.log").read_text())
             wait_for_control(second, "Apply text")
             cli(second, "type", "--interval", "0", "Second session only")
             result = json.loads(
@@ -3620,7 +3620,7 @@ def test_inspection_private_buses_and_unsupported_apps(
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     cli(demo.directory, "screenshot", "--delay", "0.2", str(tmp_path / "ready.png"))
     plan = tmp_path / "batch.json"
     screenshot_path = tmp_path / "result.png"
@@ -3710,7 +3710,7 @@ def test_batch_validates_later_steps_and_screenshot_before_input(demo: Demo) -> 
 def test_batch_no_interleaving_through_final_screenshot(
     demo: Demo, tmp_path: Path
 ) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     cli(demo.directory, "click", "120", "100")
     with input_request(
         demo,
@@ -4331,7 +4331,7 @@ def test_lost_vnc_during_batch_reports_partial_result(
 @pytest.mark.usefixtures("exported_tree")
 @pytest.mark.parametrize("demo", [None, "x11"], indirect=True)
 def test_inspection_reads_state_after_batch(demo: Demo, tmp_path: Path) -> None:
-    wait_until(lambda: "Demo ready" in (demo.directory / "app.log").read_text())
+    wait_until(lambda: "Demo app ready" in (demo.directory / "app.log").read_text())
     plan = tmp_path / "inspect-batch.json"
     plan.write_text(
         json.dumps(
@@ -4997,9 +4997,9 @@ def test_inspect_display_bounds_activate_offset_controls(
 ) -> None:
     log = demo.directory / "app.log"
     qt = "Coordinates probe ready"
-    wait_until(lambda: "Demo ready" in log.read_text() or qt in log.read_text())
+    wait_until(lambda: "Demo app ready" in log.read_text() or qt in log.read_text())
     is_qt = qt in log.read_text()
-    title = "Coordinates dialog" if is_qt else "Framewisp demo"
+    title = "Coordinates dialog" if is_qt else "Framewisp demo app"
     name = "Activate dialog" if is_qt else "Apply text"
     state = json.loads((demo.directory / "session.json").read_text())
 

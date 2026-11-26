@@ -221,7 +221,7 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `teach DIRECTORY --goal TEXT` | Record a lesson of the user performing a task on one desktop monitor into a new directory; screen-only access. |
+| `teach DIRECTORY --goal TEXT` | Record a lesson of the user performing a task on one desktop monitor into a new directory, without keyboard or pointer access. |
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
 | `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
@@ -305,8 +305,9 @@ framewisp teaching teach ./customer-lesson --goal 'Update a customer and verify 
 ```
 
 Choose a new lesson directory. Read the instructions, type `ATTACH`, and select
-one monitor in the desktop sharing dialog. Teaching requests screen access only;
-the teaching session refuses agent mouse and keyboard commands. Perform the task normally, then
+one monitor in the desktop sharing dialog. Teaching requests no keyboard or
+pointer access; the teaching session refuses agent mouse and keyboard commands.
+It prints `Teaching session ready:` once it saves its first frame. Perform the task normally, then
 stop with Ctrl+C in the teaching terminal. Your apps keep running. The sharing
 indicator and `framewisp --detach` can also stop capture.
 

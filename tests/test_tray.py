@@ -468,8 +468,8 @@ class Portal:
         self.bus = Gio.DBusConnection.new_for_address_sync(address,
             Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
             None, None)
-    def open(self):
-        pass
+    def open(self, *, allow_input):
+        assert allow_input
     def close(self):
         if not self.bus.is_closed():
             self.bus.close_sync(None)

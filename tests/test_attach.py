@@ -227,8 +227,7 @@ class Portal:
         self.closed = False
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     def open(self, **options):
-        if (root / 'teach').exists():
-            assert options == {'screen_only': True}
+        assert options == {'allow_input': not (root / 'teach').exists()}
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
             if self.stop.wait(.01):
@@ -484,7 +483,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
+    while "Teaching session ready:" not in attach_process.stdout.readline():
         assert attach_process.poll() is None
     assert (tmp_path / "lesson/frames/000000.png").exists()
     session_dir = tmp_path / "session"

@@ -132,7 +132,8 @@ def test_gtk_app_ignores_conflicting_caller(
                     report.exists()
                     and "Session ready:" in log.read_text()
                     and (
-                        not demo or "Demo ready" in (directory / "app.log").read_text()
+                        not demo
+                        or "Demo app ready" in (directory / "app.log").read_text()
                     )
                 )
 
