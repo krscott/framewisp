@@ -55,7 +55,7 @@ failure, SIGINT, SIGTERM, and recording tests also exercise the new bus lifetime
 
 The standalone timeout defaults to 5 seconds. Depth (8) and node count (256)
 remain conservative because deeper traversals have crashed some Qt apps. Batch
-checks default to 2 seconds per observation. Their optional `limits.timeout`
+checks default to 2 seconds per query. Their optional `limits.timeout`
 can raise that budget to 10 seconds, within the overall check deadline; see
 [check traversal settings](checks.md#conditions-and-deadlines).
 
