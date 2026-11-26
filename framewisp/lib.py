@@ -697,7 +697,7 @@ class Clips:
 def session_command(
     session_dir: Path,
     command: str,
-    destination: Path | None = None,
+    clip_destination: Path | None = None,
     *,
     captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
@@ -709,7 +709,9 @@ def session_command(
     request: dict[str, object] = {
         "command": command,
         "session_directory": str(session_dir),
-        "destination": str(destination.resolve()) if destination else None,
+        "clip_destination": (
+            str(clip_destination.resolve()) if clip_destination else None
+        ),
         "click_pings": click_pings,
         "compact": compact,
         "console": console.parameters() if console is not None else None,
@@ -749,7 +751,7 @@ def session_command(
 
 @dataclass(frozen=True)
 class RecordStart:
-    destination: Path
+    clip_destination: Path
     captions: CaptionOptions
     click_pings: bool
     console: ConsolePanel | None
@@ -758,13 +760,13 @@ class RecordStart:
     @staticmethod
     def parse(command: dict[str, object]) -> "RecordStart":
         console = ConsolePanel.parse(command.get("console"))
-        destination = command.get("destination")
+        clip_destination = command.get("clip_destination")
         pointer_captions = command.get("pointer_captions")
         key_captions = command.get("key_captions")
         click_pings = command.get("click_pings", True)
         compact = command.get("compact", False)
-        if not isinstance(destination, str):
-            raise ValueError("record-start requires a destination")
+        if not isinstance(clip_destination, str):
+            raise ValueError("record-start requires a clip_destination")
         if pointer_captions is not None and pointer_captions not in POINTER_CAPTIONS:
             raise ValueError(
                 f"pointer_captions must be one of {', '.join(POINTER_CAPTIONS)}"
@@ -775,11 +777,11 @@ class RecordStart:
             raise ValueError("click_pings must be true or false")
         if not isinstance(compact, bool):
             raise ValueError("compact must be true or false")
-        path = Path(destination)
+        path = Path(clip_destination)
         if not path.is_absolute():
-            raise ValueError("destination must be absolute in session requests.")
+            raise ValueError("clip_destination must be absolute in session requests.")
         return RecordStart(
-            resolved_request_path(path, "destination"),
+            resolved_request_path(path, "clip_destination"),
             CaptionOptions(
                 pointer=pointer_captions,
                 key=key_captions,
@@ -891,7 +893,7 @@ def handle_session_command(
                 data = clips.last_summary
         else:
             error = clips.start(
-                request.destination,
+                request.clip_destination,
                 captions=request.captions,
                 click_pings=request.click_pings,
                 console=request.console,

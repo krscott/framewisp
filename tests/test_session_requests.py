@@ -43,7 +43,11 @@ def test_pointer_input_rejects_keyboard_privacy_marker() -> None:
 def test_record_start_requires_a_boolean_compact(raw: object) -> None:
     with pytest.raises(ValueError, match="compact must be true or false"):
         RecordStart.parse(
-            {"destination": "/tmp/clip.mp4", "key_captions": "non-text", "compact": raw}
+            {
+                "clip_destination": "/tmp/clip.mp4",
+                "key_captions": "non-text",
+                "compact": raw,
+            }
         )
 
 
@@ -95,7 +99,7 @@ def handle(
 def start_request(tmp_path: Path) -> dict[str, object]:
     return {
         "command": "record-start",
-        "destination": str(tmp_path / "clip.mp4"),
+        "clip_destination": str(tmp_path / "clip.mp4"),
         "key_captions": "non-text",
     }
 

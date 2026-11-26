@@ -2229,7 +2229,7 @@ def test_rejected_console_panel_leaves_the_app_running(
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory.resolve()),
-                "destination": str(rejected),
+                "clip_destination": str(rejected),
                 "key_captions": "non-text",
                 "console": value,
             }
@@ -2254,7 +2254,7 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
         request = {
             "command": "record-start",
             "session_directory": str(demo.directory.resolve()),
-            "destination": str(tmp_path / "rejected.mp4"),
+            "clip_destination": str(tmp_path / "rejected.mp4"),
             "key_captions": "non-text",
             "click_pings": "no",
         }
@@ -2288,15 +2288,15 @@ def test_unusable_clip_destination_leaves_the_app_running(
     wait_for_input_probe_window(demo)
     session_dir = str(demo.directory.resolve())
     for destination, message in (
-        (f"{tmp_path}/nul\0.mp4", "destination is not a usable path"),
-        (f"{tmp_path}/\ud800.mp4", "destination is not a usable path"),
+        (f"{tmp_path}/nul\0.mp4", "clip_destination is not a usable path"),
+        (f"{tmp_path}/\ud800.mp4", "clip_destination is not a usable path"),
         # The failing stage depends on the Python version.
         (f"{tmp_path}/{'a' * 300}.mp4", ""),
     ):
         request = {
             "command": "record-start",
             "session_directory": session_dir,
-            "destination": destination,
+            "clip_destination": destination,
             "key_captions": "non-text",
         }
         line = request_reply(demo, (json.dumps(request) + "\n").encode())
@@ -2320,7 +2320,7 @@ def test_non_utf8_clip_destination_records(demo: Demo, tmp_path: Path) -> None:
     request = {
         "command": "record-start",
         "session_directory": str(demo.directory.resolve()),
-        "destination": str(clip),
+        "clip_destination": str(clip),
         "key_captions": "non-text",
     }
     line = request_reply(demo, (json.dumps(request) + "\n").encode())
@@ -2383,11 +2383,19 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         {"command": 1},
         {"command": "unknown"},
         {"command": "record-start"},
-        {"command": "record-start", "destination": "x.mp4", "key_captions": "non-text"},
-        {"command": "record-start", "destination": "/tmp/x.mp4", "key_captions": []},
         {
             "command": "record-start",
-            "destination": "/tmp/x.mp4",
+            "clip_destination": "x.mp4",
+            "key_captions": "non-text",
+        },
+        {
+            "command": "record-start",
+            "clip_destination": "/tmp/x.mp4",
+            "key_captions": [],
+        },
+        {
+            "command": "record-start",
+            "clip_destination": "/tmp/x.mp4",
             "key_captions": "non-text",
             "compact": "yes",
         },
@@ -2811,7 +2819,7 @@ def test_runner_rejects_invalid_caption_mode(
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory),
-                "destination": str(destination),
+                "clip_destination": str(destination),
                 field: value,
             }
             connection.sendall((json.dumps(request) + "\n").encode())
