@@ -673,6 +673,7 @@ def test_stale_desktop_session_gets_desktop_session_steps(
     message = str(refusal.value)
     assert " run -- APP" not in message
     assert "--stop-sharing" not in message
+    assert "attach again" not in message
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0

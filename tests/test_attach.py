@@ -483,8 +483,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Teaching session ready:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
     assert (tmp_path / "lesson/frames/000000.png").exists()
     session_dir = tmp_path / "session"
     note = subprocess.run(
@@ -632,8 +631,7 @@ def test_source_end_without_revocation_marks_teaching_failed(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Teaching session ready:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
     (tmp_path / "source-end").touch()
     assert attach_process.wait(timeout=5) == 1
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
@@ -1300,6 +1298,7 @@ def terminal_process(
 
 
 def read_terminal(descriptor: int, expected: bytes) -> bytes:
+    """Read until `expected` appears, failing with the output after 5 seconds."""
     output = b""
     deadline = time.monotonic() + 5
     while expected not in output:

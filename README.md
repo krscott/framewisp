@@ -566,7 +566,9 @@ existing directory. The PNG appears only after successful capture.
 The CLI prints structured results, timing, completed-step count, and artifact
 paths. This input-and-screenshot example returns `verified: null`; inspect its PNG
 before claiming visual success. On runtime failure it exits with status 1 and reports the zero-based
-`failed_index` and `failed_phase`. A screenshot failure has a null failed index.
+`failed_index` and `failed_phase`. A failed final `screenshot` has a null failed index;
+a failed `failure_screenshot` keeps the original failure's phase and index and adds
+`failure_screenshot_error`.
 Execution stops at that point; completed inputs cannot be rolled back, and even
 the failed step may have sent partial input. Never replay a failed batch without
 inspecting the app first. Disconnecting cancels queued or remaining work and

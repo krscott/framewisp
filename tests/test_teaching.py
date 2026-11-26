@@ -357,7 +357,7 @@ def test_teach_rejects_invalid_parent_before_consent(
 
 
 @pytest.fixture
-def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
+def desktop_demo_app(tmp_path: Path) -> Iterator[tuple[str, Path]]:
     """Run the demo app on an isolated desktop, never the user's display."""
     read, write = os.pipe()
     server = subprocess.Popen(
@@ -426,9 +426,9 @@ def desktop_demo(tmp_path: Path) -> Iterator[tuple[str, Path]]:
 
 
 def test_teaching_captures_a_task_performed_in_the_demo_app(
-    desktop_demo: tuple[str, Path], teaching: Teaching
+    desktop_demo_app: tuple[str, Path], teaching: Teaching
 ) -> None:
-    display, log = desktop_demo
+    display, log = desktop_demo_app
     teaching.start(
         f"ximagesrc display-name={display} show-pointer=true use-damage=false ! video/x-raw,framerate=30/1"
     )
