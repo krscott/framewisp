@@ -70,7 +70,7 @@ def main() -> None:
     parser.add_argument(
         "--stop-sharing",
         action="store_true",
-        help="stop the active desktop share, regardless of session",
+        help="emergency stop for whichever session is sharing the desktop",
     )
     parser.add_argument(
         "session",
