@@ -216,8 +216,8 @@ Headless runtime sockets also use this temporary directory. Startup checks the
 `TMPDIR` if needed. Cleanup and recovery use the runtime path in the ownership
 journal, even when `TMPDIR` changes. If the journal is unreadable, the manual steps
 recovery prints assume the current `TMPDIR`.
-Project scoping does not change sandbox socket permissions. `--detach` remains
-session-independent.
+Project scoping does not change sandbox socket permissions. `--stop-sharing`
+remains session-independent.
 
 | Command | Behavior |
 | --- | --- |
@@ -225,7 +225,7 @@ session-independent.
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
 | `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
-| `--detach` (no session) | Stop the active desktop attachment and leave your apps running. |
+| `--stop-sharing` (no session) | Stop the active desktop share and leave your apps running. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
@@ -305,10 +305,10 @@ framewisp teaching teach ./customer-lesson --goal 'Update a customer and verify 
 ```
 
 Choose a new lesson directory. Read the instructions, type `ATTACH`, and select
-one monitor in the desktop sharing dialog. Teaching requests screen access only;
+one monitor in the desktop's screen sharing dialog. Teaching requests screen access only;
 the teaching session refuses agent mouse and keyboard commands. Perform the task normally, then
 stop with Ctrl+C in the teaching terminal. Your apps keep running. The sharing
-indicator and `framewisp --detach` can also stop capture.
+indicator and `framewisp --stop-sharing` can also stop capture.
 
 You or the agent can add explanations from another terminal while recording:
 
@@ -336,22 +336,22 @@ workflow.
 
 Use this when an app is already running on your desktop and you want an agent to
 inspect its current state. Tested desktops are COSMIC on Wayland and GNOME 42 on
-Xorg (X11); see [verification](docs/desktop-sharing-tray.md). Your desktop
+Xorg (X11); see [verification](docs/sharing-indicator.md). Your desktop
 must provide the RemoteDesktop and ScreenCast portals; framewisp supplies its own
 capture tools through the Nix package.
 
 Before sharing, configure a desktop shortcut that runs:
 
 ```sh
-framewisp --detach
+framewisp --stop-sharing
 ```
 
 In COSMIC Settings, open **Input devices > Keyboard > Keyboard shortcuts** and add
 custom shortcuts with that command for both Ctrl+Alt+Escape and
 Ctrl+Alt+Shift+Escape. The second binding lets physical Ctrl+Alt+Escape stop
-access while framewisp holds Shift for a gesture. Use the absolute path to
+sharing while framewisp holds Shift for a gesture. Use the absolute path to
 the installed `framewisp` executable if your desktop does not have it on PATH.
-The same bindings work for every session. Only one desktop attachment can run
+The same bindings work for every session. Only one desktop share can be active
 at a time.
 Verify the shortcuts appear in the saved list. On the tested COSMIC version,
 the custom-shortcut form displayed the chord without saving it. The equivalent
@@ -360,12 +360,12 @@ entries in `~/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom` ar
 ```ron
 (
     modifiers: [Ctrl, Alt], key: "Escape",
-    description: Some("framewisp-detach"),
-): Spawn("framewisp --detach"),
+    description: Some("framewisp-stop-sharing"),
+): Spawn("framewisp --stop-sharing"),
 (
     modifiers: [Ctrl, Alt, Shift], key: "Escape",
-    description: Some("framewisp-detach-held-shift"),
-): Spawn("framewisp --detach"),
+    description: Some("framewisp-stop-sharing-held-shift"),
+): Spawn("framewisp --stop-sharing"),
 ```
 
 Close Settings before editing that file. Add the entries inside its existing
@@ -382,10 +382,10 @@ keys=org.gnome.settings-daemon.plugins.media-keys
 path=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
 gsettings set $wm cycle-panels "[]"
 gsettings set $wm cycle-panels-backward "[]"
-gsettings set $keys custom-keybindings "['$path/fw-detach/', '$path/fw-detach-shift/']"
-for entry in "fw-detach <Control><Alt>Escape" "fw-detach-shift <Shift><Control><Alt>Escape"; do
+gsettings set $keys custom-keybindings "['$path/fw-stop-sharing/', '$path/fw-stop-sharing-shift/']"
+for entry in "fw-stop-sharing <Control><Alt>Escape" "fw-stop-sharing-shift <Shift><Control><Alt>Escape"; do
   gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" name "${entry%% *}"
-  gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" command "framewisp --detach"
+  gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" command "framewisp --stop-sharing"
   gsettings set "$keys.custom-keybinding:$path/${entry%% *}/" binding "${entry#* }"
 done
 ```
@@ -405,9 +405,9 @@ the user to run it, never allocate a terminal to bypass the startup check. The
 terminal check prevents accidental agent startup; it is not a security boundary
 against programs running under the same user account.
 
-Other processes with access to the attachment's state and command socket can
-issue commands. Portal approval grants desktop access to the attachment; it
-does not authenticate a particular agent.
+Other processes with access to the attached session's metadata and command
+socket can issue commands. Portal approval grants the desktop share to the
+attached session; it does not authenticate a particular agent.
 
 Wait for `Attached:`. An agent running under the same user account can now use
 another terminal:
@@ -423,23 +423,23 @@ your live pointer and keyboard focus. Keyboard input goes to the focused app,
 even if that app is on another monitor. Screenshots include everything visible
 on the shared monitor.
 
-Once sharing becomes active, framewisp registers a tray icon with the label
-"framewisp desktop sharing is active" and a "Stop sharing" menu item. Open its
-menu to end access. Supported tray hosts are KDE Plasma, COSMIC's status area,
+Once sharing becomes active, framewisp registers a sharing indicator with the
+label "framewisp desktop share is active" and a "Stop sharing" menu item. Open
+its menu to end the desktop share. Supported tray hosts are KDE Plasma, COSMIC's status area,
 and GNOME with an enabled StatusNotifierItem/AppIndicator extension (for example,
 AppIndicator and KStatusNotifierItem Support). Framewisp uses its existing Gio
 runtime dependency; no root access or extra indicator library is required.
 The desktop controls icon placement, overflow, panel auto-hide, and visibility.
 Registration does not guarantee a visible icon. If no compatible host is available,
 the terminal reports that the indicator is unavailable and gives the shortcut
-and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a tray
-icon: its menu requires a responsive owner. The indicator disappears when the
-attachment ends or its owner exits; a new attachment registers a new item.
-See [tray verification](docs/desktop-sharing-tray.md) for setup and verification status.
+and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a sharing
+indicator: its menu requires a responsive owner. The indicator disappears when the
+desktop share ends or its owner exits; a new desktop share registers a new one.
+See [sharing indicator verification](docs/sharing-indicator.md) for setup and verification status.
 
-Ctrl+Alt+Escape runs `framewisp --detach`. Ctrl+C, loss of the controlling terminal,
-pressing Ctrl+Z, or portal revocation also ends access. Detaching from tmux
-or screen can leave that terminal and the attach process running. Use `--detach`
+Ctrl+Alt+Escape runs `framewisp --stop-sharing`. Ctrl+C, loss of the controlling terminal,
+pressing Ctrl+Z, or portal revocation also ends the desktop share. Detaching from tmux
+or screen can leave that terminal and the attach process running. Use `--stop-sharing`
 before disconnecting from a terminal multiplexer. If the attach
 process crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive attach process
@@ -451,14 +451,14 @@ the dialog again. Test your binding before handing control to an agent.
 
 While the agent holds Shift, Ctrl+C in the attach terminal arrives as
 Ctrl+Shift+C, which many terminals treat as copy. Use the Shift shortcut or the
-tray item instead.
+sharing indicator instead.
 
 ### X11 desktops
 
 On X11 the portal dialog asks for consent but is not a permission boundary. Any
 program running as you can read the screen and send input through the X display
 without it. GNOME on Xorg shows no screen-sharing indicator of its own, so the
-framewisp tray item is the visible sign of sharing. Its dialog leaves remote
+framewisp sharing indicator is the visible sign of sharing. Its dialog leaves remote
 interaction off until you switch it on; attach fails without it.
 
 GNOME's X11 backend leaves keys and buttons held when sharing ends. Attach
@@ -468,8 +468,8 @@ held by the X server's test input device, which only injected input uses. Your
 physical keyboard and mouse are unaffected. Attach refuses to start on X11
 without `DISPLAY` or a working `xdotool`; the Nix package provides `xdotool`.
 
-Whether a Wayland desktop attachment covers X11 apps running through Xwayland
-has not been verified yet; see [verification](docs/desktop-sharing-tray.md).
+Whether a desktop share on Wayland covers X11 apps running through Xwayland
+has not been verified yet; see [verification](docs/sharing-indicator.md).
 
 Attached sessions support screenshots and input commands, including input logs.
 Keyboard shortcuts currently assume a US keyboard layout.
@@ -499,7 +499,7 @@ edge. Movement by apps or other clients does not update this tracking, so the
 next animation may jump to the tracked position
 before continuing to its target. Tracking works during recording without a
 compositor patch or cursor query.
-Attached desktops retain immediate positioning and reject `--move-duration`.
+Attached sessions retain immediate positioning and reject `--move-duration`.
 
 ```sh
 framewisp paint click 500 400 --move-duration 0.6
@@ -576,7 +576,7 @@ Batches require 1 to 256 steps, at most 16,384 typed characters and 10,000 scrol
 steps, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
 are limited to 1 MiB each. Each step is an action (`"action"`: `move`, `click`,
 `drag`, `scroll`, `type`, or `key`) or a check (`"check"`: `wait`, `assert`, or
-`baseline`); the screenshot is separate. No attached desktops, loops, lifecycle
+`baseline`); the screenshot is separate. No attached sessions, loops, lifecycle
 commands. Checks support known accessible text, name, value, and checked/enabled
 state. Checks keep conservative traversal defaults. For larger trees, set
 `"limits": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` on each
@@ -650,7 +650,7 @@ send the same Preferences shortcut. Use `key Ctrl+plus` or `key 'Ctrl++'` for
 Ctrl with `+`; `Ctrl+` alone is incomplete. Quote literal shell metacharacters.
 Shift selects the US-layout shifted symbol: `Ctrl+Shift+comma` sends Ctrl+`<`.
 Shifted punctuation names and literals imply Shift, so `Ctrl+less` also sends
-Ctrl+`<`. Desktop attachment uses its documented US-layout keycodes.
+Ctrl+`<`. Attached sessions use their documented US-layout keycodes.
 
 Each command presses the modifiers, presses and releases the key, then releases
 the modifiers in reverse order on the same connection. Modifiers do not remain
@@ -1131,7 +1131,7 @@ not a security sandbox for untrusted apps. Sway owns Xwayland and shuts
 it down when the session ends.
 
 The bundled GTK demo app is the tested X11 target. GPU/game support, desktop services,
-and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
+and attached sessions on native X11 desktops are outside this mode's scope. X11 Flatpak
 launching has not been verified. The first X11 pointer command primes the virtual
 pointer with a one-pixel motion and a 100 ms pause to avoid losing its first
 motion. The worker primes beside its tracked position, or beside the destination
@@ -1186,8 +1186,8 @@ processes to exit, runtime sockets and session metadata to be removed, and any
 active clip to be finalized. Success prints JSON with `status: "stopped"` and the
 last recording summary, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
-These commands manage headless sessions; use `framewisp --detach` for desktop
-attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
+These commands manage headless sessions; use `framewisp --stop-sharing` for a
+desktop share. Stop requires a responsive runner; it is not a forced crash-recovery command.
 Session metadata publishes the runner's command protocol version. A session
 command refuses a session that publishes a different version from its own, or
 none, before it sends the session anything (R-CONTROL-3). Stop that runner with
@@ -1238,7 +1238,7 @@ processes manually; their PIDs are diagnostic, not safe signal targets. Resource
 and ownership metadata remain so recovery cannot claim success. Recovery also
 refuses missing or unverifiable journals and replaced runtimes. It removes nothing
 and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
-not recover desktop attachments; use `framewisp --detach` for those. Attachment shares the session
+not recover attached or teaching sessions; use `framewisp --stop-sharing` for those. A desktop share uses the session
 metadata lock and refuses directories with abandoned headless ownership.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
@@ -1370,5 +1370,5 @@ IDs belong to one observation and cannot be reused as selectors. Bounds are
 window-relative toolkit coordinates, not guaranteed screenshot pixels.
 
 Keep screenshots for appearance, canvases, omitted controls, and pointer targeting.
-Desktop attachment does not support inspection. See the [support matrix and
+Attached sessions do not support inspection. See the [support matrix and
 measurements](docs/ui-inspection.md) before relying on a particular toolkit.

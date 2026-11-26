@@ -290,37 +290,39 @@ investigate or ask; never invent a rationale.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
   and its error gives manual cleanup steps.
 
-## Attached desktops (ATTACH)
+## Desktop shares (ATTACH)
 
 - **R-ATTACH-1** [test] `attach` starts only from a foreground interactive
   terminal after the user types `ATTACH` exactly.
 - **R-ATTACH-2** [test] `attach` refuses to start when `XDG_RUNTIME_DIR`
   (`/run/user/UID` when it is unset), or framewisp's directory in it, is not
   private or not owned by the user.
-- **R-ATTACH-3** [test] While an attachment is active, framewisp offers a
-  compatible tray host an item that says desktop sharing is active.
+- **R-ATTACH-3** [test] While a desktop share is active, framewisp offers a
+  compatible tray host a sharing indicator that says a desktop share is active.
 
-  Rationale: The tray item tells the user that an agent has their desktop, even
+  Rationale: The sharing indicator tells the user that an agent has their desktop, even
   when the terminal is hidden.
 
-- **R-ATTACH-4** [test] The tray item's stop action ends the attachment.
+- **R-ATTACH-4** [test] The sharing indicator's stop action ends the desktop
+  share.
 
   Rationale: The user may have no visible terminal when they need to take back
   the desktop.
 
 - **R-ATTACH-5** [test] Before the user confirms, `attach` names
-  `framewisp --detach` and Ctrl+C as ways to stop.
+  `framewisp --stop-sharing` and Ctrl+C as ways to stop.
 
-  Rationale: The user needs to know how to end the attachment before granting
-  access, whether or not a tray item appears.
+  Rationale: The user needs to know how to end the desktop share before
+  granting it, whether or not a sharing indicator appears.
 
-- **R-ATTACH-6** [manual: On each supported desktop, allow the item if the
-  desktop requires it, then run `attach`. Check that the item is visible and
-  that its stop action ends the attachment.] A compatible desktop shows the tray
-  item to the user while an attachment is active.
+- **R-ATTACH-6** [manual: On each supported desktop, allow the sharing
+  indicator if the desktop requires it, then run `attach`. Check that the
+  indicator is visible and that its stop action ends the desktop share.] A
+  compatible desktop shows the sharing indicator to the user while a desktop
+  share is active.
 
   Rationale: The host decides what appears on screen, so only a check on that
-  desktop proves that the user can see the item.
+  desktop proves that the user can see the sharing indicator.
 - **R-ATTACH-7** [test] An attached screenshot skips a leftover first frame when
   the desktop sends a newer frame within 100 ms.
 
