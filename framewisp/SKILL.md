@@ -239,7 +239,7 @@ ask before changing them. If the user already has the app open, that copy may
 take over the launch or the app may refuse to start; ask the user to close it,
 or point the app at a separate profile. Use it only for that kind of debugging,
 because its screenshots and clips can differ between hosts. To show a difference,
-compare it with a default run of the same app.
+compare it with a default session of the same app.
 
 Start the demo app on a private display in a terminal or background tool session.
 Use a distinct session name and a fresh working directory, wait for

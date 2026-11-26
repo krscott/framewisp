@@ -55,7 +55,7 @@ investigate or ask; never invent a rationale.
   starts.
 - **R-ENV-3** [test] The app receives the caller's `PYTHONPATH`
   unchanged.
-- **R-ENV-4** [test] By default, two `run` sessions of the same framewisp and
+- **R-ENV-4** [test] By default, two headless sessions of the same framewisp and
   native app builds, at the same display size and backend and with the same app
   state, show the same pixels when their callers differ in locale, time zone,
   fonts, toolkit theme, scale, desktop identity, or home directory.
@@ -70,7 +70,7 @@ investigate or ask; never invent a rationale.
   Rationale: Sanitizing is the default, and calling agents inject changes into
   the environment as needed, so that path must always work.
 
-- **R-ENV-6** [test] By default, each `run` session gives the app private home,
+- **R-ENV-6** [test] By default, each headless session gives the app private home,
   XDG config, cache, data, and state directories and a private `TMPDIR`. They
   hold no caller data, app writes to them do not reach the caller's home, and
   they are removed with the session's runtime directory.

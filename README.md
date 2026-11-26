@@ -924,7 +924,7 @@ Review artifacts before sharing.
 
 By default, `run` sanitizes the app's environment, so the same app build shows
 the same pixels whichever environment started it. `--real-env` turns this off
-for one run (see [Use the real environment](#use-the-real-environment)).
+for one session (see [Use the real environment](#use-the-real-environment)).
 
 Each session gives the app private HOME, XDG config/cache/data/state directories
 and TMPDIR under its runtime directory. `XDG_CONFIG_DIRS` points at the
@@ -1200,7 +1200,7 @@ Ctrl+C or SIGTERM and start the session again.
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
 `recorder.log` when recording. During a
-run, `session.json` records the private runtime directory, command socket,
+session, `session.json` records the private runtime directory, command socket,
 Wayland socket name, and managed process IDs. Normal shutdown removes the runtime directory and
 `session.json`, and keeps the logs. Reusing the directory replaces its logs.
 
@@ -1211,7 +1211,7 @@ forked helpers and detached descendants. Cleanup allows five seconds for SIGTERM
 and two more for SIGKILL per tree, and reports failures with process IDs and logs.
 Other sessions and unrelated processes remain outside these trees.
 
-Headless runs require Linux 5.3+, readable procfs (including task `children`), and
+Headless sessions require Linux 5.3+, readable procfs (including task `children`), and
 permission for `prctl`, `pidfd_open`, and `pidfd_send_signal`. Startup checks these
 before launching apps and fails if supervision is unavailable. Neither root nor a
 systemd user service is required. Supervisors end forked processes; they do not restrict
@@ -1222,7 +1222,7 @@ cleanup on runner loss. Recovery refuses while the runner or any supervisor
 holds the session lock; wait a few seconds and retry. It removes the
 runtime directory and stale session metadata, preserves logs and clips, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
-run replaces its logs. If a private clip remains, the JSON also has
+session replaces its logs. If a private clip remains, the JSON also has
 `interrupted_clip`, the path of that clip in a hidden
 `.framewisp-clip-*` directory beside the clip destination. The clip may be
 incomplete. Recovery leaves it in place, and it does not block later clips.
@@ -1230,7 +1230,7 @@ Move what you want to keep and delete the directory.
 
 Recovery never signals PIDs from session metadata or follows its runtime directory path.
 The recovery journal is bound to the session directory's device and inode, so copied
-metadata cannot recover the original run. Keep `.session.lock` in place, including between runs.
+metadata cannot recover the original session. Keep `.session.lock` in place, including between sessions.
 If it is deleted or replaced, recovery refuses, removes nothing (R-LIFE-5), and
 prints the steps to stop the session or clean up manually. `stop` still works. Use a private session directory. Startup and recovery reject session
 directories owned by another user or writable by the group or others. Same-user programs that deliberately
@@ -1341,7 +1341,7 @@ framewisp demo inspect --json --role 'text box'
 framewisp demo inspect --json --role label --text 'Applied:'
 ```
 
-Private `run` sessions default `ACCESSIBILITY_ENABLED` to `1` so Chromium can
+Private headless sessions default `ACCESSIBILITY_ENABLED` to `1` so Chromium can
 connect to the private AT-SPI bus on headless hosts. Caller-provided values are
 preserved, including `ACCESSIBILITY_ENABLED=0` to disable this bridge. Set it
 before invoking framewisp, or pass `env ACCESSIBILITY_ENABLED=0` before the app

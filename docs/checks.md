@@ -193,7 +193,7 @@ Raw samples and logs are in the [PR benchmark comments](https://github.com/krsco
 client-side inspection polling, and a batch containing a `wait` check. It
 uses `tests/wait_probe.py` with a configurable delayed response. Run it in the
 development shell with an output path outside the repository. Raw per-run
-responses belong in a PR comment, not checked-in files.
+results belong in a PR comment, not checked-in files.
 
 These local CLI measurements exclude tool scheduling and model processing.
 Tool/model turn counts and total agent wall time must come from separate agent
@@ -208,7 +208,7 @@ checks. Client polling and the batch check passed all ten, at 1.210 s and
 1.165 s respectively. The batch check used one CLI call per sample.
 [350 ms raw samples](https://github.com/krscott/framewisp/pull/64#issuecomment-5752423801)
 and [900 ms raw samples](https://github.com/krscott/framewisp/pull/64#issuecomment-5752423964)
-include every response and retry count.
+include every result and retry count.
 
 Separate single agent trials took 17.799 s for fixed sleep, 32.494 s for polling
 (one retry), and 13.692 s for the batch check. Each passed. The polling

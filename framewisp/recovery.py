@@ -529,7 +529,7 @@ def recover_session(session_dir: Path) -> int:
         if path_status(session_dir / JOURNAL) == "absent":
             # Before the first journal commit, no runtime directory or children may
             # exist. A partial temporary journal is disposable, but stale session
-            # metadata without a recovery journal belongs to an unsupported older run.
+            # metadata without a recovery journal belongs to an unsupported older session.
             metadata = (session_dir / "session.json", session_dir / ".session.json")
             if any(
                 path_status(path) != "absent"
