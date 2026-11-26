@@ -233,6 +233,12 @@ class Portal:
             if self.stop.wait(.01):
                 raise InterruptedError('Stopped while waiting for desktop permission.')
     def input(self, method, signature, *values):
+        if (root / 'block-input').exists():
+            (root / 'block-input').unlink()
+            (root / 'blocking').touch()
+            while not self.closed:
+                time.sleep(.01)
+            raise RuntimeError('The connection is closed')
         if (root / 'fail').exists():
             # Include the values, as a real backend error might.
             raise RuntimeError(f'injected portal failure: {values!r}')
@@ -1282,9 +1288,39 @@ def test_portal_failure_closes_owner(
     assert not (tmp_path / "session/session.json").exists()
     stdout, stderr = attach_process.communicate(timeout=5)
     assert "Stopped sharing: RuntimeError: input details omitted" in stderr
-    assert "hunter2" not in stderr and "hunter2" not in stdout
+    # The traceback quotes the fake's source line, so match the formatted values too.
+    assert "injected portal failure: (" not in result.stderr + stderr + stdout
     assert stdout.endswith("Your apps and desktop are still running.\n")
     assert "Stopped sharing." not in stdout
+
+
+def test_stop_during_input_is_not_a_failure(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
+    (tmp_path / "block-input").touch()
+    command = subprocess.Popen(
+        [sys.executable, "-m", "framewisp", str(tmp_path / "session"), "key", "a"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_file(tmp_path / "blocking")
+        attach_process.send_signal(signal.SIGINT)
+        assert command.wait(timeout=5) == 1
+        assert attach_process.wait(timeout=5) == 0
+        stdout, stderr = attach_process.communicate(timeout=5)
+        assert "Stopped sharing:" not in stderr
+        assert stdout.endswith(
+            "Stopped sharing. Your apps and desktop are still running.\n"
+        )
+    finally:
+        if command.poll() is None:
+            command.terminate()
+        command.wait(timeout=5)
 
 
 @pytest.fixture

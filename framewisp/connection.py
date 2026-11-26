@@ -79,7 +79,7 @@ def request_desktop(
 
     The caller passes the `kind` it read from the session metadata; it only
     words the messages printed here. The runner refuses a command that its own
-    kind does not accept or whose attachment token does not match.
+    kind does not accept or whose share token does not match.
     """
     try:
         state = json.loads((session_dir / "session.json").read_text())
