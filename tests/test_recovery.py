@@ -625,28 +625,28 @@ def test_missing_journal_refused_with_working_manual_steps(
     assert recover_session(session_dir) == 0
 
 
-def replace_runtime(session_dir: Path, runtime_dir: Path) -> None:
+def replace_runtime_dir(session_dir: Path, runtime_dir: Path) -> None:
     runtime_dir.rename(session_dir / "moved-runtime-directory")
     runtime_dir.mkdir(mode=0o700)
     (runtime_dir / "kept").write_text("preserve")
 
 
-def symlink_runtime(session_dir: Path, runtime_dir: Path) -> None:
+def symlink_runtime_dir(session_dir: Path, runtime_dir: Path) -> None:
     runtime_dir.rename(session_dir / "moved-runtime-directory")
     runtime_dir.symlink_to(session_dir / "moved-runtime-directory")
 
 
-def open_runtime_permissions(_: Path, runtime_dir: Path) -> None:
+def open_runtime_dir_permissions(_: Path, runtime_dir: Path) -> None:
     runtime_dir.chmod(0o755)
 
 
 # R-LIFE-5, R-LIFE-7
 @pytest.mark.parametrize(
     "change",
-    [replace_runtime, symlink_runtime, open_runtime_permissions],
+    [replace_runtime_dir, symlink_runtime_dir, open_runtime_dir_permissions],
     ids=["replaced", "symlink", "permissions"],
 )
-def test_changed_runtime_refused_with_working_manual_steps(
+def test_changed_runtime_dir_refused_with_working_manual_steps(
     abandoned: tuple[Path, Path],
     change: Callable[[Path, Path], object],
     tmp_path: Path,
@@ -812,7 +812,7 @@ def test_moved_session_recovers_at_its_new_path(
 
 
 # R-LIFE-7
-def test_session_deleted_during_shutdown_keeps_runtime_and_gives_steps(
+def test_session_deleted_during_shutdown_keeps_runtime_dir_and_gives_steps(
     tmp_path: Path,
 ) -> None:
     session_dir = tmp_path / "session"
@@ -853,7 +853,7 @@ def test_session_vanishing_during_lock_gets_steps(
 # R-LIFE-7
 @pytest.mark.skipif(os.getuid() == 0, reason="Root can write a read-only directory")
 @pytest.mark.parametrize("journal", ["unreadable", "missing"])
-def test_read_only_tmpdir_is_still_checked_for_runtime(
+def test_read_only_tmpdir_is_still_checked_for_runtime_dir(
     tmp_path: Path, journal: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     temporary = tmp_path / "temporary"
@@ -888,7 +888,7 @@ def test_read_only_tmpdir_is_still_checked_for_runtime(
 
 # R-LIFE-7
 @pytest.mark.skipif(os.getuid() == 0, reason="Root can write a read-only directory")
-def test_runtime_found_when_tmpdir_was_read_only_from_the_start(
+def test_runtime_dir_found_when_tmpdir_was_read_only_from_the_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     configured = tmp_path / "configured"
@@ -1059,7 +1059,7 @@ def leave_supervisor_record(_: Path, runtime_dir: Path) -> None:
         damage_journal,
         remove_journal,
         lose_lock,
-        replace_runtime,
+        replace_runtime_dir,
         leave_supervisor_record,
     ],
 )
@@ -1182,7 +1182,7 @@ def test_process_check_finds_session_under_non_utf8_tmpdir(
 
 
 # R-LIFE-5, R-LIFE-7
-def test_foreign_journal_steps_leave_its_runtime_alone(
+def test_foreign_journal_steps_leave_its_runtime_dir_alone(
     abandoned: tuple[Path, Path], tmp_path: Path
 ) -> None:
     session_dir, runtime_dir = abandoned
@@ -1258,7 +1258,7 @@ def test_journal_without_valid_lock_identity_refused(
 
 
 # R-LIFE-5
-def test_runtime_of_another_user_refused(
+def test_runtime_dir_of_another_user_refused(
     abandoned: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session_dir, runtime_dir = abandoned

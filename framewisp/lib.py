@@ -161,7 +161,7 @@ def start_inspection_buses(
     app_env: dict[str, str],
     stop: Event,
 ) -> dict[str, ManagedProcess] | None:
-    """Own both buses and the registry; never activate the desktop's services."""
+    """Start and manage both buses and the registry; never activate the desktop's services."""
     config = runtime_dir / "bus.conf"
     config.write_text(
         "<busconfig><type>session</type><auth>EXTERNAL</auth><listen>unix:tmpdir=/tmp</listen>"
@@ -266,7 +266,7 @@ def wait_for_x11(
 
 @contextmanager
 def keep_input_devices(runtime_dir: Path, stop: Event) -> Generator[VNC, None, None]:
-    """Own one input connection. Connection loss stops access without replay.
+    """Hold one input connection. Connection loss stops access without replay.
 
     It lasts the whole session so the seat keeps its keyboard and pointer between
     commands (R-INPUT-1). Qt dismisses an open context menu when the last input

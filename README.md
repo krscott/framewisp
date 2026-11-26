@@ -706,7 +706,7 @@ file alone, reports the path of the finished clip in the hidden directory, and
 ends the session like any other finalization failure (R-REC-18). If the recorder
 fails to finalize, the incomplete clip also stays there, and the error names it.
 
-The session runner owns the recorder and finalizes
+The session runner manages the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
 an invalid `record-start` request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
@@ -844,7 +844,7 @@ unfinished command. Reusing a session directory starts a fresh log.
 Input logs omit typed text and individual letter, digit, punctuation, and Space
 keystrokes, including with Shift alone. They retain Ctrl/Alt shortcuts and named
 keys such as Return and arrows. Keyboard failures preserve actionable errors
-and exit codes while omitting backend details that could expose input.
+and exit codes while omitting input tool details that could expose input.
 
 Text captions are off by default. Select them independently for each clip with
 `run --record` or `record-start`:
@@ -1203,7 +1203,7 @@ Wayland socket name, and managed process IDs. Normal shutdown removes the runtim
 
 The runner stops its managed processes on Ctrl+C, SIGTERM, or app
 exit. It returns the app's exit code when the app exits on its own.
-Each managed process has a private Linux subreaper supervisor that also stops
+Each managed process has a private supervisor, a Linux subreaper, that also stops
 forked helpers and detached descendants. Cleanup allows five seconds for SIGTERM
 and two more for SIGKILL per tree, and reports failures with process IDs and logs.
 Other sessions and unrelated processes remain outside these trees.

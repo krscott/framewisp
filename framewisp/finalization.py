@@ -45,7 +45,7 @@ class CaptionOptions:
 
 
 def capture_origin(log: Path) -> float:
-    """Read the first captured frame's monotonic timestamp on our Sway backend."""
+    """Read the first frame's monotonic timestamp from the private compositor."""
     # The recorder logs the path it writes, which can be any bytes.
     with log.open(encoding="utf-8", errors="replace") as source:
         for line in source:

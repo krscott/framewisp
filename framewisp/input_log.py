@@ -70,7 +70,7 @@ def retained_parameters(
 
 
 def input_error(action: str, error: BaseException) -> str:
-    """Backend errors can include text, keysyms, or serialized subprocess arguments."""
+    """Input tool errors can include text, keysyms, or serialized subprocess arguments."""
     if action not in KEY_ACTIONS:
         return str(error)
     if isinstance(error, InterruptedError):

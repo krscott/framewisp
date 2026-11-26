@@ -1,4 +1,6 @@
-"""Private, single-threaded Linux subreaper for one managed process tree.
+"""Private, single-threaded supervisor for one managed process tree.
+
+It is a Linux subreaper, so detached descendants reparent to it.
 
 Executed by filename so it also works with the installed package's interpreter.
 Only this process reaps its children. A listed child's PID cannot be reused

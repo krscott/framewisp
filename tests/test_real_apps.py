@@ -242,7 +242,7 @@ def real_app(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RealApp
                 else:
                     assert [left.st_ino, left.st_ctime_ns] != identity, path
             (tmp_path / "cleanup.json").write_text(
-                json.dumps({"pids": sorted(pids), "runtime_removed": True})
+                json.dumps({"pids": sorted(pids), "runtime_dir_removed": True})
             )
 
 
