@@ -123,20 +123,20 @@ investigate or ask; never invent a rationale.
 
 ## Batches (BATCH)
 
-- **R-BATCH-1** [test] A batch validates all its actions and its capture
+- **R-BATCH-1** [test] A batch validates all its steps and its screenshot
   before it sends any input.
 - **R-BATCH-2** [test] No other input runs during a batch, including during
-  its final capture.
+  its final screenshot.
 
-## Conditional checks (CHECK)
+## Checks (CHECK)
 
 - **R-CHECK-1** [test] A check passes only on a complete observation with
   exactly one readable match. A partial observation never passes a check.
 - **R-CHECK-2** [test] A transition wait runs only after its baseline observed
   a nonmatching value.
-- **R-CHECK-3** [test] Input completion and PNG capture alone never set a
+- **R-CHECK-3** [test] Input completion and a screenshot alone never set a
   batch's `verified` to true.
-- **R-CHECK-4** [test] With observation overrides, checks verify controls
+- **R-CHECK-4** [test] With raised limits, checks verify controls
   deeper than 32 levels in the accessibility tree.
 
 ## Inspection (INSPECT)
@@ -185,7 +185,7 @@ investigate or ask; never invent a rationale.
 ## Recording (REC)
 
 - **R-REC-1** [test] Recording rejects a destination that already exists. A
-  recording or batch capture never replaces an existing file, including one
+  recording or batch screenshot never replaces an existing file, including one
   created after the destination was checked.
 - **R-REC-2** [test] Recording rejects an odd display width or height.
 - **R-REC-3** [test] An active recording is finalized as a playable MP4 when
@@ -234,7 +234,7 @@ investigate or ask; never invent a rationale.
   links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports
   the path of the interrupted clip. That clip does not block later recordings.
-- **R-REC-21** [test] `screenshot` and batch capture reject their own session's
+- **R-REC-21** [test] `screenshot` and a batch screenshot reject their own session's
   active recording destination, directly or through a symlink. The recording
   continues, and `record-stop` publishes it at that destination.
 - **R-REC-22** [test] A finished clip with no measurable duration does not end

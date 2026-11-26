@@ -69,7 +69,7 @@ The following report describes the earlier implementation, before persistent inp
 Measured on the development NixOS x86_64 host with Python 3.14.7 and the pinned
 vncdotool 1.2.0. The target was the bundled Wayland demo at 1280x720. Each entry
 is the median of five subprocess wall-clock measurements after one warm-up.
-These are local observations, not latency guarantees; host load varies.
+These are local measurements, not latency guarantees; host load varies.
 
 | Invocation | Before (seconds) | After deferring imports (seconds) |
 | --- | ---: | ---: |

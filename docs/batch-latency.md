@@ -18,14 +18,14 @@ each timed sequence, takes one warm-up then 40 samples for each case, and keeps
 raw wall-clock samples plus nearest-rank p95 and median. Cold session readiness
 is measured separately across six launches. Individual click, key and typing
 measurements are also separate from the full sequence. The sequence timing
-includes process startup, IPC, input logging, capture, and the app-log check.
+includes process startup, IPC, input logging, the screenshot, and the app-log check.
 It excludes session startup, reset, plan-file creation, and intentional pacing.
 App acknowledgement is part of the benchmark, not a batch feature.
 
 Measured on September 20, 2026 on NixOS x86_64, Linux 6.18.52, an Intel Core
 i7-8550U, Python 3.14.7, vncdotool 1.2.0, Sway 1.12, wayvnc 0.10.1, and
 Xwayland 24.1.13. Backends ran sequentially without other framewisp tests or
-benchmarks running locally. These are host-specific observations, not latency
+benchmarks running locally. These are host-specific measurements, not latency
 guarantees. Raw samples and versions for both backends are in the
 [PR comment](https://github.com/krscott/framewisp/pull/61#issuecomment-5751648069).
 

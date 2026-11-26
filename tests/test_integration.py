@@ -3455,7 +3455,7 @@ def test_inspect_reads_demo_without_screenshots(demo: Demo) -> None:
     sliders = slider["matches"]
     assert isinstance(sliders, list)
     assert sliders[0]["value"] == 25
-    # A fresh request rereads the app; snapshot IDs are never reusable selectors.
+    # A fresh request rereads the app; observation IDs are never reusable selectors.
     cli(demo.directory, "click", "700", "513")
     reset = inspect(demo, "--text", "Applied: Inspected text")
     assert reset["status"] == "ok", reset

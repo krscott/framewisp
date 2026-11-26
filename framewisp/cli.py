@@ -120,7 +120,7 @@ def main() -> None:
     batch = commands.add_parser(
         "batch",
         help="run ordered headless steps and an optional screenshot from JSON",
-        description="Validate all inputs, execute without interleaving, and print JSON results. "
+        description="Validate all steps, execute without interleaving, and print JSON results. "
         "Stop at the first failure; completed steps cannot be rolled back. "
         f"The checks baseline/wait/assert accept limits: {{max_nodes: 1..{limits.MAX_NODES} (default {limits.DEFAULT_MAX_NODES}), "
         f"max_depth: 1..{limits.MAX_DEPTH} (default {limits.DEFAULT_MAX_DEPTH}), timeout: >0..{limits.MAX_TIMEOUT} seconds (default {limits.DEFAULT_CHECK_TIMEOUT})}}. "

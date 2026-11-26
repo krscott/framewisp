@@ -1,7 +1,7 @@
 # UI inspection prototype
 
 Issue [#56](https://github.com/krscott/framewisp/issues/56) adds read-only
-`inspect --json` observations. Inspection supplies observations for [conditional batch checks](conditional-checks.md).
+`inspect --json` observations. Inspection supplies observations for [batch checks](checks.md).
 It does not add selectors for input. The
 [README](../README.md#inspect-accessible-controls) describes the filters and
 statuses, `inspect --help` gives the limits, and the agent skill
@@ -13,13 +13,13 @@ Checked on NixOS x86_64, Linux 6.18.52, Python 3.14.7, GTK 4.22.4,
 AT-SPI 2.60.6, and the repository's pinned Qt 6. The display is Sway 1.12 with
 wlroots 0.20.2 and Pixman at 1280x720, without recording.
 
-| App/toolkit | Wayland | Private Xwayland | Observations and limits |
+| App/toolkit | Wayland | Private Xwayland | Findings and limits |
 | --- | --- | --- | --- |
 | Bundled GTK 4 demo | Tested | Tested | Entry/button discovery, changed entry/result text, checkbox state, slider value, action names, window-relative bounds, and display bounds. |
 | Qt Quick QML probe | Tested | Tested | Ordinary button name and state work. The separate `Popup.Window` menu item is absent, even while visible. |
 | KolourPaint 26.04.3, Qt Widgets Flatpak | Tested | Not tested for inspection | Menus expose names, states, actions, and bounds. The default 256-node budget is partial; `--max-nodes 1024 --max-depth 16 --timeout 5` traversed 379 objects. Painting content still needs images. |
 | LibreOffice Writer 26.8.1.1, GTK 3 Flatpak | Tested | Tested | Paragraph text verifies an edit with raised traversal budgets. Default queries are partial; display-coordinate conversion is unavailable. See the real-app runs below. |
-| Blender 5.2.0 LTS, custom canvas Flatpak | Tested for images/input | Tested for images/input | No accessible app registers. Conditional checks cannot verify visible geometry or console text. See the real-app runs below. |
+| Blender 5.2.0 LTS, custom canvas Flatpak | Tested for images/input | Tested for images/input | No accessible app registers. Checks cannot verify visible geometry or console text. See the real-app runs below. |
 | App without AT-SPI (`sleep` test) | Tested | Not applicable | Explicit `unsupported`, not a successful empty search. |
 | GTK 4 Flatpak and other toolkits/custom canvases | Not tested | Not tested | Writer GTK 3 and Blender coverage does not establish support for these targets. Use screenshots until useful accessible content is demonstrated. |
 | Attached desktop | Unsupported | Unsupported | No connection to the user's desktop accessibility bus. |
@@ -55,9 +55,9 @@ failure, SIGINT, SIGTERM, and recording tests also exercise the new bus lifetime
 
 The standalone timeout defaults to 5 seconds. Depth (8) and node count (256)
 remain conservative because deeper traversals have crashed some Qt apps. Batch
-checks default to 2 seconds per observation. Their optional `observation.timeout`
+checks default to 2 seconds per observation. Their optional `limits.timeout`
 can raise that budget to 10 seconds, within the overall check deadline; see
-[check traversal settings](conditional-checks.md#conditions-and-deadlines).
+[check traversal settings](checks.md#conditions-and-deadlines).
 
 `tests/inspection_probe.qml` exposes 800 buttons on Qt Quick. On September 30,
 2026, the pinned Nix environment on Xwayland traversed 804 objects in 2434 ms
@@ -98,10 +98,10 @@ framewisp /tmp/fw-inspection-bench stop
 | --- | ---: | ---: | ---: |
 | Find Apply button | 570 ms | 624 ms | 516 |
 | Read applied result | 750 ms | 900 ms | 642 |
-| Capture PNG containing both | 154 ms | 171 ms | 62,670 |
+| Screenshot containing both | 154 ms | 171 ms | 62,670 |
 
 Queries currently read each object through several D-Bus calls. Inspection is
-slower than capture in this small demo. It exchanges much less data and lets
+slower than a screenshot in this small demo. It exchanges much less data and lets
 an agent read text/state without an image-viewing step. Neither response size
 nor these CLI measurements establish a model-latency speedup.
 
@@ -125,9 +125,9 @@ illustrative trial, affected by scheduling and prior knowledge of the demo,
 not a latency distribution or evidence of an agent speedup. Both paths took
 about 15.5 seconds despite the large difference in response size.
 
-## Decision for conditional waits
+## Decision for checks
 
-The [conditional checks](conditional-checks.md) use this coverage for positive
+The [checks](checks.md) use this coverage for positive
 text/state assertions. They re-run bounded queries, reject ambiguity, and only
 accept complete observations. No persistent object handles are needed. Each
 observation opens and closes a private connection. Traversal dominates larger
@@ -205,8 +205,8 @@ precede the first useful frame.
 Writer's first-run welcome required three Next clicks despite
 `--nofirststartwizard`. The run clicked into the document, typed
 `Framewisp compatibility café`, replaced it with `Verified Writer café`, and
-verified that exact paragraph through a conditional check. Both backends needed
-`max_nodes=4096`, `max_depth=32`, and a 10-second observation/check budget.
+verified that exact paragraph through a check. Both backends needed
+`max_nodes=4096`, `max_depth=32`, and a 10-second query/check budget.
 Default inspection was partial. Complete observations visited 2,106 nodes on
 Wayland and 2,097 on Xwayland; the repeated-run edit checks took about 7 seconds
 on this shared host. This is not a latency distribution or a general Writer
