@@ -788,8 +788,9 @@ def _share_desktop(
                 if owns_state:
                     state.unlink(missing_ok=True)
                     owns_state = False
-    except InterruptedError:
-        pass
+    except InterruptedError as interruption:
+        if not shared:
+            print(interruption, file=sys.stderr)
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
         if shared:
             print(f"Stopped sharing: {failure}", file=sys.stderr)

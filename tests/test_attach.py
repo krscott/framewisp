@@ -231,7 +231,7 @@ class Portal:
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
             if self.stop.wait(.01):
-                raise InterruptedError('cancelled')
+                raise InterruptedError('Stopped while waiting for desktop permission.')
     def input(self, method, signature, *values):
         if (root / 'fail').exists():
             raise RuntimeError('injected portal failure')
@@ -483,8 +483,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Teaching session ready:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
     assert (tmp_path / "lesson/frames/000000.png").exists()
     session_dir = tmp_path / "session"
     note = subprocess.run(
@@ -558,6 +557,10 @@ def test_stop_sharing_allows_teaching_to_finalize(
     (tmp_path / "slow-close").touch()
     assert stop_sharing() == 0
     assert attach_process.wait(timeout=5) == 0
+    stdout, _ = attach_process.communicate(timeout=5)
+    assert stdout.endswith(
+        "Stopped sharing. Your apps and desktop are still running.\n"
+    )
     assert (
         json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
         == "complete"
@@ -632,8 +635,7 @@ def test_source_end_without_revocation_marks_teaching_failed(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Teaching session ready:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
     (tmp_path / "source-end").touch()
     assert attach_process.wait(timeout=5) == 1
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
@@ -693,6 +695,9 @@ def test_pending_consent_reserves_session(
     assert not metadata.exists()
     assert (tmp_path / "closed").exists()
     assert attach_process.wait(timeout=5) == 0
+    stdout, stderr = attach_process.communicate(timeout=5)
+    assert "Stopped while waiting for desktop permission." in stderr
+    assert "Stopped sharing" not in stdout
 
 
 def test_stop_sharing_cancels_long_input_and_waits_for_cleanup(
@@ -919,7 +924,10 @@ def test_attach_refuses_metadata_of_another_session(
 
     monkeypatch.setattr(attach, "DesktopPortal", no_portal)
     assert share_desktop(session_dir, None) == 1
-    assert "belongs to another session" in capsys.readouterr().err
+    output = capsys.readouterr()
+    assert output.err.startswith("Could not share the desktop:")
+    assert "belongs to another session" in output.err
+    assert "Stopped sharing" not in output.out
     assert (session_dir / "session.json").read_text() == metadata
 
 
@@ -1300,6 +1308,7 @@ def terminal_process(
 
 
 def read_terminal(descriptor: int, expected: bytes) -> bytes:
+    """Read until `expected` appears, failing with the output after 5 seconds."""
     output = b""
     deadline = time.monotonic() + 5
     while expected not in output:
