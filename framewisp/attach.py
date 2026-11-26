@@ -787,8 +787,9 @@ def _share_desktop(
                 if wrote_metadata:
                     metadata_path.unlink(missing_ok=True)
                     wrote_metadata = False
-    except InterruptedError:
-        pass
+    except InterruptedError as interruption:
+        if not shared:
+            print(interruption, file=sys.stderr)
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
         if shared:
             print(f"Stopped sharing: {failure}", file=sys.stderr)

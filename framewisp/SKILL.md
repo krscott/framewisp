@@ -144,9 +144,10 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `stop` | Stop a headless session, finalize any active clip, and wait for managed processes and the runtime directory to be cleaned up. Print JSON with stopped status and the last clip's summary as `clip`, if any. |
 | `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the desktop share instructions below. |
 
-Standalone commands take no SESSION: `framewisp --stop-sharing` stops the active
-desktop share, leaving the user's apps running; `framewisp --agent-skill`
-prints this guide. `framewisp --help` and `framewisp SESSION COMMAND --help`
+Standalone commands take no SESSION: `framewisp --stop-sharing` is the user's
+emergency stop for whichever session is sharing the desktop, leaving the user's
+apps running. Do not run it yourself: it can end a session other than yours.
+`framewisp --agent-skill` prints this guide. `framewisp --help` and `framewisp SESSION COMMAND --help`
 (also `-h`) show the installed version's help.
 
 Input coordinates are integer display pixels, with `(0, 0)` at the top left.
@@ -314,8 +315,8 @@ framewisp demo stop
 The successful primary path uses three CLI invocations: run, batch, stop, with
 zero images inspected. The optional visual fallback adds one screenshot and image
 inspection. Use `status` if session health is uncertain. Ctrl+C or SIGTERM to the
-runner also stops it. `status` and `stop` require a connected headless session;
-`--stop-sharing` is for desktop shares only.
+runner also stops it. `status` and `stop` require a connected headless session; the user ends an
+attached or teaching session with Ctrl+C in its terminal.
 
 ## Accessible text and state
 
@@ -419,8 +420,10 @@ runtime/session failure, or 2 for invalid CLI/file input. Rejection before execu
 may report only an error on stderr, without result JSON.
 
 Execution stops at the first runtime failure. Inspect completed results and
-`failed_index`; the failed step may itself have sent some input. A screenshot failure
-has `failed_phase: "screenshot"` and a null failed index. No step is rolled back or
+`failed_index`; the failed step may itself have sent some input. A failed final
+`screenshot` has `failed_phase: "screenshot"` and a null failed index. A failed
+`failure_screenshot` keeps the original failure's phase and index and adds
+`failure_screenshot_error`. No step is rolled back or
 retried. If the connection dies before a reply, the outcome may be partial: inspect
 the app and `inputs.jsonl` before deciding what to do next. Disconnecting cancels
 queued work or the remaining running batch and releases held keys/buttons. Session
@@ -477,7 +480,7 @@ put `{"check": "baseline", "timeout": 2, "condition": ...}` before the input,
 then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
 Use the identical condition in both. The baseline must read a unique nonmatching
 value. Limits may differ between baseline and wait. A failed or
-incomplete baseline stops the steps after it, so put it before the input it guards. The wait resolves the selector afresh,
+incomplete baseline stops the steps after it. The wait resolves the selector afresh,
 allowing a replacement control. Observation IDs are diagnostic, not reusable handles.
 This proves observed nonmatching then matching state, not input causation.
 
@@ -506,9 +509,7 @@ requires even display dimensions and produces silent MP4 video. Only one clip ma
 shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
 `.framewisp-clip-*` directory beside it, so the clip destination's
-directory must be writable and support hard links. If another file takes the clip destination first,
-framewisp leaves that file intact, keeps the rendered clip, or the raw MP4 if
-rendering failed, ends the session with an error, and names the kept path. After a killed runner, `recover` prints the interrupted clip's path as
+directory must be writable and support hard links. After a killed runner, `recover` prints the interrupted clip's path as
 `interrupted_clip`. Text captions are off by default. For a clip that needs
 them, use `--pointer-captions modifiers` for shortcuts such as Ctrl+Click or
 `--pointer-captions all` for every pointer action. Use `--key-captions non-text`
@@ -620,7 +621,7 @@ for the next attached or teaching session, which needs fresh portal approval. Ke
 emergency shortcuts configured. The indicator's menu needs a responsive runner, while
 `--stop-sharing` can stop a suspended runner.
 
-The stop command is `framewisp --stop-sharing`, independent of SESSION. The documented
+The emergency stop command is `framewisp --stop-sharing`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also
 works during a Shift gesture. An attached session shares the real pointer and keyboard;
 input can reach any focused app, including one outside the captured monitor.

@@ -46,9 +46,11 @@ def host_files(host: Path) -> dict[Path, bytes]:
 # R-ENV-4, R-ENV-6
 @pytest.mark.integration
 @pytest.mark.parametrize("x11", [False, True], ids=["wayland", "x11"])
-@pytest.mark.parametrize("demo", [False, True], ids=["native-gtk", "bundled-demo"])
+@pytest.mark.parametrize(
+    "demo_app", [False, True], ids=["native-gtk", "bundled-demo-app"]
+)
 def test_gtk_app_ignores_conflicting_caller(
-    tmp_path: Path, conflicting_home: Path, x11: bool, demo: bool
+    tmp_path: Path, conflicting_home: Path, x11: bool, demo_app: bool
 ) -> None:
     app = os.environ.get("FRAMEWISP_TEST_GTK_APP")
     assert app and Path(app).is_file(), "Run inside nix develop for GTK's demo app"
@@ -93,7 +95,7 @@ def test_gtk_app_ignores_conflicting_caller(
                 str(Path(__file__).with_name("environment_probe.py")),
             ]
         )
-        if demo:
+        if demo_app:
             command.append("--demo-app")
         env = os.environ | {"FRAMEWISP_TEST_REPORT": str(report)}
         # Only the second caller conflicts, so a leak changes its pixels.
@@ -132,7 +134,7 @@ def test_gtk_app_ignores_conflicting_caller(
                     report.exists()
                     and "Session ready:" in log.read_text()
                     and (
-                        not demo
+                        not demo_app
                         or "Demo app ready" in (directory / "app.log").read_text()
                     )
                 )
@@ -152,7 +154,7 @@ def test_gtk_app_ignores_conflicting_caller(
             homes.append(Path(observed["home"]))
             assert homes[-1].is_relative_to(Path(metadata["runtime_directory"]))
             time.sleep(1)
-            if demo:
+            if demo_app:
                 # Move focus off the entry so cursor blinking cannot change pixels.
                 cli(directory, "key", "Tab")
             # Move the cursor away from app widgets to avoid hover state.
@@ -220,7 +222,7 @@ def test_gtk_app_ignores_conflicting_caller(
     assert text_sizes[0] == text_sizes[1]
     # GTK's title-bar SVG icons can vary by a few antialiased pixels on X11.
     # Compare content pixels; keep full screenshots and display geometry checks.
-    region = (0, 50, 1280, 720) if not demo else (0, 0, 1280, 720)
+    region = (0, 50, 1280, 720) if not demo_app else (0, 0, 1280, 720)
     assert (
         ImageChops.difference(*(image.crop(region) for image in screenshots)).getbbox()
         is None

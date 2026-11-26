@@ -416,6 +416,9 @@ def test_session_commands_refuse_another_command_protocol(
     recover = shlex.join(["framewisp", str(tmp_path), "recover"])
     assert (f"`{recover}` with the framewisp version" in result.stderr) is not desktop
     assert "again with this version" in result.stderr
+    assert ("a new lesson directory" in result.stderr) is (
+        metadata.get("kind") == "teaching"
+    )
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "screenshot.png").exists()
 

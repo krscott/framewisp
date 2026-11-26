@@ -416,7 +416,8 @@ def start_recording(
         except Exception as error:
             restored = False
             failure = RuntimeError(
-                f"Finalization failed; raw clip remains at {clip}. Cause: {error}"
+                f"Finalization failed; raw clip remains at {clip} without "
+                f"overlays, console panel or compaction. Cause: {error}"
             )
         # A clip with no duration has nothing to render on (R-REC-22).
         if restored and timed:

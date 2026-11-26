@@ -226,7 +226,7 @@ remains session-independent.
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
 | `attach` | Share your desktop with an attached session (screenshots and input); stay in the foreground. |
-| `--stop-sharing` (no session) | Stop the active desktop share and leave your apps running. |
+| `--stop-sharing` (no session) | Emergency stop for whichever session is sharing your desktop; leave your apps running. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start a clip in the running session. |
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
@@ -567,7 +567,9 @@ existing directory. The PNG appears only after successful capture.
 The CLI prints structured results, timing, completed-step count, and artifact
 paths. This input-and-screenshot example returns `verified: null`; inspect its PNG
 before claiming visual success. On runtime failure it exits with status 1 and reports the zero-based
-`failed_index` and `failed_phase`. A screenshot failure has a null failed index.
+`failed_index` and `failed_phase`. A failed final `screenshot` has a null failed index;
+a failed `failure_screenshot` keeps the original failure's phase and index and adds
+`failure_screenshot_error`.
 Execution stops at that point; completed inputs cannot be rolled back, and even
 the failed step may have sent partial input. Never replay a failed batch without
 inspecting the app first. Disconnecting cancels queued or remaining work and
@@ -702,11 +704,8 @@ until it is finalized. Until then, framewisp records to a hidden
 on a filesystem with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
 when the clip starts (R-REC-19).
 
-If another file appears at the clip destination during a clip, framewisp leaves that
-file intact, keeps the rendered clip in the hidden directory, or the raw MP4 if
-rendering failed (R-REC-10), reports the kept path, and ends the session like any
-other finalization failure (R-REC-18). If the recorder
-fails to finalize, the incomplete clip also stays there, and the error names it.
+If the recorder fails to finalize, the incomplete clip stays in the hidden
+directory, and the error names it.
 
 The session runner manages the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
@@ -1134,7 +1133,7 @@ not a security sandbox for untrusted apps. Sway owns Xwayland and shuts
 it down when the session ends.
 
 The bundled GTK demo app is the tested X11 target. GPU/game support and desktop services
-are outside this mode's scope; sharing an X11 desktop uses `attach`, not this mode. X11 Flatpak
+are outside this mode's scope; to share an X11 desktop, use `attach` for screenshots and input, or `teach` for a lesson that only watches. X11 Flatpak
 launching has not been verified. The first X11 pointer command primes the virtual
 pointer with a one-pixel motion and a 100 ms pause to avoid losing its first
 motion. The worker primes beside its tracked position, or beside the destination
@@ -1189,8 +1188,9 @@ processes to exit, the runtime directory and session metadata to be removed, and
 active clip to be finalized. Success prints JSON with `status: "stopped"` and the
 summary of the last clip under `clip`, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
-These commands manage headless sessions; use `framewisp --stop-sharing` for a
-desktop share. Stop requires a responsive runner; it is not a forced crash-recovery command.
+These commands manage headless sessions. End an attached or teaching session with
+Ctrl+C in its terminal; `framewisp --stop-sharing` is the emergency stop for
+whichever session is sharing. Stop requires a responsive runner; it is not a forced crash-recovery command.
 Session metadata publishes the runner's command protocol version. A session
 command refuses a session that publishes a different version from its own, or
 none, before it sends the session anything (R-CONTROL-3). Stop that runner with
@@ -1246,7 +1246,7 @@ refuses missing or unverifiable journals and replaced runtime directories. It re
 and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
 not recover attached or teaching sessions: it names the steps to start the session
 again with attach or teach or to delete its metadata. `framewisp --stop-sharing` is the
-emergency stop for the active desktop share. Attached and teaching sessions take
+emergency stop for whichever session is sharing. Attached and teaching sessions take
 the same session lock as headless sessions and refuse directories that a headless session left unrecovered.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
