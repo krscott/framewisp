@@ -78,10 +78,10 @@ with session_lease(session_dir) as lease:
         time.sleep(60)
     with headless_runtime(session_dir, lease) as runtime:
         if str(stage) in {'shutdown-runtime', 'shutdown-metadata'}:
-            (session_dir / 'session_dir.json').write_text('{}')
+            (session_dir / 'session.json').write_text('{}')
             shutil.rmtree(runtime)
             if str(stage) == 'shutdown-metadata':
-                (session_dir / 'session_dir.json').unlink()
+                (session_dir / 'session.json').unlink()
             ready.touch()
             time.sleep(60)
         if str(stage) == 'runtime':

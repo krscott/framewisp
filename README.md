@@ -1189,8 +1189,9 @@ last recording summary, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
 These commands manage headless sessions; use `framewisp --detach` for desktop
 attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
-A session command refuses a runner that publishes another command protocol,
-before it sends a request. Stop that runner with Ctrl+C or SIGTERM and start a
+A session command that sends a request to a headless session's runner first
+checks the command protocol in session metadata, and refuses a runner that does
+not publish this version's. Stop that runner with Ctrl+C or SIGTERM and start a
 fresh session.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
