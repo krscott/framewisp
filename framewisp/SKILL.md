@@ -505,9 +505,7 @@ requires even display dimensions and produces silent MP4 video. Only one clip ma
 shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
 `.framewisp-clip-*` directory beside it, so the clip destination's
-directory must be writable and support hard links. If another file takes the clip destination first,
-framewisp leaves that file intact, keeps the rendered clip, or the raw MP4 if
-rendering failed, ends the session with an error, and names the kept path. After a killed runner, `recover` prints the interrupted clip's path as
+directory must be writable and support hard links. After a killed runner, `recover` prints the interrupted clip's path as
 `interrupted_clip`. Text captions are off by default. For a clip that needs
 them, use `--pointer-captions modifiers` for shortcuts such as Ctrl+Click or
 `--pointer-captions all` for every pointer action. Use `--key-captions non-text`
