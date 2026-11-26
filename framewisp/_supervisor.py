@@ -164,9 +164,12 @@ def supervise(
 
 
 if __name__ == "__main__":
+    # An inherited SIGCHLD of SIG_IGN would make the kernel reap children
+    # itself: their exit statuses would be lost, and a listed PID could be
+    # reused before cleanup signals it.
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     # A terminal signal must not bypass cleanup. The runner sends stop over the
     # private socket; its SIGKILL closes that socket too.
-    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     signal.signal(signal.SIGINT, lambda signum, frame: None)
     signal.signal(signal.SIGTERM, lambda signum, frame: None)
     with socket.socket(fileno=int(sys.argv[1])) as control:

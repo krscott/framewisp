@@ -3,8 +3,9 @@
 Issue [#56](https://github.com/krscott/framewisp/issues/56) adds read-only
 `inspect --json` observations. Inspection supplies observations for [conditional batch checks](conditional-checks.md).
 It does not add selectors for input. The
-[README](../README.md#inspect-accessible-controls) describes the response and
-its bounds.
+[README](../README.md#inspect-accessible-controls) describes the filters and
+statuses, `inspect --help` gives the limits, and the agent skill
+(`framewisp --agent-skill`) explains `display_bounds`.
 
 ## Toolkit coverage
 

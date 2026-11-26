@@ -57,6 +57,12 @@ def icon_pixmaps() -> GLib.Variant:
 
 
 class SharingIndicator:
+    """Offer the sharing indicator to the desktop's tray when it has a host.
+
+    Every call to the watcher is asynchronous, so an unresponsive watcher cannot
+    block input cancellation or the foreground-terminal check.
+    """
+
     def __init__(self, bus: Gio.DBusConnection, stop: Event):
         self.bus = bus
         self.stop = stop

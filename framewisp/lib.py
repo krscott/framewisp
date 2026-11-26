@@ -129,8 +129,8 @@ def session_environment_for_run(
         QT_QPA_PLATFORM="wayland",
         GSK_RENDERER="cairo",
     )
-    # Chromium starts its AT-SPI bridge on a headless host only when this is set.
-    # A caller's own value, such as 0, wins.
+    # Lets Chromium connect to the session's accessibility bus on a headless
+    # host. A caller's own value, such as 0, wins.
     env.setdefault("ACCESSIBILITY_ENABLED", "1")
     return env
 
@@ -175,6 +175,8 @@ def start_inspection_buses(
         process = stack.enter_context(
             managed_process(
                 [
+                    # Resolved here because the bus runs with the app's
+                    # environment, whose PATH need not contain dbus-daemon.
                     shutil.which("dbus-daemon") or "dbus-daemon",
                     "--nofork",
                     f"--config-file={config}",
@@ -1252,9 +1254,10 @@ def screenshot(
             "screenshot --json requires a file path; '-' writes PNG to stdout."
         )
     if str(destination) != "-":
-        # Read the destination from session metadata, not from the runner:
-        # record-stop renders in the control loop, so a request would wait for it.
-        # A runner from an older framewisp publishes no recording key.
+        # Read the active clip's destination from session metadata, not from the
+        # runner: record-stop renders in the runner's command loop, so asking
+        # the runner would wait for it. A runner from an older framewisp
+        # publishes no recording key.
         recording = json.loads((session / "session.json").read_text()).get("recording")
         error = capture_path_error(
             destination, Path(recording) if isinstance(recording, str) else None
@@ -1291,8 +1294,9 @@ def screenshot(
         if region is not None:
             selector = ["-g", f"{x},{y} {width}x{height}"]
     started = time.monotonic()
-    # grim, not the VNC connection: framebuffer requests over VNC timed out with
-    # the pinned Sway, wayvnc and vncdotool while input worked. The cause is unknown.
+    # grim, not the VNC connection: framebuffer requests over VNC timed out
+    # while input worked, for an unknown reason. That was seen with Sway 1.12,
+    # wlroots 0.20.2, wayvnc 0.10.1 and vncdotool 1.2.0.
     result = display_command(
         session,
         ["grim", "-t", "png", *selector, str(destination)],

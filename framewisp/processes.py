@@ -102,6 +102,8 @@ def managed_process(
         runtime = supervisor_env.pop("FRAMEWISP_OWNER_RUNTIME", "")
         supervisor = subprocess.Popen(
             [
+                # The interpreter binary itself: sys.executable can name a
+                # command wrapper that changes the environment.
                 str(Path("/proc/self/exe").resolve()),
                 "-I",
                 str(Path(__file__).with_name("_supervisor.py")),

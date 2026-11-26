@@ -84,12 +84,14 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 - `REQUIREMENTS.md` lists the observable behaviours and invariants framewisp
   must keep, by stable ID.
 - `GLOSSARY.md` defines the domain terms. It is the naming authority for code,
-  the CLI, file formats and docs: use its terms and none of the words it lists
-  under _Avoid_. When a concept has no term, or a term no longer fits, change
-  the glossary in the same PR. Keep implementation detail out of it.
-  Existing code and docs still use some avoided words; issues #196 to #200
-  rename them. Use the glossary's terms in new work.
-  TODO: remove these two sentences once #196 to #200 are closed.
+  the CLI, file formats and docs: use its term for each concept, and do not use
+  a word listed under a term's _Avoid_ for that term's concept. When a concept
+  has no term, or a term no longer fits, change the glossary in the same PR.
+  Keep implementation detail out of it.
+  Existing code and docs still use some avoided words; issues #196 to #200 and
+  #204 rename them. Use the glossary's terms in new work.
+  TODO: remove these two sentences once those issues are closed and no avoided
+  word is left in its avoided sense.
 - `docs/adr/` records decisions that are hard to reverse, surprising without
   context, and the result of a real trade-off. Read the ADRs for an area before
   changing it, and add one only when all three hold.
@@ -101,8 +103,10 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 - For a bug fix, check whether a requirement was missing or violated. Add one when it captures a valuable durable guarantee; an implementation defect does not automatically create a new product promise.
 - Never renumber, reuse or delete a requirement ID; tag it `[retired]` instead. Tests covering a `[test]` requirement carry its ID in a comment.
 
-## Control protocol
+## Command protocol
 
-Each new control feature is advertised by a flag in session metadata
-(`session.json`), and the CLI checks that flag before it sends the request, so
-a newer CLI cannot silently ask an older runner for something it does not have.
+When a change lets a newer CLI ask for something that a session's older runner
+would accept but not do, make the CLI refuse clearly: the runner advertises the
+feature in session metadata (`session.json`), and the CLI checks that before it
+relies on it. A session command that the older runner already rejects needs no
+check.
