@@ -132,7 +132,7 @@ class Batch:
             if directory is not None:
                 destination = (directory / destination).resolve()
             if not destination.is_absolute():
-                raise ValueError("capture.path must be absolute in runner requests.")
+                raise ValueError("capture.path must be absolute in session requests.")
             delay = options.get("delay", 0.0)
             if (
                 type(delay) not in {int, float}

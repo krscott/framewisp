@@ -283,8 +283,8 @@ investigate or ask; never invent a rationale.
   they must not delete a live session. A same-user program can already remove
   these files directly, so framewisp cannot stop it.
 
-- **R-LIFE-6** [test] A session command that reads session metadata copied to
-  another directory cannot reach the original session.
+- **R-LIFE-6** [test] A runner rejects a request on its command socket that
+  comes from session metadata copied to another directory.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
   and its error gives manual cleanup steps.
 
@@ -317,7 +317,7 @@ investigate or ask; never invent a rationale.
   that its stop action ends the attachment.] A compatible desktop shows the tray
   item to the user while an attachment is active.
 
-  Rationale: The host decides what appears on screen, so only a check on a real
+  Rationale: The host decides what appears on screen, so only a check on that
   desktop proves that the user can see the item.
 - **R-ATTACH-7** [test] An attached screenshot skips a leftover first frame when
   the desktop sends a newer frame within 100 ms.

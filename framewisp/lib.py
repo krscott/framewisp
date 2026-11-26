@@ -759,7 +759,7 @@ def session_command(
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
         raise SessionError("Session request exceeds the 1 MiB limit.")
-    endpoint = Path(state["runtime_directory"]) / "command.sock"
+    endpoint = Path(state["command_socket"])
     try:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))
@@ -816,7 +816,7 @@ class RecordStart:
             raise ValueError("compact must be true or false")
         path = Path(destination)
         if not path.is_absolute():
-            raise ValueError("destination must be absolute in runner requests.")
+            raise ValueError("destination must be absolute in session requests.")
         return RecordStart(
             resolved_request_path(path, "destination"),
             CaptionOptions(
@@ -1111,8 +1111,9 @@ def _run_session(
                     command, log=session_dir / "app.log", env=app_env, output=output
                 )
             )
+            command_socket = str(runtime / "command.sock")
             listener = stack.enter_context(socket.socket(socket.AF_UNIX))
-            listener.bind(str(runtime / "command.sock"))
+            listener.bind(command_socket)
             listener.listen()
             listener.settimeout(0.1)
             inputs = InputWorker(
@@ -1146,6 +1147,7 @@ def _run_session(
                             "inspection_protocol": 1,
                             "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
                             "batch_input": True,
+                            "command_socket": command_socket,
                             "runtime_directory": directory,
                             "wayland_display": display,
                             "width": size[0],

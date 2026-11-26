@@ -288,7 +288,7 @@ def test_record_start_sends_console_only_for_a_panel(
                     "input_caption_options": True,
                     "click_pings_recording": True,
                     "console_cell_scale": True,
-                    "runtime_directory": directory,
+                    "command_socket": str(session_dir / "command.sock"),
                 }
             )
         )
@@ -314,7 +314,7 @@ def test_default_clip_rejects_runner_without_click_pings(
     state: dict[str, object] = {
         "command_protocol": 1,
         "input_caption_options": True,
-        "runtime_directory": str(tmp_path),
+        "command_socket": str(tmp_path / "command.sock"),
     }
     if capability is not None:
         state["click_pings_recording"] = capability

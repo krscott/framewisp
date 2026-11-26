@@ -87,7 +87,7 @@ def test_packaged_demo_ignores_caller_python_settings(
 
 # R-ENV-3
 @pytest.mark.parametrize("pythonpath", ["unset", "empty", "foreign"])
-def test_target_app_inherits_caller_pythonpath(
+def test_app_inherits_caller_pythonpath(
     tmp_path: Path, foreign_python: Path, pythonpath: str
 ) -> None:
     session_dir = tmp_path / "session"
@@ -125,9 +125,7 @@ def test_target_app_inherits_caller_pythonpath(
 
 # R-ENV-1
 @pytest.mark.parametrize("value", [None, "", "/caller/sentinel"])
-def test_target_app_preserves_wrapper_variables(
-    tmp_path: Path, value: str | None
-) -> None:
+def test_app_preserves_wrapper_variables(tmp_path: Path, value: str | None) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
     keys = (
@@ -168,7 +166,7 @@ def test_target_app_preserves_wrapper_variables(
 
 
 @pytest.mark.parametrize("value", [None, "0", ""])
-def test_target_app_accessibility_default(tmp_path: Path, value: str | None) -> None:
+def test_app_accessibility_default(tmp_path: Path, value: str | None) -> None:
     env = os.environ.copy()
     if value is None:
         env.pop("ACCESSIBILITY_ENABLED", None)
@@ -195,7 +193,7 @@ def test_target_app_accessibility_default(tmp_path: Path, value: str | None) -> 
 
 
 # R-ENV-1
-def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
+def test_app_resolves_caller_venv_python(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
     venv = tmp_path / "caller venv"
@@ -220,7 +218,7 @@ def test_target_app_resolves_caller_venv_python(tmp_path: Path) -> None:
 
 
 # R-ENV-1
-def test_target_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
+def test_app_receives_minimal_caller_environment(tmp_path: Path) -> None:
     framewisp = shutil.which("framewisp")
     assert framewisp is not None
     session_dir = tmp_path / "session"

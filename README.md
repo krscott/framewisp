@@ -523,8 +523,8 @@ framewisp paint click --count 2 500 400
 
 `--button` accepts `left` (default) or `right`. `--count` accepts `1` (default)
 or `2`. Two clicks use the same connection and position, with a 0.1-second pause
-between them. Every click presses and releases the chosen button. The target
-app's settings and the control under the pointer determine how it responds.
+between them. Every click presses and releases the chosen button. The app's
+settings and the control under the pointer determine how it responds.
 Plain `click X Y` still sends one left click.
 
 The runner sends input through one persistent connection for the session. It
@@ -1189,9 +1189,9 @@ last recording summary, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
 These commands manage headless sessions; use `framewisp --detach` for desktop
 attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
-After upgrading from a recording-only command protocol, stop the old runner with
-Ctrl+C or SIGTERM and start a fresh session. New session commands reject that old
-protocol before sending a request.
+A session command refuses a runner that publishes another command protocol,
+before it sends a request. Stop that runner with Ctrl+C or SIGTERM and start a
+fresh session.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus

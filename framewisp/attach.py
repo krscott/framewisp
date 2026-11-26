@@ -662,7 +662,8 @@ def _run_attachment(
                     socket.socket(socket.AF_UNIX) as listener,
                     socket.socket(socket.AF_UNIX) as emergency,
                 ):
-                    listener.bind(str(directory / "command.sock"))
+                    command_socket = str(directory / "command.sock")
+                    listener.bind(command_socket)
                     emergency.bind(str(directory / "detach.sock"))
                     listener.listen(32)
                     emergency.listen(32)
@@ -672,19 +673,12 @@ def _run_attachment(
                             "kind": "attached",
                             "input_caption_options": True,
                             "attachment": attachment,
-                            "command_socket": str(directory / "command.sock"),
+                            "command_socket": command_socket,
                             "processes": {"attach": os.getpid()},
                         },
                     )
                     owns_state = True
                     (session_dir / "app-exit.json").unlink(missing_ok=True)
-                    write_state(
-                        directory / "desktop.json",
-                        {
-                            "session_directory": str(session_dir),
-                            "attachment": attachment,
-                        },
-                    )
                     (session_dir / "inputs.jsonl").write_text("", encoding="utf-8")
                     if teaching is None:
                         guard = start_release_guard(stop)

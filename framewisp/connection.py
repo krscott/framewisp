@@ -1,4 +1,4 @@
-"""Session socket messages; no desktop libraries required."""
+"""Command socket messages; no desktop libraries required."""
 
 import json
 import socket
@@ -115,7 +115,7 @@ def parse_command(line: bytes) -> dict[str, object]:
     except (ValueError, RecursionError) as failure:
         raise ValueError(f"Session request is not valid JSON: {failure}") from None
     if not isinstance(raw, dict):
-        raise ValueError("Expected a session command object.")
+        raise ValueError("Expected a session request object.")
     return cast(dict[str, object], raw)
 
 

@@ -573,6 +573,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
         json.dumps(
             {
                 "command_protocol": 1,
+                "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
             }

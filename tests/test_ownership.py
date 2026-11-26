@@ -61,34 +61,34 @@ import os, shutil, sys, time
 from pathlib import Path
 from framewisp.ownership import session_lease, headless_runtime, write_journal, runtime_path
 from framewisp.processes import managed_process
-session, ready, stage, probe = map(Path, sys.argv[1:])
-with session_lease(session) as lease:
+session_dir, ready, stage, probe = map(Path, sys.argv[1:])
+with session_lease(session_dir) as lease:
     if str(stage) == 'lease':
         ready.touch()
         time.sleep(60)
     if str(stage) == 'partial-journal':
-        (session / '.headless-owner.tmp').write_text('{')
+        (session_dir / '.headless-owner.tmp').write_text('{')
         ready.touch()
         time.sleep(60)
     if str(stage) in {'journal', 'mkdir'}:
-        write_journal(session, runtime_path(session), lease, created=False)
+        write_journal(session_dir, runtime_path(session_dir), lease, created=False)
         if str(stage) == 'mkdir':
-            runtime_path(session).mkdir(mode=0o700)
+            runtime_path(session_dir).mkdir(mode=0o700)
         ready.touch()
         time.sleep(60)
-    with headless_runtime(session, lease) as runtime:
+    with headless_runtime(session_dir, lease) as runtime:
         if str(stage) in {'shutdown-runtime', 'shutdown-metadata'}:
-            (session / 'session.json').write_text('{}')
+            (session_dir / 'session_dir.json').write_text('{}')
             shutil.rmtree(runtime)
             if str(stage) == 'shutdown-metadata':
-                (session / 'session.json').unlink()
+                (session_dir / 'session_dir.json').unlink()
             ready.touch()
             time.sleep(60)
         if str(stage) == 'runtime':
             ready.touch()
             time.sleep(60)
         env = os.environ | {'FRAMEWISP_OWNER_FD': str(lease), 'FRAMEWISP_OWNER_RUNTIME': str(runtime)}
-        with managed_process([sys.executable, str(probe), str(session / 'tree')], log=session / 'app.log', env=env):
+        with managed_process([sys.executable, str(probe), str(session_dir / 'tree')], log=session_dir / 'app.log', env=env):
             ready.touch()
             time.sleep(60)
 """
