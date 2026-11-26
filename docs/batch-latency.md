@@ -40,7 +40,7 @@ incremental savings from batching. They must not be added to the persistence
 speedup reported for #54. Xwayland retains its pointer-priming delay.
 
 Cold metadata readiness was 662 ms median on Wayland and 752 ms on Xwayland;
-this does not promise that the app has painted. Recording and caption finalization
+this does not promise that the app has painted. Recording and finalization
 were not part of these timings. Input completion alone remains insufficient to
 verify an app result, which is why each sequence checks the demo app's log.
 

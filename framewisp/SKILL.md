@@ -81,9 +81,9 @@ ffmpeg -copyts -i DIRECTORY/video.webm -ss 4.5 -frames:v 1 -n /tmp/lesson-detail
 frame, so `-ss` accepts the times in timeline.jsonl. FFmpeg is on PATH in the
 development shell; elsewhere install it separately if
 needed. `complete` means capture finalized successfully, not that the procedure
-has been learned or validated. `failed` names an error; `recording` after the
+has been learned or validated. `failed` names an error; `capturing` after the
 owner exits means interrupted capture. Treat either as a partial lesson. Frames
-and notes are available during recording, but do not assume the video is finished.
+and notes are available during capture, but do not assume the video is finished.
 
 Derive a procedure describing starting state, variable inputs, control labels,
 decisions, expected outcomes, and recovery or stop conditions. Prefer meaning and
@@ -125,10 +125,10 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 
 | Command syntax | Behavior and defaults |
 | --- | --- |
-| `teach DIRECTORY --goal TEXT` | Record a lesson of the user performing a task on one desktop monitor into a new directory, with silent video and sampled PNG frames. User starts it interactively; it only watches. |
+| `teach DIRECTORY --goal TEXT` | Capture a lesson of the user performing a task on one desktop monitor into a new directory, with silent video and sampled PNG frames. User starts it interactively; it only watches. |
 | `teach-note TEXT` | Add an explanation to the active teaching session. |
 | `run [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, the caption flags, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
-| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
+| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's clip destination. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move X Y [--move-duration SECONDS]` | Move without pressing a button; useful for hover tooltips. |
@@ -139,8 +139,8 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `key [--private] CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
-| `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
-| `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
+| `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and the active recording's `clip_destination`, PID and running state (or null). |
+| `stop` | Stop a headless session, finalize any active clip, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last clip's summary as `clip`, if any. |
 | `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the desktop share instructions below. |
 
 Standalone commands take no SESSION: `framewisp --stop-sharing` stops the active
@@ -427,7 +427,7 @@ stop does the same. The completed inputs remain in the app.
 
 A successful screenshot is an artifact, not proof that the app finished processing.
 Inspect it or check an app-specific acknowledgement before claiming success.
-Each input retains its own log records and any recording caption its clip selects.
+Each input retains its own log records and any caption its clip selects.
 
 Before an X11 batch sends input, the worker checks all its Unicode characters
 against the session's 128-character mapping limit, including mappings allocated
@@ -492,7 +492,7 @@ visual-only state and accessibility gaps.
 ## Recording
 
 To record just a demonstration, start recording after setup, perform the inputs,
-then stop recording. Use a new output filename:
+then stop recording. Use a new clip destination:
 
 ```sh
 framewisp demo record-start /tmp/demo.mp4
@@ -500,15 +500,15 @@ framewisp demo record-start /tmp/demo.mp4
 framewisp demo record-stop
 ```
 
-Recording works only in headless sessions, requires even display dimensions,
-and produces silent MP4 video. Only one clip may be active. Normal runner
-shutdown also finalizes it. The output file does not exist until the clip is
-finalized, so don't poll for it during recording. Framewisp records to a hidden
-`.framewisp-recording-*` directory beside it, so the output directory must be
-writable and support hard links. If another file takes the output path first,
+Recording works only in headless sessions, so clips come only from them. It
+requires even display dimensions and produces silent MP4 video. Only one clip may be active. Normal runner
+shutdown also finalizes it. The clip does not appear at its destination until it
+is finalized, so don't poll for it during recording. Framewisp records to a hidden
+`.framewisp-clip-*` directory beside it, so that directory must be
+writable and support hard links. If another file takes the clip destination first,
 framewisp leaves that file alone, ends the session with an error, and names the
 kept clip. After a killed runner, `recover` prints the interrupted clip's path as
-`interrupted_recording`. Text captions are off by default. For a clip that needs
+`interrupted_clip`. Text captions are off by default. For a clip that needs
 them, use `--pointer-captions modifiers` for shortcuts such as Ctrl+Click or
 `--pointer-captions all` for every pointer action. Use `--key-captions non-text`
 for Ctrl/Alt shortcuts and named keys such as Return and arrows. Use
@@ -522,11 +522,11 @@ Shift-only printable keystrokes. Private actions also omit otherwise logged
 shortcuts and named keys. Review artifacts before sharing because apps can
 display or log the original input.
 
-A red ring marks each click and drag press, and a translucent disc follows each
-completed drag while its button is held. `--no-click-pings` disables both for the
-clip. Pings appear only in recordings. Wait about 0.5 seconds after a final
-click before `record-stop` to preserve the full ring animation. Rendering adds
-time to stopping.
+A click ping (a red ring) marks each click and drag press, and a translucent hold
+disc follows each completed drag while its button is held. `--no-click-pings`
+disables both for the clip. They appear only in clips. Wait about 0.5 seconds after a final
+click before `record-stop` to preserve the full click ping animation.
+Finalization adds time to stopping.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 `duration_seconds` is `null` for a clip with no measurable duration, and `width`
@@ -545,31 +545,31 @@ Timestamp-only check and screenshot spans live in `SESSION/activity.jsonl` witho
 conditions or error text. The summary reports the compacted video's duration.
 
 Use `run --record FILE --console` or `record-start --console FILE` to add a
-scrolling panel of the launched app's combined stdout/stderr, on the right and
+console panel, a scrolling strip of the launched app's combined stdout/stderr, on the right and
 640 pixels wide by default. `--console-position left|right|top|bottom` picks the
-video edge. `--console-size PIXELS` sets the panel's width for left or right and its
+video edge. `--console-size PIXELS` sets the console panel's width for left or right and its
 height for top or bottom; the other dimension follows the GUI. The size must be even,
-and the panel needs at least 312 pixels of width and 118 of height, including the
+and the console panel needs at least 312 pixels of width and 118 of height, including the
 dimension that follows the GUI. If the app prints scripts that draw larger than
 ASCII, such as Thai, Devanagari or Vietnamese (taller rows) or Tamil (wider
-letters), and the panel's last row or line ends look cut off, add
+letters), and the console panel's last row or line ends look cut off, add
 `--console-cell-scale 1.1` (Tamil: 1.5, or 3.5 for text with many ஔ). It trades
-rows and columns for room, and raises the minimum panel size by the same factor. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
+rows and columns for room, and raises the minimum console panel size by the same factor. Each video dimension is limited to 16384 pixels, and FFmpeg's frame size limit is about 16128x16384.
 A rejected `record-start` leaves the app running.
-The GUI and screenshots keep their original dimensions. Panel lines show seconds
+The GUI and screenshots keep their original dimensions. Console panel lines show seconds
 relative to the clip; negative timestamps identify earlier output kept for context.
 ANSI formatting is stripped and carriage returns replace progress lines. No
 terminal emulation or app buffering changes occur. Times describe when Framewisp
 receives output, so buffered output can appear late. Output from separately
 activated services is not captured. Every headless session keeps original bytes
 in `app.log` and received UTF-8 text/timestamps in `console.jsonl`. Invalid UTF-8
-uses replacement characters in the panel. Console text follows the app-log policy,
-so the input-content policy does not redact it. Rendering waits until clip finalization; a failure preserves the
-raw GUI video, reports `captions.log`, and stops the session.
+uses replacement characters in the console panel. Console text follows the app-log policy,
+so the input-content policy does not redact it. Rendering waits until finalization; a failure preserves the
+raw GUI video, reports `finalization.log`, and stops the session.
 
 ## Share evidence on GitHub
 
-Review screenshots and finished recordings before publishing. Follow the user's
+Review screenshots and finished clips before publishing. Follow the user's
 repository and posting permissions; an upload publishes the file immediately.
 Wait for `record-stop` or normal session shutdown to finish before using an MP4.
 
@@ -621,12 +621,12 @@ The stop command is `framewisp --stop-sharing`, independent of SESSION. The docu
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also
 works during a Shift gesture. An attached session shares the real pointer and keyboard;
 input can reach any focused app, including one outside the captured monitor.
-Screenshots cover the selected monitor. Recording attached sessions is unsupported.
+Screenshots cover the selected monitor. Attached sessions cannot record.
 
 ## Problems
 
 Inspect the session's `dbus.log`, `accessibility.log`, `app.log`, `sway.log`, and
-`wayvnc.log` for headless launch failures, or `recorder.log` and `captions.log`
+`wayvnc.log` for headless launch failures, or `recorder.log` and `finalization.log`
 for recording failures.
 The runner and every session command need access to the
 private display sockets. Launching outside a sandbox does not grant later
