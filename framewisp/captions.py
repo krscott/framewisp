@@ -311,7 +311,7 @@ def caption_text(action: str, p: dict[str, object]) -> str:
         count = "Double " if p["count"] == 2 else ""
         text = f"{prefix}{count}{p['button']} click ({p['x']}, {p['y']})"
     elif action == "scroll":
-        text = f"Scroll {p['direction']} {p['steps']} at ({p['x']}, {p['y']})"
+        text = f"Scroll {p['direction']} {p['ticks']} at ({p['x']}, {p['y']})"
     else:
         text = f"Move ({p['x']}, {p['y']})"
     # Reserve enough width for CJK glyphs as well as Latin text.

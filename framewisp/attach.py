@@ -62,7 +62,7 @@ class InputParameters(TypedDict, total=False):
     modifier: list[str]
     duration: float
     direction: str
-    steps: int
+    ticks: int
     text: str
     interval: float
     chord: str
@@ -203,7 +203,7 @@ class AttachedInput:
                 direction = p["direction"]
                 axis = 0 if direction in {"up", "down"} else 1
                 sign = -1 if direction in {"up", "left"} else 1
-                for _ in range(p["steps"]):
+                for _ in range(p["ticks"]):
                     self.wait()
                     self.portal.input("NotifyPointerAxisDiscrete", "ui", axis, sign)
             elif action == "type":
@@ -399,7 +399,7 @@ def parse_attached_request(
         raise ValueError("Recording attached sessions is not supported yet.")
     raw = fields.get("parameters")
     if not isinstance(raw, dict):
-        raise ValueError("Input requires an action and parameters object.")
+        raise ValueError("parameters must be an object.")
     parameters = cast(dict[str, object], raw)
     if command == "teach-note":
         if not teaching:

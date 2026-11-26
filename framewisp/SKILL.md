@@ -133,7 +133,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `move X Y [--move-duration SECONDS]` | Move without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
 | `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration while holding the button: 0.4 seconds. |
-| `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
+| `scroll X Y DIRECTION [--ticks N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--private] [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key [--private] CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
@@ -163,7 +163,7 @@ Headless `move`, `click`, `scroll`, and positioning at a drag's start accept
 `--move-duration SECONDS` (default 0.3, maximum 300; finite and nonnegative).
 They follow an eased straight path from the last position Framewisp sent,
 including when recording is off. The worker tracks every move across commands
-and batches, including drag steps and cancelled movement. The first pointer
+and batches, including drag movement and cancelled movement. The first pointer
 action positions immediately because its start is unknown. Use `0` for
 immediate positioning. An unchanged tracked position adds no movement delay.
 Coordinates beyond the display clamp to its edge.
@@ -400,7 +400,7 @@ individual commands. Set `interval: 0` for unpaced typing; omit it for the usual
 0.08 seconds between characters. Explicit pacing and screenshot delay stay in effect.
 
 The whole request is validated before input. Unknown fields are errors. Limits
-per batch are 256 steps, 16,384 typed characters, 10,000 scroll steps, and 300
+per batch are 256 steps, 16,384 typed characters, 10,000 scroll ticks, and 300
 seconds of requested pointer/typing/drag/screenshot pacing and check deadlines. The file and serialized request
 must each fit in 1 MiB. At least one step is required. The screenshot is optional;
 its delay defaults to zero. Relative screenshot paths use the CLI's working directory.

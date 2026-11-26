@@ -235,7 +235,7 @@ session-independent.
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and screenshot time. Default delay: 0. |
 | `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
-| `scroll [--move-duration SECONDS] X Y DIRECTION [--steps N]` | Move to the pane, then send wheel steps; directions: up, down, left, right. |
+| `scroll [--move-duration SECONDS] X Y DIRECTION [--ticks N]` | Move to the pane, then send wheel ticks; directions: up, down, left, right. |
 | `click [--move-duration SECONDS] [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
 | `drag [--move-duration SECONDS] [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Move to the start, then hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
 | `type [--private] [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
@@ -492,7 +492,7 @@ path with gentle acceleration and deceleration over 0.3 seconds by default,
 whether recording is active or not. `--move-duration SECONDS` changes that time;
 `0` moves immediately. Values are finite, nonnegative, and at most 300 seconds (R-INPUT-3).
 The runner tracks the last pointer position it sent across commands and batches,
-including drag steps and cancelled movement. The first pointer action positions
+including drag movement and cancelled movement. The first pointer action positions
 immediately because its starting position is unknown. An unchanged tracked
 position adds no movement delay. Coordinates beyond the display clamp to its
 edge. Movement by apps or other clients does not update this tracking, so the
@@ -605,17 +605,17 @@ combination does.
 
 ## Scrolling
 
-Move the pointer to the pane you want to scroll, then send wheel steps:
+Move the pointer to the pane you want to scroll, then send wheel ticks:
 
 ```sh
-framewisp paint scroll 500 400 down --steps 3
-framewisp paint scroll 500 400 up --steps 3
+framewisp paint scroll 500 400 down --ticks 3
+framewisp paint scroll 500 400 up --ticks 3
 ```
 
-Directions are `up`, `down`, `left`, and `right`. The step count is a positive
-integer (R-INPUT-3) and defaults to one. Steps are discrete wheel ticks, not pixels; the
-widget under the pointer determines how far content moves. Each step presses and
-releases its wheel button. All steps use one connection, with no buttons left
+Directions are `up`, `down`, `left`, and `right`. The tick count is a positive
+integer (R-INPUT-3) and defaults to one. Ticks are discrete, not pixels; the
+widget under the pointer determines how far content moves. Each tick presses and
+releases its wheel button. All ticks use one connection, with no buttons left
 held. There is no smooth scrolling or momentum control.
 
 ## Keyboard shortcuts

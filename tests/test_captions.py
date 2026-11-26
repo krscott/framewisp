@@ -335,7 +335,7 @@ def test_caption_mode_selects_input_kinds(
             4,
         ),
         ("key", {"chord": "Return"}, 5),
-        ("scroll", {"x": 9, "y": 10, "direction": "up", "steps": 1}, 6),
+        ("scroll", {"x": 9, "y": 10, "direction": "up", "ticks": 1}, 6),
     )
     captions = captions_for_clip(
         log, origin=0, stopped=9, captions=mode, literal_captions={"1": TYPE}

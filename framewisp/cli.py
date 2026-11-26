@@ -282,13 +282,13 @@ def main() -> None:
     )
 
     scroll = commands.add_parser(
-        "scroll", help="send wheel steps at display coordinates"
+        "scroll", help="send wheel ticks at display coordinates"
     )
     scroll.add_argument("x", type=int)
     scroll.add_argument("y", type=int)
     scroll.add_argument("direction", choices=SCROLL_BUTTONS)
     scroll.add_argument(
-        "--steps", type=int, default=1, help="positive wheel step count (default: 1)"
+        "--ticks", type=int, default=1, help="positive wheel tick count (default: 1)"
     )
 
     drag = commands.add_parser("drag", help="drag with a mouse button")
@@ -408,8 +408,8 @@ def main() -> None:
         args.modifier
     ):
         parser.error("each --modifier may only be specified once")
-    if args.command == "scroll" and args.steps < 1:
-        parser.error("--steps must be a positive integer")
+    if args.command == "scroll" and args.ticks < 1:
+        parser.error("--ticks must be a positive integer")
     if (
         args.command in {"move", "click", "scroll", "drag"}
         and args.move_duration is not None

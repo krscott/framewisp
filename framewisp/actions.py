@@ -20,7 +20,7 @@ ACTION_FIELDS = {
         "modifier",
         "move_duration",
     ),
-    "scroll": ("x", "y", "direction", "steps", "move_duration"),
+    "scroll": ("x", "y", "direction", "ticks", "move_duration"),
     "type": ("text", "interval"),
     "key": ("chord",),
 }
@@ -45,7 +45,7 @@ class InputAction:
             raise ValueError("Unsupported or incomplete input action.")
         p = {name: p[name] for name in ACTION_FIELDS[action]}
         for name, value in p.items():
-            if name in {"x", "y", "x1", "y1", "x2", "y2", "count", "steps"}:
+            if name in {"x", "y", "x1", "y1", "x2", "y2", "count", "ticks"}:
                 if type(value) is not int:
                     raise ValueError(f"{name} must be an integer.")
                 if (
@@ -78,8 +78,8 @@ class InputAction:
             raise ValueError("Unsupported button.")
         if "count" in p and p["count"] not in (1, 2):
             raise ValueError("Click count must be 1 or 2.")
-        if "steps" in p and cast(int, p["steps"]) < 1:
-            raise ValueError("Scroll steps must be positive.")
+        if "ticks" in p and cast(int, p["ticks"]) < 1:
+            raise ValueError("Scroll ticks must be positive.")
         if "direction" in p and p["direction"] not in SCROLL_BUTTONS:
             raise ValueError("Unsupported scroll direction.")
         if action == "type" and not all(c.isprintable() for c in cast(str, p["text"])):

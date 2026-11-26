@@ -68,7 +68,7 @@ def test_gtk_app_ignores_conflicting_caller(
         '<allow receive_sender="*"/><allow own="*"/></policy>'
         f"<servicedir>{services}</servicedir></busconfig>"
     )
-    captures: list[Image.Image] = []
+    screenshots: list[Image.Image] = []
     homes: list[Path] = []
     text_sizes: list[list[int]] = []
     for number in range(2):
@@ -156,13 +156,13 @@ def test_gtk_app_ignores_conflicting_caller(
                 cli(directory, "key", "Tab")
             # Move the cursor away from app widgets to avoid hover state.
             cli(directory, "move", "1279", "719")
-            capture = tmp_path / f"capture-{number}.png"
-            cli(directory, "screenshot", "--delay", "1", str(capture))
-            with Image.open(capture) as image:
+            screenshot = tmp_path / f"screenshot-{number}.png"
+            cli(directory, "screenshot", "--delay", "1", str(screenshot))
+            with Image.open(screenshot) as image:
                 assert image.size == (1280, 720)
-                captures.append(image.convert("RGB"))
+                screenshots.append(image.convert("RGB"))
             assert ImageChops.difference(
-                captures[-1], Image.new("RGB", (1280, 720))
+                screenshots[-1], Image.new("RGB", (1280, 720))
             ).getbbox()
             private_keyfile = (
                 homes[-1].parent / "config" / "glib-2.0" / "settings" / "keyfile"
@@ -216,10 +216,10 @@ def test_gtk_app_ignores_conflicting_caller(
     assert homes[0] != homes[1]
     assert text_sizes[0] == text_sizes[1]
     # GTK's title-bar SVG icons can vary by a few antialiased pixels on X11.
-    # Compare content pixels; keep full captures and display geometry checks.
+    # Compare content pixels; keep full screenshots and display geometry checks.
     region = (0, 50, 1280, 720) if not demo else (0, 0, 1280, 720)
     assert (
-        ImageChops.difference(*(image.crop(region) for image in captures)).getbbox()
+        ImageChops.difference(*(image.crop(region) for image in screenshots)).getbbox()
         is None
     )
     assert host_files(host) == original
@@ -246,7 +246,7 @@ def session_env(
 
 
 def stable_screenshot(session_dir: Path, path: Path) -> Image.Image:
-    """Wait for the window to map and settle before trusting a capture."""
+    """Wait for the window to map and settle before trusting a screenshot."""
     previous: bytes | None = None
 
     def settled() -> bool:
@@ -270,7 +270,7 @@ def stable_screenshot(session_dir: Path, path: Path) -> Image.Image:
         return image.convert("RGB")
 
 
-def qt_probe_capture(
+def qt_probe_screenshot(
     tmp_path: Path,
     name: str,
     caller: dict[str, str],
@@ -356,15 +356,15 @@ SCALE = {"QT_SCALE_FACTOR": "2", "QT_FONT_DPI": "192"}
 def test_qt_app_ignores_caller_difference(
     tmp_path: Path, caller: dict[str, str]
 ) -> None:
-    base = qt_probe_capture(tmp_path, "base", {"TZ": "America/New_York"})
-    other = qt_probe_capture(tmp_path, "other", {"TZ": "America/New_York"} | caller)
+    base = qt_probe_screenshot(tmp_path, "base", {"TZ": "America/New_York"})
+    other = qt_probe_screenshot(tmp_path, "other", {"TZ": "America/New_York"} | caller)
     assert ImageChops.difference(base, other).getbbox() is None
 
 
 # R-ENV-4
 @pytest.mark.integration
 @pytest.mark.parametrize("source", ["home", "search-path"])
-def test_caller_cursors_stay_out_of_captures(
+def test_caller_cursors_stay_out_of_screenshots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
 ) -> None:
     # A caller search path would hide the home directory's cursors.
@@ -376,9 +376,9 @@ def test_caller_cursors_stay_out_of_captures(
         if source == "home"
         else {"XCURSOR_PATH": str(host / ".icons"), "XCURSOR_THEME": "default"}
     )
-    # Captures show the compositor's cursor only while a recording is active.
-    base = qt_probe_capture(tmp_path, "base", {}, record=True)
-    other = qt_probe_capture(tmp_path, "other", caller, record=True)
+    # Screenshots show the compositor's cursor only while a recording is active.
+    base = qt_probe_screenshot(tmp_path, "base", {}, record=True)
+    other = qt_probe_screenshot(tmp_path, "other", caller, record=True)
     assert ImageChops.difference(base, other).getbbox() is None
 
 
@@ -391,8 +391,8 @@ def test_qt_app_ignores_caller_fonts(tmp_path: Path, override: str) -> None:
         if override == "file"
         else {"FONTCONFIG_SYSROOT": str(tmp_path / "nonexistent")}
     )
-    base = qt_probe_capture(tmp_path, "base", {})
-    other = qt_probe_capture(tmp_path, "other", caller)
+    base = qt_probe_screenshot(tmp_path, "base", {})
+    other = qt_probe_screenshot(tmp_path, "other", caller)
     assert ImageChops.difference(base, other).getbbox() is None
 
 
@@ -402,8 +402,8 @@ def test_qt_app_ignores_caller_fonts(tmp_path: Path, override: str) -> None:
 def test_qt_app_ignores_every_caller_difference_at_once(
     tmp_path: Path, conflicting_home: Path, x11: bool
 ) -> None:
-    base = qt_probe_capture(tmp_path, "base", {}, x11=x11)
-    other = qt_probe_capture(
+    base = qt_probe_screenshot(tmp_path, "base", {}, x11=x11)
+    other = qt_probe_screenshot(
         tmp_path,
         "other",
         LOCALE

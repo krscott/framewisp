@@ -197,9 +197,10 @@ class InputWorker:
                     else:
                         self.perform(connection, step)
                 except Exception as error:
-                    detail = input_error(
-                        step.action if isinstance(step, InputAction) else step.kind,
-                        error,
+                    detail = (
+                        input_error(step.action, error)
+                        if isinstance(step, InputAction)
+                        else str(error)
                     )
                     result.update(status="failed", error=detail)
                     data.update(
@@ -352,7 +353,7 @@ class InputWorker:
                     ping()
                 elif action.action == "scroll":
                     number = SCROLL_BUTTONS[cast(str, p["direction"])]
-                    for _ in range(cast(int, p["steps"])):
+                    for _ in range(cast(int, p["ticks"])):
                         button(number, True)
                         button(number, False)
                 elif action.action == "type":

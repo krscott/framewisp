@@ -12,7 +12,7 @@ from framewisp.pointer import DEFAULT_MOVE_DURATION
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_STEPS = 256
 MAX_TEXT = 16384
-MAX_SCROLL_STEPS = 10000
+MAX_SCROLL_TICKS = 10000
 MAX_PACING_SECONDS = 300
 
 DEFAULTS: dict[str, dict[str, object]] = {
@@ -29,7 +29,7 @@ DEFAULTS: dict[str, dict[str, object]] = {
         "modifier": [],
         "move_duration": DEFAULT_MOVE_DURATION,
     },
-    "scroll": {"steps": 1, "move_duration": DEFAULT_MOVE_DURATION},
+    "scroll": {"ticks": 1, "move_duration": DEFAULT_MOVE_DURATION},
     "type": {"interval": 0.08},
     "key": {},
 }
@@ -68,7 +68,7 @@ class Batch:
         steps: list[Step] = []
         pacing = 0.0
         characters = 0
-        scroll_steps = 0
+        scroll_ticks = 0
         for index, entry in enumerate(cast(list[object], entries)):
             try:
                 if not isinstance(entry, dict):
@@ -116,7 +116,7 @@ class Batch:
                 elif name == "drag":
                     pacing += cast(float, parameters["duration"])
                 elif name == "scroll":
-                    scroll_steps += cast(int, parameters["steps"])
+                    scroll_ticks += cast(int, parameters["ticks"])
             except (ValueError, TypeError, OverflowError) as error:
                 raise ValueError(f"steps[{index}]: {error}") from None
         screenshots: dict[str, Screenshot] = {}
@@ -149,9 +149,9 @@ class Batch:
                 raise ValueError(f"{kind}.delay must be finite and nonnegative.")
             pacing += delay
             screenshots[kind] = Screenshot(destination, delay)
-        if characters > MAX_TEXT or scroll_steps > MAX_SCROLL_STEPS:
+        if characters > MAX_TEXT or scroll_ticks > MAX_SCROLL_TICKS:
             raise ValueError(
-                f"Batch exceeds {MAX_TEXT} text characters or {MAX_SCROLL_STEPS} scroll steps."
+                f"Batch exceeds {MAX_TEXT} text characters or {MAX_SCROLL_TICKS} scroll ticks."
             )
         if not math.isfinite(pacing) or pacing > MAX_PACING_SECONDS:
             raise ValueError(
