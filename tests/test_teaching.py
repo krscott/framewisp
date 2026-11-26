@@ -76,7 +76,7 @@ def test_teaching_portal_requests_only_screen_access(
     "command",
     ["click", "key", "type", "move", "drag", "scroll", "batch", "record-start"],
 )
-def test_teaching_rejects_every_input_command(command: str) -> None:
+def test_teaching_rejects_commands_but_screenshot_and_note(command: str) -> None:
     line = json.dumps(
         {"attachment": "token", "command": command, "parameters": {}}
     ).encode()

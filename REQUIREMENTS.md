@@ -331,7 +331,8 @@ investigate or ask; never invent a rationale.
 ## Teaching and lessons (TEACH)
 
 - **R-TEACH-1** [test] Teaching requests screen sharing without requesting
-  keyboard or pointer control. A teaching session rejects input commands.
+  keyboard or pointer control. A teaching session accepts only the
+  `screenshot` and `teach-note` session commands.
 
   Rationale: The user performs the task; agent input would interfere with the
   lesson and require access that teaching does not need.

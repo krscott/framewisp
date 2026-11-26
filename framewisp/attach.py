@@ -35,9 +35,11 @@ from framewisp.connection import (
     COMMAND_PROTOCOL,
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
+    disconnected,
     parse_request_fields,
     receive_request,
     resolved_request_path,
+    session_kind,
     teaching_refusal,
 )
 from framewisp.desktop import reserve_desktop, write_state
@@ -388,9 +390,7 @@ def parse_attached_request(
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one.
     if fields.get("attachment") != attachment:
-        raise ValueError(
-            "Attached session is disconnected. Ask the user to attach again."
-        )
+        raise ValueError(disconnected("teaching" if teaching else "attached"))
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
@@ -658,10 +658,7 @@ def _run_attachment(
                         existing: object = json.loads(state.read_text())
                     except (ValueError, RecursionError):
                         existing = None
-                    if not isinstance(existing, dict) or (
-                        cast(dict[str, object], existing).get("kind")
-                        not in DESKTOP_KINDS
-                    ):
+                    if session_kind(existing) not in DESKTOP_KINDS:
                         raise RuntimeError(
                             f"{state} belongs to another session. Use a different directory."
                         )

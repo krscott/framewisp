@@ -16,7 +16,7 @@ from typing import cast
 from gi.repository import Gio, GLib
 
 from framewisp import inspection_limits as limits
-from framewisp.connection import DESKTOP_KINDS
+from framewisp.connection import DESKTOP_KINDS, session_kind
 from framewisp.display_bounds import Rect, convert_bounds, match_window, read_windows
 from framewisp.environment import unix_bus_address
 from framewisp.errors import SessionError
@@ -196,7 +196,7 @@ def inspect_session(
     session_dir: Path, query: Query, *, cancelled: Callable[[], bool] | None = None
 ) -> dict[str, object]:
     state = json.loads((session_dir / "session.json").read_text())
-    if state.get("kind") in DESKTOP_KINDS:
+    if session_kind(state) in DESKTOP_KINDS:
         raise SessionError(
             "inspect supports headless sessions only; use screenshot in attached and teaching sessions"
         )

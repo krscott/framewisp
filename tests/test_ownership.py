@@ -675,6 +675,24 @@ def test_stale_attachment_gets_attachment_steps(tmp_path: Path, kind: str) -> No
     assert recover_session(tmp_path) == 0
 
 
+@pytest.mark.parametrize("kind", [[], {}])
+def test_recover_refuses_metadata_with_an_unhashable_kind(
+    tmp_path: Path, kind: object
+) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "recover"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "journal is missing" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert (tmp_path / "session.json").exists()
+
+
 # R-LIFE-7
 @pytest.mark.parametrize("kind", ["fifo", "device-link"])
 def test_unreadable_session_metadata_cannot_hang_recovery(

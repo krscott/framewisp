@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from framewisp.connection import DESKTOP_KINDS
+from framewisp.connection import DESKTOP_KINDS, session_kind
 from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
@@ -326,10 +326,7 @@ def records_attachment(session_dir: Path) -> bool:
         state = read_metadata(session_dir / "session.json")
     except (OSError, ValueError, RecursionError):
         return False
-    return (
-        isinstance(state, dict)
-        and cast(dict[str, object], state).get("kind") in DESKTOP_KINDS
-    )
+    return session_kind(state) in DESKTOP_KINDS
 
 
 def stale_attachment(session_dir: Path) -> str:
