@@ -389,12 +389,10 @@ def parse_desktop_request(
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one. The sender's kind may
-    # differ from this session's, so the message names neither.
+    # differ from this session's, and its session directory may differ too, so
+    # the message names neither.
     if fields.get("share_token") != share_token:
-        raise ValueError(
-            "The session this command was addressed to has ended. "
-            "Its session directory now holds another session."
-        )
+        raise ValueError("The session this command was addressed to has ended.")
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")

@@ -475,8 +475,8 @@ A state check may pass immediately on an existing value. To require a transition
 put `{"check": "baseline", "timeout": 2, "condition": ...}` before the input,
 then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
 Use the identical condition in both. The baseline must read a unique nonmatching
-value. Limits may differ between baseline and wait. The baseline
-must be complete, or the batch stops before input. The wait resolves the selector afresh,
+value. Limits may differ between baseline and wait. A failed or
+incomplete baseline stops the steps after it, so put it before the input it guards. The wait resolves the selector afresh,
 allowing a replacement control. Observation IDs are diagnostic, not reusable handles.
 This proves observed nonmatching then matching state, not input causation.
 
