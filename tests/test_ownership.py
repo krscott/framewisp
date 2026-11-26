@@ -126,6 +126,7 @@ with session_lease(session_dir) as lease:
                     time.sleep(0.05)
             assert not runtime.exists()
             assert not (session_dir / JOURNAL).exists()
+            assert not (session_dir / "session.json").exists()
             assert all(not Path(f"/proc/{pid}").exists() for pid in pids)
             if stage == "children":
                 assert (session_dir / "app.log").exists()

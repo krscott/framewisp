@@ -284,8 +284,9 @@ investigate or ask; never invent a rationale.
   these files directly, so framewisp cannot stop it.
 
 - **R-LIFE-6** [test] The runner of a headless session rejects a request on
-  its command socket that was made from a copy of its session metadata in
-  another directory.
+  its command socket that names a session directory other than its own. A
+  session command run from a copy of its session metadata in another directory
+  sends such a request.
 - **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
   and its error gives manual cleanup steps.
 
