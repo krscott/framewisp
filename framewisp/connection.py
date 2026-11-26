@@ -46,7 +46,8 @@ def session_kind(metadata: object) -> SessionKind | None:
 def teaching_refusal(command: str) -> str:
     return (
         f"{command} is refused: this is a teaching session, which only watches. "
-        "It accepts only screenshot and teach-note."
+        "It accepts only screenshot and teach-note. "
+        "The user ends it with Ctrl+C in its terminal or framewisp --stop-sharing."
     )
 
 

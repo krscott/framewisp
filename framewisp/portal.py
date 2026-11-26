@@ -92,7 +92,7 @@ class DesktopPortal:
                 if self.stop.wait(0.02):
                     self.close()
                     raise InterruptedError(
-                        "Attach stopped while waiting for desktop permission."
+                        "Stopped while waiting for desktop permission."
                     )
             code, result = response[0]
             if code:
@@ -193,7 +193,7 @@ class DesktopPortal:
             )
         streams = cast(list[tuple[int, dict[str, object]]], result.get("streams", []))
         if len(streams) != 1:
-            raise RuntimeError("Attach requires exactly one shared monitor.")
+            raise RuntimeError("Share exactly one monitor in the desktop dialog.")
         self.node, properties = streams[0]
         self.size = cast(tuple[int, int], properties.get("size", (0, 0)))
         # COSMIC creates its EI devices on the first Notify call. Zero motion

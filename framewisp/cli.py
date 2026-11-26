@@ -514,7 +514,7 @@ def main() -> None:
         if not metadata_path.exists():
             parser.exit(
                 1,
-                "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
+                "Session is disconnected. Start run, or ask the user to run attach or teach in another terminal.\n",
             )
         try:
             metadata = json.loads(metadata_path.read_text())
@@ -551,12 +551,7 @@ def main() -> None:
                 "session kind.\n",
             )
         kind = published_kind
-        # status and stop reach dispatch, which says how to stop the session.
-        if kind == "teaching" and args.command not in {
-            *TEACHING_COMMANDS,
-            "status",
-            "stop",
-        }:
+        if kind == "teaching" and args.command not in TEACHING_COMMANDS:
             parser.exit(1, f"Session {session_dir}: {teaching_refusal(args.command)}\n")
     try:
         result = dispatch(session_dir, args, kind=kind)

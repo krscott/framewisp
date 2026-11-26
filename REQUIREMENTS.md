@@ -212,11 +212,11 @@ investigate or ask; never invent a rationale.
   retained frame. Each keeps its full duration unless the clip ends first.
 - **R-REC-9** [test] With `--console`, click pings and hold discs keep their GUI
   positions. They never draw on the console panel.
-- **R-REC-10** [test] When finalization cannot draw a clip's overlays, console
-  panel or compaction, a playable MP4 of the raw capture remains. It is at the
-  clip destination, unless framewisp cannot publish it there (R-REC-18). The
-  error names the MP4's path and `finalization.log`. When drawing succeeds but
-  publishing fails, R-REC-18 applies to the finished clip.
+- **R-REC-10** [test] When the recorder stops cleanly but finalization fails
+  before publishing the clip, a playable MP4 of the raw video remains at the
+  clip destination, and the error names that path. If a file takes the clip
+  destination first, the MP4 remains at another path instead (R-REC-18). When
+  only publishing fails, R-REC-18 applies to the finished clip.
 - **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the clip. The default is right.

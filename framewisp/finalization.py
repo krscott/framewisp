@@ -1,4 +1,4 @@
-"""Finalization: overlays, console panel and compaction drawn onto a clip."""
+"""Finalization's FFmpeg pass: compaction, and the overlays and console panel drawn onto a clip."""
 
 import re
 import tempfile

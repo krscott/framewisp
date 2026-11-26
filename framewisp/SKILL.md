@@ -461,7 +461,7 @@ either AT-SPI sensitive or enabled. This rule covers the demonstrated GTK/Qt
 controls, not every toolkit. Missing or stale objects, unsupported apps, partial
 observations, and timeouts cannot satisfy a check. There is no absence assertion.
 Wait retries incomplete/missing observations within its deadline; assert does not.
-By default, queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
+By default, queries use depth 8, 256 nodes, two matches, and at most two seconds per query.
 For larger/deeper trees, add
 `"limits": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` to each
 needed `baseline`, `wait`, or `assert` step. Node/depth limits must be integers
@@ -505,8 +505,8 @@ Recording works only in headless sessions, so clips come only from them. It
 requires even display dimensions and produces silent MP4 video. Only one clip may be active. Normal runner
 shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
-`.framewisp-clip-*` directory beside it, so that directory must be
-writable and support hard links. If another file takes the clip destination first,
+`.framewisp-clip-*` directory beside it, so the clip destination's
+directory must be writable and support hard links. If another file takes the clip destination first,
 framewisp leaves that file alone, ends the session with an error, and names the
 kept clip. After a killed runner, `recover` prints the interrupted clip's path as
 `interrupted_clip`. Text captions are off by default. For a clip that needs
@@ -613,7 +613,7 @@ and choose "Stop sharing". Its label is "framewisp desktop share is active".
 KDE Plasma and COSMIC's status area support the tray protocol; GNOME needs an
 enabled StatusNotifierItem/AppIndicator extension. The desktop controls placement,
 overflow, panel auto-hide, and visibility, so registration does not guarantee a
-visible icon. If no compatible host is available, the attach terminal reports
+visible indicator. If no compatible host is available, the attach terminal reports
 that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
 The indicator ends with the desktop share's runner; reconnecting needs fresh portal
 approval and creates a new indicator. Keep emergency shortcuts configured. The

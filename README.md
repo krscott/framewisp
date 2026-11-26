@@ -431,8 +431,8 @@ its menu to end the desktop share. Supported tray hosts are KDE Plasma, COSMIC's
 and GNOME with an enabled StatusNotifierItem/AppIndicator extension (for example,
 AppIndicator and KStatusNotifierItem Support). Framewisp uses its existing Gio
 runtime dependency; no root access or extra indicator library is required.
-The desktop controls icon placement, overflow, panel auto-hide, and visibility.
-Registration does not guarantee a visible icon. If no compatible host is available,
+The desktop controls indicator placement, overflow, panel auto-hide, and visibility.
+Registration does not guarantee a visible sharing indicator. If no compatible host is available,
 the terminal reports that the indicator is unavailable and gives the shortcut
 and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a sharing
 indicator: its menu requires a responsive runner. The indicator disappears when the
@@ -575,7 +575,7 @@ releases held input. A missing reply leaves completion uncertain; consult the ap
 and per-action input log. A screenshot does not prove the app has finished processing.
 
 Batches require 1 to 256 steps, at most 16,384 typed characters and 10,000 scroll
-steps, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
+ticks, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
 are limited to 1 MiB each. Each step is an action (`"action"`: `move`, `click`,
 `drag`, `scroll`, `type`, or `key`) or a check (`"check"`: `wait`, `assert`, or
 `baseline`); the screenshot is separate. No attached sessions, loops, lifecycle
@@ -698,8 +698,8 @@ plus the console panel when `--console` is enabled, 640 pixels of width by defau
 Recording requires even width and height (R-REC-2). An existing file at the
 clip destination is never overwritten (R-REC-1). The clip does not appear there
 until it is finalized. Until then, framewisp records to a hidden
-`.framewisp-clip-*` directory beside it, so that directory must be writable and on a filesystem
-with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
+`.framewisp-clip-*` directory beside it, so the clip destination's directory must be writable and
+on a filesystem with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
 when the clip starts (R-REC-19).
 
 If another file appears at the clip destination during a clip, framewisp leaves that
@@ -788,9 +788,9 @@ Finalization applies compaction and draws the console panel and overlays in one
 FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
 that pass fails, the raw video remains playable. It stays at the clip destination
 unless framewisp cannot publish it there, and the error names its path and
-`finalization.log` (R-REC-10). If the pass succeeds but publishing fails, the
-finished clip stays in the hidden directory and the error names its path
-(R-REC-18). A session that hits either failure stops, even when `record-stop`
+`finalization.log` (R-REC-10). If the pass succeeds but a file takes the clip
+destination first, the finished clip stays in the hidden directory and the error
+names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
 triggered it.
 
 ## Share media in GitHub comments
@@ -901,10 +901,7 @@ nothing else needs rendering. `run --no-click-pings` requires `--record`.
 Captions are rendered into the clip's frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for finalization to finish.
-This adds encoding time when stopping a captioned clip. If drawing the captions
-fails, the command fails and leaves the uncaptioned MP4 playable. The MP4 is at the
-clip destination unless framewisp cannot publish it there. The error names its path
-and `finalization.log` for details (R-REC-10).
+This adds encoding time when stopping a captioned clip.
 
 The recorder log retains diagnostics and the first frame's timestamp used for
 caption alignment. Framewisp filters the remaining Wayland protocol trace as it

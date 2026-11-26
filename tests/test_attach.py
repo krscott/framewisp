@@ -773,6 +773,7 @@ def test_other_session_cannot_take_desktop(
     )
     assert result.returncode == 1
     assert "already active" in result.stderr
+    assert "Stopped sharing" not in result.stdout
     assert not (other / "waiting").exists()
     assert runner.poll() is None
 
