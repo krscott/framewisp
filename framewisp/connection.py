@@ -14,7 +14,7 @@ from framewisp.batch import MAX_REQUEST_BYTES
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 5
+COMMAND_PROTOCOL = 6
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -135,7 +135,7 @@ def parse_request_fields(line: bytes) -> dict[str, object]:
 
 
 def resolved_request_path(path: Path, field: str) -> Path:
-    """Resolve a requested path, refusing what the filesystem API cannot encode."""
+    """Resolve a path from a request, refusing what the filesystem API cannot encode."""
     try:
         return path.resolve()
     except (ValueError, RuntimeError) as failure:
@@ -144,8 +144,10 @@ def resolved_request_path(path: Path, field: str) -> Path:
         raise ValueError(f"{field} is not a usable path: {failure}") from None
 
 
-def screenshot_path_error(destination: Path, recording: Path | None) -> str | None:
-    """Refuse the active recording's destination, which is no file until published.
+def screenshot_path_error(
+    destination: Path, clip_destination: Path | None
+) -> str | None:
+    """Refuse the active recording's clip destination, a file only once published.
 
     The check is not atomic with the write: a file that lands first stops the
     clip taking its destination (R-REC-18).
@@ -154,8 +156,11 @@ def screenshot_path_error(destination: Path, recording: Path | None) -> str | No
         path = resolved_request_path(destination, "path")
     except ValueError as error:
         return str(error)
-    if path == recording:
-        return f"{path} is the active recording's destination. Choose a new path."
+    if path == clip_destination:
+        return (
+            f"{path} is the clip destination of the active recording. "
+            "Choose a new path."
+        )
     return None
 
 

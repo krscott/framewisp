@@ -1,4 +1,4 @@
-"""Input action records and text rendered into completed recordings."""
+"""The input log, and finalization: overlays, console panel and compaction."""
 
 import fcntl
 import json
@@ -22,8 +22,8 @@ from typing import BinaryIO, Literal, ParamSpec, cast, get_args
 from framewisp.compact import (
     ActivityEvent,
     activity_events,
+    clip_duration,
     compact_filter,
-    recording_duration,
     retained_frames,
 )
 from framewisp.console import ConsoleCapture, console_frames
@@ -31,7 +31,13 @@ from framewisp.environment import configured_fonts, fixed_fonts
 from framewisp.errors import SessionError
 from framewisp.keys import parse_chord
 from framewisp.layout import CONSOLE_FONT_SIZE, VideoLayout
-from framewisp.pings import PING_STYLE, Hold, Ping, ping_text, pings_for_clip
+from framewisp.pointer_overlays import (
+    POINTER_STYLE,
+    ClickPing,
+    HoldDisc,
+    pointer_overlay_text,
+    pointer_overlays_for_clip,
+)
 from framewisp.processes import run_owned
 
 KeyCaptions = Literal["all", "non-text"]
@@ -195,7 +201,8 @@ class InputEvent(ActivityEvent):
 
 @dataclass
 class InputResult:
-    ping: Callable[[int, int], None]
+    press: Callable[[int, int], None]
+    release: Callable[[int, int], None]
     returncode: int | None = None
     error: str | None = None
 
@@ -228,7 +235,10 @@ def log_input(
     *,
     caption_capture: CaptionCapture | None = None,
 ) -> Generator[InputResult, None, None]:
-    """Record command start/end and pointer pings; these are not app acknowledgements."""
+    """Record command start/end and button presses and releases.
+
+    These are not app acknowledgements.
+    """
     identifier = uuid.uuid4().hex
     retained = retained_parameters(action, parameters)
     captures_literal = (
@@ -238,7 +248,9 @@ def log_input(
     )
     capture = caption_capture if captures_literal else None
 
-    def append(event: Literal["start", "ping", "end"], **point: int) -> None:
+    def append(
+        event: Literal["start", "press", "release", "end"], **point: int
+    ) -> None:
         timestamp = time.monotonic()
         with (session_dir / "inputs.jsonl").open("a+b") as output:
             # Attached CLI clients can append concurrently. Closing flushes the
@@ -265,7 +277,10 @@ def log_input(
             record = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
             output.write(record)
 
-    result = InputResult(ping=lambda x, y: append("ping", x=x, y=y))
+    result = InputResult(
+        press=lambda x, y: append("press", x=x, y=y),
+        release=lambda x, y: append("release", x=x, y=y),
+    )
     append("start")
     try:
         yield result
@@ -285,7 +300,7 @@ def log_input(
 
 def capture_origin(log: Path) -> float:
     """Read the first captured frame's monotonic timestamp on our Sway backend."""
-    # The recorder logs its output path, which can be any bytes.
+    # The recorder logs the path it writes, which can be any bytes.
     with log.open(encoding="utf-8", errors="replace") as source:
         for line in source:
             match = re.search(
@@ -414,7 +429,7 @@ def ass_time(seconds: float) -> str:
 def subtitle_script(
     captions: list[Caption],
     *,
-    pings: Iterable[Ping | Hold] = (),
+    pointer_overlays: Iterable[ClickPing | HoldDisc] = (),
     layout: VideoLayout,
 ) -> str:
     gui = layout.gui
@@ -434,7 +449,7 @@ WrapStyle: 2
 Format: Name, Fontname, Fontsize, PrimaryColour, BackColour, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
 Style: Default,Noto Sans,{24 * scale},&H00FFFFFF,&H80000000,3,{8 * scale},0,2,{margin_left},{margin_right},{margin_bottom}
 Style: Console,DejaVu Sans Mono,{CONSOLE_FONT_SIZE},&H00EEEEEE,&H00000000,1,0,0,7,0,0,0
-{PING_STYLE}
+{POINTER_STYLE}
 
 [Events]
 Format: Layer, Start, End, Style, Text
@@ -443,8 +458,8 @@ Format: Layer, Start, End, Style, Text
         text = ass_text(caption.text)
         # A caption is one line, which can be wider than a narrow GUI.
         script += f"Dialogue: 0,{ass_time(caption.start)},{ass_time(caption.end)},Default,{{{gui.clip}}}{text}\n"
-    for ping in pings:
-        script += f"Dialogue: 1,{ass_time(ping.start)},{ass_time(ping.end)},Ping,{ping_text(ping, layout)}\n"
+    for overlay in pointer_overlays:
+        script += f"Dialogue: 1,{ass_time(overlay.start)},{ass_time(overlay.end)},Pointer,{pointer_overlay_text(overlay, layout)}\n"
     return script
 
 
@@ -452,7 +467,7 @@ P = ParamSpec("P")
 
 
 def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
-    """Report any failure after capture with the recording it left behind."""
+    """Report any failure after capture with the clip it left behind."""
 
     @wraps(render)
     def rendered(*args: P.args, **kwargs: P.kwargs) -> None:
@@ -460,7 +475,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
             render(*args, **kwargs)
         except Exception as error:
             raise RuntimeError(
-                f"Recording rendering failed; raw video remains at {args[0]} without "
+                f"Finalization failed; raw video remains at {args[0]} without "
                 f"captions, click pings, console panel or cuts. See {kwargs['log']} and "
                 f"{kwargs['input_log']}. Cause: {error}"
             ) from error
@@ -469,7 +484,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
 
 
 @keeps_raw_video
-def render_recording(
+def render_clip(
     clip: Path,
     /,
     *,
@@ -496,18 +511,22 @@ def render_recording(
         if captions.enabled
         else []
     )
-    pings = (
-        pings_for_clip(input_log, origin=origin, stopped=stopped) if click_pings else []
+    overlays = (
+        pointer_overlays_for_clip(input_log, origin=origin, stopped=stopped)
+        if click_pings
+        else []
     )
     panel = layout.panel
-    if not entries and not pings and panel is None and not compact:
+    if not entries and not overlays and panel is None and not compact:
         return
     with tempfile.TemporaryDirectory(
-        prefix=".framewisp-captions-", dir=clip.parent
+        prefix=".framewisp-finalization-", dir=clip.parent
     ) as directory:
         work = Path(directory)
-        with (work / "captions.ass").open("w", encoding="utf-8") as script:
-            script.write(subtitle_script(entries, pings=pings, layout=layout))
+        with (work / "subtitles.ass").open("w", encoding="utf-8") as script:
+            script.write(
+                subtitle_script(entries, pointer_overlays=overlays, layout=layout)
+            )
             if panel is not None:
                 console.snapshot(work / "console.jsonl")
                 position = f"{{\\pos({panel.x + 16},{panel.y + 16}){panel.clip}}}"
@@ -535,7 +554,7 @@ def render_recording(
                 f"pad={layout.width}:{layout.height}:{layout.gui.x}:{layout.gui.y}"
                 ":color=0x161b22"
             )
-        filters.extend(["ass=captions.ass", "scale=out_range=full"])
+        filters.extend(["ass=subtitles.ass", "scale=out_range=full"])
         if compact:
             filters.append(
                 compact_filter(
@@ -543,14 +562,14 @@ def render_recording(
                         (input_log, input_log.parent / "activity.jsonl"),
                         origin=origin,
                         stopped=stopped,
-                        duration=recording_duration(clip, env=env),
+                        duration=clip_duration(clip, env=env),
                     )
                 )
             )
         fonts = configured_fonts(env)
         if fonts is None:
             raise RuntimeError("FRAMEWISP_FONTCONFIG_FILE does not name a file.")
-        # A long recording can have more cut ranges than fit in an exec argument.
+        # A long clip can have more cut ranges than fit in an exec argument.
         (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
         result = run_owned(
             [

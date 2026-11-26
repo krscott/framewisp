@@ -12,7 +12,9 @@ from typing import BinaryIO
 import pytest
 
 from framewisp.actions import ACTION_FIELDS
-from framewisp.captions import (
+from framewisp.compact import activity_events
+from framewisp.errors import SessionError
+from framewisp.finalization import (
     KEY_ACTIONS,
     POINTER_ACTIONS,
     Caption,
@@ -27,8 +29,6 @@ from framewisp.captions import (
     retained_parameters,
     subtitle_script,
 )
-from framewisp.compact import activity_events
-from framewisp.errors import SessionError
 from framewisp.keys import KEYS, parse_chord
 from framewisp.layout import plain_layout
 

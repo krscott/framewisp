@@ -20,15 +20,6 @@ from typing import Any, Literal, cast, get_args
 
 from framewisp.actions import InputAction
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import (
-    KEY_CAPTIONS,
-    POINTER_CAPTIONS,
-    CaptionCapture,
-    CaptionOptions,
-    capture_origin,
-    recorder_output,
-    render_recording,
-)
 from framewisp.compact import ffprobe
 from framewisp.connection import (
     COMMAND_PROTOCOL,
@@ -53,13 +44,22 @@ from framewisp.errors import (
     display_command,
     log_failure,
 )
+from framewisp.finalization import (
+    KEY_CAPTIONS,
+    POINTER_CAPTIONS,
+    CaptionCapture,
+    CaptionOptions,
+    capture_origin,
+    recorder_output,
+    render_clip,
+)
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 from framewisp.ownership import (
     ACTIVE_RECORDING,
     headless_runtime,
-    kept_recording,
+    kept_clip,
     refuse_abandoned_ownership,
     session_lease,
 )
@@ -335,7 +335,7 @@ def start_recording(
     """Wait for the MP4 header before yielding; finalize while Sway is still alive.
 
     Everything up to publishing works on a private clip, so nothing but
-    `publish_recording` can touch the destination.
+    `publish_clip` can touch the destination.
     """
     clip = private_clip(destination)
     active = log.parent / ACTIVE_RECORDING
@@ -409,12 +409,12 @@ def start_recording(
         try:
             # A clip with no duration has no video to render on (R-REC-22).
             if restore_hidden_frames(clip, log=log, env=env) and timed:
-                render_recording(
+                render_clip(
                     clip,
                     input_log=log.parent / "inputs.jsonl",
                     origin=origin,
                     stopped=stopped,
-                    log=log.parent / "captions.log",
+                    log=log.parent / "finalization.log",
                     captions=captions,
                     literal_captions=literal_captions,
                     click_pings=click_pings,
@@ -425,7 +425,7 @@ def start_recording(
                 )
         except (RuntimeError, subprocess.TimeoutExpired) as error:
             failure = error
-        publish_recording(clip, destination, failure)
+        publish_clip(clip, destination, failure)
     finally:
         if not capturing:
             shutil.rmtree(clip.parent, ignore_errors=True)
@@ -438,7 +438,7 @@ def private_clip(destination: Path) -> Path:
     """Return an unused clip path that can later be linked to `destination`."""
     try:
         directory = Path(
-            tempfile.mkdtemp(prefix=".framewisp-recording-", dir=destination.parent)
+            tempfile.mkdtemp(prefix=".framewisp-clip-", dir=destination.parent)
         )
     except OSError as error:
         raise RuntimeError(f"Cannot record to {destination}: {error}") from None
@@ -447,7 +447,7 @@ def private_clip(destination: Path) -> Path:
     except RuntimeError:
         shutil.rmtree(directory, ignore_errors=True)
         raise
-    return directory / "recording.mp4"
+    return directory / "clip.mp4"
 
 
 def probe_destination(directory: Path, destination: Path) -> None:
@@ -463,7 +463,7 @@ def probe_destination(directory: Path, destination: Path) -> None:
         except OSError as error:
             raise RuntimeError(
                 f"Cannot record to {destination}: its filesystem must support hard "
-                f"links, so a recording can never replace an existing file ({error}). "
+                f"links, so a clip can never replace an existing file ({error}). "
                 "Choose a path on another filesystem."
             ) from None
         link.unlink()
@@ -472,7 +472,7 @@ def probe_destination(directory: Path, destination: Path) -> None:
         raise RuntimeError(f"Cannot record to {destination}: {error}") from None
 
 
-def publish_recording(clip: Path, destination: Path, failure: Exception | None) -> None:
+def publish_clip(clip: Path, destination: Path, failure: Exception | None) -> None:
     """Link a clip into place, which fails rather than replaces a file.
 
     Report `failure` too, naming wherever the clip ended up.
@@ -482,14 +482,14 @@ def publish_recording(clip: Path, destination: Path, failure: Exception | None) 
     except OSError as error:
         cause = f" {failure}" if failure is not None else ""
         raise RuntimeError(
-            f"Cannot save recording to {destination}: {error}.{cause}"
+            f"Cannot save clip to {destination}: {error}.{cause}"
         ) from None
     shutil.rmtree(clip.parent, ignore_errors=True)
     if failure is not None:
         raise RuntimeError(str(failure).replace(str(clip), str(destination)))
 
 
-def recording_path_error(session_dir: Path, destination: Path) -> str | None:
+def clip_destination_error(session_dir: Path, destination: Path) -> str | None:
     reserved = {
         (session_dir / name).resolve()
         for name in (
@@ -508,18 +508,16 @@ def recording_path_error(session_dir: Path, destination: Path) -> str | None:
             "console.jsonl",
             "inputs.jsonl",
             "activity.jsonl",
-            "captions.log",
+            "finalization.log",
             "dbus.log",
             "accessibility.log",
             "registry.log",
         )
     }
     if destination in reserved:
-        return (
-            f"{destination} is reserved for session files. Choose a new recording path."
-        )
+        return f"{destination} is reserved for session files. Choose a new clip destination."
     if destination.exists():
-        return f"{destination} already exists. Choose a new recording path."
+        return f"{destination} already exists. Choose a new clip destination."
     return None
 
 
@@ -603,7 +601,7 @@ def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool
     return probe_clip(clip, env=env).duration is not None
 
 
-def recording_summary(destination: Path, *, env: dict[str, str]) -> dict[str, object]:
+def clip_summary(destination: Path, *, env: dict[str, str]) -> dict[str, object]:
     probe = probe_clip(destination, env=env)
     return {
         "path": str(destination),
@@ -615,7 +613,7 @@ def recording_summary(destination: Path, *, env: dict[str, str]) -> dict[str, ob
 
 
 @dataclass
-class Recordings:
+class Clips:
     session_dir: Path
     env: dict[str, str]
     stop_requested: Event
@@ -644,7 +642,7 @@ class Recordings:
         if isinstance(layout, str):
             return layout
         try:
-            error = recording_path_error(self.session_dir, destination)
+            error = clip_destination_error(self.session_dir, destination)
             if error is not None:
                 return error
             self.process = self.resources.enter_context(
@@ -679,7 +677,7 @@ class Recordings:
         try:
             self.resources.close()
             if self.destination is not None:
-                self.last_summary = recording_summary(self.destination, env=self.env)
+                self.last_summary = clip_summary(self.destination, env=self.env)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
             raise SessionError(self.with_kept_clip(str(error))) from None
         finally:
@@ -687,7 +685,7 @@ class Recordings:
             self.destination = None
 
     def with_kept_clip(self, error: str) -> str:
-        clip = kept_recording(self.session_dir)
+        clip = kept_clip(self.session_dir)
         return f"{error}\nThe clip remains at {clip}." if clip is not None else error
 
 
@@ -794,7 +792,7 @@ PARAMETERLESS_COMMANDS: tuple[ParameterlessCommand, ...] = get_args(
 SessionRequest = ParameterlessCommand | RecordStart | InputAction | Batch
 
 
-def parse_batch(raw: object, recordings: Recordings) -> Batch:
+def parse_batch(raw: object, clips: Clips) -> Batch:
     batch = Batch.parse(raw)
     for kind, screenshot in (
         ("screenshot", batch.screenshot),
@@ -805,19 +803,19 @@ def parse_batch(raw: object, recordings: Recordings) -> Batch:
         if not screenshot.path.parent.is_dir():
             raise ValueError(f"{kind}.path requires an existing parent directory.")
         resolved = resolved_request_path(screenshot.path, f"{kind}.path")
-        path_error = recording_path_error(recordings.session_dir, resolved)
+        path_error = clip_destination_error(clips.session_dir, resolved)
         if path_error is not None:
-            raise ValueError(path_error.replace("recording path", "screenshot path"))
-        error = screenshot_path_error(resolved, recordings.destination)
+            raise ValueError(path_error.replace("clip destination", "screenshot path"))
+        error = screenshot_path_error(resolved, clips.destination)
         if error is not None:
             raise ValueError(error)
     return batch
 
 
-def parse_request(line: bytes, recordings: Recordings) -> SessionRequest:
+def parse_request(line: bytes, clips: Clips) -> SessionRequest:
     """Validate one request line, changing no session state."""
     fields = parse_request_fields(line)
-    if fields.get("session_directory") != str(recordings.session_dir):
+    if fields.get("session_directory") != str(clips.session_dir):
         raise ValueError(
             "Session metadata points to a different session. Use the original session directory."
         )
@@ -829,7 +827,7 @@ def parse_request(line: bytes, recordings: Recordings) -> SessionRequest:
     if command == "record-start":
         return RecordStart.parse(fields)
     if command == "batch":
-        return parse_batch(fields.get("parameters"), recordings)
+        return parse_batch(fields.get("parameters"), clips)
     if command in {"move", "click", "drag", "scroll", "type", "key"}:
         return InputAction.parse(command, fields.get("parameters"))
     raise ValueError("Unsupported headless session command.")
@@ -837,7 +835,7 @@ def parse_request(line: bytes, recordings: Recordings) -> SessionRequest:
 
 def handle_session_command(
     listener: socket.socket,
-    recordings: Recordings,
+    clips: Clips,
     write_state: Callable[[], None],
     status: Callable[[], dict[str, object]],
     inputs: InputWorker,
@@ -856,7 +854,7 @@ def handle_session_command(
         request: SessionRequest | None = receive_request(
             connection,
             lambda failure: reply(connection, error=failure),
-            lambda line: parse_request(line, recordings),
+            lambda line: parse_request(line, clips),
         )
         if request is None:
             return None
@@ -879,15 +877,15 @@ def handle_session_command(
             data = status()
         elif request == "record-stop":
             try:
-                error = recordings.finish()
+                error = clips.finish()
             except SessionError as failure:
                 # The session still fails; the caller needs the reason and raw path.
                 reply(connection, error=str(failure))
                 raise
             if error is None:
-                data = recordings.last_summary
+                data = clips.last_summary
         else:
-            error = recordings.start(
+            error = clips.start(
                 request.destination,
                 captions=request.captions,
                 click_pings=request.click_pings,
@@ -906,7 +904,7 @@ def run_session(
     session_dir: Path,
     command: list[str],
     *,
-    recording: Path | None = None,
+    clip_destination: Path | None = None,
     captions: CaptionOptions = CaptionOptions(),
     click_pings: bool = True,
     console: ConsolePanel | None = None,
@@ -924,9 +922,9 @@ def run_session(
             "can then differ between hosts."
         )
     session_dir = session_dir.resolve()
-    if recording is not None:
-        recording = recording.resolve()
-        error = recording_path_error(session_dir, recording)
+    if clip_destination is not None:
+        clip_destination = clip_destination.resolve()
+        error = clip_destination_error(session_dir, clip_destination)
         if error is not None:
             raise SessionError(error)
     session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -936,7 +934,7 @@ def run_session(
             session_dir,
             command,
             lease=lease,
-            recording=recording,
+            clip_destination=clip_destination,
             captions=captions,
             click_pings=click_pings,
             console=console,
@@ -953,7 +951,7 @@ def _run_session(
     command: list[str],
     *,
     lease: int,
-    recording: Path | None,
+    clip_destination: Path | None,
     captions: CaptionOptions,
     click_pings: bool,
     console: ConsolePanel | None,
@@ -975,7 +973,7 @@ def _run_session(
     stop = Event()
     stop_connection: socket.socket | None = None
     shutdown_error: str | None = None
-    recordings: Recordings | None = None
+    clips: Clips | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -1050,11 +1048,11 @@ def _run_session(
             backends = buses | {"sway": sway, "wayvnc": vnc}
             console_capture = ConsoleCapture(session_dir)
             output = stack.enter_context(app_output(console_capture))
-            recordings = Recordings(session_dir, env, stop, size, console_capture)
-            stack.callback(recordings.close)
-            if recording is not None:
-                error = recordings.start(
-                    recording,
+            clips = Clips(session_dir, env, stop, size, console_capture)
+            stack.callback(clips.close)
+            if clip_destination is not None:
+                error = clips.start(
+                    clip_destination,
                     captions=captions,
                     click_pings=click_pings,
                     console=console,
@@ -1066,7 +1064,7 @@ def _run_session(
                     raise SessionError(error)
 
             command = app_command(command, app_env)
-            # Drain final app bytes before rendering the last recording.
+            # Drain final app bytes before finalizing the last clip.
             stack.callback(console_capture.wait)
             stack.callback(output.close)
             app = stack.enter_context(
@@ -1085,18 +1083,18 @@ def _run_session(
                 stop,
                 x11=x11,
                 size=size,
-                caption_capture=recordings.caption_capture,
+                caption_capture=clips.caption_capture,
                 screenshot=lambda path, cancelled: batch_screenshot(
-                    recordings, path, cancelled
+                    clips, path, cancelled
                 ),
             )
             stack.callback(inputs.close)
 
             def write_state() -> None:
-                assert recordings is not None
+                assert clips is not None
                 processes = backends | {"app": app}
-                if recordings.process is not None:
-                    processes["recorder"] = recordings.process
+                if clips.process is not None:
+                    processes["recorder"] = clips.process
                 temporary = session_dir / ".session.json"
                 temporary.write_text(
                     json.dumps(
@@ -1110,9 +1108,9 @@ def _run_session(
                             "width": size[0],
                             "height": size[1],
                             "x11_display": x11_display,
-                            "recording": (
-                                str(recordings.destination)
-                                if recordings.destination is not None
+                            "clip_destination": (
+                                str(clips.destination)
+                                if clips.destination is not None
                                 else None
                             ),
                             "processes": {
@@ -1126,7 +1124,7 @@ def _run_session(
                 temporary.replace(state)
 
             def status() -> dict[str, object]:
-                assert recordings is not None
+                assert clips is not None
                 return {
                     "session_directory": str(session_dir),
                     "status": "running",
@@ -1138,11 +1136,11 @@ def _run_session(
                     "app": {"pid": app.pid, "running": app.poll() is None},
                     "recording": (
                         {
-                            "path": str(recordings.destination),
-                            "pid": recordings.process.pid,
-                            "running": recordings.process.poll() is None,
+                            "clip_destination": str(clips.destination),
+                            "pid": clips.process.pid,
+                            "running": clips.process.poll() is None,
                         }
-                        if recordings.process is not None
+                        if clips.process is not None
                         else None
                     ),
                 }
@@ -1165,15 +1163,15 @@ def _run_session(
                     )
                     return result if result >= 0 else 128 - result
                 monitored = backends.copy()
-                if recordings.process is not None:
-                    monitored["recorder"] = recordings.process
+                if clips.process is not None:
+                    monitored["recorder"] = clips.process
                 for name, process in monitored.items():
                     if process.poll() is not None:
                         raise log_failure(
                             f"{name} exited", session_dir / (name + ".log")
                         )
                 stop_connection = handle_session_command(
-                    listener, recordings, write_state, status, inputs
+                    listener, clips, write_state, status, inputs
                 )
                 if stop_connection is not None:
                     stop.set()
@@ -1195,7 +1193,7 @@ def _run_session(
                     data={
                         "session_directory": str(session_dir),
                         "status": "stopped",
-                        "recording": recordings.last_summary if recordings else None,
+                        "clip": clips.last_summary if clips else None,
                     },
                 )
 
@@ -1224,9 +1222,12 @@ def screenshot(
         # Read the active clip's destination from session metadata, not from the
         # runner: record-stop renders in the runner's command loop, so asking
         # the runner would wait for it.
-        recording = json.loads((session_dir / "session.json").read_text())["recording"]
+        clip_destination = json.loads((session_dir / "session.json").read_text())[
+            "clip_destination"
+        ]
         error = screenshot_path_error(
-            destination, Path(recording) if recording is not None else None
+            destination,
+            Path(clip_destination) if clip_destination is not None else None,
         )
         if error is not None:
             raise SessionError(error)
@@ -1279,7 +1280,7 @@ def screenshot(
 
 
 def batch_screenshot(
-    recordings: Recordings, destination: Path, cancelled: Callable[[], bool]
+    clips: Clips, destination: Path, cancelled: Callable[[], bool]
 ) -> int:
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
@@ -1287,13 +1288,13 @@ def batch_screenshot(
             prefix=".framewisp-screenshot-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "screenshot.png"
-            screenshot(recordings.session_dir, temporary, cancelled=cancelled)
+            screenshot(clips.session_dir, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Screenshot cancelled; caller disconnected or session stopped."
                 )
             # A recording may have started since this batch was validated.
-            error = screenshot_path_error(destination, recordings.destination)
+            error = screenshot_path_error(destination, clips.destination)
             if error is not None:
                 raise SessionError(error)
             destination.hardlink_to(temporary)

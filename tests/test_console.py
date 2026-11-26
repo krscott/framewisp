@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.captions import render_recording
 from framewisp.console import ConsoleCapture, ConsoleText, app_output, console_frames
+from framewisp.finalization import render_clip
 from framewisp.layout import Rect, VideoLayout
 
 DEFAULT_PANEL = Rect(1280, 0, 640, 720)
@@ -192,12 +192,12 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
         )
         + "\n"
     )
-    render_recording(
+    render_clip(
         video,
         input_log=tmp_path / "unused",
         origin=10,
         stopped=12,
-        log=tmp_path / "captions.log",
+        log=tmp_path / "finalization.log",
         click_pings=False,
         console=ConsoleCapture(tmp_path),
         layout=PANEL_LAYOUT,
@@ -268,16 +268,16 @@ def test_console_render_failure_preserves_raw_video(tmp_path: Path) -> None:
     video.write_bytes(b"raw file contents")
     (tmp_path / "console.jsonl").write_text("")
     with pytest.raises(RuntimeError, match="raw video remains"):
-        render_recording(
+        render_clip(
             video,
             input_log=tmp_path / "unused",
             origin=10,
             stopped=12,
-            log=tmp_path / "captions.log",
+            log=tmp_path / "finalization.log",
             click_pings=False,
             console=ConsoleCapture(tmp_path),
             layout=PANEL_LAYOUT,
             env=dict(os.environ),
         )
     assert video.read_bytes() == b"raw file contents"
-    assert (tmp_path / "captions.log").stat().st_size > 0
+    assert (tmp_path / "finalization.log").stat().st_size > 0

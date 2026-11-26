@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.captions import CaptionOptions, render_recording
 from framewisp.console import ConsoleCapture, console_frames
+from framewisp.finalization import CaptionOptions, render_clip
 from framewisp.layout import (
     CONSOLE_POSITIONS,
     MAX_FRAME_CELLS,
@@ -23,7 +23,7 @@ from framewisp.layout import (
     text_rows,
     video_layout,
 )
-from framewisp.lib import recording_summary
+from framewisp.lib import clip_summary
 
 GUI_SIZE = (640, 480)
 GUI_COLOUR = 0x2060A0
@@ -155,12 +155,12 @@ def render(
     console = tmp_path / "console.jsonl"
     if not console.exists():
         console.write_text("")
-    render_recording(
+    render_clip(
         video,
         input_log=inputs,
         origin=10,
         stopped=12,
-        log=tmp_path / "captions.log",
+        log=tmp_path / "finalization.log",
         captions=captions,
         literal_captions={"typed": f"Type: {caption}"} if caption else None,
         click_pings=False,
@@ -168,7 +168,7 @@ def render(
         layout=layout,
         env=dict(os.environ),
     )
-    summary = recording_summary(video, env=dict(os.environ))
+    summary = clip_summary(video, env=dict(os.environ))
     assert (summary["width"], summary["height"]) == (layout.width, layout.height)
     return frame(video, (layout.width, layout.height))
 
@@ -745,13 +745,13 @@ def test_cell_scale_shrinks_capacity_and_minimums() -> None:
             "left",
             338,
             1.1,
-            "at --console-cell-scale 1.1; a left panel needs at least 340",
+            "at --console-cell-scale 1.1; a left console panel needs at least 340",
         ),
         (
             "top",
             122,
             1.1,
-            "at --console-cell-scale 1.1; a top panel needs at least 124",
+            "at --console-cell-scale 1.1; a top console panel needs at least 124",
         ),
         ("right", 640, 0.9, "from 1 to 58"),
         ("right", 640, 0, "from 1 to 58"),
@@ -776,7 +776,7 @@ def test_layout_names_the_scale_when_the_display_is_too_small() -> None:
     assert isinstance(message, str)
     assert "at least 124 pixels tall" in message
     assert "--console-cell-scale 1.1" in message
-    # 121 pixels hold three rows at 1.05, but recordings need an even display.
+    # 121 pixels hold three rows at 1.05, but clips need an even display.
     message = video_layout((1280, 120), ConsolePanel("right", 640, 1.05))
     assert isinstance(message, str) and "at least 122 pixels tall" in message
     default = video_layout((1280, 116), ConsolePanel("right", 640))

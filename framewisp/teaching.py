@@ -51,10 +51,10 @@ class Teaching:
         self.created = True
         (self.directory / "frames").mkdir(mode=0o700)
         (self.directory / "timeline.jsonl").touch(mode=0o600)
-        self.manifest("recording")
+        self.manifest("capturing")
         self.video = (self.directory / "video.webm").open("xb")
         # A streamable WebM stays decodable without a final seek, so an
-        # interrupted lesson keeps the video recorded so far.
+        # interrupted lesson keeps the video captured so far.
         pipeline = Gst.parse_launch(
             f"{source} ! identity name=capture ! "
             "imagefreeze name=timeline allow-replace=true is-live=true ! "

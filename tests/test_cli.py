@@ -100,12 +100,12 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
         (["--console-cell-scale", "inf"], "from 1 to 58"),
         (
             ["--console-size", "338", "--console-cell-scale", "1.1"],
-            "at --console-cell-scale 1.1; a right panel needs at least 340",
+            "at --console-cell-scale 1.1; a right console panel needs at least 340",
         ),
     ],
 )
 @pytest.mark.parametrize("command", ["run", "record-start"])
-def test_recording_rejects_invalid_panels_before_any_clip(
+def test_recording_rejects_invalid_console_panels_before_any_clip(
     tmp_path: Path, command: str, options: list[str], message: str
 ) -> None:
     session_dir = tmp_path / "session"
@@ -492,7 +492,7 @@ def test_record_start_requires_an_explicit_caption_mode(
 # R-REC-1
 def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     destination = tmp_path / "existing.mp4"
-    destination.write_bytes(b"keep this recording")
+    destination.write_bytes(b"keep this file")
     result = subprocess.run(
         [
             sys.executable,
@@ -514,7 +514,7 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "already exists" in result.stderr
-    assert destination.read_bytes() == b"keep this recording"
+    assert destination.read_bytes() == b"keep this file"
 
 
 @pytest.mark.parametrize(
@@ -534,7 +534,7 @@ def test_recording_does_not_overwrite(tmp_path: Path) -> None:
         "console.jsonl",
         "inputs.jsonl",
         "activity.jsonl",
-        "captions.log",
+        "finalization.log",
         "dbus.log",
         "accessibility.log",
         "registry.log",
@@ -765,7 +765,7 @@ def test_invalid_display_size(option: str, value: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize("option", ["--width", "--height"])
 def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     session_dir = tmp_path / "session"
-    recording = tmp_path / "recording.mp4"
+    clip = tmp_path / "clip.mp4"
     result = subprocess.run(
         [
             sys.executable,
@@ -776,7 +776,7 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
             option,
             "901",
             "--record",
-            str(recording),
+            str(clip),
             "--",
             "framewisp-demo",
         ],
@@ -788,7 +788,7 @@ def test_recording_rejects_odd_dimensions(option: str, tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "even" in result.stderr
     assert not session_dir.exists()
-    assert not recording.exists()
+    assert not clip.exists()
 
 
 # R-INPUT-3

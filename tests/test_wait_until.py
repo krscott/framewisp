@@ -100,7 +100,7 @@ def test_input_probe_wait_keeps_its_own_timeout_message(
         process=cast("subprocess.Popen[bytes]", None),
         runtime=tmp_path,
         child_pids=[],
-        recording=None,
+        clip=None,
         control=None,
     )
 

@@ -10,8 +10,8 @@ import pytest
 
 from framewisp.console import ConsoleCapture
 from framewisp.layout import ConsolePanel
-from framewisp.lib import Recordings
-from framewisp.ownership import ACTIVE_RECORDING, interrupted_recording
+from framewisp.lib import Clips
+from framewisp.ownership import ACTIVE_RECORDING, interrupted_clip
 
 # wf-recorder wrote this shape for a clip stopped right after record-start under
 # load. To keep it small, this is a 16x16 one-frame FFmpeg MP4 with the mvhd, tkhd,
@@ -54,16 +54,16 @@ while :; do sleep 0.01; done
     session_dir.mkdir()
     (session_dir / "inputs.jsonl").touch()
     environment = os.environ | {"PATH": f"{tools}:{os.environ['PATH']}"}
-    recordings = Recordings(
+    clips = Clips(
         session_dir, environment, Event(), (1280, 720), ConsoleCapture(session_dir)
     )
     destination = tmp_path / "clip.mp4"
-    error = recordings.start(destination, compact=compact, console=console)
+    error = clips.start(destination, compact=compact, console=console)
     assert error is None
-    assert recordings.finish() is None
+    assert clips.finish() is None
     assert destination.stat().st_size > 0
-    assert not list(tmp_path.glob(".framewisp-recording-*"))
-    summary = recordings.last_summary
+    assert not list(tmp_path.glob(".framewisp-clip-*"))
+    summary = clips.last_summary
     assert summary is not None
     return summary
 
@@ -160,30 +160,28 @@ def test_filesystem_without_hard_links_rejects_recording_at_start(
     session_dir.mkdir()
     output = tmp_path / "output"
     output.mkdir()
-    recordings = Recordings(
-        session_dir, {}, Event(), (1280, 720), ConsoleCapture(session_dir)
-    )
-    error = recordings.start(output / "clip.mp4")
+    clips = Clips(session_dir, {}, Event(), (1280, 720), ConsoleCapture(session_dir))
+    error = clips.start(output / "clip.mp4")
     assert error is not None
     assert "hard links" in error
     assert "another filesystem" in error
-    assert recordings.process is None
+    assert clips.process is None
     assert list(output.iterdir()) == []
     assert not (session_dir / "recorder.log").exists()
 
 
 # R-REC-20
 def test_recover_removes_directory_of_a_clip_never_written(tmp_path: Path) -> None:
-    directory = tmp_path / ".framewisp-recording-unused"
+    directory = tmp_path / ".framewisp-clip-unused"
     directory.mkdir()
-    (tmp_path / ACTIVE_RECORDING).symlink_to(directory / "recording.mp4")
-    assert interrupted_recording(tmp_path) is None
+    (tmp_path / ACTIVE_RECORDING).symlink_to(directory / "clip.mp4")
+    assert interrupted_clip(tmp_path) is None
     assert not directory.exists()
     assert not (tmp_path / ACTIVE_RECORDING).is_symlink()
 
 
 # R-REC-20
 def test_recover_ignores_a_link_to_a_removed_directory(tmp_path: Path) -> None:
-    (tmp_path / ACTIVE_RECORDING).symlink_to(tmp_path / "removed" / "recording.mp4")
-    assert interrupted_recording(tmp_path) is None
+    (tmp_path / ACTIVE_RECORDING).symlink_to(tmp_path / "removed" / "clip.mp4")
+    assert interrupted_clip(tmp_path) is None
     assert not (tmp_path / ACTIVE_RECORDING).is_symlink()

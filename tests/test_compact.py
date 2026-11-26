@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.captions import CaptionOptions, render_recording
 from framewisp.compact import (
     activity_events,
     compact_filter,
@@ -15,6 +14,7 @@ from framewisp.compact import (
     retained_frames,
 )
 from framewisp.console import ConsoleCapture
+from framewisp.finalization import CaptionOptions, render_clip
 from framewisp.layout import ConsolePanel, VideoLayout, video_layout
 
 
@@ -233,7 +233,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
     (tmp_path / "console.jsonl").write_text(
         json.dumps({"time": 104.2, "text": "Result arrived\n"}) + "\n"
     )
-    render_recording(
+    render_clip(
         video,
         input_log=logs[0],
         origin=100,
@@ -324,7 +324,7 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         )
     )
     (tmp_path / "console.jsonl").write_text("")
-    render_recording(
+    render_clip(
         raw_video,
         input_log=logs[0],
         origin=100,

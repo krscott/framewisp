@@ -686,7 +686,7 @@ def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Im
 # R-REC-23
 @pytest.mark.integration
 @pytest.mark.parametrize("override", ["home", "sysroot"])
-def test_caller_font_settings_leave_recording_text_unchanged(
+def test_caller_font_settings_leave_clip_text_unchanged(
     tmp_path: Path, override: str
 ) -> None:
     home = tmp_path / "home"

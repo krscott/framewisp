@@ -8,7 +8,6 @@ from pathlib import Path
 
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions, log_input
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import (
     COMMAND_PROTOCOL,
@@ -20,6 +19,12 @@ from framewisp.connection import (
 )
 from framewisp.desktop import stop_sharing
 from framewisp.errors import SessionError, recorded_app_exit
+from framewisp.finalization import (
+    KEY_CAPTIONS,
+    POINTER_CAPTIONS,
+    CaptionOptions,
+    log_input,
+)
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.layout import (
     CONSOLE_POSITIONS,
@@ -145,7 +150,7 @@ def main() -> None:
         "attach", help="share an existing desktop through its permission dialog"
     )
     teach = commands.add_parser(
-        "teach", help="record a screen-only lesson from your desktop"
+        "teach", help="capture a screen-only lesson from your desktop"
     )
     teach.add_argument("directory", type=Path, help="new directory for the lesson")
     teach.add_argument("--goal", required=True, help="what the agent should learn")
@@ -201,7 +206,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--console",
             action="store_true",
-            help="add a panel of timestamped app stdout/stderr to the recorded video",
+            help="add a console panel of timestamped app stdout/stderr to the clip",
         )
         recording_parser.add_argument(
             "--console-position",
@@ -212,7 +217,7 @@ def main() -> None:
             "--console-size",
             type=positive_integer,
             metavar="PIXELS",
-            help=f"even panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
+            help=f"even console panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
         )
         recording_parser.add_argument(
             "--console-cell-scale",
@@ -233,7 +238,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--no-click-pings",
             action="store_true",
-            help="record without the red ring at each press and the disc that follows drags",
+            help="record without the click ping at each press and the hold disc that follows drags",
         )
     commands.add_parser(
         "record-stop", help="finalize the active clip and keep the app running"
@@ -586,7 +591,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
         result = run_session(
             session_dir,
             app_command,
-            recording=args.record,
+            clip_destination=args.record,
             captions=args.captions,
             click_pings=not args.no_click_pings,
             console=args.console_panel,

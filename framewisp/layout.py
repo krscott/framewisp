@@ -1,4 +1,4 @@
-"""Where the GUI and console panel sit in a recording's video.
+"""Where the GUI and console panel sit in a clip.
 
 Only this module depends on the panel's position. Everything else reads the
 rectangles of a `VideoLayout`, so each overlay and FFmpeg's `pad` agree for every
@@ -104,7 +104,7 @@ class ConsolePanel:
             if self.size < needed:
                 raise ValueError(
                     f"--console-size {self.size} is too narrow for {MIN_TEXT_COLUMNS} text "
-                    f"columns{self.scale_note}; a {self.position} panel needs at least "
+                    f"columns{self.scale_note}; a {self.position} console panel needs at least "
                     f"{needed + needed % 2}."
                 )
         else:
@@ -112,7 +112,7 @@ class ConsolePanel:
             if self.size < needed:
                 raise ValueError(
                     f"--console-size {self.size} is too short for {MIN_TEXT_ROWS} text "
-                    f"rows{self.scale_note}; a {self.position} panel needs at least "
+                    f"rows{self.scale_note}; a {self.position} console panel needs at least "
                     f"{needed + needed % 2}."
                 )
 
@@ -194,7 +194,7 @@ def video_layout(
     panel_width = console.size if beside else width
     panel_height = height if beside else console.size
     smaller = ", a smaller --console-cell-scale," if console.scale_note else ""
-    # Recordings need an even display, so name an even minimum.
+    # Clips need an even display, so name an even minimum.
     needed = min_panel_height(console.cell_scale)
     needed += needed % 2
     if panel_height < needed:
