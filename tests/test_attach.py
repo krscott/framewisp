@@ -767,8 +767,10 @@ def test_other_session_cannot_take_desktop(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "already active" in result.stderr
-    assert "Stopped sharing" not in result.stdout
+    assert (
+        "Another attached or teaching session is starting or running" in result.stderr
+    )
+    assert "still running" not in result.stdout
     assert not (other / "waiting").exists()
     assert attach_process.poll() is None
 
@@ -934,7 +936,12 @@ def test_x11_desktop_share_stops_when_release_guard_dies(
     os.kill(guard, signal.SIGKILL)
     assert attach_process.wait(timeout=5) == 1
     assert attach_process.stderr is not None
-    assert "release helper exited" in attach_process.stderr.read()
+    stderr = attach_process.stderr.read()
+    assert "Stopped sharing: " in stderr and "release helper exited" in stderr
+    assert "Could not share the desktop" not in stderr
+    stdout = attach_process.stdout.read()
+    assert "Your apps and desktop are still running." in stdout
+    assert "Stopped sharing." not in stdout
     # The owner runs the final release the dead guard cannot.
     assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 

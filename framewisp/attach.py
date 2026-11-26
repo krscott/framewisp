@@ -548,6 +548,7 @@ def _share_desktop(
     owns_state = False
     capture_descriptor: int | None = None
     shared = False
+    stopped = "Stopped sharing. Your apps and desktop are still running."
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -790,7 +791,11 @@ def _share_desktop(
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(f"Could not share the desktop: {failure}", file=sys.stderr)
+        if shared:
+            print(f"Stopped sharing: {failure}", file=sys.stderr)
+            stopped = "Your apps and desktop are still running."
+        else:
+            print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
     finally:
         stop.set()
@@ -801,7 +806,5 @@ def _share_desktop(
         for sig, handler in previous.items():
             signal.signal(sig, handler)
         if shared:
-            print(
-                "Stopped sharing. Your apps and desktop are still running.", flush=True
-            )
+            print(stopped, flush=True)
     return int(bool(failures))

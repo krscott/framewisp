@@ -605,7 +605,9 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, kind: SessionKind) 
     elif args.command in {"record-start", "record-stop", "status", "stop"}:
         if desktop and args.command in {"status", "stop"}:
             raise SessionError(
-                "status and stop manage headless sessions. Use framewisp --stop-sharing to stop a desktop share."
+                "status and stop manage headless sessions. The user ends this session with Ctrl+C "
+                "in its terminal; framewisp --stop-sharing is the emergency stop for whichever "
+                "session is sharing."
             )
         result = (
             request_desktop(session_dir, args.command, {})
