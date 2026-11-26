@@ -1188,9 +1188,10 @@ PIDs. Disconnected sessions and metadata copied from another session are rejecte
 These commands manage headless sessions; use `framewisp --detach` for desktop
 attachment. Stop requires a responsive runner; it is not a forced crash-recovery command.
 Session metadata publishes the runner's command protocol version. A session
-command refuses a session that publishes another version than its own, before it
-does anything else (R-CONTROL-3). Stop that runner with Ctrl+C or SIGTERM, or
-with `framewisp --detach` for a desktop attachment, and start the session again.
+command refuses a session that publishes a different version from its own, before
+it sends the session anything (R-CONTROL-3). Stop that runner with Ctrl+C or
+SIGTERM, or with `framewisp --detach` for an attached or teaching session, and
+start the session again.
 
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus

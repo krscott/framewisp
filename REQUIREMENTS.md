@@ -362,5 +362,4 @@ investigate or ask; never invent a rationale.
   command, and sends that session nothing.
 
   Rationale: A runner from another version can accept a request and ignore the
-  part it does not know. One version check covers every feature, where a check
-  per feature has to be remembered for each new one.
+  part it does not know.

@@ -632,7 +632,8 @@ sandboxed commands access. If the environment denies socket access, use its
 normal permission process for both launch and session commands. Connection
 errors can also mean the session exited; check the error and logs first.
 If a command reports that the session was started by another version of
-framewisp, stop the session and start it again with the version you are running.
+framewisp, `stop` is refused too. End the session as the message says, then
+start it again with the version you are running.
 If something goes wrong, ask the user for permission before filing an issue at
 https://github.com/krscott/framewisp/issues. Agree on the report and any logs or
 screenshots to include before submitting it.

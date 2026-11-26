@@ -106,7 +106,7 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
 ## Command protocol
 
 A session command refuses a session whose metadata (`session.json`) publishes
-another `command_protocol` than its own `COMMAND_PROTOCOL` (R-CONTROL-3). Bump
-`COMMAND_PROTOCOL` in `framewisp/connection.py` in any change to the fields or
-meaning of session metadata, a request or a reply. Do not add a flag or a check
-for one feature.
+a `command_protocol` different from its own `COMMAND_PROTOCOL` (R-CONTROL-3).
+Bump `COMMAND_PROTOCOL` in `framewisp/connection.py` in any change to the fields
+or meaning of session metadata, a request or a reply, including a new session
+command. Do not add a flag or a check for one feature.
