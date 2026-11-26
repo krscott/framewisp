@@ -1197,8 +1197,8 @@ fresh session.
 The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
 `recorder.log` when recording. During a
-run, `session.json` records the private runtime directory, Wayland socket name,
-and managed process IDs. Normal shutdown removes the runtime sockets and
+run, `session.json` records the private runtime directory, command socket,
+Wayland socket name, and managed process IDs. Normal shutdown removes the runtime sockets and
 `session.json`, and keeps the logs. Reusing the directory replaces its logs.
 
 The runner stops its managed processes on Ctrl+C, SIGTERM, or app
