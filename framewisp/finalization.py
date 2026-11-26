@@ -1,26 +1,14 @@
-"""The input log, and finalization: overlays, console panel and compaction."""
+"""Finalization: overlays, console panel and compaction drawn onto a clip."""
 
-import fcntl
-import json
-import os
 import re
-import select
 import tempfile
-import time
-import unicodedata
-import uuid
-from collections.abc import Callable, Generator, Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
-from threading import Event, Lock
-from typing import BinaryIO, Literal, ParamSpec, cast, get_args
+from typing import Literal, ParamSpec, cast, get_args
 
 from framewisp.compact import (
-    ActivityEvent,
     activity_events,
     clip_duration,
     compact_filter,
@@ -28,8 +16,7 @@ from framewisp.compact import (
 )
 from framewisp.console import ConsoleCapture, console_frames
 from framewisp.environment import configured_fonts, fixed_fonts
-from framewisp.errors import SessionError
-from framewisp.keys import parse_chord
+from framewisp.input_log import KEY_ACTIONS, InputEvent, caption_text
 from framewisp.layout import CONSOLE_FONT_SIZE, VideoLayout
 from framewisp.pointer_overlays import (
     POINTER_STYLE,
@@ -44,7 +31,6 @@ KeyCaptions = Literal["all", "non-text"]
 PointerCaptions = Literal["all", "modifiers"]
 KEY_CAPTIONS: tuple[KeyCaptions, ...] = get_args(KeyCaptions)
 POINTER_CAPTIONS: tuple[PointerCaptions, ...] = get_args(PointerCaptions)
-KEY_ACTIONS = frozenset({"key", "type"})
 POINTER_ACTIONS = frozenset({"move", "click", "drag", "scroll"})
 
 
@@ -56,246 +42,6 @@ class CaptionOptions:
     @property
     def enabled(self) -> bool:
         return self.pointer is not None or self.key is not None
-
-
-class CaptionCapture:
-    """Coordinate clip boundaries with the worker writing input starts."""
-
-    def __init__(self) -> None:
-        self.lock = Lock()
-        self.texts: dict[str, str] | None = None
-
-    @contextmanager
-    def clip(self, *, enabled: bool) -> Generator[dict[str, str], None, None]:
-        texts: dict[str, str] = {}
-        if enabled:
-            with self.lock:
-                self.texts = texts
-        try:
-            yield texts
-        finally:
-            if enabled:
-                self.stop()
-
-    def stop(self) -> float:
-        with self.lock:
-            self.texts = None
-            return time.monotonic()
-
-
-def retained_parameters(
-    action: str, parameters: dict[str, object]
-) -> dict[str, object]:
-    """Keep shortcuts and action metadata without retaining literal keystrokes."""
-    p = parameters.copy()
-    if action == "type":
-        p.pop("text", None)
-    elif action == "key":
-        chord = cast(str, p.pop("chord"))
-        if p.get("private") is True:
-            return p
-        parsed = parse_chord(chord)
-        assert parsed is not None
-        modifiers, key = parsed
-        # Ctrl/Alt chords describe shortcuts. Shift alone can still type text.
-        if {"ctrl", "alt"}.intersection(modifiers) or not (
-            len(key) == 1 or key == "space"
-        ):
-            p["chord"] = chord
-        else:
-            p["modifier"] = modifiers
-    return p
-
-
-def input_error(action: str, error: BaseException) -> str:
-    """Backend errors can include text, keysyms, or serialized subprocess arguments."""
-    if action not in KEY_ACTIONS:
-        return str(error)
-    if isinstance(error, InterruptedError):
-        return "Input cancelled; caller disconnected or session stopped."
-    if isinstance(error, SessionError) and error.input_message is not None:
-        return f"{type(error).__name__}: {error.input_message}"
-    details = "input details omitted"
-    returncode = getattr(error, "returncode", None)
-    if isinstance(returncode, int):
-        details += f"; exit {returncode}"
-    return f"{type(error).__name__}: {details}"
-
-
-def filter_recorder_output(source: Iterable[bytes], destination: BinaryIO) -> None:
-    """Keep diagnostics and the first frame's clock, discarding protocol chatter."""
-    kept_origin = False
-    protocol = re.compile(
-        rb"^\[[\d:. ]+\]\s+(?:\{[^}]*\}\s+)?(?:(?:->|discarded)\s+)?"
-        rb"\w+[#@]\d+\.\w+\(.*\)\s*$"
-    )
-    for line in source:
-        origin = re.search(rb"zwlr_screencopy_frame_v1[#@]\d+\.ready\(", line)
-        if origin and not kept_origin:
-            kept_origin = True
-        elif protocol.match(line):
-            continue
-        destination.write(line)
-        destination.flush()
-
-
-def recorder_lines(reader: int, stopped: Event) -> Generator[bytes]:
-    """Read complete lines without blocking shutdown on an inherited pipe writer."""
-    pending: bytes = b""
-    while not stopped.is_set():
-        if not select.select([reader], [], [], 0.1)[0]:
-            continue
-        chunk = os.read(reader, 65536)
-        if not chunk:
-            break
-        pending = b"".join((pending, chunk))
-        while b"\n" in pending:
-            line, pending = pending.split(b"\n", 1)
-            yield line + b"\n"
-    if pending:
-        yield pending
-
-
-@contextmanager
-def recorder_output(log: Path) -> Generator[BinaryIO, None, None]:
-    """Drain recorder output continuously so protocol tracing cannot fill the log."""
-    reader, writer = os.pipe()
-    stopped = Event()
-    with (
-        os.fdopen(reader, "rb") as source,
-        os.fdopen(writer, "wb") as sink,
-        log.open("wb") as destination,
-        ThreadPoolExecutor(max_workers=1) as worker,
-    ):
-        task = worker.submit(
-            filter_recorder_output,
-            recorder_lines(source.fileno(), stopped),
-            destination,
-        )
-        failed = False
-        try:
-            yield sink
-        except BaseException:
-            failed = True
-            raise
-        finally:
-            sink.close()
-            try:
-                task.result(timeout=1)
-            except FutureTimeout:
-                stopped.set()
-                task.result()
-                if not failed:
-                    raise RuntimeError(
-                        f"Recorder output did not close within 1s; an inherited log pipe "
-                        f"is still open. Inspect recorder descendants; log: {log}"
-                    ) from None
-
-
-class InputEvent(ActivityEvent):
-    action: str
-    parameters: dict[str, object]
-    returncode: int | None
-    error: str | None
-
-
-@dataclass
-class InputResult:
-    press: Callable[[int, int], None]
-    release: Callable[[int, int], None]
-    returncode: int | None = None
-    error: str | None = None
-
-
-def _discard_unfinished_tail(output: BinaryIO) -> None:
-    """A newline commits a record, even when its JSON is malformed."""
-    end = output.seek(0, os.SEEK_END)
-    if not end:
-        return
-    output.seek(end - 1)
-    if output.read(1) == b"\n":
-        return
-    position = end - 1
-    while position:
-        start = max(0, position - 8192)
-        output.seek(start)
-        newline = output.read(position - start).rfind(b"\n")
-        if newline >= 0:
-            output.truncate(start + newline + 1)
-            return
-        position = start
-    output.truncate(0)
-
-
-@contextmanager
-def log_input(
-    session_dir: Path,
-    action: str,
-    parameters: dict[str, object],
-    *,
-    caption_capture: CaptionCapture | None = None,
-) -> Generator[InputResult, None, None]:
-    """Record command start/end and button presses and releases.
-
-    These are not app acknowledgements.
-    """
-    identifier = uuid.uuid4().hex
-    retained = retained_parameters(action, parameters)
-    captures_literal = (
-        action in KEY_ACTIONS
-        and retained.get("private") is not True
-        and "chord" not in retained
-    )
-    capture = caption_capture if captures_literal else None
-
-    def append(
-        event: Literal["start", "press", "release", "end"], **point: int
-    ) -> None:
-        timestamp = time.monotonic()
-        with (session_dir / "inputs.jsonl").open("a+b") as output:
-            # Attached CLI clients can append concurrently. Closing flushes the
-            # buffered record before releasing this descriptor's file lock.
-            fcntl.flock(output, fcntl.LOCK_EX)
-            _discard_unfinished_tail(output)
-            if event == "start" and capture is not None:
-                # The renderer's shared flock waits for this start to reach
-                # the log. The clip lock never spans file operations.
-                with capture.lock:
-                    timestamp = time.monotonic()
-                    if capture.texts is not None:
-                        capture.texts[identifier] = caption_text(action, parameters)
-            entry = {
-                "id": identifier,
-                "event": event,
-                "time": timestamp,
-                "action": action,
-                "parameters": retained,
-                "returncode": result.returncode,
-                "error": result.error,
-                **point,
-            }
-            record = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
-            output.write(record)
-
-    result = InputResult(
-        press=lambda x, y: append("press", x=x, y=y),
-        release=lambda x, y: append("release", x=x, y=y),
-    )
-    append("start")
-    try:
-        yield result
-    except BaseException as error:
-        # Preserve the exception and traceback while recording why the command ended.
-        returncode = getattr(error, "returncode", None)
-        if isinstance(returncode, int):
-            result.returncode = returncode
-        detail = input_error(action, error)
-        result.error = (
-            f"{type(error).__name__}: {detail}" if action not in KEY_ACTIONS else detail
-        )
-        raise
-    finally:
-        append("end")
 
 
 def capture_origin(log: Path) -> float:
@@ -311,31 +57,6 @@ def capture_origin(log: Path) -> float:
                 high, low, nanoseconds = map(int, match.groups())
                 return (high << 32) + low + nanoseconds / 1_000_000_000
     raise RuntimeError(f"Missing first-frame timestamp. See {log}")
-
-
-def caption_text(action: str, p: dict[str, object]) -> str:
-    modifiers = cast(list[str], p.get("modifier", []))
-    prefix = "".join(f"{str(modifier).title()}+" for modifier in modifiers)
-    if action == "type":
-        text = f"Type: {p['text']}"
-    elif action == "key":
-        text = str(p["chord"])
-    elif action == "drag":
-        text = f"{prefix}{p['button']} drag ({p['x1']}, {p['y1']}) to ({p['x2']}, {p['y2']})"
-    elif action == "click":
-        count = "Double " if p["count"] == 2 else ""
-        text = f"{prefix}{count}{p['button']} click ({p['x']}, {p['y']})"
-    elif action == "scroll":
-        text = f"Scroll {p['direction']} {p['ticks']} at ({p['x']}, {p['y']})"
-    else:
-        text = f"Move ({p['x']}, {p['y']})"
-    # Reserve enough width for CJK glyphs as well as Latin text.
-    width = 0
-    for index, character in enumerate(text):
-        width += 2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
-        if width > 76:
-            return text[:index] + "..."
-    return text
 
 
 @dataclass(frozen=True)
@@ -476,7 +197,7 @@ def keeps_raw_video(render: Callable[P, None]) -> Callable[P, None]:
         except Exception as error:
             raise RuntimeError(
                 f"Finalization failed; raw video remains at {args[0]} without "
-                f"captions, click pings, console panel or cuts. See {kwargs['log']} and "
+                f"overlays, console panel or compaction. See {kwargs['log']} and "
                 f"{kwargs['input_log']}. Cause: {error}"
             ) from error
 

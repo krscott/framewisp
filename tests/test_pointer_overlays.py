@@ -10,12 +10,8 @@ from PIL import Image, ImageChops
 
 from framewisp.compact import clip_duration, retained_frames
 from framewisp.console import ConsoleCapture
-from framewisp.finalization import (
-    CaptionOptions,
-    log_input,
-    render_clip,
-    subtitle_script,
-)
+from framewisp.finalization import CaptionOptions, render_clip, subtitle_script
+from framewisp.input_log import log_input
 from framewisp.layout import (
     ConsolePanel,
     ConsolePosition,

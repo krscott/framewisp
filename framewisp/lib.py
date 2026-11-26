@@ -47,12 +47,11 @@ from framewisp.errors import (
 from framewisp.finalization import (
     KEY_CAPTIONS,
     POINTER_CAPTIONS,
-    CaptionCapture,
     CaptionOptions,
     capture_origin,
-    recorder_output,
     render_clip,
 )
+from framewisp.input_log import CaptionCapture
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 from framewisp.layout import ConsolePanel, VideoLayout, video_layout
@@ -64,6 +63,7 @@ from framewisp.ownership import (
     session_lease,
 )
 from framewisp.processes import OwnedProcess, managed_process, run_owned
+from framewisp.recorder import recorder_output
 
 SWAY_CONFIG = """\
 xwayland disable
