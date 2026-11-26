@@ -518,7 +518,7 @@ def share_desktop(
                 teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
-        print(f"Could not attach: {failure}", file=sys.stderr)
+        print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
 
 
@@ -541,6 +541,7 @@ def _share_desktop(
     state = session_dir / "session.json"
     owns_state = False
     capture_descriptor: int | None = None
+    shared = False
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -694,10 +695,9 @@ def _share_desktop(
                     )
                     server.start()
                     try:
-                        if teaching is None:
-                            portal.open(allow_input=True)
-                        else:
-                            portal.open(allow_input=False)
+                        portal.open(allow_input=teaching is None)
+                        shared = True
+                        if teaching is not None:
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"
@@ -784,7 +784,7 @@ def _share_desktop(
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(f"Could not attach: {failure}", file=sys.stderr)
+        print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
     finally:
         stop.set()
@@ -794,5 +794,8 @@ def _share_desktop(
             os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-        print("Stopped sharing. Your apps and desktop are still running.", flush=True)
+        if shared:
+            print(
+                "Stopped sharing. Your apps and desktop are still running.", flush=True
+            )
     return int(bool(failures))

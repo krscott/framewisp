@@ -610,7 +610,7 @@ and choose "Stop sharing". Its label is "framewisp desktop share is active".
 KDE Plasma and COSMIC's status area support the tray protocol; GNOME needs an
 enabled StatusNotifierItem/AppIndicator extension. The desktop controls placement,
 overflow, panel auto-hide, and visibility, so registration does not guarantee a
-visible icon. If no compatible host is available, the attach terminal reports
+visible indicator. If no compatible host is available, the attach terminal reports
 that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
 The indicator ends with the desktop share's owner; reconnecting needs fresh portal
 approval and creates a new indicator. Keep emergency shortcuts configured. The

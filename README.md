@@ -430,8 +430,8 @@ its menu to end the desktop share. Supported tray hosts are KDE Plasma, COSMIC's
 and GNOME with an enabled StatusNotifierItem/AppIndicator extension (for example,
 AppIndicator and KStatusNotifierItem Support). Framewisp uses its existing Gio
 runtime dependency; no root access or extra indicator library is required.
-The desktop controls icon placement, overflow, panel auto-hide, and visibility.
-Registration does not guarantee a visible icon. If no compatible host is available,
+The desktop controls indicator placement, overflow, panel auto-hide, and visibility.
+Registration does not guarantee a visible sharing indicator. If no compatible host is available,
 the terminal reports that the indicator is unavailable and gives the shortcut
 and Ctrl+C stop methods. Keep the emergency shortcuts configured even with a sharing
 indicator: its menu requires a responsive owner. The indicator disappears when the
