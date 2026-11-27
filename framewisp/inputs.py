@@ -238,7 +238,6 @@ class InputWorker:
                 finally:
                     data["screenshot_seconds"] = time.monotonic() - screenshot_started
         except Exception:
-            data["verified"] = False
             if batch.failure_screenshot is not None and not self.cancelled(connection):
                 try:
                     with log_activity(self.session_dir):

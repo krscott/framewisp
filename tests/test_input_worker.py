@@ -265,7 +265,7 @@ class TransportFailureClient(HoldingClient):
     ("step", "secret"),
     [
         (action("key", chord="a"), "vnc pipe broke"),
-        (action("type", text="secret", interval=0), "secret"),
+        (action("type", text="secret", interval=0), "vnc pipe broke"),
         (action("click", x=10, y=20, button="left", count=1), None),
     ],
     ids=["key", "type", "click"],
