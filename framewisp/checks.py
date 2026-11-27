@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast, get_args
 
 from framewisp import inspection_limits as limits
 from framewisp.errors import SessionError
@@ -98,19 +98,19 @@ class Condition:
 
 
 @dataclass(frozen=True)
-class Observation:
+class Limits:
     max_nodes: int = limits.DEFAULT_MAX_NODES
     max_depth: int = limits.DEFAULT_MAX_DEPTH
     timeout: float = limits.DEFAULT_CHECK_TIMEOUT
 
     @staticmethod
-    def parse(raw: object) -> "Observation":
+    def parse(raw: object) -> "Limits":
         if not isinstance(raw, dict):
-            raise ValueError("observation must be an object.")
+            raise ValueError("limits must be an object.")
         data = cast(dict[str, object], raw)
         if data.keys() - {"max_nodes", "max_depth", "timeout"}:
-            raise ValueError("Unknown observation parameter.")
-        defaults = Observation()
+            raise ValueError("Unknown limits parameter.")
+        defaults = Limits()
         nodes = data.get("max_nodes", defaults.max_nodes)
         depth = data.get("max_depth", defaults.max_depth)
         for name, value, maximum in (
@@ -118,16 +118,16 @@ class Observation:
             ("max_depth", depth, limits.MAX_DEPTH),
         ):
             if type(value) is not int or not 1 <= value <= maximum:
-                raise ValueError(f"observation.{name} must be between 1 and {maximum}.")
+                raise ValueError(f"limits.{name} must be between 1 and {maximum}.")
         timeout = data.get("timeout", defaults.timeout)
         if (
             type(timeout) not in (int, float)
             or not 0 < cast(float, timeout) <= limits.MAX_TIMEOUT
         ):
             raise ValueError(
-                f"observation.timeout must be greater than 0 and at most {limits.MAX_TIMEOUT} seconds."
+                f"limits.timeout must be greater than 0 and at most {limits.MAX_TIMEOUT} seconds."
             )
-        return Observation(cast(int, nodes), cast(int, depth), cast(float, timeout))
+        return Limits(cast(int, nodes), cast(int, depth), cast(float, timeout))
 
     def parameters(self) -> dict[str, object]:
         return {
@@ -137,17 +137,26 @@ class Observation:
         }
 
 
+CheckKind = Literal["assert", "wait", "baseline"]
+CHECK_KINDS: tuple[CheckKind, ...] = get_args(CheckKind)
+
+
 @dataclass(frozen=True)
 class Check:
-    action: str
+    kind: CheckKind
     condition: Condition
     timeout: float
     after: int | None = None
-    observation: Observation = Observation()
+    limits: Limits = Limits()
 
     @staticmethod
-    def parse(action: str, data: dict[str, object]) -> "Check":
-        if data.keys() - {"action", "condition", "timeout", "after", "observation"}:
+    def parse(data: dict[str, object]) -> "Check":
+        kind: CheckKind | None = next(
+            (k for k in CHECK_KINDS if k == data.get("check")), None
+        )
+        if kind is None:
+            raise ValueError(f"check must be one of {', '.join(CHECK_KINDS)}.")
+        if data.keys() - {"check", "condition", "timeout", "after", "limits"}:
             raise ValueError("Unknown check parameter.")
         timeout = data.get("timeout")
         if (
@@ -158,16 +167,14 @@ class Check:
                 f"Checks require a timeout greater than 0 and at most {limits.MAX_TIMEOUT} seconds."
             )
         after = data.get("after")
-        if "after" in data and (
-            type(after) is not int or after < 0 or action != "wait"
-        ):
-            raise ValueError("Only wait accepts after, a prior baseline action index.")
+        if "after" in data and (type(after) is not int or after < 0 or kind != "wait"):
+            raise ValueError("Only wait accepts after, a prior baseline step index.")
         return Check(
-            action,
+            kind,
             Condition.parse(data.get("condition")),
             cast(float, timeout),
             cast(int | None, after),
-            Observation.parse(data.get("observation", {})),
+            Limits.parse(data.get("limits", {})),
         )
 
     @property
@@ -175,7 +182,7 @@ class Check:
         result: dict[str, object] = {
             "condition": self.condition.parameters(),
             "timeout": self.timeout,
-            "observation": self.observation.parameters(),
+            "limits": self.limits.parameters(),
         }
         if self.after is not None:
             result["after"] = self.after
@@ -199,7 +206,7 @@ def perform_check(
         observation=None,
         observations=0,
         verified=False,
-        observation_settings=check.observation.parameters(),
+        limits=check.limits.parameters(),
     )
     reasons: set[str] = set()
 
@@ -210,23 +217,23 @@ def perform_check(
             ("max-depth", "max_depth", limits.MAX_DEPTH),
         ):
             if reason in reasons:
-                current = check.observation.parameters()[field]
+                current = check.limits.parameters()[field]
                 if current == maximum:
                     hints.append(
-                        f"observation.{field} reached its maximum ({maximum}); narrow the app tree or use a screenshot."
+                        f"limits.{field} reached its maximum ({maximum}); narrow the app tree or use a screenshot."
                     )
                 else:
                     hints.append(
-                        f"Raise observation.{field} (currently {current}, maximum {maximum}); a longer check timeout alone cannot fix this traversal cap."
+                        f"Raise limits.{field} (currently {current}, maximum {maximum}); a longer check timeout alone cannot fix this traversal cap."
                     )
         if "timeout" in reasons:
             hints.append(
-                f"Observation time budget exhausted (observation.timeout={check.observation.timeout}, check timeout={check.timeout}); each query is capped by the remaining check deadline."
+                f"Query time budget exhausted (limits.timeout={check.limits.timeout}, check timeout={check.timeout}); each query is capped by the remaining check deadline."
             )
             if "app-unresponsive" in reasons:
                 hints.append("An app call was unresponsive; retry or use a screenshot.")
             elif (
-                check.observation.timeout == limits.MAX_TIMEOUT
+                check.limits.timeout == limits.MAX_TIMEOUT
                 and check.timeout == limits.MAX_TIMEOUT
             ):
                 hints.append(
@@ -234,7 +241,7 @@ def perform_check(
                 )
             else:
                 hints.append(
-                    f"Increase observation.timeout and the check timeout if needed (maximum {limits.MAX_TIMEOUT} seconds each), or use a screenshot."
+                    f"Increase limits.timeout and the check timeout if needed (maximum {limits.MAX_TIMEOUT} seconds each), or use a screenshot."
                 )
         return SessionError(" ".join([message, *hints]))
 
@@ -249,9 +256,9 @@ def perform_check(
                 role=check.condition.role,
                 name=check.condition.name,
                 limit=2,
-                max_nodes=check.observation.max_nodes,
-                max_depth=check.observation.max_depth,
-                timeout=min(check.observation.timeout, remaining),
+                max_nodes=check.limits.max_nodes,
+                max_depth=check.limits.max_depth,
+                timeout=min(check.limits.timeout, remaining),
             ),
             cancelled=cancelled,
         )
@@ -265,17 +272,17 @@ def perform_check(
         matched = check.condition.evaluate(observation)
         if time.monotonic() > deadline:
             raise failure("Condition timed out before a complete matching observation.")
-        if check.action == "baseline":
+        if check.kind == "baseline":
             if matched is not False:
                 raise failure(
                     "Transition baseline requires one complete, readable, nonmatching control."
                 )
-            result["baseline_snapshot_id"] = observation["snapshot_id"]
+            result["baseline_observation_id"] = observation["observation_id"]
             return
         if matched is True:
             result["verified"] = True
             return
-        if check.action == "assert":
+        if check.kind == "assert":
             raise failure(
                 "Assertion failed: condition is false or observation is incomplete."
             )

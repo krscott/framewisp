@@ -276,8 +276,8 @@ def dispatch():
         lesson.source_ended.set()
         active.stop.set()
 attach.dispatch_events = dispatch
-original_capture = attach.capture
-def capture(portal, *args):
+original_save_screenshot = attach.save_screenshot
+def save_screenshot(portal, *args):
     global revoke_at
     if (root / 'empty-screenshot').exists():
         lesson.source_ended.set()
@@ -285,11 +285,11 @@ def capture(portal, *args):
         (root / 'revoke').touch()
         return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
     if not (root / 'slow-screenshot').exists():
-        return original_capture(portal, *args)
+        return original_save_screenshot(portal, *args)
     (root / 'capturing').touch()
     portal.stop.wait(10)
-    raise InterruptedError('capture stopped')
-attach.capture = capture
+    raise InterruptedError('screenshot stopped')
+attach.save_screenshot = save_screenshot
 if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -563,7 +563,7 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
                 request_attached(
                     tmp_path / "session",
                     "screenshot",
-                    {"path": str(tmp_path / "capture.png")},
+                    {"path": str(tmp_path / "screenshot.png")},
                 )
             )
         )
@@ -626,7 +626,9 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
     (tmp_path / "empty-screenshot").touch()
     assert (
         request_attached(
-            tmp_path / "session", "screenshot", {"path": str(tmp_path / "capture.png")}
+            tmp_path / "session",
+            "screenshot",
+            {"path": str(tmp_path / "screenshot.png")},
         )
         == 1
     )
@@ -1020,30 +1022,30 @@ def test_malformed_requests_leave_the_attachment_running(
     os.mkfifo(tmp_path / "fifo")
     requests: list[dict[str, object]] = [
         {},
-        {"action": 1, "parameters": {}},
-        {"action": "key"},
-        {"action": "key", "parameters": []},
-        {"action": "key", "parameters": {}},
-        {"action": "key", "parameters": {"chord": []}},
-        {"action": "key", "parameters": {"chord": "\ud800"}},
-        {"action": "unknown", "parameters": {}},
-        {"action": "record-start", "parameters": {}},
-        {"action": "click", "parameters": {"x": "a", "y": 0}},
-        {"action": "screenshot"},
-        {"action": "screenshot", "parameters": {"path": 1}},
-        {"action": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
-        {"action": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
-        {"action": "screenshot", "parameters": {"path": "x.png"}},
-        {"action": "screenshot", "parameters": {"path": ""}},
-        {"action": "screenshot", "parameters": {"path": str(tmp_path)}},
-        {"action": "screenshot", "parameters": {"path": str(tmp_path / "fifo")}},
-        {"action": "screenshot", "parameters": {"path": "/dev/full"}},
+        {"command": 1, "parameters": {}},
+        {"command": "key"},
+        {"command": "key", "parameters": []},
+        {"command": "key", "parameters": {}},
+        {"command": "key", "parameters": {"chord": []}},
+        {"command": "key", "parameters": {"chord": "\ud800"}},
+        {"command": "unknown", "parameters": {}},
+        {"command": "record-start", "parameters": {}},
+        {"command": "click", "parameters": {"x": "a", "y": 0}},
+        {"command": "screenshot"},
+        {"command": "screenshot", "parameters": {"path": 1}},
+        {"command": "screenshot", "parameters": {"path": "/tmp/nul\0.png"}},
+        {"command": "screenshot", "parameters": {"path": "/tmp/\ud800.png"}},
+        {"command": "screenshot", "parameters": {"path": "x.png"}},
+        {"command": "screenshot", "parameters": {"path": ""}},
+        {"command": "screenshot", "parameters": {"path": str(tmp_path)}},
+        {"command": "screenshot", "parameters": {"path": str(tmp_path / "fifo")}},
+        {"command": "screenshot", "parameters": {"path": "/dev/full"}},
         {
-            "action": "screenshot",
+            "command": "screenshot",
             "parameters": {"path": str(tmp_path / "missing" / "x.png")},
         },
         {
-            "action": "screenshot",
+            "command": "screenshot",
             "parameters": {"path": str(tmp_path / ("a" * 300))},
         },
     ]
@@ -1154,7 +1156,7 @@ def test_truncate_failure_fails_only_that_command(
 
 
 # R-CONTROL-2
-@pytest.mark.parametrize("failure", [None, RuntimeError("capture failed")])
+@pytest.mark.parametrize("failure", [None, RuntimeError("screenshot failed")])
 def test_failure_closing_the_destination_fails_only_that_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception | None
 ) -> None:
@@ -1176,10 +1178,10 @@ def test_failure_closing_the_destination_fails_only_that_command(
     monkeypatch.setattr(attach, "write_png", write)
     monkeypatch.setattr(os, "close", fail_on_output)
     portal = cast(DesktopPortal, CapturePortal())
-    # A fatal capture failure stays fatal, whatever closing the file does.
+    # A fatal screenshot failure stays fatal, whatever closing the file does.
     expected = RuntimeError if failure is not None else ValueError
     with pytest.raises(expected):
-        attach.capture(portal, tmp_path / "x.png", Event(), tmp_path / "log")
+        attach.save_screenshot(portal, tmp_path / "x.png", Event(), tmp_path / "log")
 
 
 # R-CONTROL-2

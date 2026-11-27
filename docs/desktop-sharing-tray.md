@@ -41,11 +41,11 @@ Start `framewisp SESSION attach` yourself in a foreground desktop terminal,
 type ATTACH, and approve sharing for one monitor. Never automate user consent.
 
 1. Confirm the icon, active-sharing label or tooltip, and "Stop sharing" menu.
-2. Choose "Stop sharing" while idle. Verify capture and input requests fail and
+2. Choose "Stop sharing" while idle. Verify screenshot and input requests fail and
    the user's apps stay open and usable.
 3. Reattach with fresh approval. Start a long drag with Ctrl and Shift held,
    then choose "Stop sharing". Confirm cancellation and release of the pointer
-   button and modifiers. Confirm later capture/input requests fail.
+   button and modifiers. Confirm later screenshot/input requests fail.
 4. Reattach separately for ordinary detach, Ctrl+C, terminal closure, owner exit,
    forced owner death, and portal revocation. Confirm each removes the item.
 5. Verify emergency detach during held-modifier input and after suspending the

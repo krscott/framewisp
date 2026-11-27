@@ -136,14 +136,14 @@ first terminal, then create and run this batch:
 check_dir=$(pwd)
 cat > check.json <<'JSON'
 {
-  "actions": [
-    {"action": "wait", "timeout": 5, "condition": {"role": "text box", "field": "text", "equals": ""}},
+  "steps": [
+    {"check": "wait", "timeout": 5, "condition": {"role": "text box", "field": "text", "equals": ""}},
     {"action": "click", "x": 120, "y": 100},
     {"action": "type", "text": "HelloGUI", "interval": 0},
     {"action": "key", "chord": "Return"},
-    {"action": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
+    {"check": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
   ],
-  "failure_capture": {"path": "check-failed.png"}
+  "failure_screenshot": {"path": "check-failed.png"}
 }
 JSON
 framewisp demo batch --file check.json
@@ -161,9 +161,9 @@ only the last `equals` to `"Entered: Wrong"`. The batch exits 1 with
 `status: "failed"`, `verified: false`, `failed_phase: "check"`, and `failed_index: 4`.
 Read `error` and `results[4].observation` for the last accessible result and its
 diagnostics. Open the failure PNG listed in `artifacts`, or read
-`failure_capture_error` if capture failed. Earlier input remains in the app;
+`failure_screenshot_error` if that screenshot failed. Earlier input remains in the app;
 inspect its state before deciding what to do next. The fresh working directory
-ensures the failure capture uses a new filename.
+ensures the failure screenshot uses a new filename.
 
 No success screenshot needs inspection. For visual evidence or an accessibility
 gap, capture a PNG and open it, or have the agent use its image-viewing tool.
@@ -180,7 +180,7 @@ framewisp demo stop
 ```
 
 The primary path uses three CLI invocations (run, batch, stop) and zero images
-inspected. The optional visual fallback adds one capture and image inspection.
+inspected. The optional visual fallback adds one screenshot and image inspection.
 Ctrl+C in the first terminal or SIGTERM to the runner also stops it. An agent can
 keep the foreground runner alive through its shell tool while sending the batch.
 
@@ -232,10 +232,10 @@ session-independent.
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
 | `stop` | Stop the headless session and wait for cleanup and recording finalization. |
 | `recover` | Recover an abandoned headless session after its owner and supervisors exit, preserving logs. |
-| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and capture time. Default delay: 0. |
-| `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
+| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and screenshot time. Default delay: 0. |
+| `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
-| `scroll [--move-duration SECONDS] X Y DIRECTION [--steps N]` | Move to the pane, then send wheel steps; directions: up, down, left, right. |
+| `scroll [--move-duration SECONDS] X Y DIRECTION [--ticks N]` | Move to the pane, then send wheel ticks; directions: up, down, left, right. |
 | `click [--move-duration SECONDS] [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
 | `drag [--move-duration SECONDS] [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Move to the start, then hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
 | `type [--private] [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
@@ -259,7 +259,7 @@ requires both to be even (R-REC-2), because the recorder crops odd dimensions.
 `Session ready:` means the display and input sockets exist and the app's
 process has started. The app may still be drawing its first frame. A screenshot
 captures the current display; it does not wait for the app to finish responding
-to input automatically. Prefer a [bounded check](docs/conditional-checks.md) for
+to input automatically. Prefer a [bounded check](docs/checks.md) for
 a known accessible result. For visual-only changes such as animations, choose
 a delay before capture:
 
@@ -492,7 +492,7 @@ path with gentle acceleration and deceleration over 0.3 seconds by default,
 whether recording is active or not. `--move-duration SECONDS` changes that time;
 `0` moves immediately. Values are finite, nonnegative, and at most 300 seconds (R-INPUT-3).
 The runner tracks the last pointer position it sent across commands and batches,
-including drag steps and cancelled movement. The first pointer action positions
+including drag movement and cancelled movement. The first pointer action positions
 immediately because its starting position is unknown. An unchanged tracked
 position adds no movement delay. Coordinates beyond the display clamp to its
 edge. Movement by apps or other clients does not update this tracking, so the
@@ -538,49 +538,52 @@ without replaying input; restart the session before trying again.
 ## Batch known actions
 
 The primary example above batches input and checks an accessible outcome.
-For a visual-only outcome, save known inputs and an optional final capture as JSON:
+For a visual-only outcome, save known inputs and an optional final screenshot as `visual-check.json`:
 
 ```json
 {
-  "actions": [
+  "steps": [
     {"action": "click", "x": 120, "y": 100},
     {"action": "type", "text": "HelloGUI", "interval": 0},
     {"action": "key", "chord": "Return"}
   ],
-  "capture": {"path": "/tmp/result.png"}
+  "screenshot": {"path": "/tmp/result.png"}
 }
 ```
 
 ```sh
-framewisp demo batch --file check.json
+framewisp demo batch --file visual-check.json
 ```
 
 The headless runner validates the complete sequence, then executes it without
-interleaving other clients' input, including during capture. Defaults match the
+interleaving other clients' input, including during the screenshot. Defaults match the
 individual commands. `interval: 0` removes deliberate typing pauses; explicit
-pacing remains available. An optional capture `delay` waits before the screenshot.
-Relative capture paths use the CLI's working directory. Use a new filename in an
+pacing remains available. An optional screenshot `delay` waits before capturing.
+Relative screenshot paths use the CLI's working directory. Use a new filename in an
 existing directory. The PNG appears only after successful capture.
 
-The CLI prints structured results, timing, completed-action count, and artifact
-paths. This input-and-capture example returns `verified: null`; inspect its PNG
+The CLI prints structured results, timing, completed-step count, and artifact
+paths. This input-and-screenshot example returns `verified: null`; inspect its PNG
 before claiming visual success. On runtime failure it exits with status 1 and reports the zero-based
-`failed_index` and `failed_phase`. Capture failure has a null failed index.
+`failed_index` and `failed_phase`. A failed final `screenshot` has a null failed index;
+a failed `failure_screenshot` keeps the original failure's phase and index and adds
+`failure_screenshot_error`.
 Execution stops at that point; completed inputs cannot be rolled back, and even
-the failed action may have sent partial input. Never replay a failed batch without
+the failed step may have sent partial input. Never replay a failed batch without
 inspecting the app first. Disconnecting cancels queued or remaining work and
 releases held input. A missing reply leaves completion uncertain; consult the app
-and per-action input log. Capture does not prove the app has finished processing.
+and per-action input log. A screenshot does not prove the app has finished processing.
 
 Batches require 1 to 256 steps, at most 16,384 typed characters and 10,000 scroll
-steps, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
-are limited to 1 MiB each. Supported actions are `move`, `click`, `drag`, `scroll`,
-`type`, `key`, `wait`, `assert`, and `baseline`; capture is separate. No attached desktops, loops, lifecycle
+ticks, and at most 300 seconds of requested pacing and check deadlines. File and wire request sizes
+are limited to 1 MiB each. Each step is an action (`"action"`: `move`, `click`,
+`drag`, `scroll`, `type`, or `key`) or a check (`"check"`: `wait`, `assert`, or
+`baseline`); the screenshot is separate. No attached desktops, loops, lifecycle
 commands. Checks support known accessible text, name, value, and checked/enabled
 state. Checks keep conservative traversal defaults. For larger trees, set
-`"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` on each
+`"limits": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` on each
 `baseline`, `wait`, or `assert` step. The step's own `timeout` remains the total
-deadline; partial observations never verify state (R-CHECK-1). See [conditional checks](docs/conditional-checks.md) for waits, assertions,
+deadline; partial observations never verify state (R-CHECK-1). See [checks](docs/checks.md) for waits, assertions,
 transition baselines, and failure screenshots. See the [agent skill](framewisp/SKILL.md#batch-known-actions)
 for the schema and error handling, and [batch measurements](docs/batch-latency.md)
 for complete CLI timings with app acknowledgements.
@@ -604,17 +607,17 @@ combination does.
 
 ## Scrolling
 
-Move the pointer to the pane you want to scroll, then send wheel steps:
+Move the pointer to the pane you want to scroll, then send wheel ticks:
 
 ```sh
-framewisp paint scroll 500 400 down --steps 3
-framewisp paint scroll 500 400 up --steps 3
+framewisp paint scroll 500 400 down --ticks 3
+framewisp paint scroll 500 400 up --ticks 3
 ```
 
-Directions are `up`, `down`, `left`, and `right`. The step count is a positive
-integer (R-INPUT-3) and defaults to one. Steps are discrete wheel ticks, not pixels; the
-widget under the pointer determines how far content moves. Each step presses and
-releases its wheel button. All steps use one connection, with no buttons left
+Directions are `up`, `down`, `left`, and `right`. The tick count is a positive
+integer (R-INPUT-3) and defaults to one. Ticks are discrete, not pixels; the
+widget under the pointer determines how far content moves. Each tick presses and
+releases its wheel button. All ticks use one connection, with no buttons left
 held. There is no smooth scrolling or momentum control.
 
 ## Keyboard shortcuts
@@ -767,7 +770,7 @@ It keeps 1 second before and 2 seconds after, merging overlapping sections. The
 same padding keeps the opening 1 second and closing 2 seconds. `run --compact`
 requires `--record`. Cuts round outward to 30 fps frames.
 
-Batch checks (`baseline`, `wait`, and `assert`) and batch capture delays remain
+Batch checks (`baseline`, `wait`, and `assert`) and batch screenshot delays remain
 in full, including failed and cancelled steps. Their timestamp-only spans are
 stored in `SESSION/activity.jsonl`; conditions and error text are not retained
 there. Inputs that overlap the clip boundary remain for their captured duration.
@@ -1060,7 +1063,7 @@ including the Flatpak wrapper and game, exited on shutdown.
 The game rendered and accepted input despite warnings about the missing D-Bus
 session and settings portal. Other Flatpak apps may need those services. An
 immediate screenshot after clicking Let's Play still showed the welcome screen;
-later captures showed the board. Waiting 0.5 seconds after subsequent moves was
+later screenshots showed the board. Waiting 0.5 seconds after subsequent moves was
 enough for this test; use `screenshot --delay 0.5 PATH` to request that wait.
 This is not a general animation-completion guarantee.
 

@@ -1,4 +1,4 @@
-"""Compare full and region CLI captures of identical frozen demo content."""
+"""Compare full and region CLI screenshots of identical frozen demo content."""
 
 import argparse
 import json
@@ -75,7 +75,7 @@ def main() -> None:
                         ["full", "region"] if index % 2 else ["region", "full"]
                     ):
                         path = directory / (name + ".png")
-                        capture_command = [
+                        screenshot_command = [
                             *command,
                             str(session_dir),
                             "screenshot",
@@ -83,10 +83,10 @@ def main() -> None:
                             "--json",
                         ]
                         if name == "region":
-                            capture_command += ["--region", "40", "80", "400", "160"]
+                            screenshot_command += ["--region", "40", "80", "400", "160"]
                         started = time.perf_counter()
                         result = subprocess.run(
-                            capture_command,
+                            screenshot_command,
                             capture_output=True,
                             text=True,
                             check=True,
@@ -106,7 +106,9 @@ def main() -> None:
                             )
                         if reference is None:
                             reference = pixels
-                        assert pixels == reference, "Content changed between captures"
+                        assert (
+                            pixels == reference
+                        ), "Content changed between screenshots"
                         if index == 0:
                             continue
                         print(
@@ -123,7 +125,7 @@ def main() -> None:
                         )
                         for metric, value in [
                             ("cli_seconds", elapsed),
-                            ("capture_seconds", metadata["capture_seconds"]),
+                            ("screenshot_seconds", metadata["screenshot_seconds"]),
                             ("bytes", path.stat().st_size),
                         ]:
                             samples.setdefault(name + "." + metric, []).append(value)

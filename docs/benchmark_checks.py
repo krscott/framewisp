@@ -1,4 +1,4 @@
-"""Compare fixed delays, client polling, and conditional batches on wait_probe.py."""
+"""Compare fixed delays, client polling, and batch checks on wait_probe.py."""
 
 import argparse
 import json
@@ -60,7 +60,7 @@ def main() -> None:
 
             plan = root / "plan.json"
             for index in range(args.samples):
-                for mode in ("fixed_sleep", "client_polling", "conditional"):
+                for mode in ("fixed_sleep", "client_polling", "batch_check"):
                     text = f"sample{index}{mode}"
                     condition = {
                         "role": "label",
@@ -68,22 +68,22 @@ def main() -> None:
                         "field": "text",
                         "equals": text,
                     }
-                    actions: list[dict[str, object]] = [
+                    steps: list[dict[str, object]] = [
                         {"action": "key", "chord": "Ctrl+a"},
                         {"action": "type", "text": text, "interval": 0},
                         {"action": "key", "chord": "Return"},
                     ]
-                    if mode == "conditional":
-                        actions.append(
-                            {"action": "wait", "timeout": 5, "condition": condition}
+                    if mode == "batch_check":
+                        steps.append(
+                            {"check": "wait", "timeout": 5, "condition": condition}
                         )
-                    plan.write_text(json.dumps({"actions": actions}))
+                    plan.write_text(json.dumps({"steps": steps}))
                     started = time.monotonic()
                     responses = [run("batch", "--file", str(plan))]
                     wait_started = time.monotonic()
                     calls = 1
                     retries = 0
-                    if mode == "conditional":
+                    if mode == "batch_check":
                         success = responses[0]["verified"] is True
                         local_wait = responses[0]["results"][-1]["duration_seconds"]
                     else:
@@ -127,7 +127,7 @@ def main() -> None:
             runner.terminate()
             runner.wait(timeout=15)
     summary = {}
-    for mode in ("fixed_sleep", "client_polling", "conditional"):
+    for mode in ("fixed_sleep", "client_polling", "batch_check"):
         samples = [row for row in measurements if row["mode"] == mode]
         summary[mode] = {
             "successes": sum(bool(row["success"]) for row in samples),

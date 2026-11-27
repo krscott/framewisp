@@ -96,11 +96,11 @@ def main() -> None:
                         for index in range(args.samples + 1):
                             run(session_dir, "click", "700", "513")
                             offset = app_log.stat().st_size
-                            capture = Path(temporary) / f"{name}-{index}.png"
+                            screenshot_path = Path(temporary) / f"{name}-{index}.png"
                             plan.write_text(
                                 json.dumps(
                                     {
-                                        "actions": [
+                                        "steps": [
                                             {"action": "click", "x": 120, "y": 100},
                                             {
                                                 "action": "type",
@@ -109,7 +109,7 @@ def main() -> None:
                                             },
                                             {"action": "key", "chord": "Return"},
                                         ],
-                                        "capture": {"path": str(capture)},
+                                        "screenshot": {"path": str(screenshot_path)},
                                     }
                                 )
                             )
@@ -120,7 +120,7 @@ def main() -> None:
                                 run(session_dir, "click", "120", "100")
                                 run(session_dir, "type", "--interval", "0", "HelloGUI")
                                 run(session_dir, "key", "Return")
-                                run(session_dir, "screenshot", str(capture))
+                                run(session_dir, "screenshot", str(screenshot_path))
                             deadline = time.monotonic() + 2
                             while (
                                 b"Entered: HelloGUI\n"

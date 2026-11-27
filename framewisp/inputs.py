@@ -14,7 +14,7 @@ from threading import Event, Thread
 from typing import Protocol, cast
 
 from framewisp.actions import InputAction
-from framewisp.batch import Batch
+from framewisp.batch import Batch, step_name
 from framewisp.captions import KEY_ACTIONS, CaptionCapture, input_error, log_input
 from framewisp.checks import Check, perform_check
 from framewisp.compact import log_activity
@@ -48,7 +48,7 @@ class InputWorker:
         *,
         x11: bool,
         size: tuple[int, int],
-        capture: Callable[[Path, Callable[[], bool]], int],
+        screenshot: Callable[[Path, Callable[[], bool]], int],
         caption_capture: CaptionCapture | None = None,
     ):
         self.session_dir = session_dir
@@ -58,16 +58,16 @@ class InputWorker:
         self.size = size
         self.pointer_primed = False
         self.pointer_position: tuple[int, int] | None = None
-        self.capture = capture
+        self.screenshot = screenshot
         self.caption_capture = caption_capture
         self.failure: str | None = None
         self.queue: Queue[tuple[socket.socket, InputAction | Batch]] = Queue(maxsize=32)
         self.thread = Thread(target=self.run, name="headless-input")
         self.thread.start()
 
-    def submit(self, connection: socket.socket, action: InputAction | Batch) -> bool:
+    def submit(self, connection: socket.socket, request: InputAction | Batch) -> bool:
         try:
-            self.queue.put_nowait((connection, action))
+            self.queue.put_nowait((connection, request))
             return True
         except Full:
             return False
@@ -81,23 +81,23 @@ class InputWorker:
     def run(self) -> None:
         while not self.stop.is_set() or not self.queue.empty():
             try:
-                connection, action = self.queue.get(timeout=0.05)
+                connection, request = self.queue.get(timeout=0.05)
             except Empty:
                 continue
             with connection:
                 error = None
                 data: dict[str, object] | None = (
-                    {} if isinstance(action, Batch) else None
+                    {} if isinstance(request, Batch) else None
                 )
                 try:
-                    if isinstance(action, Batch):
+                    if isinstance(request, Batch):
                         assert data is not None
-                        self.perform_batch(connection, action, data)
+                        self.perform_batch(connection, request, data)
                     else:
-                        self.perform(connection, action)
+                        self.perform(connection, request)
                 except (InterruptedError, SessionError) as failure:
                     error = input_error(
-                        "batch" if isinstance(action, Batch) else action.action,
+                        "batch" if isinstance(request, Batch) else request.action,
                         failure,
                     )
                 except Exception as failure:
@@ -106,7 +106,7 @@ class InputWorker:
                     self.stop.set()
                     self.client.disconnect()
                     detail = input_error(
-                        "batch" if isinstance(action, Batch) else action.action,
+                        "batch" if isinstance(request, Batch) else request.action,
                         failure,
                     )
                     traceback.print_exception(
@@ -150,60 +150,64 @@ class InputWorker:
         data.update(
             results=results,
             artifacts=artifacts,
-            completed_actions=0,
+            completed_steps=0,
             failed_index=None,
             failed_phase=None,
-            capture_seconds=None,
+            screenshot_seconds=None,
             verified=None,
-            failure_capture_error=None,
+            failure_screenshot_error=None,
         )
         try:
             self.wait(connection)
             if self.x11:
                 # Check at dequeue time so mappings allocated by earlier jobs count.
                 characters = mapped_characters(self.session_dir)
-                for index, action in enumerate(batch.actions):
-                    if action.action == "type":
+                for index, step in enumerate(batch.steps):
+                    if isinstance(step, InputAction) and step.action == "type":
                         characters.update(
                             char
-                            for char in cast(str, action.parameters["text"])
+                            for char in cast(str, step.parameters["text"])
                             if not char.isascii()
                         )
                         if len(characters) > MAX_UNICODE_CHARACTERS:
                             data.update(failed_index=index, failed_phase="validation")
                             raise SessionError(UNICODE_CAPACITY_ERROR)
-            for index, action in enumerate(batch.actions):
-                action_started = time.monotonic()
+            for index, step in enumerate(batch.steps):
+                step_started = time.monotonic()
                 result: dict[str, object] = {
                     "index": index,
-                    "action": action.action,
+                    **step_name(step),
                     "status": "completed",
                     "error": None,
                 }
                 try:
-                    if isinstance(action, Check):
-                        if action.after is not None:
-                            result["baseline_snapshot_id"] = results[action.after][
-                                "baseline_snapshot_id"
+                    if isinstance(step, Check):
+                        if step.after is not None:
+                            result["baseline_observation_id"] = results[step.after][
+                                "baseline_observation_id"
                             ]
                         with log_activity(self.session_dir):
                             perform_check(
                                 self.session_dir,
-                                action,
+                                step,
                                 result,
                                 cancelled=lambda: self.cancelled(connection),
                                 wait=lambda seconds: self.wait(connection, seconds),
                             )
                     else:
-                        self.perform(connection, action)
+                        self.perform(connection, step)
                 except Exception as error:
-                    detail = input_error(action.action, error)
+                    detail = (
+                        input_error(step.action, error)
+                        if isinstance(step, InputAction)
+                        else str(error)
+                    )
                     result.update(status="failed", error=detail)
                     data.update(
                         failed_index=index,
-                        failed_phase="check" if isinstance(action, Check) else "action",
+                        failed_phase="check" if isinstance(step, Check) else "action",
                     )
-                    if action.action in KEY_ACTIONS:
+                    if isinstance(step, InputAction) and step.action in KEY_ACTIONS:
                         if isinstance(error, InterruptedError):
                             raise InterruptedError(detail) from None
                         if isinstance(error, SessionError):
@@ -213,41 +217,41 @@ class InputWorker:
                         raise RuntimeError(detail) from None
                     raise
                 finally:
-                    result["duration_seconds"] = time.monotonic() - action_started
+                    result["duration_seconds"] = time.monotonic() - step_started
                     results.append(result)
-                data["completed_actions"] = index + 1
+                data["completed_steps"] = index + 1
             if any(
-                isinstance(action, Check) and action.action != "baseline"
-                for action in batch.actions
+                isinstance(step, Check) and step.kind != "baseline"
+                for step in batch.steps
             ):
                 data["verified"] = True
-            if batch.capture is not None:
-                capture_started = time.monotonic()
+            if batch.screenshot is not None:
+                screenshot_started = time.monotonic()
                 try:
                     with log_activity(self.session_dir):
-                        self.wait(connection, batch.capture.delay)
-                        self.capture(
-                            batch.capture.path, lambda: self.cancelled(connection)
+                        self.wait(connection, batch.screenshot.delay)
+                        self.screenshot(
+                            batch.screenshot.path, lambda: self.cancelled(connection)
                         )
-                    artifacts.append(str(batch.capture.path))
+                    artifacts.append(str(batch.screenshot.path))
                 except Exception:
-                    data["failed_phase"] = "capture"
+                    data["failed_phase"] = "screenshot"
                     raise
                 finally:
-                    data["capture_seconds"] = time.monotonic() - capture_started
+                    data["screenshot_seconds"] = time.monotonic() - screenshot_started
         except (SessionError, InterruptedError):
             data["verified"] = False
-            if batch.failure_capture is not None and not self.cancelled(connection):
+            if batch.failure_screenshot is not None and not self.cancelled(connection):
                 try:
                     with log_activity(self.session_dir):
-                        self.wait(connection, batch.failure_capture.delay)
-                        self.capture(
-                            batch.failure_capture.path,
+                        self.wait(connection, batch.failure_screenshot.delay)
+                        self.screenshot(
+                            batch.failure_screenshot.path,
                             lambda: self.cancelled(connection),
                         )
-                    artifacts.append(str(batch.failure_capture.path))
+                    artifacts.append(str(batch.failure_screenshot.path))
                 except (SessionError, InterruptedError, OSError) as error:
-                    data["failure_capture_error"] = str(error)
+                    data["failure_screenshot_error"] = str(error)
             raise
         finally:
             data["duration_seconds"] = time.monotonic() - started
@@ -349,7 +353,7 @@ class InputWorker:
                     ping()
                 elif action.action == "scroll":
                     number = SCROLL_BUTTONS[cast(str, p["direction"])]
-                    for _ in range(cast(int, p["steps"])):
+                    for _ in range(cast(int, p["ticks"])):
                         button(number, True)
                         button(number, False)
                 elif action.action == "type":

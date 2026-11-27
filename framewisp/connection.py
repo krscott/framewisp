@@ -14,7 +14,7 @@ from framewisp.batch import MAX_REQUEST_BYTES
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 2
+COMMAND_PROTOCOL = 3
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -24,7 +24,7 @@ Request = TypeVar("Request")
 
 
 def request_attached(
-    session_dir: Path, action: str, parameters: dict[str, object]
+    session_dir: Path, command: str, parameters: dict[str, object]
 ) -> int:
     try:
         state = json.loads((session_dir / "session.json").read_text())
@@ -38,7 +38,7 @@ def request_attached(
                 (
                     json.dumps(
                         {
-                            "action": action,
+                            "command": command,
                             "parameters": parameters,
                             "attachment": state["attachment"],
                         }
@@ -107,7 +107,7 @@ def read_line(connection: socket.socket) -> bytes:
     return bytes(data[:end])
 
 
-def parse_command(line: bytes) -> dict[str, object]:
+def parse_request_fields(line: bytes) -> dict[str, object]:
     try:
         raw: object = json.loads(line)
     except (ValueError, RecursionError) as failure:
@@ -127,7 +127,7 @@ def resolved_request_path(path: Path, field: str) -> Path:
         raise ValueError(f"{field} is not a usable path: {failure}") from None
 
 
-def capture_path_error(destination: Path, recording: Path | None) -> str | None:
+def screenshot_path_error(destination: Path, recording: Path | None) -> str | None:
     """Refuse the active recording's destination, which is no file until published.
 
     The check is not atomic with the write: a file that lands first stops the

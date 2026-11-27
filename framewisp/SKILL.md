@@ -129,11 +129,11 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `run [--x11] [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start an app on a private display and stay in the foreground. Default display: Wayland, 1280x720. `--x11` uses private Xwayland. `--real-env` gives the app the caller's real environment (see below). Width and height must be positive integers. `--record` starts an MP4 before launching the app. `--console`, the caption flags, `--compact`, and `--no-click-pings` require `--record`; the `--console-*` options require `--console`. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Save a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Crops and JSON metadata are headless-only. Default delay: 0. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
-| `batch --file FILE` | Execute a JSON sequence in a headless session, optionally capture a PNG, and print ordered results and timing. |
+| `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move X Y [--move-duration SECONDS]` | Move without pressing a button; useful for hover tooltips. |
 | `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
 | `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration while holding the button: 0.4 seconds. |
-| `scroll X Y DIRECTION [--steps N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
+| `scroll X Y DIRECTION [--ticks N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--private] [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key [--private] CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
@@ -152,7 +152,7 @@ Use full screenshots for discovery or when surrounding context matters. When
 the target region is known, use `screenshot --region 100 80 400 160 --json /tmp/crop.png`.
 The region must fit inside the display and have positive dimensions. JSON reports
 `path`, crop `x`, `y`, `width`, `height`, `display_width`, `display_height`, and
-`capture_seconds` (excluding delay and CLI startup). Add the crop origin to local
+`screenshot_seconds` (excluding delay and CLI startup). Add the crop origin to local
 image coordinates before sending input: local `(20, 30)` in this crop means
 `click 120 110`. Cropping does not resize pixels or change input coordinates.
 Inspect the screenshot to choose targets. Keyboard input goes to the focused
@@ -163,7 +163,7 @@ Headless `move`, `click`, `scroll`, and positioning at a drag's start accept
 `--move-duration SECONDS` (default 0.3, maximum 300; finite and nonnegative).
 They follow an eased straight path from the last position Framewisp sent,
 including when recording is off. The worker tracks every move across commands
-and batches, including drag steps and cancelled movement. The first pointer
+and batches, including drag movement and cancelled movement. The first pointer
 action positions immediately because its start is unknown. Use `0` for
 immediate positioning. An unchanged tracked position adds no movement delay.
 Coordinates beyond the display clamp to its edge.
@@ -193,7 +193,7 @@ Names are case-insensitive; `A` does not imply Shift. Use `Shift+a` for that cho
 or `key Tab` separately. X11 sessions support 128 distinct non-ASCII characters
 across text commands; start a fresh session if that limit is reached.
 
-Timing values are finite seconds, including fractions. Input/capture delays may
+Timing values are finite seconds, including fractions. Input/screenshot delays may
 be zero; inspection requires a positive timeout. Input completion does not verify
 the app's response. Prefer a bounded `wait` for a known accessible result. Use
 `screenshot --delay 0.5 PATH` when intentionally allowing time for visual changes
@@ -260,14 +260,14 @@ sending input; the last checks its resulting label:
 check_dir=$(pwd)
 cat > check.json <<'JSON'
 {
-  "actions": [
-    {"action": "wait", "timeout": 5, "condition": {"role": "text box", "field": "text", "equals": ""}},
+  "steps": [
+    {"check": "wait", "timeout": 5, "condition": {"role": "text box", "field": "text", "equals": ""}},
     {"action": "click", "x": 120, "y": 100},
     {"action": "type", "text": "HelloGUI", "interval": 0},
     {"action": "key", "chord": "Return"},
-    {"action": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
+    {"check": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
   ],
-  "failure_capture": {"path": "check-failed.png"}
+  "failure_screenshot": {"path": "check-failed.png"}
 }
 JSON
 framewisp demo batch --file check.json
@@ -283,8 +283,8 @@ changing only the last `equals` to `"Entered: Wrong"`. The batch exits 1 with
 `verified: false`, `status: "failed"`, `failed_phase: "check"`, and `failed_index: 4`.
 Read `error` and `results[4].observation` (including its `status`, matches, reasons,
 hints, and errors). Inspect the failure PNG at the absolute path in `artifacts`;
-if capture failed, read `failure_capture_error`. The fresh working directory
-keeps the optional capture filename unused. Do not blindly replay completed input.
+if that screenshot failed, read `failure_screenshot_error`. The fresh working directory
+keeps the optional screenshot filename unused. Do not blindly replay completed input.
 
 For an unfamiliar app, use `inspect` to find a control. When `display_bounds` is
 present, its center can be passed directly to `click` or other pointer commands:
@@ -310,7 +310,7 @@ framewisp demo stop
 ```
 
 The successful primary path uses three CLI invocations: run, batch, stop, with
-zero images inspected. The optional visual fallback adds one capture and image
+zero images inspected. The optional visual fallback adds one screenshot and image
 inspection. Use `status` if session health is uncertain. Ctrl+C or SIGTERM to the
 runner also stops it. `status` and `stop` require a connected headless session;
 `--detach` is for desktop attachments only.
@@ -361,7 +361,7 @@ If the app exits, the runner and later commands report its exit code or signal
 and the path to `app.log`. Start a new `run` to retry.
 
 Check all matches. A button and its child label can share a name; add a role
-filter instead of choosing the first. IDs are scoped to that snapshot and cannot
+filter instead of choosing the first. IDs are scoped to that observation and cannot
 be reused. Re-query after input. Reads are fresh but not atomic. State flags and
 listed actions are what the app advertises, not proof that an action will succeed.
 GTK may expose `sensitive` without `enabled` for an enabled control.
@@ -377,61 +377,63 @@ unavailable on attached desktops and does not supply semantic clicks.
 ## Batch known actions
 
 The primary example batches inputs and accessible checks. For a visual-only
-outcome, batch the known inputs and an optional final capture instead.
+outcome, batch the known inputs and an optional final screenshot instead.
 Save this JSON to `visual-check.json`, then run
 `framewisp demo batch --file visual-check.json`:
 
 ```json
 {
-  "actions": [
+  "steps": [
     {"action": "click", "x": 120, "y": 100},
     {"action": "type", "text": "HelloGUI", "interval": 0},
     {"action": "key", "chord": "Return"}
   ],
-  "capture": {"path": "/tmp/result.png", "delay": 0.1}
+  "screenshot": {"path": "/tmp/result.png", "delay": 0.1}
 }
 ```
 
-Batch supports `move`, `click`, `drag`, `scroll`, `type`, `key`, and the checks
-described below on headless
+Each step is an action, named by `"action"` (`move`, `click`, `drag`, `scroll`,
+`type`, or `key`), or a check, named by `"check"` and described below. Batches run on headless
 Wayland and Xwayland. Parameters use the CLI names without `--`; `modifier` is
 an array of lowercase names, such as `["ctrl", "shift"]`. Defaults match the
-individual commands. Set `interval: 0` for unpaced checks; omit it for the usual
-0.08 seconds between characters. Explicit pacing and capture delay stay in effect.
+individual commands. Set `interval: 0` for unpaced typing; omit it for the usual
+0.08 seconds between characters. Explicit pacing and screenshot delay stay in effect.
 
 The whole request is validated before input. Unknown fields are errors. Limits
-per batch are 256 actions, 16,384 typed characters, 10,000 scroll steps, and 300
-seconds of requested pointer/typing/drag/capture pacing and check deadlines. The file and serialized request
-must each fit in 1 MiB. At least one action is required. Capture is optional;
-its delay defaults to zero. Relative capture paths use the CLI's working directory.
+per batch are 256 steps, 16,384 typed characters, 10,000 scroll ticks, and 300
+seconds of requested pointer/typing/drag/screenshot pacing and check deadlines. The file and serialized request
+must each fit in 1 MiB. At least one step is required. The screenshot is optional;
+its delay defaults to zero. Relative screenshot paths use the CLI's working directory.
 Use a new PNG filename in an existing directory; session files and existing files
 are rejected. Recording, lifecycle commands, and loops cannot go inside a batch. Attached desktops do not support batches.
 
-The runner serializes the whole batch, including capture, with other input jobs.
-JSON on stdout includes `status`, `results` (zero-based index, action, status,
-error, duration), `completed_actions`, `failed_index`, `failed_phase`,
-`duration_seconds`, `capture_seconds`, `artifacts` (absolute PNG paths), and `error`.
-Per-action durations use the key `duration_seconds`. Times exclude queue wait;
-capture time includes its requested delay. Exit code is 0 for completion, 1 for
+The runner serializes the whole batch, including the screenshot, with other input jobs.
+JSON on stdout includes `status`, `results` (zero-based index, `action` or `check`,
+status, error, duration), `completed_steps`, `failed_index`, `failed_phase`,
+`duration_seconds`, `screenshot_seconds`, `artifacts` (absolute PNG paths), and `error`.
+Per-step durations use the key `duration_seconds`. Times exclude queue wait;
+screenshot time includes its requested delay. Exit code is 0 for completion, 1 for
 runtime/session failure, or 2 for invalid CLI/file input. Rejection before execution
 may report only an error on stderr, without result JSON.
 
 Execution stops at the first runtime failure. Inspect completed results and
-`failed_index`; the failed action may itself have sent some input. Capture failure
-has `failed_phase: "capture"` and a null failed index. No action is rolled back or
+`failed_index`; the failed step may itself have sent some input. A failed final
+`screenshot` has `failed_phase: "screenshot"` and a null failed index. A failed
+`failure_screenshot` keeps the original failure's phase and index and adds
+`failure_screenshot_error`. No step is rolled back or
 retried. If the connection dies before a reply, the outcome may be partial: inspect
 the app and `inputs.jsonl` before deciding what to do next. Disconnecting cancels
 queued work or the remaining running batch and releases held keys/buttons. Session
 stop does the same. The completed inputs remain in the app.
 
-A successful capture is an artifact, not proof that the app finished processing.
+A successful screenshot is an artifact, not proof that the app finished processing.
 Inspect it or check an app-specific acknowledgement before claiming success.
 Each input retains its own log records and any recording caption its clip selects.
 
 Before an X11 batch sends input, the worker checks all its Unicode characters
 against the session's 128-character mapping limit, including mappings allocated
-by earlier queued jobs. A capacity failure returns no action results, zero completed
-actions, `failed_phase: "validation"`, and the index that exceeds the limit.
+by earlier queued jobs. A capacity failure returns no step results, zero completed
+steps, `failed_phase: "validation"`, and the index that exceeds the limit.
 
 ## Verify known outcomes
 
@@ -441,12 +443,12 @@ observation. Both require an explicit timeout greater than 0 and at most 10 seco
 
 ```json
 {
-  "actions": [
+  "steps": [
     {"action": "type", "text": "HelloGUI", "interval": 0},
     {"action": "key", "chord": "Return"},
-    {"action": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
+    {"check": "wait", "timeout": 5, "condition": {"role": "label", "name": "Entered:", "field": "text", "equals": "Entered: HelloGUI"}}
   ],
-  "failure_capture": {"path": "/tmp/failed.png"}
+  "failure_screenshot": {"path": "/tmp/failed.png"}
 }
 ```
 
@@ -458,33 +460,33 @@ a checkable control; indeterminate is unknown. `enabled` compares a boolean usin
 either AT-SPI sensitive or enabled. This rule covers the demonstrated GTK/Qt
 controls, not every toolkit. Missing or stale objects, unsupported apps, partial
 observations, and timeouts cannot satisfy a check. There is no absence assertion.
-Wait retries incomplete/missing observations within its deadline; assert does not.
-By default, queries use depth 8, 256 nodes, two matches, and at most two seconds per observation.
+Wait queries again after an incomplete observation or a missing match until its deadline; assert does not.
+By default, queries use depth 8, 256 nodes, two matches, and at most two seconds per query.
 For larger/deeper trees, add
-`"observation": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` to each
+`"limits": {"max_nodes": 1024, "max_depth": 16, "timeout": 5}` to each
 needed `baseline`, `wait`, or `assert` step. Node/depth limits must be integers
-in 1..4096 and 1..64 respectively; observation timeout must be greater than 0
+in 1..4096 and 1..64 respectively; `limits.timeout` must be greater than 0
 and at most 10 seconds. Omitted fields keep their defaults. Each query gets the
-smaller of its observation timeout and the remaining step deadline. Increase
-both time budgets when needed. Structural cap errors name `observation.max_nodes`
-or `observation.max_depth`; a longer wait alone cannot fix those caps. Partial
+smaller of `limits.timeout` and the remaining step deadline. Increase
+both time budgets when needed. Structural cap errors name `limits.max_nodes`
+or `limits.max_depth`; a longer wait alone cannot fix those caps. Partial
 observations still fail. At hard maxima or for unresponsive apps, use screenshots.
 
 A state check may pass immediately on an existing value. To require a transition,
-put `{"action": "baseline", "timeout": 2, "condition": ...}` before the input,
+put `{"check": "baseline", "timeout": 2, "condition": ...}` before the input,
 then add `"after": INDEX` to the wait, referencing that baseline's zero-based index.
 Use the identical condition in both. The baseline must read a unique nonmatching
-value. Observation settings may differ between baseline and wait. The baseline
-must be complete, or the batch stops before input. The wait resolves the selector afresh,
-allowing a replacement control. Snapshot IDs are diagnostic, not reusable handles.
+value. Limits may differ between baseline and wait. A failed or
+incomplete baseline stops the steps after it. The wait resolves the selector afresh,
+allowing a replacement control. Observation IDs are diagnostic, not reusable handles.
 This proves observed nonmatching then matching state, not input causation.
 
 Read `verified` as well as `status`. True means all requested checks passed; null
 means no wait/assert verified app state. Failure stops the batch and sets verified
 to false. Each check returns its condition, last observation, observation count,
-configured `observation_settings`, and duration. `failed_phase: "check"` identifies failed checks. Optional
-`failure_capture` uses capture's path/delay schema, runs only on failure, and is
-skipped on cancellation. Its errors appear separately in `failure_capture_error`.
+configured `limits`, and duration. `failed_phase: "check"` identifies failed checks. Optional
+`failure_screenshot` uses `screenshot`'s path/delay schema, runs only on failure, and is
+skipped on cancellation. Its errors appear separately in `failure_screenshot_error`.
 Checks retain per-input results and do not create captions. Keep screenshots for
 visual-only state and accessibility gaps.
 
@@ -535,12 +537,12 @@ clip has nothing to show, so record it again.
 Use `run --record FILE --compact` or `record-start --compact FILE` to trim gaps
 between commands during finalization. Each input keeps its full duration plus
 1 second before and 2 seconds after; overlapping sections merge. The opening
-1 second and closing 2 seconds also remain. Batch checks and capture delays remain in full, including failed/cancelled steps.
+1 second and closing 2 seconds also remain. Batch checks and screenshot delays remain in full, including failed/cancelled steps.
 External sleeps can be cut. Delayed app responses, animations, and output in
 removed gaps can be omitted; use a batch wait or leave compaction off when those
 matter. Captions, click pings, and console output stay aligned with retained GUI
 frames; console timestamps keep original clip time. Compaction is per clip, works with captions and `--console`, and leaves logs unchanged.
-Timestamp-only check/capture spans live in `SESSION/activity.jsonl` without
+Timestamp-only check and screenshot spans live in `SESSION/activity.jsonl` without
 conditions or error text. The summary reports the compacted video's duration.
 
 Use `run --record FILE --console` or `record-start --console FILE` to add a

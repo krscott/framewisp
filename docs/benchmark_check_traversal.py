@@ -85,21 +85,14 @@ def main() -> None:
             plan = root / "plan.json"
             for sample in range(args.samples):
                 for mode in ("default", "explicit"):
-                    for action in ("inspect", "baseline", "wait", "assert"):
-                        request: dict[str, object] = {
-                            "action": action,
-                            "timeout": 5,
-                            "condition": condition,
+                    for kind in ("inspect", "baseline", "wait", "assert"):
+                        measurement: dict[str, object] = {
+                            "sample": sample,
+                            "mode": mode,
+                            "kind": kind,
                         }
-                        if action == "baseline":
-                            request["condition"] = condition | {
-                                "equals": "Never" if args.app == "gtk" else False
-                            }
-                        if mode == "explicit":
-                            request["observation"] = budgets
-                        plan.write_text(json.dumps({"actions": [request]}))
-                        arguments = (
-                            [
+                        if kind == "inspect":
+                            arguments = [
                                 "inspect",
                                 "--json",
                                 *(
@@ -122,9 +115,22 @@ def main() -> None:
                                     else []
                                 ),
                             ]
-                            if action == "inspect"
-                            else ["batch", "--file", str(plan)]
-                        )
+                        else:
+                            request: dict[str, object] = {
+                                "check": kind,
+                                "timeout": 5,
+                                "condition": condition,
+                            }
+                            if kind == "baseline":
+                                request["condition"] = condition | {
+                                    "equals": "Never" if args.app == "gtk" else False
+                                }
+                            if mode == "explicit":
+                                request["limits"] = budgets
+                            payload = {"steps": [request]}
+                            plan.write_text(json.dumps(payload))
+                            measurement["request"] = payload
+                            arguments = ["batch", "--file", str(plan)]
                         started = time.monotonic()
                         response = subprocess.run(
                             [*command, *arguments],
@@ -137,12 +143,9 @@ def main() -> None:
                             raise RuntimeError(response.stderr)
                         result = cast(dict[str, Any], json.loads(response.stdout))
                         measurements.append(
-                            {
-                                "sample": sample,
-                                "mode": mode,
-                                "action": action,
+                            measurement
+                            | {
                                 "cli_wall_seconds": wall,
-                                "request": request,
                                 "exit_code": response.returncode,
                                 "stderr": response.stderr,
                                 "arguments": arguments,
@@ -159,13 +162,13 @@ def main() -> None:
             }
     summary: dict[str, object] = {}
     for mode in ("default", "explicit"):
-        for action in ("inspect", "baseline", "wait", "assert"):
+        for kind in ("inspect", "baseline", "wait", "assert"):
             rows = [
                 row
                 for row in measurements
-                if row["mode"] == mode and row["action"] == action
+                if row["mode"] == mode and row["kind"] == kind
             ]
-            summary[f"{mode}_{action}"] = {
+            summary[f"{mode}_{kind}"] = {
                 "successes": sum(row["success"] for row in rows),
                 "samples": len(rows),
                 "median_cli_wall_seconds": statistics.median(

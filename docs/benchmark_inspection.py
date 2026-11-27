@@ -29,7 +29,7 @@ def main() -> None:
     run("click", "700", "513")
     run("type", "--interval", "0", "HelloGUI")
     run("click", "120", "170")
-    capture = args.output.with_suffix(".png")
+    screenshot_path = args.output.with_suffix(".png")
     cases = {
         "find_button": (
             "inspect",
@@ -47,7 +47,7 @@ def main() -> None:
             "--text",
             "Applied: HelloGUI",
         ),
-        "screenshot": ("screenshot", str(capture)),
+        "screenshot": ("screenshot", str(screenshot_path)),
     }
     measurements: dict[str, dict[str, object]] = {}
     for name, arguments in cases.items():
@@ -59,7 +59,7 @@ def main() -> None:
             output = run(*arguments)
             times.append((time.perf_counter() - start) * 1000)
             if name == "screenshot":
-                sizes.append(capture.stat().st_size)
+                sizes.append(screenshot_path.stat().st_size)
             else:
                 assert json.loads(output)["match_count"] == 1
                 sizes.append(len(output))

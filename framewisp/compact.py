@@ -28,7 +28,7 @@ class ActivityEvent(TypedDict):
 
 @contextmanager
 def log_activity(session_dir: Path) -> Generator[None, None, None]:
-    """Record check/capture spans without retaining conditions, text, or errors."""
+    """Record check and screenshot spans without retaining conditions, text, or errors."""
     identifier = uuid.uuid4().hex
 
     def append(event: str) -> None:

@@ -73,12 +73,12 @@ def test_teaching_portal_requests_only_screen_access(
 
 # R-TEACH-1
 @pytest.mark.parametrize(
-    "action",
+    "command",
     ["click", "key", "type", "move", "drag", "scroll", "batch", "record-start"],
 )
-def test_teaching_rejects_every_input_action(action: str) -> None:
+def test_teaching_rejects_every_input_command(command: str) -> None:
     line = json.dumps(
-        {"attachment": "token", "action": action, "parameters": {}}
+        {"attachment": "token", "command": command, "parameters": {}}
     ).encode()
     with pytest.raises(ValueError, match="observation-only"):
         parse_attached_request(line, "token", teaching=True)
@@ -87,7 +87,7 @@ def test_teaching_rejects_every_input_action(action: str) -> None:
 @pytest.mark.parametrize("text", ["", "  ", 1, "n" * 8001])
 def test_teaching_rejects_invalid_notes(text: object) -> None:
     line = json.dumps(
-        {"attachment": "token", "action": "teach-note", "parameters": {"text": text}}
+        {"attachment": "token", "command": "teach-note", "parameters": {"text": text}}
     ).encode()
     with pytest.raises(ValueError, match="nonblank"):
         parse_attached_request(line, "token", teaching=True)

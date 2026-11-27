@@ -33,7 +33,7 @@ from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
     COMMAND_PROTOCOL,
-    parse_command,
+    parse_request_fields,
     receive_request,
     resolved_request_path,
 )
@@ -62,7 +62,7 @@ class InputParameters(TypedDict, total=False):
     modifier: list[str]
     duration: float
     direction: str
-    steps: int
+    ticks: int
     text: str
     interval: float
     chord: str
@@ -203,7 +203,7 @@ class AttachedInput:
                 direction = p["direction"]
                 axis = 0 if direction in {"up", "down"} else 1
                 sign = -1 if direction in {"up", "left"} else 1
-                for _ in range(p["steps"]):
+                for _ in range(p["ticks"]):
                     self.wait()
                     self.portal.input("NotifyPointerAxisDiscrete", "ui", axis, sign)
             elif action == "type":
@@ -256,7 +256,9 @@ def open_destination(destination: Path) -> int:
     raise ValueError(f"{failure}: {reason}")
 
 
-def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) -> None:
+def save_screenshot(
+    portal: DesktopPortal, destination: Path, stop: Event, log: Path
+) -> None:
     output = open_destination(destination)
     try:
         # Capture lives in the owner process: even SIGKILL closes every capture FD.
@@ -271,7 +273,7 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
         finally:
             os.close(descriptor)
     except BaseException:
-        # A close failure must not hide why the capture failed.
+        # A close failure must not hide why the screenshot failed.
         with suppress(OSError):
             os.close(output)
         raise
@@ -285,8 +287,8 @@ def capture(portal: DesktopPortal, destination: Path, stop: Event, log: Path) ->
 # Mutter can hand a new PipeWire connection a frame left from an earlier one
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
-CAPTURE_TIMEOUT = 10
-CAPTURE_CANCELLED = "Attached session disconnected; capture cancelled."
+SCREENSHOT_TIMEOUT = 10
+SCREENSHOT_CANCELLED = "Attached session disconnected; screenshot cancelled."
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -304,7 +306,7 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
     with playing(encoder):
         source_element.emit("push-sample", frame)
         source_element.emit("end-of-stream")
-        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        deadline = time.monotonic() + SCREENSHOT_TIMEOUT
         while not finished(encoder, sink, stop, log, deadline):
             pass
 
@@ -320,7 +322,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
     sink = pipeline.get_by_name("frames")
     assert sink is not None
     with playing(pipeline):
-        deadline = time.monotonic() + CAPTURE_TIMEOUT
+        deadline = time.monotonic() + SCREENSHOT_TIMEOUT
         while (frame := sink.emit("try-pull-sample", 0)) is None:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
@@ -328,7 +330,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
                     raise ValueError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
-            raise InterruptedError(CAPTURE_CANCELLED)
+            raise InterruptedError(SCREENSHOT_CANCELLED)
         frame = sink.emit("try-pull-sample", 0) or frame
         assert isinstance(frame, Gst.Sample)
         # Stopping the source may release the memory behind its buffers.
@@ -356,7 +358,7 @@ def finished(
 ) -> bool:
     """Wait briefly for end of stream. Raise on failure, timeout, or stop."""
     if stop.is_set():
-        raise InterruptedError(CAPTURE_CANCELLED)
+        raise InterruptedError(SCREENSHOT_CANCELLED)
     if time.monotonic() >= deadline:
         raise RuntimeError("Desktop capture timed out.")
     bus = pipeline.get_bus()
@@ -381,27 +383,27 @@ def parse_attached_request(
     line: bytes, attachment: str, *, teaching: bool = False
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
-    command = parse_command(line)
+    fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
     # accepting a command addressed to an earlier one.
-    if command.get("attachment") != attachment:
+    if fields.get("attachment") != attachment:
         raise ValueError(
             "Attached session is disconnected. Ask the user to attach again."
         )
-    action = command.get("action")
-    if not isinstance(action, str):
-        raise ValueError("action must be a string.")
-    if teaching and action not in {"screenshot", "teach-note"}:
+    command = fields.get("command")
+    if not isinstance(command, str):
+        raise ValueError("command must be a string.")
+    if teaching and command not in {"screenshot", "teach-note"}:
         raise ValueError(
             "Teaching is observation-only; input and recording commands are disabled."
         )
-    if action.startswith("record-"):
+    if command.startswith("record-"):
         raise ValueError("Recording attached sessions is not supported yet.")
-    raw = command.get("parameters")
+    raw = fields.get("parameters")
     if not isinstance(raw, dict):
-        raise ValueError("Input requires an action and parameters object.")
+        raise ValueError("parameters must be an object.")
     parameters = cast(dict[str, object], raw)
-    if action == "teach-note":
+    if command == "teach-note":
         if not teaching:
             raise ValueError("teach-note requires a teaching session.")
         text = parameters.get("text")
@@ -410,9 +412,9 @@ def parse_attached_request(
                 "teach-note requires nonblank text of at most 8000 characters."
             )
         return text
-    if action != "screenshot":
+    if command != "screenshot":
         defaults: dict[str, object] = {"modifier": []}
-        return InputAction.parse(action, defaults | parameters)
+        return InputAction.parse(command, defaults | parameters)
     path = parameters.get("path")
     if not isinstance(path, str) or not Path(path).is_absolute():
         raise ValueError("screenshot requires an absolute path.")
@@ -593,7 +595,7 @@ def _run_attachment(
             if request is None:
                 return
             status, error = 0, None
-            action = (
+            command = (
                 "screenshot"
                 if isinstance(request, Path)
                 else "teach-note" if isinstance(request, str) else request.action
@@ -609,17 +611,19 @@ def _run_attachment(
                     try:
                         inputs.wait()
                         if isinstance(request, Path):
-                            capture(portal, request, stop, session_dir / "capture.log")
+                            save_screenshot(
+                                portal, request, stop, session_dir / "capture.log"
+                            )
                         else:
                             inputs.perform(
-                                action, cast(InputParameters, request.parameters)
+                                command, cast(InputParameters, request.parameters)
                             )
                     finally:
                         lock.release()
             except (ValueError, InterruptedError, TimeoutError) as failure:
-                status, error = 1, input_error(action, failure)
+                status, error = 1, input_error(command, failure)
             except BaseException as failure:
-                status, error = 1, input_error(action, failure)
+                status, error = 1, input_error(command, failure)
                 failures.append(failure)
                 stop.set()
                 portal.close()

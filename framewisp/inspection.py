@@ -254,7 +254,7 @@ def inspect_bus(
     pids: dict[str, int] = {}
     geometries: dict[tuple[str, str], Rect | None] = {}
     conversions: list[tuple[dict[str, object], Rect, Rect, tuple[str, ...], int]] = []
-    snapshot = uuid.uuid4().hex
+    observation_id = uuid.uuid4().hex
     matches: list[dict[str, object]] = []
     reasons: set[str] = set()
     errors: list[str] = []
@@ -338,7 +338,7 @@ def inspect_bus(
                 ):
                     continue
                 node: dict[str, object] = {
-                    "id": f"{snapshot}:{len(matches)}",
+                    "id": f"{observation_id}:{len(matches)}",
                     "role": role,
                     "name": name,
                     "text": None,
@@ -522,8 +522,8 @@ def inspect_bus(
     if status == "ok" and reasons:
         status = "partial"
     return {
-        "schema_version": 1,
-        "snapshot_id": snapshot,
+        "schema_version": 2,
+        "observation_id": observation_id,
         "status": status,
         "matches": matches,
         "match_count": len(matches),

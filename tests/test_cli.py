@@ -104,18 +104,18 @@ def test_console_options_with_console_still_require_recording(tmp_path: Path) ->
         ),
     ],
 )
-@pytest.mark.parametrize("action", ["run", "record-start"])
+@pytest.mark.parametrize("command", ["run", "record-start"])
 def test_recording_rejects_invalid_panels_before_any_clip(
-    tmp_path: Path, action: str, options: list[str], message: str
+    tmp_path: Path, command: str, options: list[str], message: str
 ) -> None:
     session_dir = tmp_path / "session"
     clip = tmp_path / "clip.mp4"
-    command = (
+    arguments = (
         ["run", "--record", str(clip), "--console", *options, "--", "framewisp-demo"]
-        if action == "run"
+        if command == "run"
         else ["record-start", "--console", *options, str(clip)]
     )
-    result = framewisp(session_dir, *command)
+    result = framewisp(session_dir, *arguments)
     assert result.returncode == 2
     assert message in result.stderr
     assert not session_dir.exists()
@@ -289,13 +289,13 @@ def test_run_captions_requires_record(tmp_path: Path, flag: str) -> None:
     assert not (tmp_path / "session").exists()
 
 
-@pytest.mark.parametrize("action", ["run", "record-start"])
+@pytest.mark.parametrize("command", ["run", "record-start"])
 @pytest.mark.parametrize("flag", ["--pointer-captions", "--key-captions"])
-def test_captions_rejects_unknown_mode(tmp_path: Path, action: str, flag: str) -> None:
+def test_captions_rejects_unknown_mode(tmp_path: Path, command: str, flag: str) -> None:
     destination = tmp_path / "clip.mp4"
     arguments = (
         ["--record", str(destination), flag, "mouse", "--", "framewisp-demo"]
-        if action == "run"
+        if command == "run"
         else [flag, "mouse", str(destination)]
     )
     result = subprocess.run(
@@ -304,7 +304,7 @@ def test_captions_rejects_unknown_mode(tmp_path: Path, action: str, flag: str) -
             "-m",
             "framewisp",
             str(tmp_path / "session"),
-            action,
+            command,
             *arguments,
         ],
         capture_output=True,
@@ -385,7 +385,7 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
         ("record-stop",),
         ("click", "1", "1"),
         ("type", "a"),
-        ("screenshot", "capture.png"),
+        ("screenshot", "screenshot.png"),
         ("inspect", "--json"),
         ("teach-note", "a note"),
     ],
@@ -409,7 +409,7 @@ def test_session_commands_refuse_another_command_protocol(
     assert ("Ask the user" in result.stderr) is (metadata.get("kind") == "attached")
     assert "again with this version" in result.stderr
     assert "Traceback" not in result.stderr
-    assert not (tmp_path / "capture.png").exists()
+    assert not (tmp_path / "screenshot.png").exists()
 
 
 # R-CONTROL-3
@@ -428,7 +428,7 @@ def test_screenshot_checks_the_command_protocol_after_its_delay(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["framewisp", str(tmp_path), "screenshot", "--delay", "3", "capture.png"],
+        ["framewisp", str(tmp_path), "screenshot", "--delay", "3", "screenshot.png"],
     )
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as stopped:
@@ -436,13 +436,13 @@ def test_screenshot_checks_the_command_protocol_after_its_delay(
     assert stopped.value.code == 1
     assert waits == [3.0]
     assert "another version of framewisp" in capsys.readouterr().err
-    assert not (tmp_path / "capture.png").exists()
+    assert not (tmp_path / "screenshot.png").exists()
 
 
 # R-INPUT-3
 @pytest.mark.parametrize("delay", ["-1", "nan", "inf", "nope"])
 def test_invalid_screenshot_delay(delay: str, tmp_path: Path) -> None:
-    destination = tmp_path / "capture.png"
+    destination = tmp_path / "screenshot.png"
     result = subprocess.run(
         [
             sys.executable,
@@ -637,8 +637,8 @@ def test_invalid_key_combination(chord: str, tmp_path: Path) -> None:
 
 
 # R-INPUT-3
-@pytest.mark.parametrize("steps", ["0", "-1", "1.5", "nope"])
-def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("ticks", ["0", "-1", "1.5", "nope"])
+def test_invalid_scroll_ticks(ticks: str, tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -649,7 +649,7 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
             "100",
             "100",
             "down",
-            f"--steps={steps}",
+            f"--ticks={ticks}",
         ],
         capture_output=True,
         text=True,
@@ -657,7 +657,7 @@ def test_invalid_scroll_steps(steps: str, tmp_path: Path) -> None:
         timeout=5,
     )
     assert result.returncode == 2
-    assert "--steps" in result.stderr
+    assert "--ticks" in result.stderr
     assert "session.json" not in result.stderr
 
 
@@ -851,7 +851,7 @@ def test_screenshot_options_reject_attached_sessions(
     (tmp_path / "session.json").write_text(
         json.dumps({"kind": "attached", "command_protocol": COMMAND_PROTOCOL})
     )
-    destination = tmp_path / "capture.png"
+    destination = tmp_path / "screenshot.png"
     result = subprocess.run(
         [
             sys.executable,
