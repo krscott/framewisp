@@ -1180,13 +1180,20 @@ def test_attached_input_does_not_reread_metadata_after_input_log_lock(
 
     def serve(servers: dict[socket.socket, str]) -> None:
         deadline = time.monotonic() + 5
-        while not done.is_set() and time.monotonic() < deadline:
-            readable, _, _ = select.select(list(servers), [], [], 0.05)
-            for server in readable:
-                connection, _ = server.accept()
-                with connection, connection.makefile("rw") as stream:
-                    received.append((servers[server], json.loads(stream.readline())))
-                    stream.write(json.dumps({"status": 0, "error": None}) + "\n")
+        try:
+            while not done.is_set() and time.monotonic() < deadline:
+                readable, _, _ = select.select(list(servers), [], [], 0.05)
+                for server in readable:
+                    connection, _ = server.accept()
+                    connection.settimeout(5)
+                    with connection, connection.makefile("rw") as stream:
+                        received.append(
+                            (servers[server], json.loads(stream.readline()))
+                        )
+                        stream.write(json.dumps({"status": 0, "error": None}) + "\n")
+        finally:
+            for server in servers:
+                server.close()
 
     with tempfile.TemporaryDirectory(prefix="fw-toctou-") as directory:
         sock_dir = Path(directory)

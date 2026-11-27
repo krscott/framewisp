@@ -193,27 +193,23 @@ def _positive_int(data: dict[str, object], name: str, path: Path) -> int:
 def _restart_guidance(
     session_dir: Path, published_kind: SessionKind | None, *, version_mismatch: bool
 ) -> str:
+    with_this_version = " with this version" if version_mismatch else ""
     if published_kind in DESKTOP_KINDS:
-        if version_mismatch:
-            return (
-                "Ask the user to end it with Ctrl+C in its terminal if it is "
-                "still running, then to start it again with this version "
-                "(for teach, with a new lesson directory)."
-            )
         return (
             "Ask the user to end it with Ctrl+C in its terminal if it is still "
-            "running, then to start it again (for teach, with a new lesson directory)."
+            f"running, then to start it again{with_this_version} "
+            "(for teach, with a new lesson directory)."
         )
     recover = shlex.join(["framewisp", str(session_dir), "recover"])
-    if version_mismatch:
-        return (
-            "Stop its runner with Ctrl+C or SIGTERM. If the runner has "
-            f"died, run `{recover}` with the framewisp version that started "
-            "the session. Then start the session again with this version."
-        )
+    recover_version = (
+        " with the framewisp version that started the session"
+        if version_mismatch
+        else ""
+    )
     return (
         "Stop its runner with Ctrl+C or SIGTERM. If the runner has died, "
-        f"run `{recover}`, then start the session again."
+        f"run `{recover}`{recover_version}. Then start the session again"
+        f"{with_this_version}."
     )
 
 
@@ -240,9 +236,10 @@ def parse_session_metadata(raw: object, session_dir: Path) -> SessionMetadata | 
             f"{remedy}"
         )
     if published_kind is None:
+        remedy = _restart_guidance(session_dir, None, version_mismatch=False)
         return (
             f"Cannot read session metadata: {metadata_path} publishes no known "
-            "session kind."
+            f"session kind. {remedy}"
         )
     try:
         if published_kind == "headless":

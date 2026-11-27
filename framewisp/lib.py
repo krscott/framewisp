@@ -1310,8 +1310,7 @@ def batch_screenshot(
             prefix=".framewisp-screenshot-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "screenshot.png"
-            current = replace(session, clip_destination=recording.clip_destination)
-            screenshot(current, temporary, cancelled=cancelled)
+            screenshot(session, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Screenshot cancelled; caller disconnected or session stopped."
