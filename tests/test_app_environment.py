@@ -619,7 +619,7 @@ print(json.dumps(dict(os.environ)))
 
 
 CAPTION_REGION = (0, 0, 1280, 720)
-# Skip the panel title and each line's timestamp, which depends on app startup.
+# Skip the console panel title and each line's timestamp, which depends on app startup.
 CONSOLE_TEXT_REGION = (1400, 48, 1920, 720)
 
 
@@ -689,7 +689,7 @@ def overlay_frame(tmp_path: Path, name: str, caller: dict[str, str]) -> Image.Im
 # R-REC-23
 @pytest.mark.integration
 @pytest.mark.parametrize("override", ["home", "sysroot"])
-def test_caller_font_settings_leave_recording_text_unchanged(
+def test_caller_font_settings_leave_clip_text_unchanged(
     tmp_path: Path, override: str
 ) -> None:
     home = tmp_path / "home"

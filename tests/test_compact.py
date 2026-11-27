@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.captions import CaptionOptions, render_recording
 from framewisp.compact import (
     activity_events,
     compact_filter,
@@ -15,12 +14,13 @@ from framewisp.compact import (
     retained_frames,
 )
 from framewisp.console import ConsoleCapture
-from framewisp.layout import ConsolePanel, VideoLayout, video_layout
+from framewisp.finalization import CaptionOptions, render_clip
+from framewisp.layout import ClipLayout, ConsolePanel, clip_layout
 
 
-def clip_layout(panel: bool) -> VideoLayout:
-    layout = video_layout((320, 240), ConsolePanel() if panel else None)
-    assert isinstance(layout, VideoLayout)
+def layout_with(console_panel: bool) -> ClipLayout:
+    layout = clip_layout((320, 240), ConsolePanel() if console_panel else None)
+    assert isinstance(layout, ClipLayout)
     return layout
 
 
@@ -203,7 +203,7 @@ def video_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture
-def raw_video(tmp_path: Path, video_seed: Path) -> Path:
+def raw_clip(tmp_path: Path, video_seed: Path) -> Path:
     video = tmp_path / "clip with spaces.mp4"
     shutil.copyfile(video_seed, video)
     return video
@@ -213,10 +213,10 @@ def raw_video(tmp_path: Path, video_seed: Path) -> Path:
 def test_rendered_cuts_keep_frames_and_align_overlays(
     logs: tuple[Path, Path],
     tmp_path: Path,
-    raw_video: Path,
+    raw_clip: Path,
     overlays: bool,
 ) -> None:
-    video = raw_video
+    video = raw_clip
     events = [
         {
             "id": "key",
@@ -233,7 +233,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
     (tmp_path / "console.jsonl").write_text(
         json.dumps({"time": 104.2, "text": "Result arrived\n"}) + "\n"
     )
-    render_recording(
+    render_clip(
         video,
         input_log=logs[0],
         origin=100,
@@ -242,7 +242,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
         captions=CaptionOptions(key="non-text" if overlays else None),
         console=ConsoleCapture(tmp_path),
         compact=True,
-        layout=clip_layout(overlays),
+        layout=layout_with(overlays),
         env=dict(os.environ),
     )
     summary = json.loads(
@@ -296,7 +296,7 @@ def test_rendered_cuts_keep_frames_and_align_overlays(
 def test_caption_modes_stay_aligned_with_compaction_and_console(
     logs: tuple[Path, Path],
     tmp_path: Path,
-    raw_video: Path,
+    raw_clip: Path,
     captions: CaptionOptions,
     pointer_shown: bool,
     key_shown: bool,
@@ -324,8 +324,8 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         )
     )
     (tmp_path / "console.jsonl").write_text("")
-    render_recording(
-        raw_video,
+    render_clip(
+        raw_clip,
         input_log=logs[0],
         origin=100,
         stopped=109,
@@ -333,12 +333,12 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
         captions=captions,
         console=ConsoleCapture(tmp_path),
         compact=True,
-        layout=clip_layout(console),
+        layout=layout_with(console),
         env=dict(os.environ),
     )
 
     def shown(second: float) -> bool:
-        return len(set(frame(raw_video, second, "320:50:0:190"))) > 30
+        return len(set(frame(raw_clip, second, "320:50:0:190"))) > 30
 
     # Compaction keeps 0-4.5 and 5-9 in every mode. That leaves the pointer
     # input at 2s and moves the key input from 6s to 5.5s.
@@ -349,7 +349,7 @@ def test_caption_modes_stay_aligned_with_compaction_and_console(
 @pytest.mark.parametrize("range_count", [135, 1000])
 def test_many_disjoint_cuts_render(
     tmp_path: Path,
-    raw_video: Path,
+    raw_clip: Path,
     range_count: int,
 ) -> None:
     filters = tmp_path / "cuts.txt"
@@ -362,7 +362,7 @@ def test_many_disjoint_cuts_render(
             "-v",
             "error",
             "-i",
-            str(raw_video),
+            str(raw_clip),
             "-/filter:v",
             str(filters),
             "-f",

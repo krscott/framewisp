@@ -30,7 +30,6 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
 from framewisp.actions import InputAction
-from framewisp.captions import input_error
 from framewisp.connection import (
     COMMAND_PROTOCOL,
     DESKTOP_KINDS,
@@ -43,6 +42,7 @@ from framewisp.connection import (
     teaching_refusal,
 )
 from framewisp.desktop import STOP_SOCKET, lock_desktop, write_state
+from framewisp.input_log import input_error
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
@@ -408,7 +408,9 @@ def parse_desktop_request(
     if kind == "teaching" and command not in TEACHING_COMMANDS:
         raise ValueError(teaching_refusal(command))
     if command.startswith("record-"):
-        raise ValueError("Recording attached sessions is not supported yet.")
+        raise ValueError(
+            "Attached sessions cannot record; clips come from headless sessions only."
+        )
     raw = fields.get("parameters")
     if not isinstance(raw, dict):
         raise ValueError("parameters must be an object.")
@@ -463,7 +465,7 @@ def attach_session(
         return 1
     if teaching is not None:
         print(
-            "Teaching records your selected monitor and cursor, without keyboard or pointer control.\n"
+            "Teaching captures your selected monitor and cursor, without keyboard or pointer control.\n"
             "Video, sampled frames, and notes are saved unredacted, including any visible secrets.\n"
             f"Goal: {teaching.goal}\nLesson: {teaching.directory}\n"
             "Keep this terminal open and in the foreground. Stop with Ctrl+C here,\n"
@@ -489,7 +491,7 @@ def attach_session(
     declined = "Teaching not started." if teaching is not None else "Not attached."
     try:
         confirmation = input(
-            "Type ATTACH to confirm you understand and want to record this lesson: "
+            "Type ATTACH to confirm you understand and want to capture this lesson: "
             if teaching is not None
             else "Type ATTACH to confirm the bindings are configured and you understand this access: "
         )

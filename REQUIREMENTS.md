@@ -155,47 +155,48 @@ investigate or ask; never invent a rationale.
 - **R-INSPECT-6** [test] An unresponsive app does not block runner `status` or
   `stop`.
 
-## Input logs and captions (LOG)
+## Input logs and overlays (LOG)
 
 - **R-LOG-1** [test] `inputs.jsonl` always omits typed text and literal key
   characters. Captions show those values only in clips with `--key-captions all`.
-- **R-LOG-2** [test] Captions appear only in recordings, never in screenshots.
-- **R-LOG-3** [test] Click pings appear only in recordings, never in screenshots.
-- **R-LOG-4** [test] Recordings have no text captions by default.
+- **R-LOG-2** [test] Captions appear only in clips, never in screenshots.
+- **R-LOG-3** [test] Click pings appear only in clips, never in screenshots.
+- **R-LOG-4** [test] Clips have no text captions by default.
   `--pointer-captions all` captions moves, clicks, drags, and scrolls.
   `--pointer-captions modifiers` captions only clicks and drags with a modifier.
   `--key-captions all` captions key and type actions.
   `--key-captions non-text` captions Ctrl/Alt shortcuts and named non-printing
   keys. The two options can be combined for a clip.
-- **R-LOG-5** [test] Recording caption options do not change `inputs.jsonl`.
+- **R-LOG-5** [test] Caption options do not change `inputs.jsonl`.
 - **R-LOG-6** [retired] Framewisp rejects `--captions` combined with `--no-captions`
   before it starts a session or a clip.
 - **R-LOG-7** [test] An incomplete last line in `inputs.jsonl`, as left by an
-  interrupted write, does not fail recording rendering, including after later
-  inputs are appended.
+  interrupted write, does not fail finalization, including after later inputs
+  are appended.
 
-  Rationale: Recording remains usable when input logging resumes after an
+  Rationale: Clips remain usable when input logging resumes after an
   interrupted write.
 - **R-LOG-8** [test] A newline-terminated line in `inputs.jsonl` that is not
-  valid JSON fails any recording rendering that reads the log (R-REC-10).
+  valid JSON fails any finalization that reads the log (R-REC-10).
 - **R-LOG-9** [test] `key --private`, `type --private`, and a keyboard batch
   action with `"private": true` suppress the action's caption in every mode.
   The log keeps the action's timing and outcome and omits its key or text value.
 
 ## Recording (REC)
 
-- **R-REC-1** [test] Recording rejects a destination that already exists. A
-  recording or batch screenshot never replaces an existing file, including one
+- **R-REC-1** [test] Recording rejects a clip destination that already exists.
+  A clip or batch screenshot never replaces an existing file, including one
   created after the destination was checked.
 - **R-REC-2** [test] Recording rejects an odd display width or height.
-- **R-REC-3** [test] An active recording is finalized as a playable MP4 when
-  the app exits, on SIGINT, on SIGTERM, and on `stop`.
+- **R-REC-3** [test] The clip of an active recording is finalized as a playable
+  MP4 when the app exits, on SIGINT, on SIGTERM, and on `stop`.
 - **R-REC-4** [test] Recorded colours match screenshot colours.
-- **R-REC-5** [test] By default, a recording shows a click ping at each press
-  of a `click` or `drag`. Each press of a double click has its own ping. While a
-  completed drag holds its button, a translucent hold disc follows the pointer,
-  and it fades after the release. A hold that began before the clip shows its
-  disc from the clip's first frame. `scroll` and `move` show neither.
+- **R-REC-5** [test] By default, a clip shows a click ping at each press of a
+  `click` or `drag`. Each press of a double click has its own click ping. While
+  a completed drag holds its button, a translucent hold disc follows the
+  pointer, and it fades after the release. A drag that began holding before the
+  clip shows its hold disc from the clip's first frame. `scroll` and `move` show
+  neither.
 
   Rationale: Viewers can tell a click from a drag and see where the button was
   held and for how long.
@@ -211,52 +212,57 @@ investigate or ask; never invent a rationale.
   retained frame. Each keeps its full duration unless the clip ends first.
 - **R-REC-9** [test] With `--console`, click pings and hold discs keep their GUI
   positions. They never draw on the console panel.
-- **R-REC-10** [test] When recording rendering fails, a playable MP4 of the raw
-  capture remains. It is at the requested path, unless framewisp cannot publish
-  it there (R-REC-18). The error names the MP4's path and `captions.log`.
+- **R-REC-10** [test] When the recorder stops cleanly but finalization fails
+  before publishing the clip, the raw clip remains at the clip destination, or
+  under R-REC-18 at another path. It is playable when the recorder wrote a
+  playable file. The error names where.
 - **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
-  right, top, or bottom edge of the video. The default is right.
-- **R-REC-13** [test] `--console-size` sets the panel width for `left` and
-  `right`, and the panel height for `top` and `bottom`. The default is 640
+  right, top, or bottom edge of the clip. The default is right.
+- **R-REC-13** [test] `--console-size` sets the console panel width for `left`
+  and `right`, and its height for `top` and `bottom`. The default is 640
   pixels.
 - **R-REC-14** [test] A console panel does not scale or crop the GUI in the
-  video. It does not change input coordinates or screenshots.
+  clip. It does not change input coordinates or screenshots.
 - **R-REC-15** [test] With `--console`, a caption stays centred on the GUI. It
   never draws on the console panel.
 - **R-REC-16** [test] Framewisp rejects a console panel that it cannot encode or
   that cannot show readable text, before it starts a clip.
 - **R-REC-17** [test] A rejected console panel leaves the app running.
-- **R-REC-18** [test] When a file takes a recording's destination before the
-  clip is finalized, the finished clip remains at another path, and the error
-  names that path.
-- **R-REC-19** [test] Framewisp rejects a recording on a filesystem without hard
-  links before it starts the clip, and the error names that limit.
+- **R-REC-18** [test] When framewisp cannot publish a clip at its clip
+  destination, such as when a file takes it first or its directory is no longer
+  writable, framewisp leaves any file there intact. The clip remains at another
+  path with whatever finalization completed, raw if finalization failed before
+  publishing (R-REC-10), and the error names that path.
+- **R-REC-19** [test] Framewisp rejects a clip destination on a filesystem
+  without hard links before it starts the clip, and the error names that limit.
 - **R-REC-20** [test] After the runner is killed during a clip, `recover` reports
-  the path of the interrupted clip. That clip does not block later recordings.
+  the path of the interrupted clip. That clip does not block later clips.
 - **R-REC-21** [test] `screenshot` and a batch screenshot reject their own session's
-  active recording destination, directly or through a symlink. The recording
-  continues, and `record-stop` publishes it at that destination.
+  active recording's clip destination, directly or through a symlink. The
+  recording continues, and `record-stop` publishes the clip at that
+  destination.
 - **R-REC-22** [test] A finished clip with no measurable duration does not end
   the session or fail shutdown. `record-stop` reports `duration_seconds` as `null`.
 - **R-REC-23** [test] Captions and console panels render with the configured
   font file. The caller's home directory and user font configuration do not
   change them.
 
-  Rationale: Agents in different environments should produce the same videos by
+  Rationale: Agents in different environments should produce the same clips by
   default, including the text framewisp draws on them.
 
 - **R-REC-24** [test] Printable ASCII text in a console panel stays inside the
-  panel at every accepted position and size. A line longer than the panel wraps
-  instead of running past its edge.
+  console panel at every accepted position and size. A line longer than the
+  console panel wraps instead of running past its edge.
 
-  Rationale: Agents read the panel to see app output. Text cut off at the edge
+  Rationale: Agents read the console panel to see app output. Text cut off at the edge
   hides that output without any sign.
 
 - **R-REC-25** [test] `--console-cell-scale` makes framewisp assume each console
   text cell is that many times the console font's cell, in both directions. Rows
   and columns shrink to fit, so text that draws larger than the console font,
-  such as Thai or Devanagari, can stay inside the panel. The default is 1.
+  such as Thai or Devanagari, can stay inside the console panel. The default is
+  1.
 
   Rationale: Agents can make room for scripts that draw larger without
   framewisp measuring every font.

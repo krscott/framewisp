@@ -95,11 +95,11 @@ def logged_records(session_dir: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in lines]
 
 
-def pings(session_dir: Path) -> list[tuple[object, object]]:
+def button_events(session_dir: Path) -> list[tuple[object, object, object]]:
     return [
-        (record["x"], record["y"])
+        (record["event"], record["x"], record["y"])
         for record in logged_records(session_dir)
-        if record["event"] == "ping"
+        if record["event"] in {"press", "release"}
     ]
 
 
@@ -136,60 +136,67 @@ def action(name: str, **parameters: object) -> InputAction:
 @pytest.mark.parametrize(
     ("gesture", "expected"),
     [
-        (action("click", x=10, y=20, button="left", count=1), [(10, 20)]),
-        (action("click", x=10, y=20, button="right", count=1), [(10, 20)]),
-        (action("click", x=10, y=20, button="left", count=2), [(10, 20)] * 2),
+        (action("click", x=10, y=20, button="left", count=1), [("press", 10, 20)]),
+        (action("click", x=10, y=20, button="right", count=1), [("press", 10, 20)]),
+        (
+            action("click", x=10, y=20, button="left", count=2),
+            [("press", 10, 20)] * 2,
+        ),
         (
             action("drag", x1=1, y1=2, x2=30, y2=40, duration=0.05),
-            [(1, 2), (30, 40)],
+            [("press", 1, 2), ("release", 30, 40)],
         ),
         (action("move", x=10, y=20), []),
         (action("scroll", x=10, y=20, direction="down", ticks=2), []),
     ],
 )
-def test_pings_mark_pointer_presses(
-    tmp_path: Path, gesture: InputAction, expected: list[tuple[int, int]]
+def test_log_marks_presses_and_drag_releases(
+    tmp_path: Path, gesture: InputAction, expected: list[tuple[str, int, int]]
 ) -> None:
     assert perform(tmp_path, gesture)["error"] is None
-    assert pings(tmp_path) == expected
+    assert button_events(tmp_path) == expected
 
 
 # R-REC-5
-def test_batched_click_pings(tmp_path: Path) -> None:
+def test_batched_click_logs_its_press(tmp_path: Path) -> None:
     batch = Batch((action("click", x=10, y=20, button="left", count=1),), None)
     assert perform(tmp_path, batch)["error"] is None
-    assert pings(tmp_path) == [(10, 20)]
+    assert button_events(tmp_path) == [("press", 10, 20)]
 
 
 # R-REC-6
-def test_ping_uses_the_clamped_position(tmp_path: Path) -> None:
+def test_press_and_release_use_the_clamped_position(tmp_path: Path) -> None:
     perform(tmp_path, action("click", x=5000, y=6000, button="left", count=1))
     perform(tmp_path, action("drag", x1=1, y1=2, x2=5000, y2=6000, duration=0.05))
-    assert pings(tmp_path) == [(799, 599), (1, 2), (799, 599)]
+    assert button_events(tmp_path) == [
+        ("press", 799, 599),
+        ("press", 1, 2),
+        ("release", 799, 599),
+    ]
 
 
 # R-REC-6
-def test_ping_times_each_press_not_its_command(tmp_path: Path) -> None:
+def test_log_times_each_press_not_its_command(tmp_path: Path) -> None:
     gesture = action("click", x=9, y=9, button="left", count=2, move_duration=0.2)
     perform(tmp_path, Batch((action("move", x=1, y=1), gesture), None))
     click = [r for r in logged_records(tmp_path) if r["action"] == "click"]
     start, first, second, end = (cast(float, r["time"]) for r in click)
-    assert [r["event"] for r in click] == ["start", "ping", "ping", "end"]
+    assert [r["event"] for r in click] == ["start", "press", "press", "end"]
     assert first - start >= 0.2
     assert second - first >= 0.1
     assert end >= second
 
 
 # R-REC-5
-def test_refused_press_has_no_ping(tmp_path: Path) -> None:
+def test_refused_press_is_not_logged(tmp_path: Path) -> None:
     client = FailingPress(Event())
     gesture = action("click", x=10, y=20, button="left", count=1)
     assert "button refused" in str(perform(tmp_path, gesture, client)["error"])
-    assert pings(tmp_path) == []
+    assert button_events(tmp_path) == []
 
 
 # R-REC-5
-def test_interrupted_drag_pings_its_press_only(tmp_path: Path) -> None:
+def test_interrupted_drag_logs_its_press_only(tmp_path: Path) -> None:
     stop = Event()
     client = HoldingClient(stop)
     worker = InputWorker(
@@ -210,4 +217,4 @@ def test_interrupted_drag_pings_its_press_only(tmp_path: Path) -> None:
         caller.close()
         worker.close()
     assert ("mouseUp", 1) in client.calls
-    assert pings(tmp_path) == [(1, 2)]
+    assert button_events(tmp_path) == [("press", 1, 2)]

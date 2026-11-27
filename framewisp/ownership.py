@@ -19,8 +19,9 @@ from framewisp.errors import SessionError
 
 LOCK = ".headless.lock"
 JOURNAL = ".headless-owner.json"
-# Symlink to the private clip of the active or kept recording.
-ACTIVE_RECORDING = ".active-recording"
+# Symlink to a recording's private clip. It stays while that clip remains,
+# after an interruption or a failed finalization or publish.
+PRIVATE_CLIP = ".private-clip"
 # Far above any journal, whose runtime path fits in a 108-byte socket address, or
 # any session.json that recovery reads.
 MAX_METADATA_BYTES = 1 << 16
@@ -136,13 +137,13 @@ def journal_runtime(session_dir: Path, journal: dict[str, object]) -> Path:
     return runtime
 
 
-def kept_recording_note(session_dir: Path) -> str:
-    clip = kept_recording(session_dir)
+def kept_clip_note(session_dir: Path) -> str:
+    clip = kept_clip(session_dir)
     if clip is None:
         return ""
     recover = shlex.join(["framewisp", str(session_dir), "recover"])
     return (
-        f"\nAn interrupted recording is kept at {str(clip)!r}. These steps do not touch "
+        f"\nAn interrupted clip is kept at {str(clip)!r}. These steps do not touch "
         f"it, and a successful `{recover}` reports it."
     )
 
@@ -155,7 +156,7 @@ def unusable_lock(lock: Path, problem: str) -> str:
         "Otherwise move it aside. "
         f"Then run `{recover}`, which checks the lock against the session's "
         "ownership journal and reports what to do next."
-    ) + kept_recording_note(lock.parent)
+    ) + kept_clip_note(lock.parent)
 
 
 @contextmanager
@@ -173,7 +174,7 @@ def session_lease(session_dir: Path) -> Generator[int, None, None]:
     ):
         raise SessionError(
             f"Unsafe session directory: {session_dir}. Use a directory you own without group or other write permission (chmod 700)."
-            + kept_recording_note(session_dir)
+            + kept_clip_note(session_dir)
         )
     lock = session_dir / LOCK
     try:
@@ -228,7 +229,7 @@ def cleanup_steps(session_dir: Path, runtime: Path, *process_checks: str) -> str
         + shlex.join(["rm", "-rf", "--", *(str(session_dir / m) for m in metadata)]),
         f"Then start again with `{framewisp} run -- APP`.",
     ]
-    return "\n".join(lines) + kept_recording_note(session_dir)
+    return "\n".join(lines) + kept_clip_note(session_dir)
 
 
 def read_metadata(path: Path) -> object:
@@ -337,7 +338,7 @@ def stale_desktop_session(session_dir: Path) -> str:
         "Start it again with attach or teach "
         "(for teach, with a new lesson directory), "
         f"or delete its metadata:\n  {metadata}"
-    ) + kept_recording_note(session_dir)
+    ) + kept_clip_note(session_dir)
 
 
 def verify_lock(
@@ -537,31 +538,31 @@ def recover_session(session_dir: Path) -> int:
             remove_runtime(session_dir, lease)
         for name in ("session.json", ".session.json", ".headless-owner.tmp", JOURNAL):
             (session_dir / name).unlink(missing_ok=True)
-        interrupted = interrupted_recording(session_dir)
+        interrupted = interrupted_clip(session_dir)
     result: dict[str, str] = {
         "session_directory": str(session_dir),
         "status": "recovered",
         "logs": "preserved",
     }
     if interrupted is not None:
-        result["interrupted_recording"] = str(interrupted)
+        result["interrupted_clip"] = str(interrupted)
     print(json.dumps(result))
     return 0
 
 
-def kept_recording(session_dir: Path) -> Path | None:
-    """Return the private clip that the active-recording link points at, if any."""
+def kept_clip(session_dir: Path) -> Path | None:
+    """Return the clip that the private clip link points at, if it remains."""
     # Refusals call this, so a damaged link must not raise.
     try:
-        clip = (session_dir / ACTIVE_RECORDING).readlink()
+        clip = (session_dir / PRIVATE_CLIP).readlink()
     except OSError:
         return None
     return None if path_status(clip) == "absent" else clip
 
 
-def interrupted_recording(session_dir: Path) -> Path | None:
-    """Clear the active-recording link, returning the clip it left behind."""
-    link = session_dir / ACTIVE_RECORDING
+def interrupted_clip(session_dir: Path) -> Path | None:
+    """Clear the private clip link, returning the clip it left behind."""
+    link = session_dir / PRIVATE_CLIP
     if not link.is_symlink():
         return None
     clip = link.readlink()

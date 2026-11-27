@@ -15,11 +15,11 @@ from typing import Protocol, cast
 
 from framewisp.actions import InputAction
 from framewisp.batch import Batch, step_name
-from framewisp.captions import KEY_ACTIONS, CaptionCapture, input_error, log_input
 from framewisp.checks import Check, perform_check
 from framewisp.compact import log_activity
 from framewisp.connection import reply
 from framewisp.errors import SessionError, display_command
+from framewisp.input_log import KEY_ACTIONS, CaptionCapture, input_error, log_input
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
 from framewisp.pointer import approach
 from framewisp.x11 import (
@@ -299,9 +299,15 @@ class InputWorker:
             caption_capture=self.caption_capture,
         ) as logged:
 
-            def ping() -> None:
+            def press(number: int) -> None:
+                button(number, True)
                 assert self.pointer_position is not None
-                logged.ping(*self.pointer_position)
+                logged.press(*self.pointer_position)
+
+            def release(number: int) -> None:
+                button(number, False)
+                assert self.pointer_position is not None
+                logged.release(*self.pointer_position)
 
             try:
                 modifiers = cast(list[str], p.get("modifier", []))
@@ -332,8 +338,7 @@ class InputWorker:
                     for index in range(cast(int, p["count"])):
                         if index:
                             wait(0.1)
-                        button(number, True)
-                        ping()
+                        press(number)
                         button(number, False)
                 elif action.action == "drag":
                     number = CLICK_BUTTONS[cast(str, p["button"])]
@@ -341,16 +346,14 @@ class InputWorker:
                     x2, y2 = bounded(cast(int, p["x2"]), cast(int, p["y2"]))
                     duration = cast(float, p["duration"])
                     steps = max(1, math.ceil(duration * 60))
-                    button(number, True)
-                    ping()
+                    press(number)
                     for step in range(1, steps + 1):
                         wait(duration / steps)
                         move(
                             round(x1 + (x2 - x1) * step / steps),
                             round(y1 + (y2 - y1) * step / steps),
                         )
-                    button(number, False)
-                    ping()
+                    release(number)
                 elif action.action == "scroll":
                     number = SCROLL_BUTTONS[cast(str, p["direction"])]
                     for _ in range(cast(int, p["ticks"])):

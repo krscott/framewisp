@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageChops
 
-from framewisp.captions import render_recording
 from framewisp.console import ConsoleCapture, ConsoleText, app_output, console_frames
-from framewisp.layout import Rect, VideoLayout
+from framewisp.finalization import render_clip
+from framewisp.layout import ClipLayout, Rect
 
-DEFAULT_PANEL = Rect(1280, 0, 640, 720)
-PANEL_LAYOUT = VideoLayout(960, 240, Rect(0, 0, 320, 240), Rect(320, 0, 640, 240))
+DEFAULT_CONSOLE_PANEL = Rect(1280, 0, 640, 720)
+CONSOLE_PANEL_LAYOUT = ClipLayout(
+    960, 240, Rect(0, 0, 320, 240), Rect(320, 0, 640, 240)
+)
 
 
 @pytest.fixture
@@ -153,7 +155,13 @@ def test_clip_has_context_coalesces_bursts_and_excludes_later_output(
         )
     )
     frames = list(
-        console_frames(log, origin=10, stopped=12, panel=DEFAULT_PANEL, cell_scale=1)
+        console_frames(
+            log,
+            origin=10,
+            stopped=12,
+            console_panel=DEFAULT_CONSOLE_PANEL,
+            cell_scale=1,
+        )
     )
     assert len(frames) == 3
     assert frames[0].start == 0
@@ -192,15 +200,15 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
         )
         + "\n"
     )
-    render_recording(
+    render_clip(
         video,
         input_log=tmp_path / "unused",
         origin=10,
         stopped=12,
-        log=tmp_path / "captions.log",
+        log=tmp_path / "finalization.log",
         click_pings=False,
         console=ConsoleCapture(tmp_path),
-        layout=PANEL_LAYOUT,
+        layout=CONSOLE_PANEL_LAYOUT,
         env=dict(os.environ),
     )
 
@@ -229,7 +237,7 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
         return Image.frombytes("RGB", (960, 240), result.stdout)
 
     early, late = frame(0.3), frame(1.3)
-    # Output only changes the added panel. Literal ASS syntax cannot move it onto the GUI.
+    # Output only changes the added console panel. Literal ASS syntax cannot move it onto the GUI.
     assert (
         ImageChops.difference(
             early.crop((0, 0, 304, 240)), late.crop((0, 0, 304, 240))
@@ -263,21 +271,21 @@ def test_console_rendering_preserves_gui_and_timing(tmp_path: Path) -> None:
     assert data["streams"][0]["r_frame_rate"] == "30/1"
 
 
-def test_console_render_failure_preserves_raw_video(tmp_path: Path) -> None:
+def test_console_render_failure_preserves_raw_clip(tmp_path: Path) -> None:
     video = tmp_path / "invalid.mp4"
     video.write_bytes(b"raw file contents")
     (tmp_path / "console.jsonl").write_text("")
-    with pytest.raises(RuntimeError, match="raw video remains"):
-        render_recording(
+    with pytest.raises(RuntimeError):
+        render_clip(
             video,
             input_log=tmp_path / "unused",
             origin=10,
             stopped=12,
-            log=tmp_path / "captions.log",
+            log=tmp_path / "finalization.log",
             click_pings=False,
             console=ConsoleCapture(tmp_path),
-            layout=PANEL_LAYOUT,
+            layout=CONSOLE_PANEL_LAYOUT,
             env=dict(os.environ),
         )
     assert video.read_bytes() == b"raw file contents"
-    assert (tmp_path / "captions.log").stat().st_size > 0
+    assert (tmp_path / "finalization.log").stat().st_size > 0

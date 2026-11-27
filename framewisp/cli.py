@@ -8,7 +8,6 @@ from pathlib import Path
 
 from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
-from framewisp.captions import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions, log_input
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import (
     COMMAND_PROTOCOL,
@@ -21,6 +20,8 @@ from framewisp.connection import (
 )
 from framewisp.desktop import stop_sharing
 from framewisp.errors import SessionError, recorded_app_exit
+from framewisp.finalization import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions
+from framewisp.input_log import log_input
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.layout import (
     CONSOLE_POSITIONS,
@@ -28,7 +29,7 @@ from framewisp.layout import (
     DEFAULT_CONSOLE_POSITION,
     DEFAULT_CONSOLE_SIZE,
     ConsolePanel,
-    video_layout,
+    clip_layout,
 )
 from framewisp.lib import (
     key_commands,
@@ -147,7 +148,7 @@ def main() -> None:
     )
     teach = commands.add_parser(
         "teach",
-        help="record a lesson from your desktop without keyboard or pointer access",
+        help="capture a lesson from your desktop without keyboard or pointer access",
     )
     teach.add_argument("directory", type=Path, help="new directory for the lesson")
     teach.add_argument("--goal", required=True, help="what the agent should learn")
@@ -171,7 +172,11 @@ def main() -> None:
         "between hosts",
     )
     run.add_argument(
-        "--record", type=Path, metavar="FILE", help="record the session to MP4"
+        "--record",
+        type=Path,
+        metavar="FILE",
+        help="record a clip to FILE, starting before the app launches; record-stop "
+        "or the end of the session finishes it",
     )
     run.add_argument(
         "--width",
@@ -203,18 +208,18 @@ def main() -> None:
         recording_parser.add_argument(
             "--console",
             action="store_true",
-            help="add a panel of timestamped app stdout/stderr to the recorded video",
+            help="add a console panel of timestamped app stdout/stderr to the clip",
         )
         recording_parser.add_argument(
             "--console-position",
             choices=CONSOLE_POSITIONS,
-            help=f"video edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
+            help=f"clip edge for the console panel (default: {DEFAULT_CONSOLE_POSITION}; requires --console)",
         )
         recording_parser.add_argument(
             "--console-size",
             type=positive_integer,
             metavar="PIXELS",
-            help=f"even panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
+            help=f"even console panel width for left or right, height for top or bottom; the other dimension follows the GUI (default: {DEFAULT_CONSOLE_SIZE}; requires --console)",
         )
         recording_parser.add_argument(
             "--console-cell-scale",
@@ -235,7 +240,7 @@ def main() -> None:
         recording_parser.add_argument(
             "--no-click-pings",
             action="store_true",
-            help="record without the red ring at each press and the disc that follows drags",
+            help="record without the click ping at each press and the hold disc that follows drags",
         )
     commands.add_parser(
         "record-stop", help="finalize the active clip and keep the app running"
@@ -481,7 +486,7 @@ def main() -> None:
             parser.error("run requires an app command after --")
         if args.record is not None and (args.width % 2 or args.height % 2):
             parser.error("--record requires even --width and --height")
-        layout = video_layout((args.width, args.height), args.console_panel)
+        layout = clip_layout((args.width, args.height), args.console_panel)
         if isinstance(layout, str):
             parser.error(layout)
     state_path = session_dir / "session.json"
@@ -601,10 +606,10 @@ def dispatch(
         result = run_session(
             session_dir,
             app_command,
-            recording=args.record,
+            clip_destination=args.record,
             captions=args.captions,
             click_pings=not args.no_click_pings,
-            console=args.console_panel,
+            console_panel=args.console_panel,
             compact=args.compact,
             size=(args.width, args.height),
             x11=args.x11,
@@ -625,7 +630,7 @@ def dispatch(
                 args.path if args.command == "record-start" else None,
                 captions=getattr(args, "captions", CaptionOptions()),
                 click_pings=not getattr(args, "no_click_pings", False),
-                console=getattr(args, "console_panel", None),
+                console_panel=getattr(args, "console_panel", None),
                 compact=getattr(args, "compact", False),
             )
         )

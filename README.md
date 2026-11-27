@@ -1,6 +1,6 @@
 # framewisp
 
-Run a Wayland or X11 app without a physical display, save PNG screenshots or MP4 recordings, and
+Run a Wayland or X11 app without a physical display, save PNG screenshots or MP4 clips, and
 send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
 development environment and includes a small GTK demo app.
 
@@ -25,8 +25,8 @@ commands with their runtime environment. The apps you run, including Flatpaks,
 are installed separately.
 
 Development uses pytest and Pillow to run real GUI tests and compare screenshots.
-FFmpeg's `ffmpeg` and `ffprobe` commands render captions, inspect finished recordings,
-and decode recordings in tests. The package supplies them for Framewisp's internal
+FFmpeg's `ffmpeg` and `ffprobe` commands render overlays, inspect finished clips,
+and decode clips in tests. The package supplies them for Framewisp's internal
 use; the development shell also puts them on PATH. Mypy and Pyright check types; Black, isort, and
 nixfmt format the source. Setuptools builds the Python package, and Just provides
 development command recipes.
@@ -221,7 +221,7 @@ remains session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `teach DIRECTORY --goal TEXT` | Record a lesson of the user performing a task on one desktop monitor into a new directory, without keyboard or pointer access. |
+| `teach DIRECTORY --goal TEXT` | Capture a lesson of the user performing a task on one desktop monitor into a new directory, without keyboard or pointer access. |
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
 | `attach` | Share your desktop with an attached session (screenshots and input); stay in the foreground. |
@@ -230,9 +230,9 @@ remains session-independent.
 | `record-stop` | Finalize the clip without stopping the app; print its measured summary as JSON. |
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
-| `stop` | Stop the headless session and wait for cleanup and recording finalization. |
+| `stop` | Stop the headless session and wait for cleanup and finalization of any clip. |
 | `recover` | Recover an abandoned headless session after its owner and supervisors exit, preserving logs. |
-| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and screenshot time. Default delay: 0. |
+| `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's clip destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and screenshot time. Default delay: 0. |
 | `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
 | `scroll [--move-duration SECONDS] X Y DIRECTION [--ticks N]` | Move to the pane, then send wheel ticks; directions: up, down, left, right. |
@@ -311,7 +311,7 @@ It prints `Teaching session ready:` once it saves its first frame. Perform the t
 stop with Ctrl+C in the teaching terminal. Your apps keep running. The sharing
 indicator and `framewisp --stop-sharing` can also stop capture.
 
-You or the agent can add explanations from another terminal while recording:
+You or the agent can add explanations from another terminal during the teaching session:
 
 ```sh
 framewisp teaching teach-note 'The customer name is an input; verify the saved address before finishing.'
@@ -320,14 +320,14 @@ framewisp teaching teach-note 'The customer name is an input; verify the saved a
 The lesson contains `lesson.json` with the goal and completion status,
 `video.webm` with the silent video and cursor, `frames/` with roughly one PNG
 frame per second, and `timeline.jsonl` mapping frames and notes to capture
-times in seconds. The agent can study the frames directly, even while recording,
+times in seconds. The agent can study the frames directly, even while the teaching session runs,
 and extract additional frames from the video for fast interactions. Notes,
 frames, and video are unredacted. Teaching does not capture physical key events,
 audio, or clipboard contents; explain shortcuts and choices in notes.
 
 Ask the agent to turn the lesson into a procedure with variable inputs
 and outcome checks, clarify uncertain steps, and try it on a fresh example.
-Framewisp supplies the lesson; your agent writes the procedure. A `recording`
+Framewisp supplies the lesson; your agent writes the procedure. A `capturing`
 status after the process exits means capture was interrupted; `failed` includes
 an error. A partial lesson keeps what it saved. See the
 [agent guide](framewisp/SKILL.md#learn-from-a-lesson) for the full
@@ -475,7 +475,7 @@ has not been verified yet; see [verification](docs/sharing-indicator.md).
 
 Attached sessions support screenshots and input commands, including input logs.
 Keyboard shortcuts currently assume a US keyboard layout.
-Recording attached sessions is not implemented yet.
+Attached and teaching sessions cannot record; clips come from headless sessions only.
 
 ## Hover feedback
 
@@ -687,72 +687,70 @@ MP4 is finalized and playable, leaving the app running. It can also stop a clip
 started with `run --record FILE`. Only one recording can be active at a time;
 starting another or stopping when none is active reports an error.
 
-On success, `record-stop` prints JSON with the output `path`, `duration_seconds`,
+On success, `record-stop` prints JSON with the clip's `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`. Framewisp uses ffprobe and the completed file
-to measure these values after caption rendering; duration is not a wall-clock estimate.
+to measure these values after finalization; duration is not a wall-clock estimate.
 `duration_seconds` is `null` for a clip with no measurable duration, such as one
 stopped before it encoded a frame. Such a clip skips captions, click pings, console
 panels, and compaction. `width` and `height` are also `null` when the clip has no
 video stream.
 
-Recordings are silent H.264 MP4 files at 30 fps and the session's display size,
+Clips are silent H.264 MP4 files at 30 fps and the session's display size,
 plus the console panel when `--console` is enabled, 640 pixels of width by default.
-Recording requires even width and height (R-REC-2). Existing output files are
-never overwritten (R-REC-1). The output file does not exist until the clip is
-finalized. Until then, framewisp records to a hidden `.framewisp-recording-*`
-directory beside it, so the output directory must be writable and on a filesystem
-with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
+Recording requires even width and height (R-REC-2). An existing file at the
+clip destination is never overwritten (R-REC-1). The clip does not appear there
+until it is finalized. Until then, framewisp records to a hidden
+`.framewisp-clip-*` directory beside it, so the clip destination's directory must be writable and
+on a filesystem with hard links, such as ext4, btrfs, xfs or tmpfs. vfat and exFAT are rejected
 when the clip starts (R-REC-19).
 
-If another file appears at the output path during a clip, framewisp leaves that
-file alone, reports the path of the finished clip in the hidden directory, and
-ends the session like any other finalization failure (R-REC-18). If the recorder
-fails to finalize, the incomplete clip also stays there, and the error names it.
+If the recorder fails to finalize, the incomplete clip stays in the hidden
+directory, and the error names it.
 
 The session runner owns the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
-an invalid recording request or failed `record-start` leaves the app running.
+an invalid `record-start` request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
 Keep the runner alive until shutdown completes so it can finalize the MP4.
 The development shell includes FFmpeg for video inspection.
 
-Add `--console` to show the launched app's combined stdout/stderr in a scrolling
-text panel, on the right and 640 pixels wide by default:
+Add `--console` to show the launched app's combined stdout/stderr in a console
+panel, a scrolling text strip on the right and 640 pixels wide by default:
 
 ```sh
 framewisp demo run --record /tmp/startup.mp4 --console -- framewisp-demo
 # Or capture a later clip, with or without input captions:
 framewisp demo record-start --console /tmp/console.mp4
 framewisp demo record-stop
-# Or place a 200-pixel panel under the GUI:
+# Or place a 200-pixel console panel under the GUI:
 framewisp demo record-start --console --console-position bottom --console-size 200 /tmp/below.mp4
 framewisp demo record-stop
 ```
 
 `--console-position` takes `left`, `right`, `top`, or `bottom`. `--console-size`
-sets the panel's width for `left` and `right` and its height for `top` and `bottom`;
-the other dimension follows the GUI. The size must be even, and the panel must hold
+sets the console panel's width for `left` and `right` and its height for `top` and `bottom`;
+the other dimension follows the GUI. The size must be even, and the console panel must hold
 at least 20 text columns and 3 text rows, so at least 312 pixels wide and 118 tall,
 including the dimension that follows the GUI.
 Printable ASCII always fits its cells. Some other scripts draw larger than the
 console font: Thai, Devanagari and Vietnamese rows are taller, and Tamil letters are
 wider. `--console-cell-scale FACTOR` (default 1, from 1 to 58) makes framewisp assume
 each text cell is FACTOR times larger in both directions, so fewer rows and columns
-fit and the minimum panel size grows by the same factor. About 1.1 suits Thai,
+fit and the minimum console panel size grows by the same factor. About 1.1 suits Thai,
 Devanagari and Vietnamese, and 1.5 suits Tamil (3.5 for text with many ஔ). The
-`--console-*` options require `--console` and can differ per clip. The video can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
+`--console-*` options require `--console` and can differ per clip. The clip can't exceed 16384 pixels in either dimension or FFmpeg's frame size limit, about 16128x16384. A rejected
 `record-start` leaves the app running.
 
 The GUI keeps its original size, coordinates, and screenshots. Console lines show
 seconds relative to the clip's first frame. A short tail of earlier output provides
-context with negative timestamps. Text wraps and scrolls within the panel. ANSI
+context with negative timestamps. Text wraps and scrolls within the console panel. ANSI
 formatting is stripped; carriage returns replace the current progress line. This
 is plain text capture, without terminal emulation, colors, or cursor positioning.
 
 Every headless session preserves the original output bytes in `app.log` and writes
 received UTF-8 text and monotonic timestamps to `console.jsonl`, including when
 no recording is active. Invalid UTF-8 becomes replacement characters in the
-sidecar and panel. Timestamps describe receipt, so app buffering can delay output;
+sidecar and console panel. Timestamps describe receipt, so app buffering can delay output;
 Framewisp does not change the app's buffering or attach a pseudo-terminal.
 Only the launched process tree's inherited stdout/stderr is captured. Output from
 separately activated D-Bus services or other processes is outside this capture.
@@ -776,7 +774,7 @@ Batch checks (`baseline`, `wait`, and `assert`) and batch screenshot delays rema
 in full, including failed and cancelled steps. Their timestamp-only spans are
 stored in `SESSION/activity.jsonl`; conditions and error text are not retained
 there. Inputs that overlap the clip boundary remain for their captured duration.
-Each clip chooses compaction independently; the default keeps the full recording.
+Each clip chooses compaction independently; the default keeps the full clip.
 
 Cuts use command timestamps, not pixel changes. Blinking cursors do not prevent
 trimming. Animations, app output, and delayed responses in removed gaps can be
@@ -786,17 +784,21 @@ can be removed. Captions, click pings, and console text stay aligned with the
 retained GUI frames; console timestamps still show original clip time. The reported duration measures the compacted MP4. Session logs keep their original
 timestamps and content.
 
-Compaction, console rendering, input captions, and click pings share one FFmpeg
-pass after capture stops. `record-stop` and normal shutdown wait for it. If
-rendering fails, the raw GUI video remains playable. It stays at the requested path
-unless framewisp cannot publish it there, and the error names its path and
-`captions.log` (R-REC-10). A session that hits this failure stops,
-even when `record-stop` triggered it.
+Finalization applies compaction and draws the console panel and overlays in one
+FFmpeg pass after capture stops. `record-stop` and normal shutdown wait for it. If
+that pass fails, the raw clip remains at the clip destination, playable when the
+recorder wrote a playable file, and the error names its path and
+`finalization.log` (R-REC-10). If framewisp cannot
+publish the clip there, for example because a file takes the clip destination
+first or its directory is no longer writable, it leaves any file there intact.
+The clip stays in the hidden directory with whatever finalization completed,
+and the error names its path (R-REC-18). A session that hits either failure stops, even when `record-stop`
+triggered it.
 
 ## Share media in GitHub comments
 
 [GitHub CLI 2.99.0](https://github.com/cli/cli/releases/tag/v2.99.0) and newer
-can upload PNG screenshots and MP4 recordings directly to issue and PR comments.
+can upload PNG screenshots and MP4 clips directly to issue and PR comments.
 Check `gh pr comment --help` for `--attach`. Install or update `gh` separately;
 Framewisp does not include it.
 
@@ -833,12 +835,12 @@ before publishing, even when input logs omit typed text.
 See [GitHub's CLI attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
 for Markdown placement and supported commands.
 
-## Input logs and recording captions
+## Input logs and overlays
 
 Every accepted input command appends start and end records to `SESSION/inputs.jsonl`,
-even without a recording. In headless sessions, each click press and each drag
-press and release adds a `ping` record with the time and display position `x` and
-`y`. Records include an action ID, monotonic timestamp in
+even without a recording. In headless sessions, each click press and drag press
+adds a `press` record, and each drag release adds a `release` record, with the
+time and display position `x` and `y`. Records include an action ID, monotonic timestamp in
 seconds, the command and retained parameters, and its return code or exception type. They
 record what framewisp attempted and whether the input command completed, not
 whether the app responded as intended. A start without an end indicates an
@@ -867,22 +869,22 @@ keyboard caption and omit its value from the input log, use `key --private` or
 `type --private`. In a batch, set `"private": true` on the `key` or `type` step.
 Private inputs still count as activity and retain their timing and outcome.
 Apps can still display or log the input. Attached sessions support input logging
-and private input but do not support recording.
+and private input but cannot record.
 
 Captions stay visible during paced input and briefly after quick commands, until
 the next captioned input. Inputs between clips are excluded from the next clip.
-Captions appear only in recordings, never in app screenshots (R-LOG-2).
+Captions appear only in clips, never in app screenshots (R-LOG-2).
 
 ```sh
 framewisp demo record-start --pointer-captions modifiers --key-captions non-text /tmp/gestures.mp4
 framewisp demo run --record /tmp/plain.mp4 -- framewisp-demo
 ```
 
-Click pings mark each pointer press in a recording: a red ring grows and fades
+Click pings mark each pointer press in a clip: a red ring grows and fades
 over half a second at the press position. Each click of a double click and the
-press of a drag get their own ping. While a completed drag holds its button, a
+press of a drag get their own click ping. While a completed drag holds its button, a
 translucent red hold disc follows the pointer, then fades over half a second
-after the release. A cancelled drag shows only its press ring. Scrolls and moves
+after the release. A cancelled drag shows only its click ping. Scrolls and moves
 get none.
 Clips with `run --record` and `record-start` show them by default, independently
 of the caption flags. Screenshots never include them (R-LOG-3), and `inspect` and
@@ -890,31 +892,28 @@ input coordinates are unaffected. Disable them for a clip with:
 
 ```sh
 framewisp demo record-start --no-click-pings /tmp/plain.mp4
-# Or start the session with a ping-free recording:
+# Or start the session with a clip without click pings:
 framewisp demo run --record /tmp/plain.mp4 --no-click-pings -- framewisp-demo
 ```
 
-A clip with a click is encoded again to draw its pings, even when text captions
+A clip with a click is encoded again to draw its click pings, even when text captions
 are off. Add `--no-click-pings` to keep the recorder's output unprocessed when
 nothing else needs rendering. `run --no-click-pings` requires `--record`.
 
-Captions are rendered into the video frames so
+Overlays are rendered into the video frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
-`record-stop` and normal session shutdown wait for caption rendering to finish.
-This adds encoding time when stopping a captioned clip. If rendering fails, the
-command fails and leaves the uncaptioned MP4 playable. The MP4 is at the requested
-path unless framewisp cannot publish it there. The error names its path and
-`captions.log` for details.
+`record-stop` and normal session shutdown wait for finalization to finish.
+This adds encoding time when stopping a clip that finalization draws on or compacts.
 
-The recorder log retains diagnostics and the first frame's timestamp used for
-caption alignment. Framewisp filters the remaining Wayland protocol trace as it
+The recorder log retains diagnostics and the first frame's timestamp used to
+align overlays, the console panel and compaction. Framewisp filters the remaining Wayland protocol trace as it
 arrives instead of retaining it for every frame.
 
 The Nix package includes FFmpeg and caption fonts for Latin, Greek, Cyrillic, CJK,
 and monochrome emoji. Captions, console panels and apps use the same
 [font file](#app-environment). Caption and console text escapes braces and
 backslashes, so they draw as themselves and never act as subtitle formatting.
-Screenshots and recordings
+Screenshots and clips
 can still show secrets displayed by apps. Omitting input content does not redact
 screen content or provide a general app-log redaction guarantee. Shell history,
 batch files, app logs, and runtime input state are outside this policy.
@@ -1183,12 +1182,12 @@ Papers 50.2 was tested with PDF navigation, zoom, and search at 1600x900.
 
 Use `framewisp SESSION status` to query the live headless runner. Its JSON output
 includes the backend, display dimensions, app PID and running state, and the
-active recording path/PID/running state (or null).
+active recording's clip destination, PID and running state (or null).
 
 Use `framewisp SESSION stop` to request normal shutdown. It waits for managed
 processes to exit, runtime sockets and session metadata to be removed, and any
 active clip to be finalized. Success prints JSON with `status: "stopped"` and the
-last recording summary, if one exists. Neither command sends signals to stored
+summary of the last clip under `clip`, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
 These commands manage headless sessions. End an attached or teaching session with
 Ctrl+C in its terminal; `framewisp --stop-sharing` is the emergency stop for
@@ -1221,12 +1220,12 @@ After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`,
 then reuse the directory with `framewisp SESSION run -- APP`. Supervisors start
 cleanup on runner loss. Recovery refuses while the runner or any supervisor
 holds the kernel ownership lock; wait a few seconds and retry. It removes the
-owned runtime and stale session metadata, preserves logs and recordings, and
+owned runtime and stale session metadata, preserves logs and clips, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
 run replaces its logs. If a private clip remains, the JSON also has
-`interrupted_recording`, the path of that clip in a hidden
-`.framewisp-recording-*` directory beside the destination. The clip may be
-incomplete. Recovery leaves it in place, and it does not block later recordings.
+`interrupted_clip`, the path of that clip in a hidden
+`.framewisp-clip-*` directory beside the clip destination. The clip may be
+incomplete. Recovery leaves it in place, and it does not block later clips.
 Move what you want to keep and delete the directory.
 
 Recovery never signals PIDs from metadata or follows its runtime path. Ownership
@@ -1274,7 +1273,7 @@ pyright
 ```
 
 Tests run a real compositor, VNC server, and GTK app. They check input through
-the demo app's output, compare screenshot regions, decode recordings, and verify
+the demo app's output, compare screenshot regions, decode clips, and verify
 managed-process cleanup.
 
 Declare Python dependencies in `pyproject.toml` and the corresponding Nix

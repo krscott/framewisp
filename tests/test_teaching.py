@@ -134,6 +134,10 @@ def test_lesson_has_playable_video_frames_goal_and_timed_notes(
         "videotestsrc is-live=true pattern=ball ! video/x-raw,width=320,height=240,framerate=30/1"
     )
     wait_for_frames(teaching, 1)
+    assert (
+        json.loads((teaching.directory / "lesson.json").read_text())["status"]
+        == "capturing"
+    )
     teaching.note("Choose this customer; the name is a variable. ✓")
     wait_for_frames(teaching, 3)
     assert teaching.close() is None

@@ -48,7 +48,7 @@ class Demo:
     process: subprocess.Popen[bytes]
     runtime: Path
     child_pids: list[int]
-    recording: Path | None
+    clip: Path | None
     # Name of a control the app exports once its accessibility tree is ready.
     control: str | None
 
@@ -156,10 +156,10 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             "x11-large-waits": "large-waits",
             "x11-deep": "deep",
         }[mode]
-    recording = (
+    clip = (
         tmp_path / "session.mp4"
         if mode is True
-        or mode in {"large", "no-pings", "console", "record-probe", "compact"}
+        or mode in {"large", "no-click-pings", "console", "record-probe", "compact"}
         or mode in CONSOLE_STARTS
         or (isinstance(mode, str) and mode.startswith("captions-"))
         else None
@@ -167,13 +167,13 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
     command = ["framewisp", str(directory), "run"]
     if x11:
         command.append("--x11")
-    if recording is not None:
-        command.extend(["--record", str(recording)])
+    if clip is not None:
+        command.extend(["--record", str(clip)])
         if mode == "console":
             command.append("--console")
         if mode in CONSOLE_STARTS:
             command.extend(console_options(*CONSOLE_STARTS[mode]))
-        if mode == "no-pings":
+        if mode == "no-click-pings":
             command.append("--no-click-pings")
         if mode in {"record-probe", "captions-pointer", "captions-all"}:
             command.extend(["--pointer-captions", "all"])
@@ -312,7 +312,7 @@ def demo(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Demo]:
             process=process,
             runtime=Path(state["runtime_directory"]),
             child_pids=list(state["processes"].values()),
-            recording=recording,
+            clip=clip,
             control=control,
         )
     finally:
@@ -405,22 +405,22 @@ def test_interrupt_stops_session(demo: Demo) -> None:
 # R-LIFE-2, R-REC-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True, "x11-record"], indirect=True)
-def test_status_and_stop_finalize_recording(demo: Demo) -> None:
-    assert demo.recording is not None
+def test_status_and_stop_finalize_clip(demo: Demo) -> None:
+    assert demo.clip is not None
     state = json.loads(cli(demo.directory, "status").stdout)
     assert state["status"] == "running"
     assert state["backend"] in {"wayland", "x11"}
     assert state["app"]["running"]
     assert state["recording"]["running"]
-    assert state["recording"]["path"] == str(demo.recording)
+    assert state["recording"]["clip_destination"] == str(demo.clip)
     cli(demo.directory, "type", "stop test")
     stopped = json.loads(cli(demo.directory, "stop").stdout)
     assert stopped["status"] == "stopped"
-    summary = stopped["recording"]
-    assert summary["path"] == str(demo.recording)
+    summary = stopped["clip"]
+    assert summary["path"] == str(demo.clip)
     assert summary["width"] == 1280 and summary["height"] == 720
     assert summary["duration_seconds"] > 0
-    assert summary["size_bytes"] == demo.recording.stat().st_size
+    assert summary["size_bytes"] == demo.clip.stat().st_size
     # The reply comes after cleanup, rather than merely acknowledging the request.
     assert not demo.runtime.exists()
     assert not (demo.directory / "session.json").exists()
@@ -428,8 +428,8 @@ def test_status_and_stop_finalize_recording(demo: Demo) -> None:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
     assert demo.process.wait(timeout=5) == 0
-    recording_frames(demo.recording)
-    assert not private_directories(demo.recording.parent)
+    clip_frames(demo.clip)
+    assert not private_directories(demo.clip.parent)
     log = (demo.directory / "recorder.log").read_text()
     assert len(re.findall(r"zwlr_screencopy_frame_v1[#@]\d+\.ready", log)) == 1
     assert "get_registry" not in log
@@ -442,7 +442,7 @@ def test_status_and_stop_finalize_recording(demo: Demo) -> None:
 def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
     demo: Demo, tmp_path: Path
 ) -> None:
-    assert demo.recording is not None
+    assert demo.clip is not None
     wait_for_demo_frame(demo, tmp_path / "before.png")
     started = time.monotonic()
     time.sleep(5)
@@ -452,9 +452,9 @@ def test_compact_run_cuts_idle_gaps_and_keeps_paced_input(
         lambda: "Entered: Compact demo" in (demo.directory / "app.log").read_text()
     )
     time.sleep(2)
-    summary = json.loads(cli(demo.directory, "stop").stdout)["recording"]
+    summary = json.loads(cli(demo.directory, "stop").stdout)["clip"]
     assert 4.5 <= summary["duration_seconds"] < time.monotonic() - started - 2
-    recording_frames(demo.recording)
+    clip_frames(demo.clip)
     assert demo.process.wait(timeout=5) == 0
 
 
@@ -465,13 +465,13 @@ def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_for_demo_frame(demo, tmp_path / "before.png")
-    video = tmp_path / "compact console.mp4"
+    clip = tmp_path / "compact console.mp4"
     cli(
         demo.directory,
         "record-start",
         "--compact",
         "--console",
-        str(video),
+        str(clip),
     )
     time.sleep(5)
     failure = tmp_path / "failure.png"
@@ -509,7 +509,7 @@ def test_compact_clip_preserves_failed_wait_and_screenshot_delay(
     activity = (demo.directory / "activity.jsonl").read_text()
     assert "secret condition" not in activity
     assert len(activity.splitlines()) == 4
-    recording_frames(video, size=(1920, 720))
+    clip_frames(clip, size=(1920, 720))
     assert json.loads(cli(demo.directory, "status").stdout)["app"]["running"]
 
     # A later ordinary clip must not inherit compaction from the previous clip.
@@ -545,9 +545,9 @@ def test_status_and_stop_reject_copied_session_metadata(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True, "compact"], indirect=True)
-def test_stop_reports_recording_finalization_failure(demo: Demo) -> None:
+def test_stop_reports_finalization_failure(demo: Demo) -> None:
     cli(demo.directory, "click", "120", "100")
-    (demo.directory / "captions.log").mkdir()
+    (demo.directory / "finalization.log").mkdir()
     result = subprocess.run(
         ["framewisp", str(demo.directory), "stop"],
         capture_output=True,
@@ -556,13 +556,13 @@ def test_stop_reports_recording_finalization_failure(demo: Demo) -> None:
         timeout=20,
     )
     assert result.returncode == 1
-    assert "captions.log" in result.stderr
+    assert "finalization.log" in result.stderr
     assert result.stdout == ""
     assert demo.process.wait(timeout=5) == 1
     assert not demo.runtime.exists()
     assert not (demo.directory / "session.json").exists()
-    assert demo.recording is not None
-    recording_frames(demo.recording)
+    assert demo.clip is not None
+    clip_frames(demo.clip)
 
 
 @pytest.mark.integration
@@ -574,11 +574,11 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
             {
                 "kind": "headless",
                 # COMMAND_PROTOCOL; this file cannot import framewisp.
-                "command_protocol": 5,
+                "command_protocol": 6,
                 "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
-                "recording": None,
+                "clip_destination": None,
             }
         )
     )
@@ -603,12 +603,12 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
 
 
 def private_directories(parent: Path) -> list[Path]:
-    return list(parent.glob(".framewisp-recording-*"))
+    return list(parent.glob(".framewisp-clip-*"))
 
 
 def private_clip(parent: Path) -> Path:
     [directory] = private_directories(parent)
-    return directory / "recording.mp4"
+    return directory / "clip.mp4"
 
 
 def recorder_pid(parent: Path) -> int | None:
@@ -652,7 +652,7 @@ def recorder_before_first_frame(
             os.kill(sway_pid, signal.SIGCONT)
 
 
-def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
+def clip_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[str]:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
         capture_output=True,
@@ -684,10 +684,8 @@ def recording_frames(path: Path, *, size: tuple[int, int] = (1280, 720)) -> set[
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True, "captions-all"], indirect=True)
 @pytest.mark.parametrize("stop_signal", [signal.SIGINT, signal.SIGTERM])
-def test_recording_finalizes_on_shutdown(
-    demo: Demo, stop_signal: signal.Signals
-) -> None:
-    assert demo.recording is not None
+def test_clip_finalizes_on_shutdown(demo: Demo, stop_signal: signal.Signals) -> None:
+    assert demo.clip is not None
     screenshot = demo.directory / "visible.png"
 
     def app_is_visible() -> bool:
@@ -702,8 +700,8 @@ def test_recording_finalizes_on_shutdown(
     cli(demo.directory, "screenshot", "--delay", "0.2", str(screenshot))
     demo.process.send_signal(stop_signal)
     assert demo.process.wait(timeout=20) == 0
-    assert len(recording_frames(demo.recording)) > 1
-    assert not private_directories(demo.recording.parent)
+    assert len(clip_frames(demo.clip)) > 1
+    assert not private_directories(demo.clip.parent)
     # Check a uniform background patch against the screenshot. A range mismatch
     # can produce a playable video with visibly shifted brightness.
     with Image.open(screenshot) as image:
@@ -714,7 +712,7 @@ def test_recording_finalizes_on_shutdown(
             "-v",
             "error",
             "-i",
-            str(demo.recording),
+            str(demo.clip),
             "-vf",
             "fps=10,crop=2:2:1000:600",
             "-pix_fmt",
@@ -784,7 +782,7 @@ def paused_render(
                     return False  # Other processes can exit during enumeration.
                 return (
                     argv[0].endswith(b"ffmpeg")
-                    and b"captioned.mp4" in argv
+                    and any(arg.endswith(b"/rendered.mp4") for arg in argv)
                     and private_clip(tmp_path)
                     == Path(os.fsdecode(argv[argv.index(b"-i") + 1]))
                 )
@@ -845,7 +843,7 @@ def test_terminal_interrupt_during_render_publishes_rendered_clip(
         signal.pidfd_send_signal(render, signal.SIGCONT)
         assert stop.wait(timeout=60) == 0
         assert runner.wait(timeout=60) == 0, (tmp_path / "runner.log").read_text()
-    assert len(ring_frames(tmp_path / "clip.mp4", 120, 100)) >= 8
+    assert len(pointer_overlay_frames(tmp_path / "clip.mp4", 120, 100)) >= 8
     assert not private_directories(tmp_path)
 
 
@@ -879,24 +877,26 @@ def test_recover_waits_for_render_of_killed_runner(tmp_path: Path) -> None:
 
 # R-REC-3
 @pytest.mark.integration
-def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -> None:
-    video = tmp_path / "quick.mp4"
+def test_recording_starts_before_app_and_clip_finalizes_on_app_exit(
+    tmp_path: Path,
+) -> None:
+    clip = tmp_path / "quick.mp4"
     result = subprocess.run(
         [
             "framewisp",
             str(tmp_path / "session"),
             "run",
             "--record",
-            str(video),
+            str(clip),
             "--",
             sys.executable,
             "-c",
             "from pathlib import Path; import sys; "
-            "[clip] = Path(sys.argv[1]).glob('.framewisp-recording-*/recording.mp4'); "
+            "[clip] = Path(sys.argv[1]).glob('.framewisp-clip-*/clip.mp4'); "
             "assert clip.stat().st_size > 0; "
             "assert not Path(sys.argv[2]).exists()",
             str(tmp_path),
-            str(video),
+            str(clip),
         ],
         capture_output=True,
         text=True,
@@ -904,7 +904,7 @@ def test_recording_starts_before_app_and_finalizes_on_app_exit(tmp_path: Path) -
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
-    recording_frames(video)
+    clip_frames(clip)
     assert not private_directories(tmp_path)
 
 
@@ -929,7 +929,7 @@ def test_recording_into_new_session_directory(tmp_path: Path) -> None:
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
-    recording_frames(session_dir / "clip.mp4")
+    clip_frames(session_dir / "clip.mp4")
 
 
 @pytest.mark.integration
@@ -940,11 +940,11 @@ def test_recorder_failure_stops_session(demo: Demo) -> None:
     assert demo.process.wait(timeout=20) != 0
     log = (demo.directory.parent / "runner.log").read_text()
     assert "recorder.log" in log
-    assert demo.recording is not None
-    assert not demo.recording.exists()
-    kept = private_clip(demo.recording.parent)
+    assert demo.clip is not None
+    assert not demo.clip.exists()
+    kept = private_clip(demo.clip.parent)
     assert str(kept) in " ".join(log.split())
-    assert (demo.directory / ".active-recording").readlink() == kept
+    assert (demo.directory / ".private-clip").readlink() == kept
     assert not demo.runtime.exists()
     for pid in demo.child_pids:
         with pytest.raises(ProcessLookupError):
@@ -1717,8 +1717,8 @@ def test_custom_display_size(demo: Demo, size: tuple[int, int], tmp_path: Path) 
     )
     demo.process.terminate()
     assert demo.process.wait(timeout=20) == 0
-    if demo.recording is not None:
-        assert len(recording_frames(demo.recording, size=size)) > 1
+    if demo.clip is not None:
+        assert len(clip_frames(demo.clip, size=size)) > 1
 
 
 @pytest.mark.integration
@@ -1750,9 +1750,9 @@ def test_record_multiple_clips_without_restarting_app(
 ) -> None:
     state_path = demo.directory / "session.json"
     app_pid = json.loads(state_path.read_text())["processes"]["app"]
-    if demo.recording is not None:
+    if demo.clip is not None:
         cli(demo.directory, "record-stop")
-        recording_frames(demo.recording)
+        clip_frames(demo.clip)
 
     def rejected(*arguments: str) -> str:
         result = subprocess.run(
@@ -1802,7 +1802,7 @@ def test_record_multiple_clips_without_restarting_app(
         assert summary["width"] == 1280 and summary["height"] == 720
         assert summary["duration_seconds"] > 0
         assert summary["size_bytes"] == clip.stat().st_size
-        assert len(recording_frames(clip)) > 1
+        assert len(clip_frames(clip)) > 1
         state = json.loads(state_path.read_text())
         assert state["processes"]["app"] == app_pid
         assert "recorder" not in state["processes"]
@@ -1813,7 +1813,7 @@ def test_record_multiple_clips_without_restarting_app(
     cli(demo.directory, "record-start", *unrendered, str(final_clip))
     demo.process.terminate()
     assert demo.process.wait(timeout=20) == 0
-    recording_frames(final_clip)
+    clip_frames(final_clip)
 
 
 # R-REC-2
@@ -1834,7 +1834,7 @@ def test_record_start_rejects_odd_display(demo: Demo, tmp_path: Path) -> None:
     assert demo.process.poll() is None
 
 
-def video_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
+def clip_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
     return subprocess.run(
         [
             "ffmpeg",
@@ -1861,7 +1861,7 @@ def video_patch(path: Path, second: float, x: int = 0, y: int = 0) -> bytes:
 
 
 def caption_patches(path: Path) -> list[bytes]:
-    """Return the caption area of the video, sampled five times per second."""
+    """Return the caption area of the clip, sampled five times per second."""
     data = subprocess.run(
         [
             "ffmpeg",
@@ -1885,15 +1885,17 @@ def caption_patches(path: Path) -> list[bytes]:
     return [data[offset : offset + size] for offset in range(0, len(data), size)]
 
 
-RING_CROP = 100
+OVERLAY_CROP = 100
 
 
-def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
-    """List 30 fps frames with a centred red ring or disc around a display position.
+def pointer_overlay_frames(
+    path: Path, x: int, y: int, *, contrast: int = 40
+) -> list[int]:
+    """List 30 fps frames with a centred click ping or hold disc around a display position.
 
     Red pixels exceed green and blue by more than `contrast`.
     """
-    crop = f"crop={RING_CROP}:{RING_CROP}:{x - RING_CROP // 2}:{y - RING_CROP // 2}"
+    crop = f"crop={OVERLAY_CROP}:{OVERLAY_CROP}:{x - OVERLAY_CROP // 2}:{y - OVERLAY_CROP // 2}"
     data = subprocess.run(
         [
             "ffmpeg",
@@ -1913,13 +1915,13 @@ def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
         check=True,
         timeout=60,
     ).stdout
-    size = RING_CROP * RING_CROP * 3
-    rings: list[int] = []
+    size = OVERLAY_CROP * OVERLAY_CROP * 3
+    shown: list[int] = []
     for index in range(len(data) // size):
         frame = data[index * size : (index + 1) * size]
         points = [
-            (offset % RING_CROP, offset // RING_CROP)
-            for offset in range(RING_CROP * RING_CROP)
+            (offset % OVERLAY_CROP, offset // OVERLAY_CROP)
+            for offset in range(OVERLAY_CROP * OVERLAY_CROP)
             if frame[offset * 3] - frame[offset * 3 + 1] > contrast
             and frame[offset * 3] - frame[offset * 3 + 2] > contrast
         ]
@@ -1927,11 +1929,11 @@ def ring_frames(path: Path, x: int, y: int, *, contrast: int = 40) -> list[int]:
             continue
         xs, ys = [point[0] for point in points], [point[1] for point in points]
         if (
-            abs((min(xs) + max(xs)) / 2 - RING_CROP / 2) <= 2
-            and abs((min(ys) + max(ys)) / 2 - RING_CROP / 2) <= 2
+            abs((min(xs) + max(xs)) / 2 - OVERLAY_CROP / 2) <= 2
+            and abs((min(ys) + max(ys)) / 2 - OVERLAY_CROP / 2) <= 2
         ):
-            rings.append(index)
-    return rings
+            shown.append(index)
+    return shown
 
 
 def clip_origin(demo: Demo) -> float:
@@ -1945,7 +1947,7 @@ def clip_origin(demo: Demo) -> float:
     return (high << 32) + low + nanos / 1e9
 
 
-def logged_pings(demo: Demo) -> list[tuple[str, float, int, int]]:
+def logged_buttons(demo: Demo) -> list[tuple[str, float, int, int]]:
     events = [
         json.loads(line)
         for line in (demo.directory / "inputs.jsonl").read_text().splitlines()
@@ -1953,7 +1955,7 @@ def logged_pings(demo: Demo) -> list[tuple[str, float, int, int]]:
     return [
         (event["action"], event["time"], event["x"], event["y"])
         for event in events
-        if event["event"] == "ping"
+        if event["event"] in {"press", "release"}
     ]
 
 
@@ -1965,7 +1967,7 @@ def perform_gestures(demo: Demo) -> None:
     time.sleep(0.8)
 
 
-GESTURE_PINGS = [
+GESTURE_BUTTONS = [
     ("click", 200, 150),
     ("click", 500, 150),
     ("click", 500, 150),
@@ -1975,25 +1977,29 @@ GESTURE_PINGS = [
 ]
 
 
-def assert_rings_mark_gestures(demo: Demo, video: Path, *, timed: bool = True) -> None:
-    pings = logged_pings(demo)[-len(GESTURE_PINGS) :]
-    assert [(action, x, y) for action, _, x, y in pings] == GESTURE_PINGS
+def assert_click_pings_mark_gestures(
+    demo: Demo, clip: Path, *, timed: bool = True
+) -> None:
+    buttons = logged_buttons(demo)[-len(GESTURE_BUTTONS) :]
+    assert [(action, x, y) for action, _, x, y in buttons] == GESTURE_BUTTONS
     origin = clip_origin(demo)
-    *presses, release = pings
+    *presses, release = buttons
     # The drag's hold disc stops at its release and fades there; the translucent
-    # fill stays visible for fewer frames than a ring.
-    discs = ring_frames(video, release[2], release[3])
-    assert len(discs) >= 3, f"no hold disc at drag release ({release[2]}, {release[3]})"
+    # fill stays visible for fewer frames than a click ping.
+    hold_discs = pointer_overlay_frames(clip, release[2], release[3])
+    assert (
+        len(hold_discs) >= 3
+    ), f"no hold disc at drag release ({release[2]}, {release[3]})"
     if timed:
-        assert abs(discs[0] / 30 - (release[1] - origin)) <= 0.05
+        assert abs(hold_discs[0] / 30 - (release[1] - origin)) <= 0.05
     for action, moment, x, y in presses:
-        rings = ring_frames(video, x, y)
-        assert len(rings) >= 8, f"no ring for {action} at ({x}, {y})"
+        click_pings = pointer_overlay_frames(clip, x, y)
+        assert len(click_pings) >= 8, f"no click ping for {action} at ({x}, {y})"
         if timed:
-            # A drag's translucent disc leaves the crop over a few frames and
-            # skews the ring's bounds. Only the ring's early stroke is this red.
-            opaque = ring_frames(video, x, y, contrast=120)
-            first = min(when for _, when, px, py in pings if (px, py) == (x, y))
+            # A drag's translucent hold disc leaves the crop over a few frames and
+            # skews the click ping's bounds. Only its early stroke is this red.
+            opaque = pointer_overlay_frames(clip, x, y, contrast=120)
+            first = min(when for _, when, px, py in buttons if (px, py) == (x, y))
             assert abs(opaque[0] / 30 - (first - origin)) <= 0.05
             assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in opaque)
 
@@ -2001,12 +2007,12 @@ def assert_rings_mark_gestures(demo: Demo, video: Path, *, timed: bool = True) -
 # R-REC-5, R-REC-6
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["record-probe", "x11-record-probe"], indirect=True)
-def test_startup_recording_pings_gestures(demo: Demo) -> None:
-    assert demo.recording is not None
+def test_startup_clip_click_pings_gestures(demo: Demo) -> None:
+    assert demo.clip is not None
     wait_for_input_probe_window(demo)
     perform_gestures(demo)
     cli(demo.directory, "stop")
-    assert_rings_mark_gestures(demo, demo.recording)
+    assert_click_pings_mark_gestures(demo, demo.clip)
 
 
 # R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11
@@ -2022,7 +2028,7 @@ def test_startup_recording_pings_gestures(demo: Demo) -> None:
         ["--console", "--compact"],
     ],
 )
-def test_mid_session_clip_pings_gestures(
+def test_mid_session_clip_click_pings_gestures(
     demo: Demo, tmp_path: Path, options: list[str]
 ) -> None:
     compact = "--compact" in options
@@ -2038,13 +2044,13 @@ def test_mid_session_clip_pings_gestures(
     summary = json.loads(cli(demo.directory, "record-stop").stdout)
     if compact:
         assert summary["duration_seconds"] < elapsed - 1
-    assert_rings_mark_gestures(demo, clip, timed=not compact)
+    assert_click_pings_mark_gestures(demo, clip, timed=not compact)
 
 
 # R-REC-7, R-LOG-3
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_pings_are_per_clip_and_absent_from_screenshots(
+def test_click_pings_are_per_clip_and_absent_from_screenshots(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_for_input_probe_window(demo)
@@ -2053,7 +2059,7 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
     cli(demo.directory, "click", "300", "200")
     time.sleep(0.8)
     cli(demo.directory, "record-stop")
-    assert ring_frames(plain, 300, 200) == []
+    assert pointer_overlay_frames(plain, 300, 200) == []
 
     pinged = tmp_path / "pinged.mp4"
     cli(demo.directory, "record-start", str(pinged))
@@ -2073,13 +2079,13 @@ def test_pings_are_per_clip_and_absent_from_screenshots(
         capture_output=True,
         timeout=20,
     )
-    moment = logged_pings(demo)[-1][1]
+    moment = logged_buttons(demo)[-1][1]
     time.sleep(0.8)
     cli(demo.directory, "record-stop")
-    # The batch captures 0.05 seconds after its press, inside the ping the clip shows.
-    rings = ring_frames(pinged, 300, 200)
+    # The batch captures 0.05 seconds after its press, inside the click ping the clip shows.
+    click_pings = pointer_overlay_frames(pinged, 300, 200)
     origin = clip_origin(demo)
-    assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in rings)
+    assert any(abs(frame / 30 - (moment - origin)) <= 0.05 for frame in click_pings)
     with Image.open(shot) as screenshot:
         patch = screenshot.convert("RGB").crop((250, 150, 350, 250)).tobytes()
     assert not any(
@@ -2118,15 +2124,15 @@ def check_console_clip(
     assert (summary["width"], summary["height"]) == (
         (1280 + pixels, 720) if position in {"left", "right"} else (1280, 720 + pixels)
     )
-    assert len(ring_frames(clip, gui_x + 300, gui_y + 200)) >= 8
+    assert len(pointer_overlay_frames(clip, gui_x + 300, gui_y + 200)) >= 8
     origin = clip_origin(demo)
     pressed = next(
         event["time"] - origin
         for event in reversed(clip_inputs(demo, 0))
         if event["event"] == "start" and event["action"] == "key"
     )
-    shown = video_patch(clip, pressed + 0.4, gui_x, gui_y)
-    ended = video_patch(clip, pressed + 1.1, gui_x, gui_y)
+    shown = clip_patch(clip, pressed + 0.4, gui_x, gui_y)
+    ended = clip_patch(clip, pressed + 1.1, gui_x, gui_y)
     assert caption_differs(shown, ended) is (captions == "non-text")
 
 
@@ -2135,14 +2141,14 @@ def check_console_clip(
 @pytest.mark.parametrize(
     ("demo", "placement"), CONSOLE_STARTS.items(), indirect=["demo"]
 )
-def test_startup_clip_extends_the_video_around_the_gui(
+def test_startup_console_panel_extends_the_clip_around_the_gui(
     demo: Demo, tmp_path: Path, placement: tuple[str, int, str]
 ) -> None:
-    assert demo.recording is not None
+    assert demo.clip is not None
     wait_for_input_probe_window(demo)
     exercise_console_clip(demo, tmp_path)
     summary = json.loads(cli(demo.directory, "record-stop").stdout)
-    check_console_clip(demo, demo.recording, summary, placement)
+    check_console_clip(demo, demo.clip, summary, placement)
 
 
 # R-REC-12, R-REC-13, R-REC-14, R-REC-15
@@ -2199,11 +2205,14 @@ def test_rejected_console_panel_leaves_the_app_running(
         assert "--console-size" in result.stderr
         assert not rejected.exists()
     for value, message in (
-        (True, "console must be null or an object"),
-        ({"position": "left"}, "console requires only position, size and cell_scale"),
+        (True, "console_panel must be null or an object"),
+        (
+            {"position": "left"},
+            "console_panel requires only position, size and cell_scale",
+        ),
         (
             {"position": "up", "size": 640, "cell_scale": 1},
-            "console position must be one of",
+            "console_panel position must be one of",
         ),
         ({"position": "left", "size": 641, "cell_scale": 1}, "must be even"),
         ({"position": "left", "size": True, "cell_scale": 1}, "positive even"),
@@ -2223,9 +2232,9 @@ def test_rejected_console_panel_leaves_the_app_running(
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory.resolve()),
-                "destination": str(rejected),
+                "clip_destination": str(rejected),
                 "key_captions": "non-text",
-                "console": value,
+                "console_panel": value,
             }
             connection.sendall((json.dumps(request) + "\n").encode())
             reply = json.loads(connection.makefile().readline())
@@ -2248,7 +2257,7 @@ def test_runner_rejects_non_boolean_click_pings(demo: Demo, tmp_path: Path) -> N
         request = {
             "command": "record-start",
             "session_directory": str(demo.directory.resolve()),
-            "destination": str(tmp_path / "rejected.mp4"),
+            "clip_destination": str(tmp_path / "rejected.mp4"),
             "key_captions": "non-text",
             "click_pings": "no",
         }
@@ -2276,21 +2285,21 @@ def assert_session_running(demo: Demo) -> None:
 # R-CONTROL-1, R-CONTROL-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_unusable_recording_destination_leaves_the_app_running(
+def test_unusable_clip_destination_leaves_the_app_running(
     demo: Demo, tmp_path: Path
 ) -> None:
     wait_for_input_probe_window(demo)
     session_dir = str(demo.directory.resolve())
     for destination, message in (
-        (f"{tmp_path}/nul\0.mp4", "destination is not a usable path"),
-        (f"{tmp_path}/\ud800.mp4", "destination is not a usable path"),
+        (f"{tmp_path}/nul\0.mp4", "clip_destination is not a usable path"),
+        (f"{tmp_path}/\ud800.mp4", "clip_destination is not a usable path"),
         # The failing stage depends on the Python version.
         (f"{tmp_path}/{'a' * 300}.mp4", ""),
     ):
         request = {
             "command": "record-start",
             "session_directory": session_dir,
-            "destination": destination,
+            "clip_destination": destination,
             "key_captions": "non-text",
         }
         line = request_reply(demo, (json.dumps(request) + "\n").encode())
@@ -2308,13 +2317,13 @@ def test_unusable_recording_destination_leaves_the_app_running(
 # R-CONTROL-2
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", ["probe"], indirect=True)
-def test_non_utf8_recording_destination_records(demo: Demo, tmp_path: Path) -> None:
+def test_non_utf8_clip_destination_records(demo: Demo, tmp_path: Path) -> None:
     wait_for_input_probe_window(demo)
     clip = tmp_path / "\udc80.mp4"
     request = {
         "command": "record-start",
         "session_directory": str(demo.directory.resolve()),
-        "destination": str(clip),
+        "clip_destination": str(clip),
         "key_captions": "non-text",
     }
     line = request_reply(demo, (json.dumps(request) + "\n").encode())
@@ -2377,11 +2386,19 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
         {"command": 1},
         {"command": "unknown"},
         {"command": "record-start"},
-        {"command": "record-start", "destination": "x.mp4", "key_captions": "non-text"},
-        {"command": "record-start", "destination": "/tmp/x.mp4", "key_captions": []},
         {
             "command": "record-start",
-            "destination": "/tmp/x.mp4",
+            "clip_destination": "x.mp4",
+            "key_captions": "non-text",
+        },
+        {
+            "command": "record-start",
+            "clip_destination": "/tmp/x.mp4",
+            "key_captions": [],
+        },
+        {
+            "command": "record-start",
+            "clip_destination": "/tmp/x.mp4",
             "key_captions": "non-text",
             "compact": "yes",
         },
@@ -2419,15 +2436,15 @@ def test_malformed_requests_get_an_error_reply(demo: Demo, tmp_path: Path) -> No
 
 # R-REC-7
 @pytest.mark.integration
-@pytest.mark.parametrize("demo", ["no-pings"], indirect=True)
+@pytest.mark.parametrize("demo", ["no-click-pings"], indirect=True)
 def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) -> None:
-    assert demo.recording is not None
+    assert demo.clip is not None
     wait_for_demo_frame(demo, tmp_path / "before.png")
     cli(demo.directory, "click", "300", "200")
     time.sleep(0.8)
-    assert logged_pings(demo)
+    assert logged_buttons(demo)
     cli(demo.directory, "stop")
-    assert ring_frames(demo.recording, 300, 200) == []
+    assert pointer_overlay_frames(demo.clip, 300, 200) == []
 
 
 # R-REC-10
@@ -2435,16 +2452,16 @@ def test_startup_recording_honours_no_click_pings(demo: Demo, tmp_path: Path) ->
 @pytest.mark.parametrize("demo", [None], indirect=True)
 @pytest.mark.parametrize("failure", ["unwritable-log", "malformed-input-log"])
 @pytest.mark.parametrize("command", ["record-stop", "stop"])
-def test_failed_ping_render_leaves_pings_only_clip_playable(
+def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
     demo: Demo, tmp_path: Path, failure: str, command: str
 ) -> None:
     wait_for_demo_frame(demo, tmp_path / "before.png")
-    clip = tmp_path / "pings only.mp4"
+    clip = tmp_path / "click pings only.mp4"
     cli(demo.directory, "record-start", str(clip))
     cli(demo.directory, "click", "120", "100")
     time.sleep(0.3)
     if failure == "unwritable-log":
-        (demo.directory / "captions.log").mkdir()
+        (demo.directory / "finalization.log").mkdir()
     else:
         with (demo.directory / "inputs.jsonl").open("a") as log:
             log.write("not json\n")
@@ -2456,13 +2473,13 @@ def test_failed_ping_render_leaves_pings_only_clip_playable(
         timeout=20,
     )
     assert result.returncode == 1
-    assert "raw video remains" in result.stderr
+    assert "raw clip remains" in result.stderr
     assert str(clip) in " ".join(result.stderr.split())
-    assert "captions.log" in result.stderr
+    assert "finalization.log" in result.stderr
     assert demo.process.wait(timeout=5) == 1
     assert not private_directories(clip.parent)
-    assert len(recording_frames(clip)) > 1
-    assert ring_frames(clip, 120, 100) == []
+    assert len(clip_frames(clip)) > 1
+    assert pointer_overlay_frames(clip, 120, 100) == []
 
 
 def console_panel(path: Path, second: float) -> bytes:
@@ -2496,10 +2513,10 @@ def console_panel(path: Path, second: float) -> bytes:
 def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> None:
     screenshot = tmp_path / "gui.png"
     wait_for_demo_frame(demo, screenshot)
-    assert demo.recording is not None
+    assert demo.clip is not None
     summary = json.loads(cli(demo.directory, "record-stop").stdout)
     assert (summary["width"], summary["height"]) == (1920, 720)
-    assert len(recording_frames(demo.recording, size=(1920, 720))) > 1
+    assert len(clip_frames(demo.clip, size=(1920, 720))) > 1
     assert (demo.directory / "console.jsonl").stat().st_size > 0
     for captions in [False, True]:
         clip = tmp_path / f"console-{captions}.mp4"
@@ -2536,7 +2553,7 @@ def test_console_panel_startup_and_later_clips(demo: Demo, tmp_path: Path) -> No
     assert (summary["width"], summary["height"]) == (1280, 720)
     cli(demo.directory, "record-start", "--console", str(tmp_path / "shutdown.mp4"))
     stopped = json.loads(cli(demo.directory, "stop").stdout)
-    assert stopped["recording"]["width"] == 1920
+    assert stopped["clip"]["width"] == 1920
     assert demo.process.wait(timeout=20) == 0
 
 
@@ -2617,12 +2634,10 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             )
             second = typed["time"] - origin + 0.4
             assert (
-                max(
-                    abs(a - b) for a, b in zip(video_patch(clip, 0), patch, strict=True)
-                )
+                max(abs(a - b) for a, b in zip(clip_patch(clip, 0), patch, strict=True))
                 <= 3
             )
-            changed = video_patch(clip, second)
+            changed = clip_patch(clip, second)
             assert (
                 sum(abs(a - b) > 20 for a, b in zip(changed, patch, strict=True)) > 1000
             )
@@ -2630,7 +2645,7 @@ def test_captioned_clips_and_opt_out(demo: Demo, tmp_path: Path) -> None:
             assert (
                 max(
                     abs(a - b)
-                    for a, b in zip(video_patch(clip, 0.8), patch, strict=True)
+                    for a, b in zip(clip_patch(clip, 0.8), patch, strict=True)
                 )
                 <= 3
             )
@@ -2684,14 +2699,14 @@ def check_clip_captions(
             )
             for action in ("move", "click", "key")
         )
-        idle = video_patch(clip, moved - 0.15)
-        assert caption_differs(video_patch(clip, moved + 0.4), idle) is (
+        idle = clip_patch(clip, moved - 0.15)
+        assert caption_differs(clip_patch(clip, moved + 0.4), idle) is (
             pointer == "all"
         )
-        assert caption_differs(video_patch(clip, clicked + 0.4), idle) is (
+        assert caption_differs(clip_patch(clip, clicked + 0.4), idle) is (
             pointer is not None
         )
-        assert caption_differs(video_patch(clip, pressed + 0.4), idle) is keys
+        assert caption_differs(clip_patch(clip, pressed + 0.4), idle) is keys
     else:
         # The app paints once at startup,
         # so a caption would make the patch change again after it first settles.
@@ -2727,14 +2742,14 @@ def check_clip_captions(
     ],
     indirect=["demo"],
 )
-def test_startup_recording_captions_selected_inputs(
+def test_startup_clip_captions_selected_inputs(
     demo: Demo, tmp_path: Path, pointer: str | None, keys: bool
 ) -> None:
-    assert demo.recording is not None
+    assert demo.clip is not None
     wait_for_demo_frame(demo, tmp_path / "before.png")
     exercise_caption_clip(demo)
     cli(demo.directory, "record-stop")
-    check_clip_captions(demo, demo.recording, 0, pointer=pointer, keys=keys)
+    check_clip_captions(demo, demo.clip, 0, pointer=pointer, keys=keys)
 
 
 # R-LOG-4, R-LOG-5
@@ -2805,7 +2820,7 @@ def test_runner_rejects_invalid_caption_mode(
             request = {
                 "command": "record-start",
                 "session_directory": str(demo.directory),
-                "destination": str(destination),
+                "clip_destination": str(destination),
                 field: value,
             }
             connection.sendall((json.dumps(request) + "\n").encode())
@@ -3208,10 +3223,10 @@ def test_concurrent_gestures_and_disconnect_release_input(demo: Demo) -> None:
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
         ("drag", "start"),
-        ("drag", "ping"),
+        ("drag", "press"),
         ("drag", "end"),
         ("click", "start"),
-        ("click", "ping"),
+        ("click", "press"),
         ("click", "end"),
     ]
     assert "cancelled" in logged[2]["error"]
@@ -3655,7 +3670,7 @@ def test_batch_cli_unicode_screenshot_and_logs(demo: Demo, tmp_path: Path) -> No
     ]
     assert [(event["action"], event["event"]) for event in logged] == [
         ("click", "start"),
-        ("click", "ping"),
+        ("click", "press"),
         ("click", "end"),
         *(
             (name, phase)
@@ -3980,7 +3995,7 @@ def test_batch_screenshot_does_not_replace_new_file(demo: Demo, tmp_path: Path) 
 # R-REC-1, R-REC-21
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_batch_screenshot_rejects_active_recording_destination(
+def test_batch_screenshot_rejects_active_clip_destination(
     demo: Demo, tmp_path: Path
 ) -> None:
     clip = tmp_path / "clip.mp4"
@@ -3996,7 +4011,7 @@ def test_batch_screenshot_rejects_active_recording_destination(
         response = json.loads(connection.recv(8192))
     assert "active recording" in response["error"]
     cli(demo.directory, "record-stop")
-    recording_frames(clip)
+    clip_frames(clip)
 
 
 def rejected_screenshot(demo: Demo, path: Path) -> str:
@@ -4035,17 +4050,15 @@ def test_batch_screenshot_yields_to_a_recording_started_during_the_batch(
     assert not clip.exists()
     cli(demo.directory, "record-stop")
     assert demo.process.poll() is None
-    recording_frames(clip)
+    clip_frames(clip)
 
 
 # R-REC-21
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None, True], indirect=True)
-def test_screenshot_rejects_active_recording_destination(
-    demo: Demo, tmp_path: Path
-) -> None:
-    clip = demo.recording or tmp_path / "clip.mp4"
-    if demo.recording is None:
+def test_screenshot_rejects_active_clip_destination(demo: Demo, tmp_path: Path) -> None:
+    clip = demo.clip or tmp_path / "clip.mp4"
+    if demo.clip is None:
         cli(demo.directory, "record-start", str(clip))
     alias = tmp_path / "alias.mp4"
     alias.symlink_to(clip)
@@ -4054,7 +4067,7 @@ def test_screenshot_rejects_active_recording_destination(
         assert not clip.exists()
     cli(demo.directory, "record-stop")
     assert demo.process.poll() is None
-    recording_frames(clip)
+    clip_frames(clip)
 
 
 @pytest.mark.integration
@@ -4098,13 +4111,13 @@ def test_recording_keeps_file_created_before_recorder_opens(
     assert demo.process.wait(timeout=20) == 1
     kept = private_clip(tmp_path)
     assert str(kept) in " ".join(result.stderr.split())
-    assert len(recording_frames(kept)) > 1
+    assert len(clip_frames(kept)) > 1
 
 
 # R-REC-1, R-REC-18
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [None], indirect=True)
-def test_finalizing_keeps_video_moved_onto_destination(
+def test_finalizing_keeps_a_file_moved_onto_the_destination(
     demo: Demo, tmp_path: Path
 ) -> None:
     first = tmp_path / "first.mp4"
@@ -4128,7 +4141,7 @@ def test_finalizing_keeps_video_moved_onto_destination(
     kept = private_clip(tmp_path)
     assert str(kept) in " ".join(result.stderr.split())
     assert kept.read_bytes() != other
-    assert len(recording_frames(kept)) > 1
+    assert len(clip_frames(kept)) > 1
 
 
 # R-REC-1, R-REC-10, R-REC-18
@@ -4141,7 +4154,7 @@ def test_collision_reports_render_failure_with_kept_clip(
     cli(demo.directory, "record-start", str(clip))
     cli(demo.directory, "click", "120", "100")
     clip.write_bytes(b"another client's file")
-    (demo.directory / "captions.log").mkdir()
+    (demo.directory / "finalization.log").mkdir()
     result = subprocess.run(
         ["framewisp", str(demo.directory), "stop"],
         capture_output=True,
@@ -4153,10 +4166,10 @@ def test_collision_reports_render_failure_with_kept_clip(
     assert result.returncode == 1
     error = " ".join(result.stderr.split())
     assert f"The clip remains at {private_clip(tmp_path)}" in error
-    assert "raw video remains" in error
-    assert "captions.log" in error
-    assert (demo.directory / ".active-recording").readlink() == private_clip(tmp_path)
-    assert len(recording_frames(private_clip(tmp_path))) > 1
+    assert "raw clip remains" in error
+    assert "finalization.log" in error
+    assert (demo.directory / ".private-clip").readlink() == private_clip(tmp_path)
+    assert len(clip_frames(private_clip(tmp_path))) > 1
 
 
 @pytest.fixture
@@ -4168,7 +4181,7 @@ def output_directory(tmp_path: Path) -> Generator[Path, None, None]:
     directory.chmod(0o755)
 
 
-# R-REC-10
+# R-REC-10, R-REC-18
 @pytest.mark.integration
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
 @pytest.mark.parametrize("demo", [None], indirect=True)
@@ -4179,7 +4192,7 @@ def test_unpublishable_clip_reports_render_failure_with_kept_clip(
     clip = output_directory / "clip.mp4"
     cli(demo.directory, "record-start", str(clip))
     cli(demo.directory, "click", "120", "100")
-    (demo.directory / "captions.log").mkdir()
+    (demo.directory / "finalization.log").mkdir()
     output_directory.chmod(0o555)
     result = subprocess.run(
         ["framewisp", str(demo.directory), command],
@@ -4193,11 +4206,11 @@ def test_unpublishable_clip_reports_render_failure_with_kept_clip(
     kept = private_clip(output_directory)
     error = " ".join(result.stderr.split())
     assert f"The clip remains at {kept}" in error
-    assert f"raw video remains at {kept}" in error
-    assert "captions.log" in error
-    assert (demo.directory / ".active-recording").readlink() == kept
-    assert len(recording_frames(kept)) > 1
-    assert ring_frames(kept, 120, 100) == []
+    assert f"raw clip remains at {kept}" in error
+    assert "finalization.log" in error
+    assert (demo.directory / ".private-clip").readlink() == kept
+    assert len(clip_frames(kept)) > 1
+    assert pointer_overlay_frames(kept, 120, 100) == []
 
 
 @pytest.mark.integration
@@ -4227,17 +4240,17 @@ def test_failed_recording_start_removes_private_directory(
     assert demo.process.poll() is None
     assert not private_directories(tmp_path)
     assert not clip.exists()
-    assert not (demo.directory / ".active-recording").is_symlink()
+    assert not (demo.directory / ".private-clip").is_symlink()
     cli(demo.directory, "record-start", str(clip))
     cli(demo.directory, "record-stop")
-    recording_frames(clip)
+    clip_frames(clip)
 
 
 # R-REC-20
 @pytest.mark.integration
 @pytest.mark.parametrize("demo", [True], indirect=True)
 def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
-    assert demo.recording is not None
+    assert demo.clip is not None
     interrupted = private_clip(tmp_path)
     demo.process.kill()
     demo.process.wait(timeout=5)
@@ -4259,10 +4272,10 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
     wait_until(recovered)
     report = json.loads(attempts[-1].stdout)
     assert report["status"] == "recovered"
-    assert report["interrupted_recording"] == str(interrupted)
+    assert report["interrupted_clip"] == str(interrupted)
     assert interrupted.stat().st_size > 0
-    assert not demo.recording.exists()
-    assert not (demo.directory / ".active-recording").is_symlink()
+    assert not demo.clip.exists()
+    assert not (demo.directory / ".private-clip").is_symlink()
 
     rerun = subprocess.run(
         [
@@ -4270,7 +4283,7 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
             str(demo.directory),
             "run",
             "--record",
-            str(demo.recording),
+            str(demo.clip),
             "--",
             sys.executable,
             "-c",
@@ -4282,7 +4295,7 @@ def test_recover_reports_interrupted_clip(demo: Demo, tmp_path: Path) -> None:
         timeout=20,
     )
     assert rerun.returncode == 0, rerun.stderr
-    recording_frames(demo.recording)
+    clip_frames(demo.clip)
     assert private_clip(tmp_path) == interrupted
 
 

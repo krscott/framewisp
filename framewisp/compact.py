@@ -1,4 +1,4 @@
-"""Command-based recording cuts on the original monotonic timeline."""
+"""Compaction: command-based cuts to a clip on the original monotonic timeline."""
 
 import fcntl
 import json
@@ -135,10 +135,10 @@ def ffprobe(path: Path, *arguments: str, env: dict[str, str]) -> str:
                 return output.read_text(errors="replace")
     except OSError as error:
         problem = str(error)
-    raise SessionError(f"Could not inspect recording {path}: {problem}")
+    raise SessionError(f"Could not inspect clip {path}: {problem}")
 
 
-def recording_duration(path: Path, *, env: dict[str, str]) -> float:
+def clip_duration(path: Path, *, env: dict[str, str]) -> float:
     """Use the encoded timeline so stop/encoder latency cannot remove the tail."""
     output = ffprobe(
         path,
@@ -153,9 +153,7 @@ def recording_duration(path: Path, *, env: dict[str, str]) -> float:
     try:
         duration = float(output)
     except ValueError:
-        raise RuntimeError(
-            f"Recording {path} has no readable video duration."
-        ) from None
+        raise RuntimeError(f"Clip {path} has no readable video duration.") from None
     if not math.isfinite(duration) or duration <= 0:
-        raise RuntimeError(f"Recording {path} has no positive, finite video duration.")
+        raise RuntimeError(f"Clip {path} has no positive, finite video duration.")
     return duration
