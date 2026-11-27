@@ -5,8 +5,8 @@
 Measured September 20, 2026 UTC against baseline `d20cd47`, with the same
 bundled demo app, 1280x720 Pixman display, complete CLI launches, input logging
 enabled, and no recording. Each warm result uses 40 wall-clock samples after
-one warm-up per action. p95 uses the nearest-rank method. Host and exact
-backend versions are included with the [raw samples in PR #59](https://github.com/krscott/framewisp/pull/59#issuecomment-5751288124).
+one warm-up per action. p95 uses the nearest-rank method. Host, compositor and
+input tool versions are included with the [raw samples in PR #59](https://github.com/krscott/framewisp/pull/59#issuecomment-5751288124).
 
 | Wayland operation | Before p50 / p95 (ms) | Persistent p50 / p95 (ms) | Median speedup |
 | --- | ---: | ---: | ---: |
@@ -83,9 +83,9 @@ These are local measurements, not latency guarantees; host load varies.
 `python -X importtime -m framewisp --help` attributed about 368 ms to
 `vncdotool.api` and its imports, and 174 ms to `framewisp.attach` and its imports
 in a separate baseline sample. Neither is needed by a screenshot or input CLI:
-the runner uses the API for its idle VNC connection, and only the foreground
-attach owner needs the desktop portal libraries. Importing those modules when
-their owning commands run removed about 0.56 seconds from a complete click in
+the runner uses the API for its idle VNC connection, and only the runner of an
+attached or teaching session needs the desktop portal libraries. Importing those
+modules when the commands that use them run removed about 0.56 seconds from a complete click in
 this sample, roughly 32%, without changing input delivery.
 
 The remaining VNC subprocess startup is substantial. Its measured connection
@@ -109,8 +109,8 @@ import time
 from pathlib import Path
 
 session_dir = Path('/tmp/latency-demo')
-state = json.loads((session_dir / 'session.json').read_text())
-socket = str(Path(state['runtime_directory']) / 'vnc.sock')
+metadata = json.loads((session_dir / 'session.json').read_text())
+socket = str(Path(metadata['runtime_directory']) / 'vnc.sock')
 vnc = ['vncdo', '-s', socket, '--delay', '0']
 commands = [
     ['framewisp', '--help'],

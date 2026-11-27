@@ -1,4 +1,4 @@
-"""Keep the caller's app environment separate from framewisp's runtime."""
+"""Keep the caller's app environment separate from framewisp's own."""
 
 import os
 from collections.abc import Mapping
@@ -83,15 +83,15 @@ def fixed_fonts(env: dict[str, str], *, fonts: str) -> dict[str, str]:
 
 
 def sanitized_environment(
-    runtime: Path, env: dict[str, str], *, fonts: str
+    runtime_dir: Path, env: dict[str, str], *, fonts: str
 ) -> dict[str, str]:
     """Fix the settings known to change app output, keeping everything else.
 
-    Creates private app directories under the owned runtime, so call this before
+    Creates private app directories under the runtime directory, so call this before
     starting any children.
     """
-    root = runtime / "app"
-    temporary = runtime / "tmp"
+    root = runtime_dir / "app"
+    temporary = runtime_dir / "tmp"
     temporary.mkdir(mode=0o700)
     for name in ("home", "config", "cache", "data", "state"):
         (root / name).mkdir(parents=True, mode=0o700)

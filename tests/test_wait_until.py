@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 import test_integration
-from test_integration import Demo, wait_for_input_probe_window, wait_until
+from test_integration import HeadlessSession, wait_for_input_probe_window, wait_until
 
 
 @pytest.fixture
@@ -91,21 +91,21 @@ def test_input_probe_wait_keeps_its_own_timeout_message(
 ) -> None:
     (tmp_path / "app.log").write_text('{"event": "ready"}\nGTK mapped it\n')
 
-    def empty_tree(runtime: Path, kind: int) -> dict[str, Any]:
+    def empty_tree(runtime_dir: Path, kind: int) -> dict[str, Any]:
         return {}
 
     monkeypatch.setattr(test_integration, "sway_request", empty_tree)
-    demo = Demo(
+    headless_session = HeadlessSession(
         directory=tmp_path,
         process=cast("subprocess.Popen[bytes]", None),
-        runtime=tmp_path,
+        runtime_dir=tmp_path,
         child_pids=[],
         clip=None,
         control=None,
     )
 
     with pytest.raises(AssertionError) as failure:
-        wait_for_input_probe_window(demo)
+        wait_for_input_probe_window(headless_session)
 
     message = str(failure.value)
     assert message.startswith("Sway showed no window titled 'Input probe' within")

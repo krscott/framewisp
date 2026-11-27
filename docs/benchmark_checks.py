@@ -79,13 +79,13 @@ def main() -> None:
                         )
                     plan.write_text(json.dumps({"steps": steps}))
                     started = time.monotonic()
-                    responses = [run("batch", "--file", str(plan))]
+                    results = [run("batch", "--file", str(plan))]
                     wait_started = time.monotonic()
                     calls = 1
                     retries = 0
                     if mode == "batch_check":
-                        success = responses[0]["verified"] is True
-                        local_wait = responses[0]["results"][-1]["duration_seconds"]
+                        success = results[0]["verified"] is True
+                        local_wait = results[0]["results"][-1]["duration_seconds"]
                     else:
                         if mode == "fixed_sleep":
                             time.sleep(0.5)
@@ -99,7 +99,7 @@ def main() -> None:
                                 "--name",
                                 "Result",
                             )
-                            responses.append(observation)
+                            results.append(observation)
                             calls += 1
                             success = (
                                 observation["status"] == "ok"
@@ -120,7 +120,7 @@ def main() -> None:
                             "local_wait_seconds": local_wait,
                             "cli_wall_seconds": time.monotonic() - started,
                             "cli_calls": calls,
-                            "responses": responses,
+                            "results": results,
                         }
                     )
         finally:

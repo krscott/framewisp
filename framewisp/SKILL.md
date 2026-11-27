@@ -63,9 +63,9 @@ timestamped note. Explain shortcuts, decisions, variable inputs, and expected
 outcomes that may not be evident visually. Notes must be nonblank and at most
 8000 characters. The agent can issue notes from its own shell so the user can
 keep focus on the app. Collect remaining clarifications after the teaching session
-and include them in the procedure. The user stops with Ctrl+C or the sharing indicator, or with the
-emergency stop described under Desktop share; applications stay running. Screen content and notes are
-unredacted. No audio, physical key events, or clipboard contents are recorded.
+and include them in the procedure. The user stops with Ctrl+C or the sharing indicator, or
+with the emergency stop described under Desktop share; applications stay running. Shared
+display content and notes are unredacted. No audio, physical key events, or clipboard contents are recorded.
 
 Read DIRECTORY/lesson.json for the goal and status, then timeline.jsonl for
 `frame` entries (`time`, relative PNG `path`) and `note` entries (`time`, `text`).
@@ -82,7 +82,7 @@ frame, so `-ss` accepts the times in timeline.jsonl. FFmpeg is on PATH in the
 development shell; elsewhere install it separately if
 needed. `complete` means capture finalized successfully, not that the procedure
 has been learned or validated. `failed` names an error; `capturing` after the
-owner exits means interrupted capture. Treat either as a partial lesson. Frames
+runner exits means interrupted capture. Treat either as a partial lesson. Frames
 and notes are available during capture, but do not assume the video is finished.
 
 Derive a procedure describing starting state, variable inputs, control labels,
@@ -113,10 +113,11 @@ project must choose distinct names. Keep launch and session commands in the same
 project (the same working directory outside Git). `Session ready:`, `Attached:` and
 `Teaching session ready:` print the resolved directory; use that explicit path from another project or an
 environment with a different `TMPDIR`. Bare names under different temporary
-directories select different session directories. Headless runtime sockets also use this
-temporary directory. If startup reports the 108-byte socket path limit, set
-`TMPDIR` to a shorter writable directory. Cleanup and recovery use the runtime
-path saved in the ownership journal even if `TMPDIR` changes. If the journal is
+directories select different session directories. A headless session's runtime
+directory, which holds its sockets, is also in this temporary directory. If startup
+reports the 108-byte socket path limit, set `TMPDIR` to a shorter writable directory.
+Cleanup and recovery use the runtime directory path saved in the recovery journal
+even if `TMPDIR` changes. If the journal is
 unreadable, the manual steps recovery prints assume the current `TMPDIR`.
 Project scoping does not change sandbox socket permissions.
 
@@ -140,7 +141,7 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `record-start [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] FILE` | Start one MP4 clip in an existing headless session; return when capture is ready. Use a new filename. |
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and the active recording's `clip_destination`, PID and running state (or null). |
-| `stop` | Stop a headless session, finalize any active clip, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last clip's summary as `clip`, if any. |
+| `stop` | Stop a headless session, finalize any active clip, and wait for managed processes and the runtime directory to be cleaned up. Print JSON with stopped status and the last clip's summary as `clip`, if any. |
 | `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the desktop share instructions below. |
 
 Standalone commands take no SESSION: `framewisp --stop-sharing` is the user's
@@ -207,7 +208,7 @@ Apps started with `run` run as the invoking user, with the file and account acce
 allowed by the surrounding environment. The private display does not restrict
 that access.
 
-By default, `run` sanitizes the app's environment so images and videos match
+By default, `run` sanitizes the app's environment so screenshots and clips match
 across agents.
 The app gets a disposable `HOME`, XDG directories and `TMPDIR`, which are deleted
 when the session stops, plus fixed fonts, theme, scale, `C.UTF-8` locale and
@@ -238,8 +239,8 @@ its writes and any settings or data you change there remain after the session;
 ask before changing them. If the user already has the app open, that copy may
 take over the launch or the app may refuse to start; ask the user to close it,
 or point the app at a separate profile. Use it only for that kind of debugging,
-because its images and videos can differ between hosts. To show a difference,
-compare it with a default run of the same app.
+because its screenshots and clips can differ between hosts. To show a difference,
+compare it with a default session of the same app.
 
 Start the demo app on a private display in a terminal or background tool session.
 Use a distinct session name and a fresh working directory, wait for
@@ -360,7 +361,7 @@ Use a screenshot when accessibility is missing.
 Deep accessibility traversals can crash some Qt apps. Raising `--max-nodes` can
 increase that risk; keep the default 256-node budget unless more is needed.
 If the app exits, the runner and later commands report its exit code or signal
-and the path to `app.log`. Start a new `run` to retry.
+and the path to `app.log`. Start a new headless session with `run` to retry.
 
 Check all matches. A button and its child label can share a name; add a role
 filter instead of choosing the first. IDs are scoped to that observation and cannot
@@ -504,7 +505,7 @@ framewisp demo record-stop
 ```
 
 Recording works only in headless sessions, so clips come only from them. It
-requires even display dimensions and produces silent MP4 video. Only one clip may be active. Normal runner
+requires even display dimensions and produces a silent MP4 clip. Only one clip may be active. Normal runner
 shutdown also finalizes it. The clip does not appear at its destination until it
 is finalized, so don't poll for it during recording. Framewisp records to a hidden
 `.framewisp-clip-*` directory beside it, so the clip destination's

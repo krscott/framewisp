@@ -13,7 +13,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
-from framewisp.desktop import write_state
+from framewisp.desktop import write_json
 
 
 class Teaching:
@@ -35,7 +35,7 @@ class Teaching:
         status: Literal["capturing", "complete", "failed"],
         error: str | None = None,
     ) -> None:
-        write_state(
+        write_json(
             self.directory / "lesson.json",
             {
                 "schema_version": 1,
@@ -62,12 +62,12 @@ class Teaching:
         pipeline = Gst.parse_launch(
             f"{source} ! identity name=capture ! "
             "imagefreeze name=timeline allow-replace=true is-live=true ! "
-            "video/x-raw,framerate=15/1 ! tee name=screen "
-            "screen. ! queue ! videoconvert ! video/x-raw,format=I420 ! "
+            "video/x-raw,framerate=15/1 ! tee name=display "
+            "display. ! queue ! videoconvert ! video/x-raw,format=I420 ! "
             "vp8enc deadline=1 cpu-used=8 keyframe-max-dist=30 ! "
             "webmmux streamable=true ! "
             f"fdsink fd={self.video.fileno()} sync=false "
-            "screen. ! queue leaky=downstream max-size-buffers=1 ! videoconvert ! "
+            "display. ! queue leaky=downstream max-size-buffers=1 ! videoconvert ! "
             "videorate drop-only=true ! video/x-raw,framerate=1/1 ! "
             "pngenc ! appsink name=frames sync=false max-buffers=2 drop=true wait-on-eos=false"
         )

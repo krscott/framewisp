@@ -43,7 +43,7 @@ class Window:
     content: Rect
     visible: bool
     transform_supported: bool
-    output: Rect
+    display_rect: Rect
 
 
 @dataclass(frozen=True)
@@ -96,16 +96,17 @@ def windows_from_tree(tree: object) -> list[Window]:
     windows: list[Window] = []
     pending = [(tree, False, Rect(0, 0, 0, 0))]
     while pending:
-        item, supported, output = pending.pop()
+        item, supported, display_rect = pending.pop()
         if not isinstance(item, dict):
             raise ValueError("Invalid Sway node")
         node = cast(dict[str, object], item)
+        # Sway calls the display an output.
         if node.get("type") == "output":
-            output = rectangle(node.get("rect"))
+            display_rect = rectangle(node.get("rect"))
             supported = (
                 node.get("scale") == 1
                 and node.get("transform") == "normal"
-                and output.x == output.y == 0
+                and display_rect.x == display_rect.y == 0
             )
         pid = node.get("pid")
         if type(pid) is int and pid > 0:
@@ -125,7 +126,7 @@ def windows_from_tree(tree: object) -> list[Window]:
                     ),
                     node.get("visible") is True,
                     supported,
-                    output,
+                    display_rect,
                 )
             )
         for key in ("nodes", "floating_nodes"):
@@ -133,18 +134,19 @@ def windows_from_tree(tree: object) -> list[Window]:
             if not isinstance(children, list):
                 raise ValueError("Invalid Sway children")
             pending.extend(
-                (child, supported, output) for child in cast(list[object], children)
+                (child, supported, display_rect)
+                for child in cast(list[object], children)
             )
     return windows
 
 
 def read_windows(
-    runtime: Path, deadline: float, cancelled: Callable[[], bool] | None
+    runtime_dir: Path, deadline: float, cancelled: Callable[[], bool] | None
 ) -> tuple[list[Window], str | None]:
     """Never consult SWAYSOCK or launch a command against the caller's desktop."""
     deadline = min(deadline, time.monotonic() + 0.25)
     try:
-        paths = list(runtime.glob("sway-ipc.*.sock"))
+        paths = list(runtime_dir.glob("sway-ipc.*.sock"))
         if len(paths) != 1 or not paths[0].is_socket():
             return [], "private-compositor-unavailable"
         with socket.socket(socket.AF_UNIX) as connection:
@@ -220,8 +222,8 @@ def convert_bounds(
     if (
         display.x < 0
         or display.y < 0
-        or display.x + display.width > window.output.width
-        or display.y + display.height > window.output.height
+        or display.x + display.width > window.display_rect.width
+        or display.y + display.height > window.display_rect.height
     ):
         return None, "bounds-outside-display"
     return display.as_bounds("display"), None

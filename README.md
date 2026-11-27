@@ -64,7 +64,7 @@ affect its own tools only. A command such as `run -- python -m myapp` resolves
 The private display, accessibility settings, and
 [sanitized app environment](#app-environment) override the corresponding settings.
 If `framewisp-demo` is absent from the caller's PATH, `run` resolves that bundled
-demo app through framewisp's runtime PATH. This keeps the `nix run` example working
+demo app through framewisp's own PATH. This keeps the `nix run` example working
 without adding framewisp's dependencies to an external app's PATH.
 Editable installs and `python -m framewisp` use the active Python environment.
 
@@ -211,10 +211,11 @@ Both `run` and user-started `attach` print the resolved session directory at
 startup. Use that explicit path to send session commands from another project or
 an environment with a different `TMPDIR`. The same bare name resolves to different
 session directories under different temporary directories.
-Headless runtime sockets also use this temporary directory. Startup checks the
+A headless session's runtime directory, which holds its sockets, is also in this
+temporary directory. Startup checks the
 108-byte Unix socket limit, including the terminating NUL, and asks for a shorter
-`TMPDIR` if needed. Cleanup and recovery use the runtime path in the ownership
-journal, even when `TMPDIR` changes. If the journal is unreadable, the manual steps
+`TMPDIR` if needed. Cleanup and recovery use the runtime directory path in the
+recovery journal, even when `TMPDIR` changes. If the journal is unreadable, the manual steps
 recovery prints assume the current `TMPDIR`.
 Project scoping does not change sandbox socket permissions. `--stop-sharing`
 remains session-independent.
@@ -231,7 +232,7 @@ remains session-independent.
 | `status` | Query the live headless runner and print app, display, and recording state as JSON. |
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT]` | Query a bounded set of accessible controls in a headless session. |
 | `stop` | Stop the headless session and wait for cleanup and finalization of any clip. |
-| `recover` | Recover an abandoned headless session after its owner and supervisors exit, preserving logs. |
+| `recover` | Recover an abandoned headless session after its runner and supervisors exit, preserving logs. |
 | `screenshot [--delay SECONDS] [--region X Y WIDTH HEIGHT] [--json] PATH` | Write a full-resolution PNG. Replaces an ordinary file, but rejects the active recording's clip destination. Headless sessions support crops and JSON origin, dimensions, display size, path, and screenshot time. Default delay: 0. |
 | `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
@@ -440,13 +441,13 @@ See [sharing indicator verification](docs/sharing-indicator.md) for setup and ve
 
 Stop a session with Ctrl+C in its terminal. Loss of the controlling terminal,
 pressing Ctrl+Z, or portal revocation also ends the desktop share. Detaching from tmux
-or screen can leave that terminal and the attach process running, so press Ctrl+C in
+or screen can leave that terminal and the session's runner running, so press Ctrl+C in
 the session's terminal before disconnecting from a terminal multiplexer. Ctrl+Alt+Escape
-runs `framewisp --stop-sharing`, the emergency stop for whichever session is sharing. If the attach
-process crashes or is killed, its private portal connection and capture handles
-close with it. The stop command escalates to killing an unresponsive attach process
+runs `framewisp --stop-sharing`, the emergency stop for whichever session is sharing. If the
+runner crashes or is killed, its private portal connection and capture handles
+close with it. The stop command escalates to killing an unresponsive runner
 after three seconds. This allows lessons to finalize. It uses Linux
-6.5 or newer to identify the socket owner safely.
+6.5 or newer to identify the process holding the socket safely.
 Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
 open in its current state. Reconnecting requires running `attach` and approving
 the dialog again. Test your binding before handing control to an agent.
@@ -458,14 +459,14 @@ sharing indicator instead.
 ### X11 desktops
 
 On X11 the portal dialog asks for consent but is not a permission boundary. Any
-program running as you can read the screen and send input through the X display
+program running as you can read the desktop display and send input through the X display
 without it. GNOME on Xorg shows no screen-sharing indicator of its own, so the
 framewisp sharing indicator is the visible sign of sharing. Its dialog leaves remote
 interaction off until you switch it on; attach fails without it.
 
 GNOME's X11 backend leaves keys and buttons held when sharing ends. Attach
-therefore starts a release helper that has no screen or portal access. When the
-attach process exits, however it exits, the helper releases every key and button
+therefore starts a release helper, which takes no screenshots and does not use
+the portal. When the runner exits, however it exits, the helper releases every key and button
 held by the X server's test input device, which only injected input uses. Your
 physical keyboard and mouse are unaffected. Attach refuses to start on X11
 without `DISPLAY` or a working `xdotool`; the Nix package provides `xdotool`.
@@ -691,8 +692,8 @@ On success, `record-stop` prints JSON with the clip's `path`, `duration_seconds`
 `width`, `height`, and `size_bytes`. Framewisp uses ffprobe and the completed file
 to measure these values after finalization; duration is not a wall-clock estimate.
 `duration_seconds` is `null` for a clip with no measurable duration, such as one
-stopped before it encoded a frame. Such a clip skips captions, click pings, console
-panels, and compaction. `width` and `height` are also `null` when the clip has no
+stopped before it encoded a frame. Such a clip skips overlays, the console
+panel, and compaction. `width` and `height` are also `null` when the clip has no
 video stream.
 
 Clips are silent H.264 MP4 files at 30 fps and the session's display size,
@@ -707,7 +708,7 @@ when the clip starts (R-REC-19).
 If the recorder fails to finalize, the incomplete clip stays in the hidden
 directory, and the error names it.
 
-The session runner owns the recorder and finalizes
+The session runner manages the recorder and finalizes
 an active clip on normal app exit, Ctrl+C, or SIGTERM (R-REC-3). A recorder failure stops the session;
 an invalid `record-start` request or failed `record-start` leaves the app running.
 The recorder writes diagnostics to `recorder.log`, replaced for each clip.
@@ -830,7 +831,7 @@ commit available; direct attachments avoid that maintenance.
 are 10 MB per image, 10 MB per video on free plans, and up to 100 MB per video on
 paid plans with the required access. Framewisp's H.264 MP4 matches GitHub's
 recommended codec. Uploaded files in public repositories are publicly accessible;
-private/internal attachments require repository access. Review screen content
+private/internal attachments require repository access. Review display content
 before publishing, even when input logs omit typed text.
 See [GitHub's CLI attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
 for Markdown placement and supported commands.
@@ -849,7 +850,7 @@ unfinished command. Reusing a session directory starts a fresh log.
 Input logs omit typed text and individual letter, digit, punctuation, and Space
 keystrokes, including with Shift alone. They retain Ctrl/Alt shortcuts and named
 keys such as Return and arrows. Keyboard failures preserve actionable errors
-and exit codes while omitting backend details that could expose input.
+and exit codes while omitting input tool details that could expose input.
 
 Text captions are off by default. Select them independently for each clip with
 `run --record` or `record-start`:
@@ -900,7 +901,7 @@ A clip with a click is encoded again to draw its click pings, even when text cap
 are off. Add `--no-click-pings` to keep the recorder's output unprocessed when
 nothing else needs rendering. `run --no-click-pings` requires `--record`.
 
-Overlays are rendered into the video frames so
+Overlays are rendered into the clip's frames so
 GitHub's inline player displays them; viewers cannot toggle them off afterward.
 `record-stop` and normal session shutdown wait for finalization to finish.
 This adds encoding time when stopping a clip that finalization draws on or compacts.
@@ -915,7 +916,7 @@ and monochrome emoji. Captions, console panels and apps use the same
 backslashes, so they draw as themselves and never act as subtitle formatting.
 Screenshots and clips
 can still show secrets displayed by apps. Omitting input content does not redact
-screen content or provide a general app-log redaction guarantee. Shell history,
+display content or provide a general app-log redaction guarantee. Shell history,
 batch files, app logs, and runtime input state are outside this policy.
 Review artifacts before sharing.
 
@@ -923,14 +924,14 @@ Review artifacts before sharing.
 
 By default, `run` sanitizes the app's environment, so the same app build shows
 the same pixels whichever environment started it. `--real-env` turns this off
-for one run (see [Use the real environment](#use-the-real-environment)).
+for one session (see [Use the real environment](#use-the-real-environment)).
 
 Each session gives the app private HOME, XDG config/cache/data/state directories
-and TMPDIR under its owned runtime directory. `XDG_CONFIG_DIRS` points at the
+and TMPDIR under its runtime directory. `XDG_CONFIG_DIRS` points at the
 private config directory too. Successful shutdown deletes them after stopping the
 app and its services. **Anything the app writes there is lost.** Save wanted data
 to the working directory or another explicit path. After a failed cleanup, use
-`recover` as usual; it preserves logs and removes the abandoned runtime.
+`recover` as usual; it preserves logs and removes the abandoned runtime directory.
 
 The app gets `LANG` and `LC_ALL` set to `C.UTF-8`, `TZ=UTC`, and the configured
 Fontconfig file. The Nix package's file loads DejaVu and Noto fonts and no host
@@ -1036,7 +1037,7 @@ guarantees apply to native apps, not arbitrary Flatpaks.
 
 This is not a security sandbox. The app can still access the host filesystem,
 network and system bus. Existing session and artifact path protections apply; save
-artifacts outside the disposable runtime.
+artifacts outside the disposable runtime directory.
 
 Without Nix, `run` needs a font file. It fails before starting a session when
 `FRAMEWISP_FONTCONFIG_FILE` does not name one. Set it to a Fontconfig file that
@@ -1185,7 +1186,7 @@ includes the backend, display dimensions, app PID and running state, and the
 active recording's clip destination, PID and running state (or null).
 
 Use `framewisp SESSION stop` to request normal shutdown. It waits for managed
-processes to exit, runtime sockets and session metadata to be removed, and any
+processes to exit, the runtime directory and session metadata to be removed, and any
 active clip to be finalized. Success prints JSON with `status: "stopped"` and the
 summary of the last clip under `clip`, if one exists. Neither command sends signals to stored
 PIDs. Disconnected sessions and metadata copied from another session are rejected.
@@ -1194,58 +1195,67 @@ Ctrl+C in its terminal; `framewisp --stop-sharing` is the emergency stop for
 whichever session is sharing. Stop requires a responsive runner; it is not a forced crash-recovery command.
 Session metadata publishes the runner's command protocol version. A session
 command refuses a session that publishes a different version from its own, or
-none, before it sends the session anything (R-CONTROL-3). Stop that runner with
-Ctrl+C or SIGTERM and start the session again.
+none, before it sends the session anything (R-CONTROL-3). Stop a headless
+session's runner with Ctrl+C or SIGTERM and start the session again; if the runner
+has died, first run `framewisp SESSION recover` with the framewisp version that
+started the session. End an attached or teaching session with Ctrl+C in its
+terminal and start it again; a teaching session needs a new lesson directory.
 
-The session directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
+A headless session's directory contains `sway.log`, `wayvnc.log`, `app.log`, and the
 timestamped app-output sidecar `console.jsonl`, plus
-`recorder.log` when recording. During a
-run, `session.json` records the private runtime directory, command socket,
-Wayland socket name, and managed process IDs. Normal shutdown removes the runtime sockets and
+`recorder.log` when recording. During a headless
+session, `session.json` records the private runtime directory, command socket,
+Wayland socket name, and managed process IDs. Normal shutdown removes the runtime directory and
 `session.json`, and keeps the logs. Reusing the directory replaces its logs.
 
 The runner stops its managed processes on Ctrl+C, SIGTERM, or app
 exit. It returns the app's exit code when the app exits on its own.
-Each managed process has a private Linux subreaper supervisor that also stops
+Each managed process has a private supervisor, a Linux subreaper, that also stops
 forked helpers and detached descendants. Cleanup allows five seconds for SIGTERM
 and two more for SIGKILL per tree, and reports failures with process IDs and logs.
 Other sessions and unrelated processes remain outside these trees.
 
-Headless runs require Linux 5.3+, readable procfs (including task `children`), and
+Headless sessions require Linux 5.3+, readable procfs (including task `children`), and
 permission for `prctl`, `pidfd_open`, and `pidfd_send_signal`. Startup checks these
-before launching apps and fails if ownership is unavailable. Neither root nor a
-systemd user service is required. This owns forked processes; it does not restrict
-access to your files or own work launched by an existing external service.
-After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`,
+before launching apps and fails if supervision is unavailable. Neither root nor a
+systemd user service is required. Supervisors end forked processes; they do not restrict
+access to your files or end work launched by an existing external service.
+After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`
+with the framewisp version that started the session,
 then reuse the directory with `framewisp SESSION run -- APP`. Supervisors start
-cleanup on runner loss. Recovery refuses while the runner or any supervisor
-holds the kernel ownership lock; wait a few seconds and retry. It removes the
-owned runtime and stale session metadata, preserves logs and clips, and
+cleanup on runner loss. Recovery refuses while the session lock is held. A
+live session holds it: stop that session with Ctrl+C in its runner's terminal
+(for a headless session that is ready, `framewisp SESSION stop` also works), or
+use another session directory. A starting session holds it before it is ready,
+and supervisors hold it while they clean up after a runner that just died: wait
+a few seconds and retry. Recovery removes the
+runtime directory and stale session metadata, preserves logs and clips, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
-run replaces its logs. If a private clip remains, the JSON also has
+session replaces its logs. If a private clip remains, the JSON also has
 `interrupted_clip`, the path of that clip in a hidden
 `.framewisp-clip-*` directory beside the clip destination. The clip may be
 incomplete. Recovery leaves it in place, and it does not block later clips.
 Move what you want to keep and delete the directory.
 
-Recovery never signals PIDs from metadata or follows its runtime path. Ownership
-is bound to the session directory's device and inode, so copied metadata cannot
-recover the original run. Keep `.headless.lock` in place, including between runs.
-If it is deleted or replaced, recovery refuses, removes nothing (R-LIFE-5), and
+Recovery never signals PIDs from session metadata or follows its runtime directory path.
+The recovery journal records the identities (device and inode) of the session directory,
+session lock and runtime directory. Recovery refuses a journal copied into a different
+session directory, or one whose recorded lock or runtime directory identity does not match. Keep `.session.lock` in place, including between sessions.
+If it does not match the identity the recovery journal recorded, recovery refuses, removes nothing (R-LIFE-5), and
 prints the steps to stop the session or clean up manually. `stop` still works. Use a private session directory. Startup and recovery reject session
 directories owned by another user or writable by the group or others. Same-user programs that deliberately
-replace files or remove ownership records are outside this protocol's protection.
+replace files or remove the session lock or recovery journal are outside this protocol's protection.
 
 If a supervisor dies or cannot finish cleanup, recovery fails and lists the
 remaining supervisor records in the runtime directory. Inspect those records and
 processes manually; their PIDs are diagnostic, not safe signal targets. Resources
-and ownership metadata remain so recovery cannot claim success. Recovery also
-refuses missing or unverifiable journals and replaced runtimes. It removes nothing
+and the recovery journal remain so recovery cannot claim success. Recovery also
+refuses missing or unverifiable journals and replaced runtime directories. It removes nothing
 and prints the steps to stop the session or clean up manually (R-LIFE-7). It does
 not recover attached or teaching sessions: it names the steps to start the session
 again with attach or teach or to delete its metadata. `framewisp --stop-sharing` is the
 emergency stop for whichever session is sharing. Attached and teaching sessions take
-the same session metadata lock as headless sessions and refuse directories with abandoned headless ownership.
+the same session lock as headless sessions and refuse directories that a headless session left unrecovered.
 
 Headless sessions start private D-Bus session and accessibility buses plus an
 AT-SPI registry. These buses do not activate the desktop's services. Apps that
@@ -1343,7 +1353,7 @@ framewisp demo inspect --json --role 'text box'
 framewisp demo inspect --json --role label --text 'Applied:'
 ```
 
-Private `run` sessions default `ACCESSIBILITY_ENABLED` to `1` so Chromium can
+Private headless sessions default `ACCESSIBILITY_ENABLED` to `1` so Chromium can
 connect to the private AT-SPI bus on headless hosts. Caller-provided values are
 preserved, including `ACCESSIBILITY_ENABLED=0` to disable this bridge. Set it
 before invoking framewisp, or pass `env ACCESSIBILITY_ENABLED=0` before the app

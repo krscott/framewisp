@@ -49,7 +49,7 @@ def main() -> None:
                     "--",
                     sys.executable,
                     "-m",
-                    "framewisp.demo",
+                    "framewisp.demo_app",
                 ],
                 stdout=log,
                 stderr=subprocess.STDOUT,

@@ -34,7 +34,7 @@ def desktop_directory() -> Path:
     return root / "framewisp"
 
 
-def write_state(path: Path, value: dict[str, object]) -> None:
+def write_json(path: Path, value: dict[str, object]) -> None:
     descriptor, name = tempfile.mkstemp(prefix="." + path.name, dir=path.parent)
     temporary = Path(name)
     try:
@@ -81,7 +81,7 @@ def lock_desktop() -> Generator[Path]:
 
 
 def stop_sharing() -> int:
-    """Stop the socket's actual owner, without trusting a PID in a state file."""
+    """Stop the process that holds the socket, without trusting a PID in a file."""
     try:
         directory = desktop_directory()
         with socket.socket(socket.AF_UNIX) as connection:

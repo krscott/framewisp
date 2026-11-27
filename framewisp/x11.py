@@ -15,8 +15,8 @@ UNICODE_CAPACITY_ERROR = (
 
 
 def mapped_characters(session_dir: Path) -> set[str]:
-    state = json.loads((session_dir / "session.json").read_text())
-    path = Path(state["runtime_directory"]) / "x11-keymap.json"
+    metadata = json.loads((session_dir / "session.json").read_text())
+    path = Path(metadata["runtime_directory"]) / "x11-keymap.json"
     codes: dict[str, int] = json.loads(path.read_text()) if path.exists() else {}
     return set(codes)
 

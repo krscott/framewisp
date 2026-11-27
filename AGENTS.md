@@ -88,10 +88,6 @@ Use pytest fixtures for setup and teardown. Minimize mocks.
   a word listed under a term's _Avoid_ for that term's concept. When a concept
   has no term, or a term no longer fits, change the glossary in the same PR.
   Keep implementation detail out of it.
-  Existing code and docs still use some avoided words; issues #196 to #200
-  rename them. Use the glossary's terms in new work.
-  TODO: remove these two sentences once those issues are closed and no avoided
-  word is left in its avoided sense.
 - `docs/adr/` records decisions that are hard to reverse, surprising without
   context, and the result of a real trade-off. Read the ADRs for an area before
   changing it, and add one only when all three hold.

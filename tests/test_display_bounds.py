@@ -131,12 +131,12 @@ def test_tree_includes_floating_client_origin(
 def ipc_socket() -> Iterator[tuple[Path, socket.socket]]:
     # Pytest's CI temp paths can exceed the Unix socket path limit.
     with tempfile.TemporaryDirectory(prefix="fw-ipc-", dir="/tmp") as directory:
-        runtime = Path(directory)
+        runtime_dir = Path(directory)
         with socket.socket(socket.AF_UNIX) as listener:
-            listener.bind(str(runtime / "sway-ipc.1000.123.sock"))
+            listener.bind(str(runtime_dir / "sway-ipc.1000.123.sock"))
             listener.listen()
             listener.settimeout(2)
-            yield runtime, listener
+            yield runtime_dir, listener
 
 
 @pytest.mark.parametrize(
@@ -148,7 +148,7 @@ def test_private_ipc_is_bounded_and_validated(
     reply: str,
     window: Window,
 ) -> None:
-    runtime, listener = ipc_socket
+    runtime_dir, listener = ipc_socket
 
     def serve() -> None:
         with listener.accept()[0] as connection:
@@ -169,7 +169,7 @@ def test_private_ipc_is_bounded_and_validated(
     server.start()
     started = time.monotonic()
     try:
-        windows, reason = read_windows(runtime, started + 1, None)
+        windows, reason = read_windows(runtime_dir, started + 1, None)
         assert time.monotonic() - started < 0.6
         if reply == "fragmented":
             assert reason is None

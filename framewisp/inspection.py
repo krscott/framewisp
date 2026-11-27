@@ -195,18 +195,23 @@ def wait_for_registry(address: str, stop: Event) -> None:
 def inspect_session(
     session_dir: Path, query: Query, *, cancelled: Callable[[], bool] | None = None
 ) -> dict[str, object]:
-    state = json.loads((session_dir / "session.json").read_text())
-    if session_kind(state) in DESKTOP_KINDS:
+    metadata = json.loads((session_dir / "session.json").read_text())
+    if session_kind(metadata) in DESKTOP_KINDS:
         raise SessionError(
             "inspect supports headless sessions only; use screenshot in attached and teaching sessions"
         )
     # Only the exact private socket created by this runner is eligible. Never fall
     # back to the caller's desktop bus or AT_SPI_BUS_ADDRESS environment variable.
-    expected = unix_bus_address(Path(state["runtime_directory"]) / "accessibility.sock")
-    if state.get("accessibility_bus") != expected:
+    expected = unix_bus_address(
+        Path(metadata["runtime_directory"]) / "accessibility.sock"
+    )
+    if metadata.get("accessibility_bus") != expected:
         raise SessionError("Invalid private accessibility bus in session metadata")
     return inspect_bus(
-        expected, query, cancelled=cancelled, runtime=Path(state["runtime_directory"])
+        expected,
+        query,
+        cancelled=cancelled,
+        runtime_dir=Path(metadata["runtime_directory"]),
     )
 
 
@@ -240,13 +245,13 @@ def inspect_bus(
     query: Query,
     *,
     cancelled: Callable[[], bool] | None = None,
-    runtime: Path | None = None,
+    runtime_dir: Path | None = None,
 ) -> dict[str, object]:
     started = time.monotonic()
     deadline = started + query.timeout
     before, mapping_error = (
-        read_windows(runtime, deadline, cancelled)
-        if runtime is not None
+        read_windows(runtime_dir, deadline, cancelled)
+        if runtime_dir is not None
         else ([], "private-compositor-unavailable")
     )
     # Keep enclosing windows: an embedded dialog has no compositor toplevel.
@@ -503,8 +508,8 @@ def inspect_bus(
     finally:
         if bus is not None:
             bus.close()
-    if runtime is not None and conversions:
-        after, mapping_error = read_windows(runtime, deadline, cancelled)
+    if runtime_dir is not None and conversions:
+        after, mapping_error = read_windows(runtime_dir, deadline, cancelled)
         for node, bounds, toplevel, titles, pid in conversions:
             if mapping_error is not None:
                 node["display_bounds_reason"] = mapping_error

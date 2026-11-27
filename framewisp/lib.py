@@ -56,15 +56,20 @@ from framewisp.input_log import CaptionCapture
 from framewisp.inputs import VNC, InputWorker
 from framewisp.keys import key_commands as key_commands
 from framewisp.layout import ClipLayout, ConsolePanel, clip_layout
-from framewisp.ownership import (
-    PRIVATE_CLIP,
-    headless_runtime,
-    kept_clip,
-    refuse_abandoned_ownership,
-    session_lease,
-)
-from framewisp.processes import OwnedProcess, managed_process, run_owned
+from framewisp.processes import ManagedProcess, managed_process, run_managed
 from framewisp.recorder import recorder_output
+from framewisp.recovery import (
+    JOURNAL,
+    JOURNAL_TEMPORARY,
+    LOCK,
+    PRIVATE_CLIP,
+    headless_runtime_dir,
+    kept_clip,
+    records_desktop_session,
+    refuse_unrecovered_session,
+    session_lock,
+    stale_desktop_session,
+)
 
 SWAY_CONFIG = """\
 xwayland disable
@@ -77,10 +82,10 @@ default_border none
 
 
 def wait_for_socket(
-    runtime: Path,
+    runtime_dir: Path,
     pattern: str,
     *,
-    process: OwnedProcess,
+    process: ManagedProcess,
     log: Path,
     stop: Event,
 ) -> Path | None:
@@ -88,16 +93,16 @@ def wait_for_socket(
     while not stop.is_set():
         if process.poll() is not None:
             raise log_failure(
-                f"Process exited while starting display socket {runtime / pattern}",
+                f"Process exited while starting display socket {runtime_dir / pattern}",
                 log,
                 display=True,
             )
-        for path in runtime.glob(pattern):
+        for path in runtime_dir.glob(pattern):
             if path.is_socket():
                 return path
         if time.monotonic() >= deadline:
             raise log_failure(
-                f"Waiting for display socket {runtime / pattern} timed out",
+                f"Waiting for display socket {runtime_dir / pattern} timed out",
                 log,
                 display=True,
             )
@@ -106,7 +111,7 @@ def wait_for_socket(
 
 
 def session_environment_for_run(
-    runtime: Path, source: dict[str, str]
+    runtime_dir: Path, source: dict[str, str]
 ) -> dict[str, str]:
     env = source.copy()
     for key in (
@@ -123,7 +128,7 @@ def session_environment_for_run(
     ):
         env.pop(key, None)
     env.update(
-        XDG_RUNTIME_DIR=str(runtime),
+        XDG_RUNTIME_DIR=str(runtime_dir),
         WLR_BACKENDS="headless",
         WLR_RENDERER="pixman",
         WLR_LIBINPUT_NO_DEVICES="1",
@@ -153,26 +158,26 @@ def app_command(command: list[str], env: dict[str, str]) -> list[str]:
 
 def start_inspection_buses(
     stack: ExitStack,
-    runtime: Path,
+    runtime_dir: Path,
     session_dir: Path,
     env: dict[str, str],
     app_env: dict[str, str],
     stop: Event,
-) -> dict[str, OwnedProcess] | None:
-    """Own both buses and the registry; never activate the desktop's services."""
-    config = runtime / "bus.conf"
+) -> dict[str, ManagedProcess] | None:
+    """Start and manage both buses and the registry; never activate the desktop's services."""
+    config = runtime_dir / "bus.conf"
     config.write_text(
         "<busconfig><type>session</type><auth>EXTERNAL</auth><listen>unix:tmpdir=/tmp</listen>"
         '<policy context="default"><allow send_destination="*"/>'
         '<allow receive_sender="*"/><allow own="*"/></policy>'
         '<limit name="max_message_size">1048576</limit></busconfig>'
     )
-    processes: dict[str, OwnedProcess] = {}
+    processes: dict[str, ManagedProcess] = {}
     for name, variable in (
         ("dbus", "DBUS_SESSION_BUS_ADDRESS"),
         ("accessibility", "AT_SPI_BUS_ADDRESS"),
     ):
-        address = unix_bus_address(runtime / (name + ".sock"))
+        address = unix_bus_address(runtime_dir / (name + ".sock"))
         log = session_dir / (name + ".log")
         process = stack.enter_context(
             managed_process(
@@ -191,7 +196,7 @@ def start_inspection_buses(
         processes[name] = process
         if (
             wait_for_socket(
-                runtime, name + ".sock", process=process, log=log, stop=stop
+                runtime_dir, name + ".sock", process=process, log=log, stop=stop
             )
             is None
         ):
@@ -213,16 +218,16 @@ def start_inspection_buses(
 
 @contextmanager
 def start_sway(
-    runtime: Path,
+    runtime_dir: Path,
     *,
     log: Path,
     env: dict[str, str],
     stop: Event,
     size: tuple[int, int],
     x11: bool = False,
-) -> Generator[tuple[OwnedProcess, str] | None, None, None]:
+) -> Generator[tuple[ManagedProcess, str] | None, None, None]:
     """Yield the process and display name, or None if startup is interrupted."""
-    config = runtime / "sway.conf"
+    config = runtime_dir / "sway.conf"
     contents = SWAY_CONFIG.format(width=size[0], height=size[1])
     if x11:
         # Sway chooses a free X display. Read its environment from a child,
@@ -233,7 +238,7 @@ def start_sway(
                 "-I",
                 "-c",
                 "import os; from pathlib import Path; "
-                f"Path({str(runtime / 'x11-display')!r}).write_text(os.environ['DISPLAY'])",
+                f"Path({str(runtime_dir / 'x11-display')!r}).write_text(os.environ['DISPLAY'])",
             ]
         )
         contents = contents.replace("xwayland disable", "xwayland force")
@@ -241,16 +246,16 @@ def start_sway(
     config.write_text(contents)
     with managed_process(["sway", "-c", str(config)], log=log, env=env) as process:
         display = wait_for_socket(
-            runtime, "wayland-*", process=process, log=log, stop=stop
+            runtime_dir, "wayland-*", process=process, log=log, stop=stop
         )
         yield (process, display.name) if display is not None else None
 
 
 def wait_for_x11(
-    runtime: Path, *, process: OwnedProcess, log: Path, stop: Event
+    runtime_dir: Path, *, process: ManagedProcess, log: Path, stop: Event
 ) -> str | None:
     deadline = time.monotonic() + 10
-    path = runtime / "x11-display"
+    path = runtime_dir / "x11-display"
     while not stop.is_set():
         if process.poll() is not None:
             raise log_failure("Compositor exited during X11 startup", log, display=True)
@@ -263,8 +268,8 @@ def wait_for_x11(
 
 
 @contextmanager
-def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]:
-    """Own one input connection. Connection loss stops access without replay.
+def keep_input_devices(runtime_dir: Path, stop: Event) -> Generator[VNC, None, None]:
+    """Hold one input connection. Connection loss stops access without replay.
 
     It lasts the whole session so the seat keeps its keyboard and pointer between
     commands (R-INPUT-1). Qt dismisses an open context menu when the last input
@@ -284,7 +289,7 @@ def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]
 
     try:
         with api.connect(
-            str(runtime / "vnc.sock"), factory_class=Factory, timeout=10
+            str(runtime_dir / "vnc.sock"), factory_class=Factory, timeout=10
         ) as connection:
             connection.pause(0.1)
             # A stalled reactor call must not hold up cancellation indefinitely.
@@ -300,8 +305,8 @@ def keep_input_devices(runtime: Path, stop: Event) -> Generator[VNC, None, None]
 
 @contextmanager
 def start_wayvnc(
-    runtime: Path, *, log: Path, env: dict[str, str], stop: Event
-) -> Generator[OwnedProcess | None, None, None]:
+    runtime_dir: Path, *, log: Path, env: dict[str, str], stop: Event
+) -> Generator[ManagedProcess | None, None, None]:
     """Yield the ready process, or None if startup is interrupted."""
     command = [
         "wayvnc",
@@ -310,11 +315,11 @@ def start_wayvnc(
         "/dev/null",
         "-k",
         "us",
-        f"unix:{runtime / 'vnc.sock'}",
+        f"unix:{runtime_dir / 'vnc.sock'}",
     ]
     with managed_process(command, log=log, env=env) as process:
         socket = wait_for_socket(
-            runtime, "vnc.sock", process=process, log=log, stop=stop
+            runtime_dir, "vnc.sock", process=process, log=log, stop=stop
         )
         yield process if socket is not None else None
 
@@ -332,7 +337,7 @@ def start_recording(
     console: ConsoleCapture,
     compact: bool = False,
     layout: ClipLayout,
-) -> Generator[OwnedProcess | None, None, None]:
+) -> Generator[ManagedProcess | None, None, None]:
     """Wait for the MP4 header before yielding; finalize while Sway is still alive.
 
     Everything up to publishing works on a private clip, so nothing but
@@ -510,9 +515,9 @@ def new_file_error(
     reserved = {
         (session_dir / name).resolve()
         for name in (
-            ".headless.lock",
-            ".headless-owner.json",
-            ".headless-owner.tmp",
+            LOCK,
+            JOURNAL,
+            JOURNAL_TEMPORARY,
             PRIVATE_CLIP,
             "session.json",
             ".session.json",
@@ -583,7 +588,7 @@ def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool
     remuxed = clip.with_name("remuxed.mp4")
     remux_log = clip.with_name("remux.log")
     try:
-        result = run_owned(
+        result = run_managed(
             [
                 "ffmpeg",
                 "-nostdin",
@@ -637,7 +642,7 @@ class Recording:
     size: tuple[int, int]
     console_capture: ConsoleCapture
     caption_capture: CaptionCapture = field(default_factory=CaptionCapture)
-    process: OwnedProcess | None = None
+    process: ManagedProcess | None = None
     resources: ExitStack = field(default_factory=ExitStack)
     clip_destination: Path | None = None
     last_summary: dict[str, object] | None = None
@@ -717,7 +722,7 @@ def session_command(
     compact: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> int:
-    state = json.loads((session_dir / "session.json").read_text())
+    metadata = json.loads((session_dir / "session.json").read_text())
     request: dict[str, object] = {
         "command": command,
         "session_directory": str(session_dir),
@@ -736,7 +741,7 @@ def session_command(
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
         raise SessionError("Session request exceeds the 1 MiB limit.")
-    endpoint = Path(state["command_socket"])
+    endpoint = Path(metadata["command_socket"])
     try:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))
@@ -857,7 +862,7 @@ def parse_request(line: bytes, recording: Recording) -> SessionRequest:
 def handle_session_command(
     listener: socket.socket,
     recording: Recording,
-    write_state: Callable[[], None],
+    write_metadata: Callable[[], None],
     status: Callable[[], dict[str, object]],
     inputs: InputWorker,
 ) -> socket.socket | None:
@@ -913,7 +918,7 @@ def handle_session_command(
                 console_panel=request.console_panel,
                 compact=request.compact,
             )
-        write_state()
+        write_metadata()
         reply(connection, error=error, data=data)
     finally:
         if not stopping:
@@ -949,12 +954,12 @@ def run_session(
         if error is not None:
             raise SessionError(error)
     session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with session_lease(session_dir) as lease:
-        refuse_abandoned_ownership(session_dir)
+    with session_lock(session_dir) as lock:
+        refuse_unrecovered_session(session_dir)
         return _run_session(
             session_dir,
             command,
-            lease=lease,
+            lock=lock,
             clip_destination=clip_destination,
             captions=captions,
             click_pings=click_pings,
@@ -971,7 +976,7 @@ def _run_session(
     session_dir: Path,
     command: list[str],
     *,
-    lease: int,
+    lock: int,
     clip_destination: Path | None,
     captions: CaptionOptions,
     click_pings: bool,
@@ -982,10 +987,14 @@ def _run_session(
     fonts: str,
     real_env: bool,
 ) -> int:
-    state = session_dir / "session.json"
-    if state.exists():
+    metadata_path = session_dir / "session.json"
+    if metadata_path.exists():
+        if records_desktop_session(session_dir):
+            raise SessionError(stale_desktop_session(session_dir))
         raise SessionError(
-            f"{state} already exists. Run framewisp SESSION recover after the owner exits."
+            f"{metadata_path} is left over from a session that has exited. Run "
+            f"`{shlex.join(['framewisp', str(session_dir), 'recover'])}` with the "
+            "framewisp version that started that session."
         )
 
     (session_dir / "app-exit.json").unlink(missing_ok=True)
@@ -1004,31 +1013,31 @@ def _run_session(
     }
     try:
         with (
-            headless_runtime(session_dir, lease) as runtime,
+            headless_runtime_dir(session_dir, lock) as runtime_dir,
             ExitStack() as stack,
         ):
-            directory = str(runtime)
+            directory = str(runtime_dir)
             # Compositor title bars must not use the caller's fonts either.
             env = fixed_fonts(
-                session_environment_for_run(runtime, dict(os.environ)), fonts=fonts
+                session_environment_for_run(runtime_dir, dict(os.environ)), fonts=fonts
             )
             # An empty path selects the compositor's built-in cursor, not the caller's.
             env["XCURSOR_PATH"] = ""
             app_env = caller_environment()
             if not real_env:
-                app_env = sanitized_environment(runtime, app_env, fonts=fonts)
-            app_env = session_environment_for_run(runtime, app_env)
+                app_env = sanitized_environment(runtime_dir, app_env, fonts=fonts)
+            app_env = session_environment_for_run(runtime_dir, app_env)
             for process_env in (env, app_env):
-                process_env["FRAMEWISP_OWNER_FD"] = str(lease)
-                process_env["FRAMEWISP_OWNER_RUNTIME"] = directory
+                process_env["FRAMEWISP_SESSION_LOCK_FD"] = str(lock)
+                process_env["FRAMEWISP_RUNTIME_DIRECTORY"] = directory
             buses = start_inspection_buses(
-                stack, runtime, session_dir, env, app_env, stop
+                stack, runtime_dir, session_dir, env, app_env, stop
             )
             if buses is None:
                 return 0
             compositor = stack.enter_context(
                 start_sway(
-                    runtime,
+                    runtime_dir,
                     log=session_dir / "sway.log",
                     env=env,
                     stop=stop,
@@ -1044,7 +1053,7 @@ def _run_session(
             x11_display = None
             if x11:
                 x11_display = wait_for_x11(
-                    runtime, process=sway, log=session_dir / "sway.log", stop=stop
+                    runtime_dir, process=sway, log=session_dir / "sway.log", stop=stop
                 )
                 if x11_display is None:
                     return 0
@@ -1059,14 +1068,14 @@ def _run_session(
 
             vnc = stack.enter_context(
                 start_wayvnc(
-                    runtime, log=session_dir / "wayvnc.log", env=env, stop=stop
+                    runtime_dir, log=session_dir / "wayvnc.log", env=env, stop=stop
                 )
             )
             if vnc is None:
                 return 0
-            input_client = stack.enter_context(keep_input_devices(runtime, stop))
+            input_client = stack.enter_context(keep_input_devices(runtime_dir, stop))
 
-            backends = buses | {"sway": sway, "wayvnc": vnc}
+            support_processes = buses | {"sway": sway, "wayvnc": vnc}
             console_capture = ConsoleCapture(session_dir)
             output = stack.enter_context(app_output(console_capture))
             recording = Recording(session_dir, env, stop, size, console_capture)
@@ -1093,7 +1102,7 @@ def _run_session(
                     command, log=session_dir / "app.log", env=app_env, output=output
                 )
             )
-            command_socket = str(runtime / "command.sock")
+            command_socket = str(runtime_dir / "command.sock")
             listener = stack.enter_context(socket.socket(socket.AF_UNIX))
             listener.bind(command_socket)
             listener.listen()
@@ -1111,9 +1120,9 @@ def _run_session(
             )
             stack.callback(inputs.close)
 
-            def write_state() -> None:
+            def write_metadata() -> None:
                 assert recording is not None
-                processes = backends | {"app": app}
+                processes = support_processes | {"app": app}
                 if recording.process is not None:
                     processes["recorder"] = recording.process
                 temporary = session_dir / ".session.json"
@@ -1142,7 +1151,7 @@ def _run_session(
                     + "\n"
                 )
                 # Keep metadata reads complete while recording commands update it.
-                temporary.replace(state)
+                temporary.replace(metadata_path)
 
             def status() -> dict[str, object]:
                 assert recording is not None
@@ -1166,7 +1175,7 @@ def _run_session(
                     ),
                 }
 
-            write_state()
+            write_metadata()
             print(f"Session ready: {session_dir}", flush=True)
             while not stop.is_set():
                 console_capture.check()
@@ -1183,7 +1192,7 @@ def _run_session(
                         flush=True,
                     )
                     return result if result >= 0 else 128 - result
-                monitored = backends.copy()
+                monitored = support_processes.copy()
                 if recording.process is not None:
                     monitored["recorder"] = recording.process
                 for name, process in monitored.items():
@@ -1192,7 +1201,7 @@ def _run_session(
                             f"{name} exited", session_dir / (name + ".log")
                         )
                 stop_connection = handle_session_command(
-                    listener, recording, write_state, status, inputs
+                    listener, recording, write_metadata, status, inputs
                 )
                 if stop_connection is not None:
                     stop.set()
@@ -1202,8 +1211,8 @@ def _run_session(
         shutdown_error = str(error)
         raise
     finally:
-        if not (session_dir / ".headless-owner.json").exists():
-            state.unlink(missing_ok=True)
+        if not (session_dir / JOURNAL).exists():
+            metadata_path.unlink(missing_ok=True)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
         if stop_connection is not None:
@@ -1220,10 +1229,10 @@ def _run_session(
 
 
 def session_environment(session_dir: Path) -> dict[str, str]:
-    state = json.loads((session_dir / "session.json").read_text())
+    metadata = json.loads((session_dir / "session.json").read_text())
     return os.environ | {
-        "XDG_RUNTIME_DIR": state["runtime_directory"],
-        "WAYLAND_DISPLAY": state["wayland_display"],
+        "XDG_RUNTIME_DIR": metadata["runtime_directory"],
+        "WAYLAND_DISPLAY": metadata["wayland_display"],
     }
 
 
@@ -1257,8 +1266,11 @@ def screenshot(
     x = y = 0
     display_width = display_height = 0
     if region is not None or metadata:
-        state = json.loads((session_dir / "session.json").read_text())
-        display_width, display_height = state["width"], state["height"]
+        session_metadata = json.loads((session_dir / "session.json").read_text())
+        display_width, display_height = (
+            session_metadata["width"],
+            session_metadata["height"],
+        )
         x, y, width, height = region or (0, 0, display_width, display_height)
         if x < 0 or y < 0 or width <= 0 or height <= 0:
             raise SessionError(

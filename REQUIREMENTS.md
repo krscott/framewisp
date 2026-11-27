@@ -45,8 +45,8 @@ investigate or ask; never invent a rationale.
   (R-ENV-4, R-ENV-6). Variables from framewisp's Nix wrapper do not reach the
   app.
 
-  Rationale: Agents in different environments should produce the same images
-  and videos by default, so the caller's environment is sanitized first and
+  Rationale: Agents in different environments should produce the same screenshots
+  and clips by default, so the caller's environment is sanitized first and
   calling agents inject changes as needed. Lookup paths and app-specific
   variables stay because apps need them to start and configure themselves.
 
@@ -55,13 +55,13 @@ investigate or ask; never invent a rationale.
   starts.
 - **R-ENV-3** [test] The app receives the caller's `PYTHONPATH`
   unchanged.
-- **R-ENV-4** [test] By default, two `run` sessions of the same framewisp and
+- **R-ENV-4** [test] By default, two headless sessions of the same framewisp and
   native app builds, at the same display size and backend and with the same app
   state, show the same pixels when their callers differ in locale, time zone,
   fonts, toolkit theme, scale, desktop identity, or home directory.
 
-  Rationale: Agents in different environments should produce the same images and
-  videos by default, without knowing about an option.
+  Rationale: Agents in different environments should produce the same screenshots and
+  clips by default, without knowing about an option.
 
 - **R-ENV-5** [test] A variable set or removed on the app command, as in
   `run -- env NAME=value app` or `run -- env -u NAME app`, takes effect in the
@@ -70,7 +70,7 @@ investigate or ask; never invent a rationale.
   Rationale: Sanitizing is the default, and calling agents inject changes into
   the environment as needed, so that path must always work.
 
-- **R-ENV-6** [test] By default, each `run` session gives the app private home,
+- **R-ENV-6** [test] By default, each headless session gives the app private home,
   XDG config, cache, data, and state directories and a private `TMPDIR`. They
   hold no caller data, app writes to them do not reach the caller's home, and
   they are removed with the session's runtime directory.
@@ -101,9 +101,10 @@ investigate or ask; never invent a rationale.
   `taskset -c 0,1`. In it, start `stress-ng --cpu 8` from
   `nix shell nixpkgs#stress-ng`, then run 300
   `framewisp SESSION run --x11 -- python tests/input_probe.py` sessions, four at
-  a time. After `app.log` shows `"event": "ready"`, read `runtime_directory`
-  from `session.json` as RUNTIME and run
-  `SWAYSOCK=$(ls RUNTIME/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
+  a time. After `app.log` shows `"event": "ready"`, set the shell variable
+  `RUNTIME_DIR` to the `runtime_directory` value in that session's
+  `session.json` and run
+  `SWAYSOCK=$(ls "$RUNTIME_DIR"/sway-ipc.*.sock) swaymsg -t get_tree`. Every session
   must list a window named `Input probe` within 10 seconds.] An X11 app window
   always appears in Sway, even when the app never redraws after its first frame.
 
@@ -281,9 +282,13 @@ investigate or ask; never invent a rationale.
   exit code and the `app.log` path.
 - **R-LIFE-4** [test] After the runner is killed, `recover` makes the session
   directory usable again.
-- **R-LIFE-5** [test] Recovery refuses copied, damaged, symlinked, or replaced
-  ownership files and runtime directories. A same-user program that deliberately
-  rewrites them so they verify is out of scope.
+- **R-LIFE-5** [test] Recovery refuses a damaged or symlinked session lock,
+  recovery journal, or runtime directory. It also refuses a recovery journal
+  whose recorded identities do not match: one copied into a different session
+  directory, or one whose recorded session lock or runtime directory identity
+  differs from the one present, as when either was copied or replaced. A
+  same-user program that deliberately rewrites them so they verify is out of
+  scope.
 
   Rationale: Copies, damage and accidental replacement are honest mistakes, and
   they must not delete a live session. A same-user program can already remove
@@ -293,8 +298,10 @@ investigate or ask; never invent a rationale.
   its command socket that names a session directory other than its own. A
   session command that uses the command socket sends such a request when it is
   run from a copy of that session's metadata in another directory.
-- **R-LIFE-7** [test] When recovery cannot verify ownership, it removes nothing
-  and its error gives manual cleanup steps.
+- **R-LIFE-7** [test] When recovery cannot verify the session lock, the recovery
+  journal, or the runtime directory, or holds the session lock but still cannot
+  confirm that every supervisor finished cleanup, it removes nothing and its
+  error gives manual cleanup steps.
 
 ## Desktop shares (ATTACH)
 
@@ -353,7 +360,7 @@ investigate or ask; never invent a rationale.
 - **R-TEACH-3** [test] A completed lesson contains a playable video,
   timestamped PNG frames, the stated goal, and timestamped notes.
 
-  Rationale: Agents need both what the screen showed and explanations of intent
+  Rationale: Agents need both what the shared display showed and explanations of intent
   to derive a reusable procedure.
 
 - **R-TEACH-4** [test] A capture failure marks the lesson as failed and

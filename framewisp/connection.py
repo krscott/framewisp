@@ -14,7 +14,7 @@ from framewisp.batch import MAX_REQUEST_BYTES
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 6
+COMMAND_PROTOCOL = 7
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -82,8 +82,8 @@ def request_desktop(
     kind does not accept or whose share token does not match.
     """
     try:
-        state = json.loads((session_dir / "session.json").read_text())
-        endpoint = Path(state["command_socket"])
+        metadata = json.loads((session_dir / "session.json").read_text())
+        endpoint = Path(metadata["command_socket"])
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))
             connection.sendall(
@@ -92,7 +92,7 @@ def request_desktop(
                         {
                             "command": command,
                             "parameters": parameters,
-                            "share_token": state["share_token"],
+                            "share_token": metadata["share_token"],
                         }
                     )
                     + "\n"
@@ -214,7 +214,7 @@ def receive_request(
         name = type(failure).__name__
         reject(
             f"Framewisp bug: validating this request raised {name}. "
-            "See the owner's stderr."
+            "See the runner's stderr."
         )
         try:
             # The message is left out because it can quote typed text.

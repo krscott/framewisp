@@ -24,7 +24,7 @@ from framewisp.pointer_overlays import (
     pointer_overlay_text,
     pointer_overlays_for_clip,
 )
-from framewisp.processes import run_owned
+from framewisp.processes import run_managed
 
 KeyCaptions = Literal["all", "non-text"]
 PointerCaptions = Literal["all", "modifiers"]
@@ -44,7 +44,7 @@ class CaptionOptions:
 
 
 def capture_origin(log: Path) -> float:
-    """Read the first captured frame's monotonic timestamp on our Sway backend."""
+    """Read the first frame's monotonic timestamp from the private compositor."""
     # The recorder logs the path it writes, which can be any bytes.
     with log.open(encoding="utf-8", errors="replace") as source:
         for line in source:
@@ -288,7 +288,7 @@ def render_clip(
         # A long clip can have more cut ranges than fit in an exec argument.
         (work / "filters.txt").write_text(",".join(filters), encoding="utf-8")
         rendered = work / "rendered.mp4"
-        result = run_owned(
+        result = run_managed(
             [
                 "ffmpeg",
                 "-nostdin",

@@ -15,8 +15,8 @@ from framewisp.errors import SessionError
 from framewisp.finalization import capture_origin
 from framewisp.layout import ConsolePanel
 from framewisp.lib import Recording
-from framewisp.ownership import PRIVATE_CLIP, interrupted_clip
 from framewisp.recorder import filter_recorder_output, recorder_output
+from framewisp.recovery import PRIVATE_CLIP, interrupted_clip
 
 # wf-recorder wrote this shape for a clip stopped right after record-start under
 # load. To keep it small, this is a 16x16 one-frame FFmpeg MP4 with the mvhd, tkhd,

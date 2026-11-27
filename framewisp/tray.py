@@ -155,7 +155,7 @@ class SharingIndicator:
             )
             self.available = available
 
-    def appeared(self, bus: Gio.DBusConnection, name: str, owner: str) -> None:
+    def appeared(self, bus: Gio.DBusConnection, name: str, unique_name: str) -> None:
         generation = self.generation
 
         def created(source: object, result: Gio.AsyncResult, data: object) -> None:
@@ -175,7 +175,7 @@ class SharingIndicator:
             bus,
             Gio.DBusProxyFlags.DO_NOT_AUTO_START,
             None,
-            owner,
+            unique_name,
             "/StatusNotifierWatcher",
             WATCHER,
             None,

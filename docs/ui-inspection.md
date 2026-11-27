@@ -94,7 +94,7 @@ python docs/benchmark_inspection.py /tmp/fw-inspection-bench /tmp/inspection.jso
 framewisp /tmp/fw-inspection-bench stop
 ```
 
-| Complete CLI operation | p50 | p95 | Median response bytes |
+| Complete CLI operation | p50 | p95 | Median bytes (observation JSON or screenshot file) |
 | --- | ---: | ---: | ---: |
 | Find Apply button | 570 ms | 624 ms | 516 |
 | Read applied result | 750 ms | 900 ms | 642 |
@@ -102,7 +102,7 @@ framewisp /tmp/fw-inspection-bench stop
 
 Queries currently read each object through several D-Bus calls. Inspection is
 slower than a screenshot in this small demo app. It exchanges much less data and lets
-an agent read text/state without an image-viewing step. Neither response size
+an agent read text/state without an image-viewing step. Neither these sizes
 nor these CLI measurements establish a model-latency speedup.
 
 One end-to-end agent trial at revision `bfb5c75` on September 20, 2026 used
@@ -123,7 +123,8 @@ excludes session setup and input because this comparison is a discovery/read
 task. No separate model-inference or upload timer is available. This is one
 illustrative trial, affected by scheduling and prior knowledge of the demo app,
 not a latency distribution or evidence of an agent speedup. Both paths took
-about 15.5 seconds despite the large difference in response size.
+about 15.5 seconds despite the large difference between observation JSON and
+screenshot file size.
 
 ## Decision for checks
 
@@ -178,7 +179,7 @@ resizing, hidden windows, unsupported transforms, and bounded private IPC reads.
 clicks a dialog button in tiled and moved floating windows, and verifies that
 view switcher tabs with inconsistent ancestor extents produce a warning. The
 libadwaita dependency belongs to the development shell and package compatibility
-tests, rather than the framewisp runtime.
+tests, rather than framewisp's runtime dependencies.
 
 ## Real-app compatibility runs
 
@@ -203,7 +204,7 @@ rendered window before input: runner readiness and even a mapped window can
 precede the first useful frame.
 
 Writer's first-run welcome required three Next clicks despite
-`--nofirststartwizard`. The run clicked into the document, typed
+`--nofirststartwizard`. The test clicked into the document, typed
 `Framewisp compatibility café`, replaced it with `Verified Writer café`, and
 verified that exact paragraph through a check. Both backends needed
 `max_nodes=4096`, `max_depth=32`, and a 10-second query/check budget.
@@ -220,7 +221,7 @@ formatting controls, file dialogs, multi-paragraph documents, and other
 LibreOffice components are untested. Settings-portal warnings did not prevent
 this workflow; portal-dependent features remain untested.
 
-Blender's run dismissed the splash, used `g`, `x`, `2`, Return to translate the
+Blender's session dismissed the splash, used `g`, `x`, `2`, Return to translate the
 selected cube, and sent two upward wheel ticks over the viewport. Screenshots
 recorded the viewport and editor menu. Selecting Python Console through the
 menu and typing a Python expression wrote the actual cube location to a file;

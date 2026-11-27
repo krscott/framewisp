@@ -1,4 +1,6 @@
-"""Private, single-threaded Linux subreaper for one managed process tree.
+"""Private, single-threaded supervisor for one managed process tree.
+
+It is a Linux subreaper, so detached descendants reparent to it.
 
 Executed by filename so it also works with the installed package's interpreter.
 Only this process reaps its children. A listed child's PID cannot be reused
@@ -27,7 +29,7 @@ def children() -> list[int]:
     ]
 
 
-def enable_ownership() -> None:
+def become_subreaper() -> None:
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
         raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
@@ -60,16 +62,16 @@ def cleanup(app: subprocess.Popen[bytes]) -> None:
     kill_at = deadline - KILL_SECONDS
     terminated: set[int] = set()
     failures: dict[int, str] = {}
-    while owned := children():
+    while remaining := children():
         now = time.monotonic()
         if now >= deadline:
             raise RuntimeError(
                 f"Cleanup exceeded {TERM_SECONDS + KILL_SECONDS:g}s; "
                 f"supervisor PID {os.getpid()}, app PID {app.pid}, "
-                f"surviving child PIDs {owned}, signal failures {failures}. "
+                f"surviving child PIDs {remaining}, signal failures {failures}. "
                 "Inspect these processes for blocked kernel I/O or denied signals."
             )
-        for pid in owned:
+        for pid in remaining:
             if time.monotonic() >= deadline:
                 break
             if now >= kill_at or pid not in terminated:
@@ -100,7 +102,7 @@ def cleanup(app: subprocess.Popen[bytes]) -> None:
 
 
 def supervise(
-    connection: socket.socket, command: list[str], runtime: Path | None = None
+    connection: socket.socket, command: list[str], runtime_dir: Path | None = None
 ) -> None:
     def send(value: dict[str, object]) -> None:
         try:
@@ -108,10 +110,10 @@ def supervise(
         except (BrokenPipeError, ConnectionResetError):
             pass  # Runner loss still requires descendant cleanup.
 
-    record = runtime / f"owner-{os.getpid()}.json" if runtime else None
+    record = runtime_dir / f"supervisor-{os.getpid()}.json" if runtime_dir else None
     app: subprocess.Popen[bytes] | None = None
     try:
-        enable_ownership()
+        become_subreaper()
         if record is not None:
             record.write_text(
                 json.dumps({"supervisor": os.getpid(), "command": command})
@@ -141,7 +143,7 @@ def supervise(
                 connection.recv(1)  # Stop byte or EOF both request shutdown.
                 break
     except (OSError, RuntimeError) as error:
-        send({"error": f"Process ownership unavailable or launch failed: {error}"})
+        send({"error": f"Process supervision unavailable or launch failed: {error}"})
     finally:
         if app is not None:
             try:

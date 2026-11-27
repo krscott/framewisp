@@ -1,4 +1,4 @@
-"""A user-approved desktop portal connection owned by an attach process."""
+"""A user-approved desktop portal connection held by an attached or teaching session's runner."""
 
 # pyright: reportMissingModuleSource=false
 

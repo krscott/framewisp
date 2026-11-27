@@ -1,4 +1,4 @@
-"""Runner-side handle for a private descendant-owning supervisor."""
+"""The runner's handle on a managed process and its supervisor."""
 
 import json
 import select
@@ -15,7 +15,7 @@ from framewisp.errors import SessionError
 
 
 @dataclass
-class OwnedProcess:
+class ManagedProcess:
     supervisor: subprocess.Popen[bytes]
     connection: socket.socket
     log: Path
@@ -91,15 +91,15 @@ def managed_process(
     env: dict[str, str],
     output: BinaryIO | None = None,
     cwd: Path | None = None,
-) -> Generator[OwnedProcess, None, None]:
+) -> Generator[ManagedProcess, None, None]:
     parent, child = socket.socketpair()
     with parent, child, ExitStack() as stack:
         destination = (
             output if output is not None else stack.enter_context(log.open("wb"))
         )
         supervisor_env = env.copy()
-        lease = int(supervisor_env.pop("FRAMEWISP_OWNER_FD", "-1"))
-        runtime = supervisor_env.pop("FRAMEWISP_OWNER_RUNTIME", "")
+        lock = int(supervisor_env.pop("FRAMEWISP_SESSION_LOCK_FD", "-1"))
+        runtime_dir = supervisor_env.pop("FRAMEWISP_RUNTIME_DIRECTORY", "")
         supervisor = subprocess.Popen(
             [
                 # The interpreter binary itself: sys.executable can name a
@@ -108,19 +108,19 @@ def managed_process(
                 "-I",
                 str(Path(__file__).with_name("_supervisor.py")),
                 str(child.fileno()),
-                runtime,
+                runtime_dir,
                 *command,
             ],
             env=supervisor_env,
             stdin=subprocess.DEVNULL,
             stdout=destination,
             stderr=subprocess.STDOUT,
-            pass_fds=(child.fileno(),) + ((lease,) if lease >= 0 else ()),
+            pass_fds=(child.fileno(),) + ((lock,) if lock >= 0 else ()),
             start_new_session=True,
             cwd=cwd,
         )
         child.close()
-        process = OwnedProcess(supervisor, parent, log)
+        process = ManagedProcess(supervisor, parent, log)
         try:
             deadline = time.monotonic() + 10
             while not process.pid and not process.done:
@@ -138,7 +138,7 @@ def managed_process(
             process.close()
 
 
-def run_owned(
+def run_managed(
     command: list[str],
     *,
     log: Path,
@@ -149,8 +149,9 @@ def run_owned(
     """Run a helper to completion under its own supervisor; return its exit code.
 
     The helper is outside the runner's process group, so a terminal's Ctrl+C
-    reaches only the runner. With the runner's owner settings in `env`, the
-    supervisor holds the session lease and ends the helper if the runner dies.
+    reaches only the runner. When `env` names the session lock's descriptor and the
+    runtime directory, the supervisor holds the session lock and ends the helper if
+    the runner dies.
     """
     try:
         with managed_process(command, log=log, env=env, cwd=cwd) as process:

@@ -150,7 +150,7 @@ def main() -> None:
                                 "stderr": response.stderr,
                                 "arguments": arguments,
                                 "success": result["status"] in ("ok", "completed"),
-                                "response": result,
+                                "result": result,
                             }
                         )
         finally:
