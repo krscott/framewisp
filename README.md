@@ -525,11 +525,11 @@ framewisp paint click --button middle 500 400
 framewisp paint click --count 2 500 400
 ```
 
-`--button` accepts `left` (default), `middle`, or `right`. `--count` accepts `1` (default)
-or `2`. Two clicks use the same connection and position, with a 0.1-second pause
-between them. Every click presses and releases the chosen button. The app's
-settings and the control under the pointer determine how it responds.
-Plain `click X Y` still sends one left click.
+`--button` accepts `left` (default), `middle`, or `right`. `--count` accepts
+`1` (default) or `2`. Two clicks use the same connection and position, with a
+0.1-second pause between them. Every click presses and releases the chosen
+button. The app's settings and the control under the pointer determine how it
+responds. Plain `click X Y` still sends one left click.
 
 The runner sends input through one persistent connection for the session. It
 serializes concurrent commands, including Unicode typing. This keeps the

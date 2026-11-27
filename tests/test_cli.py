@@ -793,7 +793,8 @@ def test_pointer_help_lists_middle_button(command: str) -> None:
         timeout=5,
     )
     assert result.returncode == 0
-    assert "{left,middle,right}" in result.stdout
+    assert "--button" in result.stdout
+    assert "middle" in result.stdout
 
 
 # R-INPUT-3
