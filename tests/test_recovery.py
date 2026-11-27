@@ -17,6 +17,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
+from framewisp import cli
 from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
 from framewisp.recovery import (
@@ -1636,6 +1637,83 @@ def test_app_exit_with_stopped_runner_keeps_exit_code_and_suggests_recover(
     assert "App exited: exit 2" in clean.stderr
     assert "runner has stopped" not in clean.stderr
     assert "recover" not in clean.stderr
+
+
+def test_missing_session_metadata_with_abandoned_journal_suggests_recover(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session_dir, _ = abandoned
+    (session_dir / "session.json").unlink()
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "runner has stopped" in result.stderr
+    assert f"`{recover}`" in result.stderr
+    assert "Start run" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (("screenshot", "--json", "-"), "requires a file path"),
+        (("screenshot", "--region", "2000", "0", "10", "10", "out.png"), "exceeds"),
+    ],
+)
+def test_validation_errors_are_preserved_when_runner_stopped(
+    abandoned: tuple[Path, Path],
+    tmp_path: Path,
+    arguments: tuple[str, ...],
+    expected: str,
+) -> None:
+    session_dir, runtime_dir = abandoned
+    write_headless_metadata(session_dir, runtime_dir, stale_socket=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert expected in result.stderr
+    assert "runner has stopped" not in result.stderr
+    assert "recover" not in result.stderr
+
+
+def test_inspect_probes_stopped_runner_once(
+    abandoned: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session_dir, runtime_dir = abandoned
+    write_headless_metadata(session_dir, runtime_dir, stale_socket=True)
+    calls = 0
+
+    def flip_after_first_probe(path: Path) -> bool:
+        nonlocal calls
+        calls += 1
+        return calls > 1
+
+    monkeypatch.setattr(cli, "headless_runner_stopped", flip_after_first_probe)
+    monkeypatch.setattr(
+        sys, "argv", ["framewisp", str(session_dir), "inspect", "--json"]
+    )
+    with pytest.raises(SystemExit) as exited:
+        cli.main()
+    assert exited.value.code == 1
+    assert calls == 1
+    captured = capsys.readouterr()
+    observation = json.loads(captured.out)
+    assert observation["status"] == "unavailable"
+    assert observation["hints"] == []
+    assert captured.err == ""
 
 
 def test_headless_runner_stopped_verifies_lock_and_journal(

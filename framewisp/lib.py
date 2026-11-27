@@ -758,10 +758,13 @@ def session_command(
                 + SOCKET_ACCESS_HINT
             )
         raise SessionError(
-            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{hint}"
+            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{hint}",
+            unreachable=True,
         ) from None
     if not line.endswith("\n"):
-        raise SessionError(f"Disconnected before {command} completed.")
+        raise SessionError(
+            f"Disconnected before {command} completed.", unreachable=True
+        )
     result = json.loads(line)
     error = result["error"]
     if result["data"] is not None and (error is None or command == "batch"):

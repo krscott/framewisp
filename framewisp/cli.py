@@ -3,6 +3,7 @@ import json
 import math
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import cast
@@ -14,7 +15,6 @@ from framewisp.connection import (
     MAX_REQUEST_BYTES,
     TEACHING_COMMANDS,
     DesktopSessionMetadata,
-    HeadlessSessionMetadata,
     SessionMetadata,
     read_session_metadata,
     request_desktop,
@@ -524,6 +524,12 @@ def main() -> None:
         parser.exit(1, exit_message + "\n")
     session = read_session_metadata(session_dir)
     if isinstance(session, str):
+        if not (session_dir / "session.json").exists() and headless_runner_stopped(
+            session_dir
+        ):
+            parser.exit(
+                1, f"Session {session_dir}: {stopped_runner_message(session_dir)}\n"
+            )
         parser.exit(1, session + "\n")
     if (
         isinstance(session, DesktopSessionMetadata)
@@ -534,21 +540,15 @@ def main() -> None:
     try:
         result = dispatch_session_command(session, args)
     except (SessionError, OSError, subprocess.TimeoutExpired) as error:
-        if isinstance(session, HeadlessSessionMetadata) and headless_runner_stopped(
-            session_dir
+        if (
+            isinstance(error, SessionError)
+            and error.unreachable
+            and headless_runner_stopped(session_dir)
         ):
             parser.exit(
                 1, f"Session {session_dir}: {stopped_runner_message(session_dir)}\n"
             )
         parser.exit(1, f"Session {session_dir}: {error}\n")
-    if (
-        result != 0
-        and isinstance(session, HeadlessSessionMetadata)
-        and headless_runner_stopped(session_dir)
-    ):
-        parser.exit(
-            result, f"Session {session_dir}: {stopped_runner_message(session_dir)}\n"
-        )
     raise SystemExit(result)
 
 
@@ -592,11 +592,15 @@ def dispatch_session_command(session: SessionMetadata, args: argparse.Namespace)
         from framewisp.inspection import inspect_session
 
         observation = inspect_session(session, args.query)
-        if observation["status"] != "ok" and headless_runner_stopped(
+        stopped = observation["status"] != "ok" and headless_runner_stopped(
             session.session_directory
-        ):
-            hints = cast(list[str], observation["hints"])
-            hints.append(stopped_runner_message(session.session_directory))
+        )
+        if stopped:
+            message = stopped_runner_message(session.session_directory)
+            cast(list[str], observation["hints"]).append(message)
+            print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
+            print(f"Session {session.session_directory}: {message}", file=sys.stderr)
+            return 1
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         return 0 if observation["status"] == "ok" else 1
     if args.command == "batch":
