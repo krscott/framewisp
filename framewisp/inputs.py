@@ -237,7 +237,7 @@ class InputWorker:
                     raise
                 finally:
                     data["screenshot_seconds"] = time.monotonic() - screenshot_started
-        except (SessionError, InterruptedError):
+        except Exception:
             data["verified"] = False
             if batch.failure_screenshot is not None and not self.cancelled(connection):
                 try:
@@ -248,7 +248,7 @@ class InputWorker:
                             lambda: self.cancelled(connection),
                         )
                     artifacts.append(str(batch.failure_screenshot.path))
-                except (SessionError, InterruptedError, OSError) as error:
+                except Exception as error:
                     data["failure_screenshot_error"] = str(error)
             raise
         finally:
