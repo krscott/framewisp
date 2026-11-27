@@ -140,7 +140,7 @@ def test_lesson_has_playable_video_frames_goal_and_timed_notes(
     )
     teaching.note("Choose this customer; the name is a variable. ✓")
     wait_for_frames(teaching, 3)
-    teaching.close()
+    assert teaching.close() is None
     with pytest.raises(ValueError, match="notes are closed"):
         teaching.note("Too late")
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
@@ -231,7 +231,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
     wait_for_frames(teaching, 2)
     teaching.note("This unchanged screen is the final result")
     time.sleep(0.2)
-    teaching.close()
+    assert teaching.close() is None
     entries = [
         json.loads(line)
         for line in (teaching.directory / "timeline.jsonl").read_text().splitlines()
@@ -464,7 +464,7 @@ def test_teaching_captures_a_task_performed_in_the_demo_app(
         timeout=5,
     )
     wait_for_frames(teaching, teaching.count + 3)
-    teaching.close()
+    assert teaching.close() is None
     assert "Applied: LearnMe" in log.read_text()
     frames = sorted((teaching.directory / "frames").iterdir())
     with Image.open(frames[0]) as first, Image.open(frames[-1]) as last:
