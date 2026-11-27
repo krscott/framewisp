@@ -23,7 +23,7 @@ import pytest
 
 from framewisp import attach
 from framewisp.attach import (
-    INPUT_CANCELLED,
+    COMMAND_CANCELLED,
     KEYCODES,
     AttachedInput,
     attach_session,
@@ -34,7 +34,6 @@ from framewisp.attach import (
 from framewisp.connection import DesktopKind, request_desktop
 from framewisp.desktop import lock_desktop, stop_sharing
 from framewisp.errors import SessionError
-from framewisp.input_log import input_error
 from framewisp.portal import DesktopPortal
 from framewisp.recovery import (
     recover_session,
@@ -131,7 +130,7 @@ def test_stop_releases_drag_and_modifiers(
             stop.set()
 
     monkeypatch.setattr(inputs, "move", move_and_stop)
-    with pytest.raises(InterruptedError, match=INPUT_CANCELLED):
+    with pytest.raises(InterruptedError, match=COMMAND_CANCELLED):
         inputs.perform(
             "drag",
             {
@@ -217,7 +216,7 @@ import weakref
 from pathlib import Path
 import framewisp.attach as attach
 from framewisp.portal import DesktopPortal
-from gi.repository import Gio
+from gi.repository import Gio, GLib
 test_bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
 test_bus.up()
 root = Path(sys.argv[1])
@@ -235,12 +234,15 @@ class Portal:
         assert options == {'allow_input': not (root / 'teach').exists()}
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
+            attach.dispatch_events()
             if self.stop.wait(.01):
-                raise InterruptedError('Stopped while waiting for desktop permission.')
+                raise self.interruption('Stopped while waiting for desktop permission.')
     interruption = DesktopPortal.interruption
     connection_closed = DesktopPortal.connection_closed
     def input(self, method, signature, *values):
         global pending_signal
+        with (root / 'events').open('a') as out:
+            out.write(repr((method, values)) + '\\n')
         if (root / 'block-input').exists():
             (root / 'block-input').unlink()
             (root / 'blocking').touch()
@@ -250,13 +252,15 @@ class Portal:
                     # dispatches the signal that explains why.
                     pending_signal = ((root / 'end-input').read_text(), time.monotonic() + .05)
                     break
+                if (root / 'fail-input').exists():
+                    if (root / 'fail-input').read_text() == 'backend':
+                        raise RuntimeError(f'injected portal failure: {values!r}')
+                    break
                 time.sleep(.01)
-            raise RuntimeError('g-io-error-quark: The connection is closed (18)')
+            raise GLib.Error.new_literal(Gio.io_error_quark(), 'The connection is closed', Gio.IOErrorEnum.CLOSED)
         if (root / 'fail').exists():
             # Include the values, as a real portal error might.
             raise RuntimeError(f'injected portal failure: {values!r}')
-        with (root / 'events').open('a') as out:
-            out.write(repr((method, values)) + '\\n')
     def capture_fd(self):
         return os.open('/dev/null', os.O_RDONLY)
     def close(self):
@@ -275,7 +279,7 @@ if (root / 'teach').exists():
         def close(self, *args, **kwargs):
             if (root / 'slow-close').exists():
                 time.sleep(.8)
-            super().close(*args, **kwargs)
+            return super().close(*args, **kwargs)
     lesson = TestTeaching(root / 'lesson', 'Perform a task')
 original_dispatch = attach.dispatch_events
 revoke_at = None
@@ -291,6 +295,13 @@ def dispatch():
         else:
             active.connection_closed(active.bus, True, None)
         pending_signal = None
+    if (root / 'lose-bus').exists() and pending_signal is None:
+        (root / 'lose-bus').unlink()
+        if (root / 'eos-first').exists():
+            lesson.source_ended.set()
+            pending_signal = ('lose-bus', time.monotonic() + .05)
+        else:
+            Portal.active().connection_closed(None, True, None)
     if (root / 'source-end').exists():
         lesson.source_ended.set()
     if (root / 'revoke').exists():
@@ -1360,8 +1371,7 @@ def test_user_stop_during_input_cancels_it(
             (tmp_path / "end-input").write_text("revoke")
         _, client_stderr = command.communicate(timeout=5)
         assert command.returncode == 1
-        cancelled = input_error(arguments[0], InterruptedError(INPUT_CANCELLED))
-        assert cancelled in client_stderr
+        assert COMMAND_CANCELLED in client_stderr
         assert "quark" not in client_stderr
         assert runner.wait(timeout=5) == 0
         stdout, stderr = runner.communicate(timeout=5)
@@ -1371,20 +1381,84 @@ def test_user_stop_during_input_cancels_it(
         )
 
 
+@pytest.mark.parametrize("arguments", [["type", "hunter2"], ["move", "1", "1"]])
 def test_lost_bus_during_input_fails_the_share(
-    tmp_path: Path, runner: subprocess.Popen[str]
+    tmp_path: Path, runner: subprocess.Popen[str], arguments: list[str]
 ) -> None:
-    with blocked_input(tmp_path, runner, ["type", "hunter2"]) as command:
+    with blocked_input(tmp_path, runner, arguments) as command:
         (tmp_path / "end-input").write_text("lose-bus")
         _, client_stderr = command.communicate(timeout=5)
         assert command.returncode == 1
-        assert INPUT_CANCELLED not in client_stderr
+        assert "The session bus connection closed." in client_stderr
+        assert COMMAND_CANCELLED not in client_stderr
         assert runner.wait(timeout=5) == 1
         stdout, stderr = runner.communicate(timeout=5)
-        assert "Stopped sharing: The session bus connection closed." in stderr
+        assert (
+            stderr.splitlines().count(
+                "Stopped sharing: The session bus connection closed."
+            )
+            == 1
+        )
+        assert "Stopped sharing: The session bus connection closed.;" not in stderr
         assert "hunter2" not in client_stderr + stderr + stdout
         assert stdout.endswith("Your apps and desktop are still running.\n")
         assert "Stopped sharing." not in stdout
+
+
+@pytest.mark.parametrize("failure", ["closed", "backend"])
+def test_input_queued_behind_a_failure_never_reaches_the_desktop(
+    tmp_path: Path, runner: subprocess.Popen[str], failure: str
+) -> None:
+    session_dir = tmp_path / "session"
+    with blocked_input(tmp_path, runner, ["type", "hunter2"]) as command:
+        queued = subprocess.Popen(
+            [sys.executable, "-m", "framewisp", str(session_dir), "move", "7", "7"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Let the queued command reach the runner and wait for the input lock.
+        time.sleep(0.5)
+        (tmp_path / "fail-input").write_text(failure)
+        _, client_stderr = command.communicate(timeout=5)
+        _, queued_stderr = queued.communicate(timeout=5)
+        assert command.returncode == 1
+        assert queued.returncode == 1
+        assert COMMAND_CANCELLED in queued_stderr
+        assert "hunter2" not in client_stderr
+        assert runner.wait(timeout=5) == 1
+        assert "(7.0, 7.0)" not in (tmp_path / "events").read_text()
+
+
+@pytest.mark.parametrize("runner", ["teaching"], indirect=True)
+@pytest.mark.parametrize("eos_first", [False, True])
+def test_lost_bus_fails_the_lesson(
+    tmp_path: Path, runner: subprocess.Popen[str], eos_first: bool
+) -> None:
+    (tmp_path / "approve").touch()
+    assert runner.stdout is not None
+    read_terminal(runner.stdout.fileno(), b"Teaching session ready:")
+    if eos_first:
+        # PipeWire's end of stream reaches the lesson before the bus loss.
+        (tmp_path / "eos-first").touch()
+    (tmp_path / "lose-bus").touch()
+    assert runner.wait(timeout=5) == 1
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert manifest["error"] == "The session bus connection closed."
+    _, stderr = runner.communicate(timeout=5)
+    assert "Stopped sharing: The session bus connection closed." in stderr.splitlines()
+    assert "Partial lesson:" in stderr
+
+
+def test_lost_bus_while_waiting_for_permission_fails(
+    tmp_path: Path, runner: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "lose-bus").touch()
+    assert runner.wait(timeout=5) == 1
+    stdout, stderr = runner.communicate(timeout=5)
+    assert "Could not share the desktop: The session bus connection closed." in stderr
+    assert "Stopped sharing" not in stdout + stderr
 
 
 @pytest.fixture
