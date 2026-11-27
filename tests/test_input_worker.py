@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from framewisp.actions import InputAction
-from framewisp.batch import DEFAULTS, Batch
+from framewisp.batch import DEFAULTS, Batch, Screenshot
 from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
 from framewisp.inputs import InputWorker
@@ -249,3 +249,106 @@ def test_interrupted_drag_logs_its_press_only(tmp_path: Path) -> None:
         worker.close()
     assert ("mouseUp", 1) in client.calls
     assert button_events(tmp_path) == [("press", 1, 2)]
+
+
+class TransportFailureClient(HoldingClient):
+    """Fails key and button presses with a non-SessionError transport error."""
+
+    def keyDown(self, key: str) -> None:
+        raise OSError(f"vnc pipe broke on {key}")
+
+    def mouseDown(self, button: int) -> None:
+        raise OSError(f"vnc pipe broke on button {button}")
+
+
+@pytest.mark.parametrize(
+    ("step", "secret"),
+    [
+        (action("key", chord="a"), "vnc pipe broke"),
+        (action("type", text="secret", interval=0), "vnc pipe broke"),
+        (action("click", x=10, y=20, button="left", count=1), None),
+    ],
+    ids=["key", "type", "click"],
+)
+def test_non_session_batch_failure_takes_failure_screenshot(
+    tmp_path: Path, step: InputAction, secret: str | None
+) -> None:
+    stop = Event()
+    captured: list[Path] = []
+
+    def record_screenshot(path: Path, _cancelled: object) -> int:
+        captured.append(path)
+        return 0
+
+    worker = InputWorker(
+        headless_session(tmp_path),
+        TransportFailureClient(Event()),
+        stop,
+        screenshot=record_screenshot,
+    )
+    failure_path = tmp_path / "failed.png"
+    batch = Batch(
+        (step,),
+        None,
+        failure_screenshot=Screenshot(path=failure_path, delay=0),
+    )
+    caller, runner = socket.socketpair()
+    try:
+        assert worker.submit(runner, batch)
+        reply = cast(dict[str, object], json.loads(caller.recv(65536)))
+    finally:
+        caller.close()
+        with pytest.raises(SessionError, match="session stopped without retrying"):
+            worker.close()
+
+    assert stop.is_set()
+    assert captured == [failure_path]
+    error = str(reply["error"])
+    assert "session stopped without retrying" in error
+    if secret is not None:
+        assert secret not in error
+    data = cast(dict[str, object], reply["data"])
+    assert data["status"] == "failed"
+    assert data["verified"] is False
+    assert data["failed_index"] == 0
+    assert data["failed_phase"] == "action"
+    assert data["artifacts"] == [str(failure_path)]
+    assert data["failure_screenshot_error"] is None
+
+
+def test_failure_screenshot_exception_preserves_original_batch_error(
+    tmp_path: Path,
+) -> None:
+    stop = Event()
+
+    def broken_screenshot(_path: Path, _cancelled: object) -> int:
+        raise RuntimeError("screenshot helper crashed")
+
+    worker = InputWorker(
+        headless_session(tmp_path),
+        TransportFailureClient(Event()),
+        stop,
+        screenshot=broken_screenshot,
+    )
+    batch = Batch(
+        (action("click", x=10, y=20, button="left", count=1),),
+        None,
+        failure_screenshot=Screenshot(path=tmp_path / "failed.png", delay=0),
+    )
+    caller, runner = socket.socketpair()
+    try:
+        assert worker.submit(runner, batch)
+        reply = cast(dict[str, object], json.loads(caller.recv(65536)))
+    finally:
+        caller.close()
+        with pytest.raises(SessionError, match="vnc pipe broke on button 1"):
+            worker.close()
+
+    data = cast(dict[str, object], reply["data"])
+    assert data["status"] == "failed"
+    assert data["verified"] is False
+    assert data["failed_index"] == 0
+    assert data["failed_phase"] == "action"
+    assert data["artifacts"] == []
+    assert "vnc pipe broke on button 1" in str(data["error"])
+    assert data["failure_screenshot_error"] == "screenshot helper crashed"
