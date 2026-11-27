@@ -400,6 +400,57 @@ def read_journal(session_dir: Path, lock: int) -> Journal:
     return Journal(runtime_dir, runtime_dir_identity)
 
 
+def headless_runner_stopped(session_dir: Path) -> bool:
+    """Return True only when the verified session lock is free and a journal remains.
+
+    A live headless runner and its supervisors hold an exclusive flock on the
+    lock inode recorded in the recovery journal, and clean shutdown deletes the
+    journal before releasing the lock. Unreadable, replaced, or copied state
+    returns False so callers keep their normal diagnostics.
+    """
+    lock_path = session_dir / LOCK
+    journal_path = session_dir / JOURNAL
+    try:
+        descriptor = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            return False
+        # Parse and verify the journal before taking the lock so the shared
+        # lock is held only for the final presence check.
+        journal_id = identity(journal_path)
+        value = read_json(journal_path)
+        if not isinstance(value, dict):
+            return False
+        journal = cast(dict[str, object], value)
+        if journal.get("session_directory_identity") != identity(
+            session_dir
+        ) or parse_identity(journal.get("session_lock_identity")) != lock_identity(
+            descriptor
+        ):
+            return False
+        try:
+            # flock has no non-locking query; a shared lock avoids blocking other readers.
+            fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return identity(journal_path) == journal_id
+    except (OSError, ValueError, RecursionError):
+        return False
+    finally:
+        os.close(descriptor)
+
+
+def stopped_runner_message(session_dir: Path) -> str:
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    return (
+        "The runner has stopped without cleaning up. "
+        f"Run `{recover}` to clean up the session directory."
+    )
+
+
 def sync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:

@@ -4,10 +4,12 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -15,12 +17,15 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
+from framewisp import cli
+from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
 from framewisp.recovery import (
     JOURNAL,
     JOURNAL_TEMPORARY,
     LOCK,
     PRIVATE_CLIP,
+    headless_runner_stopped,
     headless_runtime_dir,
     recover_session,
     runtime_dir_path,
@@ -1424,3 +1429,388 @@ def test_writable_session_refused_before_creating_lock(
         assert not (tmp_path / LOCK).exists()
     finally:
         tmp_path.chmod(0o700)
+
+
+def write_headless_metadata(
+    session_dir: Path, runtime_dir: Path, *, stale_socket: bool = True
+) -> HeadlessSessionMetadata:
+    command_socket = runtime_dir / "command.sock"
+    if stale_socket:
+        # Binding and closing leaves a socket path that refuses connections,
+        # matching a runner killed with SIGKILL.
+        with socket.socket(socket.AF_UNIX) as listener:
+            listener.bind(str(command_socket))
+    metadata = HeadlessSessionMetadata(
+        session_directory=session_dir,
+        command_socket=command_socket,
+        runtime_directory=runtime_dir,
+        accessibility_bus=f"unix:path={runtime_dir / 'accessibility.sock'}",
+        wayland_display="wayland-1",
+        width=1280,
+        height=720,
+        x11_display=None,
+        clip_destination=None,
+    )
+    (session_dir / "session.json").write_text(json.dumps(metadata.to_json({})))
+    return metadata
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("status",),
+        ("stop",),
+        ("click", "10", "10"),
+        ("screenshot", "out.png"),
+        ("inspect", "--json"),
+    ],
+)
+def test_session_commands_suggest_recover_when_runner_stopped(
+    abandoned: tuple[Path, Path], tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    session_dir, runtime_dir = abandoned
+    write_headless_metadata(session_dir, runtime_dir, stale_socket=True)
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "runner has stopped" in result.stderr
+    assert f"`{recover}`" in result.stderr
+    assert "sandbox" not in result.stderr
+    assert "Traceback" not in result.stderr
+    if arguments[0] == "inspect":
+        observation = json.loads(result.stdout)
+        assert observation["status"] == "unavailable"
+        assert any(f"`{recover}`" in hint for hint in observation["hints"])
+    else:
+        assert result.stdout == ""
+
+
+@pytest.mark.parametrize("stale_socket", [True, False], ids=["refused", "missing"])
+def test_session_commands_keep_sandbox_hint_when_runner_is_alive(
+    tmp_path: Path, stale_socket: bool
+) -> None:
+    session_dir = tmp_path / "live"
+    session_dir.mkdir()
+    with (
+        session_lock(session_dir) as lock,
+        headless_runtime_dir(session_dir, lock) as runtime_dir,
+    ):
+        write_headless_metadata(session_dir, runtime_dir, stale_socket=stale_socket)
+        status = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert status.returncode == 1
+        assert "sandbox" in status.stderr
+        assert "runner has stopped" not in status.stderr
+        assert "recover" not in status.stderr
+        assert ("wait a few seconds and retry" in status.stderr) is stale_socket
+
+        shot = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "framewisp",
+                str(session_dir),
+                "screenshot",
+                str(tmp_path / "out.png"),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert shot.returncode == 1
+        assert "sandbox" in shot.stderr
+        assert "runner has stopped" not in shot.stderr
+        assert "recover" not in shot.stderr
+
+
+@pytest.mark.parametrize("reply_bytes", [b"", b'{"data": '], ids=["eof", "truncated"])
+@pytest.mark.parametrize("live", [False, True], ids=["stopped", "live"])
+def test_session_command_handles_eof_and_truncated_reply(
+    tmp_path: Path, reply_bytes: bytes, live: bool
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime_dir = runtime_dir_path(session_dir)
+
+    def run_server(command_socket: Path) -> subprocess.CompletedProcess[str]:
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(str(command_socket))
+            server.listen(1)
+
+            def drain_and_close() -> None:
+                connection, _ = server.accept()
+                with connection:
+                    # Drain the request so closing sends EOF rather than ECONNRESET.
+                    with connection.makefile("r") as request:
+                        request.readline()
+                    if reply_bytes:
+                        connection.sendall(reply_bytes)
+
+            thread = threading.Thread(target=drain_and_close, daemon=True)
+            thread.start()
+            try:
+                return subprocess.run(
+                    [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+            finally:
+                thread.join(timeout=5)
+
+    if live:
+        with (
+            session_lock(session_dir) as lock,
+            headless_runtime_dir(session_dir, lock) as live_runtime,
+        ):
+            metadata = write_headless_metadata(
+                session_dir, live_runtime, stale_socket=False
+            )
+            result = run_server(metadata.command_socket)
+        assert result.returncode == 1
+        assert "Disconnected before status completed" in result.stderr
+        assert "runner has stopped" not in result.stderr
+        assert "Traceback" not in result.stderr
+    else:
+        with session_lock(session_dir) as lock:
+            write_journal(session_dir, runtime_dir, lock, created=False)
+            runtime_dir.mkdir(mode=0o700)
+            write_journal(session_dir, runtime_dir, lock, created=True)
+        try:
+            metadata = write_headless_metadata(
+                session_dir, runtime_dir, stale_socket=False
+            )
+            result = run_server(metadata.command_socket)
+            recover = shlex.join(["framewisp", str(session_dir), "recover"])
+            assert result.returncode == 1
+            assert "runner has stopped" in result.stderr
+            assert f"`{recover}`" in result.stderr
+            assert "Traceback" not in result.stderr
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+
+
+def test_app_exit_with_stopped_runner_keeps_exit_code_and_suggests_recover(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session_dir, _ = abandoned
+    (session_dir / "app-exit.json").write_text(json.dumps({"returncode": 2, "time": 0}))
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "App exited: exit 2" in result.stderr
+    assert str(session_dir / "app.log") in result.stderr
+    assert "runner has stopped" in result.stderr
+    assert f"`{recover}`" in result.stderr
+
+    # After clean recovery, an app-exit record alone does not suggest recover.
+    assert recover_session(session_dir) == 0
+    (session_dir / "app-exit.json").write_text(json.dumps({"returncode": 2, "time": 0}))
+    clean = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert clean.returncode == 1
+    assert "App exited: exit 2" in clean.stderr
+    assert "runner has stopped" not in clean.stderr
+    assert "recover" not in clean.stderr
+
+
+def test_missing_session_metadata_with_abandoned_journal_suggests_recover(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session_dir, _ = abandoned
+    (session_dir / "session.json").unlink()
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "runner has stopped" in result.stderr
+    assert f"`{recover}`" in result.stderr
+    assert "Start run" not in result.stderr
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can traverse 000 directories")
+def test_unreadable_session_metadata_symlink_preserves_permission_error(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session_dir, _ = abandoned
+    locked_dir = tmp_path / "locked"
+    locked_dir.mkdir()
+    target = locked_dir / "session.json"
+    target.write_text("{}")
+    (session_dir / "session.json").unlink()
+    (session_dir / "session.json").symlink_to(target)
+    locked_dir.chmod(0)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    finally:
+        locked_dir.chmod(0o700)
+    assert result.returncode == 1
+    assert "Cannot read session metadata" in result.stderr
+    assert "runner has stopped" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (("screenshot", "--json", "-"), "requires a file path"),
+        (("screenshot", "--region", "2000", "0", "10", "10", "out.png"), "exceeds"),
+    ],
+)
+def test_validation_errors_are_preserved_when_runner_stopped(
+    abandoned: tuple[Path, Path],
+    tmp_path: Path,
+    arguments: tuple[str, ...],
+    expected: str,
+) -> None:
+    session_dir, runtime_dir = abandoned
+    write_headless_metadata(session_dir, runtime_dir, stale_socket=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert expected in result.stderr
+    assert "runner has stopped" not in result.stderr
+    assert "recover" not in result.stderr
+
+
+def test_inspect_probes_stopped_runner_once(
+    abandoned: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    session_dir, runtime_dir = abandoned
+    write_headless_metadata(session_dir, runtime_dir, stale_socket=True)
+    calls = 0
+
+    def flip_after_first_probe(path: Path) -> bool:
+        nonlocal calls
+        calls += 1
+        return calls > 1
+
+    monkeypatch.setattr(cli, "headless_runner_stopped", flip_after_first_probe)
+    monkeypatch.setattr(
+        sys, "argv", ["framewisp", str(session_dir), "inspect", "--json"]
+    )
+    with pytest.raises(SystemExit) as exited:
+        cli.main()
+    assert exited.value.code == 1
+    assert calls == 1
+    captured = capsys.readouterr()
+    observation = json.loads(captured.out)
+    assert observation["status"] == "unavailable"
+    assert observation["hints"] == []
+    assert captured.err == ""
+
+
+def test_headless_runner_stopped_verifies_lock_and_journal(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session_dir, _ = abandoned
+    assert headless_runner_stopped(session_dir)
+
+    # Moving within the same filesystem preserves directory and lock identities.
+    moved = tmp_path / "moved"
+    session_dir.rename(moved)
+    assert headless_runner_stopped(moved)
+    moved.rename(session_dir)
+
+    # Copies (regular and hard-linked) have a different session directory identity.
+    copied = tmp_path / "copied"
+    shutil.copytree(session_dir, copied)
+    assert not headless_runner_stopped(copied)
+    hard_linked = tmp_path / "hard-linked"
+    subprocess.run(["cp", "-al", session_dir, hard_linked], check=True)
+    assert not headless_runner_stopped(hard_linked)
+
+    # A replaced lock cannot match the journal's lock identity.
+    original_lock = replace_lock(session_dir)
+    assert not headless_runner_stopped(session_dir)
+    original_lock.replace(session_dir / LOCK)
+    assert headless_runner_stopped(session_dir)
+
+    # A clean recovery removes the journal while keeping the lock file.
+    assert recover_session(session_dir) == 0
+    assert (session_dir / LOCK).exists()
+    assert not headless_runner_stopped(session_dir)
+
+
+@pytest.mark.parametrize("kind", ["missing", "symlink", "directory", "fifo"])
+def test_headless_runner_stopped_rejects_unusable_lock(
+    abandoned: tuple[Path, Path], kind: str
+) -> None:
+    session_dir, _ = abandoned
+    lock_path = session_dir / LOCK
+    target = session_dir / "other"
+    target.write_text("x")
+    lock_path.unlink()
+    if kind == "symlink":
+        lock_path.symlink_to(target)
+    elif kind == "directory":
+        lock_path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(lock_path, 0o600)
+    assert not headless_runner_stopped(session_dir)
+
+
+def test_headless_runner_stopped_rejects_live_and_damaged_journal(
+    tmp_path: Path,
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    with (
+        session_lock(session_dir) as lock,
+        headless_runtime_dir(session_dir, lock) as runtime_dir,
+    ):
+        assert not headless_runner_stopped(session_dir)
+        # Replacing the lock while the runner is still live must not read as stopped.
+        replace_lock(session_dir)
+        assert not headless_runner_stopped(session_dir)
+        assert runtime_dir.is_dir()
+
+    # Damaged journal with an otherwise valid free lock is rejected.
+    with session_lock(session_dir) as lock:
+        write_journal(session_dir, runtime_dir_path(session_dir), lock, created=False)
+    (session_dir / JOURNAL).write_text("{")
+    assert not headless_runner_stopped(session_dir)

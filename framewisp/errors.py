@@ -19,11 +19,13 @@ class SessionError(RuntimeError):
         *,
         returncode: int | None = None,
         input_message: str | None = None,
+        unreachable: bool = False,
     ):
         super().__init__(message)
         self.returncode = returncode
         # Only supply diagnostics constructed without literal or encoded input.
         self.input_message = input_message
+        self.unreachable = unreachable
 
 
 SOCKET_ACCESS_HINT = (
@@ -132,7 +134,9 @@ def display_command(
         detail = type(error).__name__ if input_content else str(error)
         message = f"{context}: {detail}\n{SOCKET_ACCESS_HINT}"
         raise SessionError(
-            message, input_message=message if input_content else None
+            message,
+            input_message=message if input_content else None,
+            unreachable=True,
         ) from None
     if result.returncode:
         diagnostic = (
@@ -145,6 +149,7 @@ def display_command(
             message,
             returncode=result.returncode,
             input_message=message if input_content else None,
+            unreachable=True,
         )
     if result.stderr and not input_content:
         print(result.stderr, end="", file=sys.stderr)

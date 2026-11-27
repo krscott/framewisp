@@ -750,15 +750,21 @@ def session_command(
             with connection.makefile("r") as response:
                 line = response.readline()
     except OSError as connection_error:
+        hint = SOCKET_ACCESS_HINT
+        if isinstance(connection_error, ConnectionRefusedError):
+            hint = (
+                "The session may be stopping, or supervisors may still be cleaning up "
+                "after its runner died; wait a few seconds and retry.\n"
+                + SOCKET_ACCESS_HINT
+            )
         raise SessionError(
-            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{SOCKET_ACCESS_HINT}"
+            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{hint}",
+            unreachable=True,
         ) from None
-    if not line:
-        print(
-            f"Session {session_dir} disconnected before {command} completed.",
-            file=sys.stderr,
+    if not line.endswith("\n"):
+        raise SessionError(
+            f"Disconnected before {command} completed.", unreachable=True
         )
-        return 1
     result = json.loads(line)
     error = result["error"]
     if result["data"] is not None and (error is None or command == "batch"):

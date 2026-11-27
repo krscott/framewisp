@@ -267,16 +267,19 @@ def parse_session_metadata(raw: object, session_dir: Path) -> SessionMetadata | 
         return f"{error} {remedy}"
 
 
+SESSION_DISCONNECTED = (
+    "Session is disconnected. Start run, or ask the user to run attach "
+    "or teach in another terminal."
+)
+
+
 def read_session_metadata(session_dir: Path) -> SessionMetadata | str:
     """Read, version-check and parse `session.json` once."""
     metadata_path = session_dir / "session.json"
     try:
         raw: object = json.loads(metadata_path.read_text())
     except FileNotFoundError:
-        return (
-            "Session is disconnected. Start run, or ask the user to run attach "
-            "or teach in another terminal."
-        )
+        return SESSION_DISCONNECTED
     except (OSError, ValueError, RecursionError) as error:
         return f"Cannot read session metadata: {error}"
     return parse_session_metadata(raw, session_dir)

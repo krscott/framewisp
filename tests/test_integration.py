@@ -3,6 +3,7 @@ import json
 import os
 import re
 import select
+import shlex
 import shutil
 import signal
 import socket
@@ -6115,3 +6116,58 @@ def test_named_session_launch_commands_and_cleanup(tmp_path: Path) -> None:
         if session_dir is not None:
             shutil.rmtree(session_dir)
             session_dir.parent.rmdir()
+
+
+@pytest.mark.integration
+def test_killed_runner_session_commands_suggest_recover(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    session_dir = headless_session.directory
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    headless_session.process.kill()
+    headless_session.process.wait(timeout=5)
+
+    # Supervisors hold the session lock until managed processes exit.
+    deadline = time.monotonic() + 15
+    while True:
+        status = subprocess.run(
+            ["framewisp", str(session_dir), "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert status.returncode == 1
+        if "runner has stopped" in status.stderr:
+            break
+        assert time.monotonic() < deadline, status.stderr
+        time.sleep(0.05)
+
+    assert f"`{recover}`" in status.stderr
+    assert "sandbox" not in status.stderr
+
+    for arguments in (
+        ("stop",),
+        ("screenshot", str(tmp_path / "shot.png")),
+        ("inspect", "--json"),
+    ):
+        result = subprocess.run(
+            ["framewisp", str(session_dir), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        assert result.returncode == 1
+        assert "runner has stopped" in result.stderr
+        assert f"`{recover}`" in result.stderr
+        assert "sandbox" not in result.stderr
+        if arguments[0] == "inspect":
+            observation = json.loads(result.stdout)
+            assert observation["status"] == "unavailable"
+            assert any(f"`{recover}`" in hint for hint in observation["hints"])
+        else:
+            assert result.stdout == ""
+
+    recovered = cli(session_dir, "recover")
+    assert json.loads(recovered.stdout)["status"] == "recovered"

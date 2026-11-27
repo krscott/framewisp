@@ -3,14 +3,17 @@ import json
 import math
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
+from typing import cast
 
 from framewisp import inspection_limits as limits
 from framewisp.batch import Batch
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import (
     MAX_REQUEST_BYTES,
+    SESSION_DISCONNECTED,
     TEACHING_COMMANDS,
     DesktopSessionMetadata,
     SessionMetadata,
@@ -38,7 +41,11 @@ from framewisp.lib import (
     session_command,
 )
 from framewisp.pointer import DEFAULT_MOVE_DURATION
-from framewisp.recovery import recover_session
+from framewisp.recovery import (
+    headless_runner_stopped,
+    recover_session,
+    stopped_runner_message,
+)
 from framewisp.sessions import resolve_session_dir
 
 
@@ -513,9 +520,15 @@ def main() -> None:
         time.sleep(args.delay)
     exit_message = recorded_app_exit(session_dir)
     if exit_message is not None:
+        if headless_runner_stopped(session_dir):
+            exit_message = f"{exit_message}\n{stopped_runner_message(session_dir)}"
         parser.exit(1, exit_message + "\n")
     session = read_session_metadata(session_dir)
     if isinstance(session, str):
+        if session == SESSION_DISCONNECTED and headless_runner_stopped(session_dir):
+            parser.exit(
+                1, f"Session {session_dir}: {stopped_runner_message(session_dir)}\n"
+            )
         parser.exit(1, session + "\n")
     if (
         isinstance(session, DesktopSessionMetadata)
@@ -526,6 +539,14 @@ def main() -> None:
     try:
         result = dispatch_session_command(session, args)
     except (SessionError, OSError, subprocess.TimeoutExpired) as error:
+        if (
+            isinstance(error, SessionError)
+            and error.unreachable
+            and headless_runner_stopped(session_dir)
+        ):
+            parser.exit(
+                1, f"Session {session_dir}: {stopped_runner_message(session_dir)}\n"
+            )
         parser.exit(1, f"Session {session_dir}: {error}\n")
     raise SystemExit(result)
 
@@ -570,6 +591,12 @@ def dispatch_session_command(session: SessionMetadata, args: argparse.Namespace)
         from framewisp.inspection import inspect_session
 
         observation = inspect_session(session, args.query)
+        if observation["status"] != "ok" and headless_runner_stopped(
+            session.session_directory
+        ):
+            message = stopped_runner_message(session.session_directory)
+            cast(list[str], observation["hints"]).append(message)
+            print(f"Session {session.session_directory}: {message}", file=sys.stderr)
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         return 0 if observation["status"] == "ok" else 1
     if args.command == "batch":
