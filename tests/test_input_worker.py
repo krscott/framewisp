@@ -180,6 +180,14 @@ def test_log_marks_presses_and_drag_releases(
 ) -> None:
     assert perform(tmp_path, gesture)["error"] is None
     assert button_events(tmp_path) == expected
+    if "button" in gesture.parameters:
+        records = logged_records(tmp_path)
+        assert records
+        assert all(
+            cast(dict[str, object], record["parameters"]).get("button")
+            == gesture.parameters["button"]
+            for record in records
+        )
 
 
 # R-REC-5

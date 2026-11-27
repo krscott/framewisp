@@ -606,8 +606,8 @@ framewisp drawing drag --button right 300 300 500 300
 
 Modifiers stay pressed for the entire gesture, then release in reverse order
 on the same connection. They do not remain held for the next command. Drags
-accept the same left, middle, and right button choices as clicks. The app decides what each
-combination does.
+accept the same left, middle, and right button choices as clicks. The app
+decides what each combination does.
 
 ## Scrolling
 

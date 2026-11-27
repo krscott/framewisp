@@ -1175,6 +1175,7 @@ def test_pointer_gesture_holds_and_releases_modifiers(
         names[modifier] for modifier in reversed(modifiers)
     ]
     if action == "drag":
+        assert (buttons[0]["x"], buttons[0]["y"]) == (100, 100)
         motion = [
             event for event in events if event["event"] == "motion" and event["pressed"]
         ]
@@ -1185,6 +1186,9 @@ def test_pointer_gesture_holds_and_releases_modifiers(
             for modifier in ("ctrl", "shift", "alt"):
                 assert event[modifier] == (modifier in modifiers)
         assert (buttons[-1]["x"], buttons[-1]["y"]) == (500, 300)
+    else:
+        for event in buttons:
+            assert (event["x"], event["y"]) == (200, 150)
     cli(headless_session.directory, "click", "600", "100")
     wait_until(
         lambda: sum(
@@ -2238,7 +2242,7 @@ def test_startup_clip_click_pings_gestures(headless_session: HeadlessSession) ->
     assert_click_pings_mark_gestures(headless_session, headless_session.clip)
 
 
-# R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11
+# R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11, R-LOG-4
 @pytest.mark.integration
 @pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize(
@@ -2270,13 +2274,14 @@ def test_mid_session_clip_click_pings_gestures(
     assert_click_pings_mark_gestures(headless_session, clip, timed=not compact)
     if "--pointer-captions" in options:
         drag_start = next(
-            event["time"]
+            event
             for event in clip_inputs(headless_session, 0)
             if event["event"] == "start" and event["action"] == "drag"
         )
+        assert drag_start["parameters"]["button"] == "middle"
         origin = clip_origin(headless_session)
         assert caption_differs(
-            clip_patch(clip, drag_start - origin + 0.4),
+            clip_patch(clip, drag_start["time"] - origin + 0.6),
             clip_patch(clip, 0.2),
         )
 
