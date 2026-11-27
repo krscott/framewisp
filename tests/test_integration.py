@@ -600,7 +600,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
             {
                 "kind": "headless",
                 # COMMAND_PROTOCOL; this file cannot import framewisp.
-                "command_protocol": 7,
+                "command_protocol": 8,
                 "accessibility_bus": f"unix:path={tmp_path / 'accessibility.sock'}",
                 "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
@@ -1086,7 +1086,7 @@ def test_move_shows_tooltip_without_clicking(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
-@pytest.mark.parametrize("button", [None, "right"])
+@pytest.mark.parametrize("button", [None, "middle", "right"])
 @pytest.mark.parametrize("count", [None, 2])
 def test_click_delivers_button_and_recognized_count(
     headless_session: HeadlessSession, button: str | None, count: int | None
@@ -1116,22 +1116,27 @@ def test_click_delivers_button_and_recognized_count(
     assert [event["count"] for event in events] == [
         n for n in range(1, expected_count + 1) for _ in range(2)
     ]
+    expected_button = {"left": 1, "middle": 2, "right": 3}[button or "left"]
     for event in events:
-        assert event["button"] == (3 if button == "right" else 1)
+        assert event["button"] == expected_button
         assert (event["x"], event["y"]) == (200, 150)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
 @pytest.mark.parametrize(
-    "action,button,modifiers",
+    "headless_session,action,button,modifiers",
     [
-        ("click", "left", ("shift",)),
-        ("click", "right", ("ctrl", "shift")),
-        ("drag", "left", ("ctrl",)),
-        ("drag", "right", ("alt",)),
-        ("drag", "right", ("ctrl", "shift", "alt")),
+        ("probe", "click", "left", ("shift",)),
+        ("probe", "click", "right", ("ctrl", "shift")),
+        ("probe", "click", "middle", ("shift",)),
+        ("x11-probe", "click", "middle", ("shift",)),
+        ("probe", "drag", "left", ("ctrl",)),
+        ("probe", "drag", "right", ("alt",)),
+        ("probe", "drag", "right", ("ctrl", "shift", "alt")),
+        ("probe", "drag", "middle", ("ctrl", "alt")),
+        ("x11-probe", "drag", "middle", ("ctrl", "alt")),
     ],
+    indirect=["headless_session"],
 )
 def test_pointer_gesture_holds_and_releases_modifiers(
     headless_session: HeadlessSession,
@@ -1157,8 +1162,9 @@ def test_pointer_gesture_holds_and_releases_modifiers(
     events = input_events(headless_session)
     buttons = [event for event in events if event["event"] in {"press", "release"}]
     assert [event["event"] for event in buttons] == ["press", "release"]
+    expected_button = {"left": 1, "middle": 2, "right": 3}[button]
     for event in buttons:
-        assert event["button"] == (1 if button == "left" else 3)
+        assert event["button"] == expected_button
         for modifier in ("ctrl", "shift", "alt"):
             assert event[modifier] == (modifier in modifiers)
     names = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L"}
@@ -1169,15 +1175,20 @@ def test_pointer_gesture_holds_and_releases_modifiers(
         names[modifier] for modifier in reversed(modifiers)
     ]
     if action == "drag":
+        assert (buttons[0]["x"], buttons[0]["y"]) == (100, 100)
         motion = [
             event for event in events if event["event"] == "motion" and event["pressed"]
         ]
         assert len(motion) > 2
         for event in motion:
+            assert event["middle"] == (button == "middle")
             assert event["right"] == (button == "right")
             for modifier in ("ctrl", "shift", "alt"):
                 assert event[modifier] == (modifier in modifiers)
         assert (buttons[-1]["x"], buttons[-1]["y"]) == (500, 300)
+    else:
+        for event in buttons:
+            assert (event["x"], event["y"]) == (200, 150)
     cli(headless_session.directory, "click", "600", "100")
     wait_until(
         lambda: sum(
@@ -2168,7 +2179,16 @@ def perform_gestures(headless_session: HeadlessSession) -> None:
     cli(headless_session.directory, "click", "200", "150")
     cli(headless_session.directory, "click", "--count", "2", "500", "150")
     cli(headless_session.directory, "click", "--button", "right", "800", "150")
-    cli(headless_session.directory, "drag", "200", "450", "700", "450")
+    cli(
+        headless_session.directory,
+        "drag",
+        "--button",
+        "middle",
+        "200",
+        "450",
+        "700",
+        "450",
+    )
     time.sleep(0.8)
 
 
@@ -2222,7 +2242,7 @@ def test_startup_clip_click_pings_gestures(headless_session: HeadlessSession) ->
     assert_click_pings_mark_gestures(headless_session, headless_session.clip)
 
 
-# R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11
+# R-REC-5, R-REC-6, R-REC-8, R-REC-9, R-REC-11, R-LOG-4
 @pytest.mark.integration
 @pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
 @pytest.mark.parametrize(
@@ -2252,6 +2272,18 @@ def test_mid_session_clip_click_pings_gestures(
     if compact:
         assert summary["duration_seconds"] < elapsed - 1
     assert_click_pings_mark_gestures(headless_session, clip, timed=not compact)
+    if "--pointer-captions" in options:
+        drag_start = next(
+            event
+            for event in clip_inputs(headless_session, 0)
+            if event["event"] == "start" and event["action"] == "drag"
+        )
+        assert drag_start["parameters"]["button"] == "middle"
+        origin = clip_origin(headless_session)
+        assert caption_differs(
+            clip_patch(clip, drag_start["time"] - origin + 0.6),
+            clip_patch(clip, 0.2),
+        )
 
 
 # R-REC-7, R-LOG-3

@@ -84,6 +84,37 @@ def test_defaults_and_screenshot_path_resolution(tmp_path: Path) -> None:
     assert Batch.parse(batch.parameters()) == batch
 
 
+def test_batch_accepts_middle_button_in_click_and_drag() -> None:
+    batch = Batch.parse(
+        {
+            "steps": [
+                {
+                    "action": "click",
+                    "x": 10,
+                    "y": 20,
+                    "button": "middle",
+                    "count": 2,
+                    "modifier": ["shift"],
+                },
+                {
+                    "action": "drag",
+                    "x1": 10,
+                    "y1": 20,
+                    "x2": 30,
+                    "y2": 40,
+                    "button": "middle",
+                    "modifier": ["ctrl"],
+                },
+            ]
+        }
+    )
+    assert batch.steps[0].parameters["button"] == "middle"
+    assert batch.steps[1].parameters["button"] == "middle"
+    assert Batch.parse(batch.parameters()) == batch
+    with pytest.raises(ValueError, match="Unsupported button"):
+        Batch.parse({"steps": [{"action": "click", "x": 1, "y": 1, "button": "side"}]})
+
+
 @pytest.mark.parametrize(
     "step, message",
     [

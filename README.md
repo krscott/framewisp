@@ -237,8 +237,8 @@ remains session-independent.
 | `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move [--move-duration SECONDS] X Y` | Move the pointer without pressing any button. Headless movement takes 0.3 seconds by default. |
 | `scroll [--move-duration SECONDS] X Y DIRECTION [--ticks N]` | Move to the pane, then send wheel ticks; directions: up, down, left, right. |
-| `click [--move-duration SECONDS] [--button left\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
-| `drag [--move-duration SECONDS] [--button left\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Move to the start, then hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
+| `click [--move-duration SECONDS] [--button left\|middle\|right] [--count 1\|2] [--modifier NAME] X Y` | Move the pointer and click (default: one left click). Coordinates start at the top left. |
+| `drag [--move-duration SECONDS] [--button left\|middle\|right] [--modifier NAME] [--duration SECONDS] X1 Y1 X2 Y2` | Move to the start, then hold the chosen button while moving along a straight path (default: left, 0.4 seconds). |
 | `type [--private] [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
 | `key [--private] CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
@@ -515,20 +515,21 @@ controls movement while holding the button. Double-click spacing and wheel ticks
 keep their existing timing. Batch actions use `move_duration` with the same
 default; it counts toward the batch's 300-second pacing limit.
 
-## Right-click and double-click
+## Mouse buttons and double-click
 
 Choose the mouse button and click count:
 
 ```sh
 framewisp paint click --button right 500 400
+framewisp paint click --button middle 500 400
 framewisp paint click --count 2 500 400
 ```
 
-`--button` accepts `left` (default) or `right`. `--count` accepts `1` (default)
-or `2`. Two clicks use the same connection and position, with a 0.1-second pause
-between them. Every click presses and releases the chosen button. The app's
-settings and the control under the pointer determine how it responds.
-Plain `click X Y` still sends one left click.
+`--button` accepts `left` (default), `middle`, or `right`. `--count` accepts
+`1` (default) or `2`. Two clicks use the same connection and position, with a
+0.1-second pause between them. Every click presses and releases the chosen
+button. The app's settings and the control under the pointer determine how it
+responds. Plain `click X Y` still sends one left click.
 
 The runner sends input through one persistent connection for the session. It
 serializes concurrent commands, including Unicode typing. This keeps the
@@ -605,8 +606,8 @@ framewisp drawing drag --button right 300 300 500 300
 
 Modifiers stay pressed for the entire gesture, then release in reverse order
 on the same connection. They do not remain held for the next command. Drags
-accept the same left/right button choices as clicks. The app decides what each
-combination does.
+accept the same left, middle, and right button choices as clicks. The app
+decides what each combination does.
 
 ## Scrolling
 

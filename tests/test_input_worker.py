@@ -58,7 +58,11 @@ class HoldingClient:
 
 # R-INPUT-5
 @pytest.mark.parametrize("cause", ["stop", "disconnect"])
-def test_interrupted_drag_releases_held_input(tmp_path: Path, cause: str) -> None:
+@pytest.mark.parametrize(("button", "number"), [("left", 1), ("middle", 2)])
+@pytest.mark.parametrize("batched", [False, True])
+def test_interrupted_drag_releases_held_input(
+    tmp_path: Path, cause: str, button: str, number: int, batched: bool
+) -> None:
     stop = Event()
     interrupted = Event()
     client = HoldingClient(stop if cause == "stop" else interrupted)
@@ -69,7 +73,7 @@ def test_interrupted_drag_releases_held_input(tmp_path: Path, cause: str) -> Non
         screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
-    action = InputAction.parse(
+    drag = InputAction.parse(
         "drag",
         {
             "x1": 1,
@@ -77,13 +81,14 @@ def test_interrupted_drag_releases_held_input(tmp_path: Path, cause: str) -> Non
             "x2": 100,
             "y2": 100,
             "duration": 30,
-            "button": "left",
+            "button": button,
             "modifier": ["ctrl"],
             "move_duration": 0,
         },
     )
+    work: InputAction | Batch = Batch((drag,), None) if batched else drag
     try:
-        assert worker.submit(runner, action)
+        assert worker.submit(runner, work)
         if cause == "disconnect":
             assert interrupted.wait(timeout=5)
             caller.close()
@@ -95,7 +100,7 @@ def test_interrupted_drag_releases_held_input(tmp_path: Path, cause: str) -> Non
     finally:
         caller.close()
         worker.close()
-    assert client.calls[-2:] == [("mouseUp", 1), ("keyUp", "ctrl")]
+    assert client.calls[-2:] == [("mouseUp", number), ("keyUp", "ctrl")]
 
 
 class FailingPress(HoldingClient):
@@ -148,6 +153,11 @@ def action(name: str, **parameters: object) -> InputAction:
     ("gesture", "expected"),
     [
         (action("click", x=10, y=20, button="left", count=1), [("press", 10, 20)]),
+        (action("click", x=10, y=20, button="middle", count=1), [("press", 10, 20)]),
+        (
+            action("click", x=10, y=20, button="middle", count=2),
+            [("press", 10, 20)] * 2,
+        ),
         (action("click", x=10, y=20, button="right", count=1), [("press", 10, 20)]),
         (
             action("click", x=10, y=20, button="left", count=2),
@@ -155,6 +165,10 @@ def action(name: str, **parameters: object) -> InputAction:
         ),
         (
             action("drag", x1=1, y1=2, x2=30, y2=40, duration=0.05),
+            [("press", 1, 2), ("release", 30, 40)],
+        ),
+        (
+            action("drag", x1=1, y1=2, x2=30, y2=40, button="middle", duration=0.05),
             [("press", 1, 2), ("release", 30, 40)],
         ),
         (action("move", x=10, y=20), []),
@@ -166,6 +180,14 @@ def test_log_marks_presses_and_drag_releases(
 ) -> None:
     assert perform(tmp_path, gesture)["error"] is None
     assert button_events(tmp_path) == expected
+    if "button" in gesture.parameters:
+        records = logged_records(tmp_path)
+        assert records
+        assert all(
+            cast(dict[str, object], record["parameters"]).get("button")
+            == gesture.parameters["button"]
+            for record in records
+        )
 
 
 # R-REC-5

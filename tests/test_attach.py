@@ -23,6 +23,7 @@ import pytest
 
 from framewisp import attach
 from framewisp.attach import (
+    BUTTONS,
     COMMAND_CANCELLED,
     KEYCODES,
     AttachedInput,
@@ -37,6 +38,7 @@ from framewisp.connection import (
     read_session_metadata,
     request_desktop,
 )
+from framewisp.keys import CLICK_BUTTONS
 
 
 def desktop_session(session_dir: Path) -> DesktopSessionMetadata:
@@ -128,10 +130,25 @@ def test_invalid_attached_chord_sends_no_keys(
     assert portal_calls == []
 
 
+def test_attached_buttons_cover_all_click_buttons(
+    portal_calls: list[tuple[str, tuple[object, ...]]],
+) -> None:
+    assert BUTTONS.keys() == CLICK_BUTTONS.keys()
+    inputs = input_without_bus(Event())
+    inputs.perform("click", {"x": 10, "y": 20, "button": "middle", "count": 1})
+    assert [call for call in portal_calls if call[0] == "NotifyPointerButton"] == [
+        ("NotifyPointerButton", (274, 1)),
+        ("NotifyPointerButton", (274, 0)),
+    ]
+
+
 # R-INPUT-5
+@pytest.mark.parametrize(("button", "code"), [("left", 272), ("middle", 274)])
 def test_stop_releases_drag_and_modifiers(
     portal_calls: list[tuple[str, tuple[object, ...]]],
     monkeypatch: pytest.MonkeyPatch,
+    button: str,
+    code: int,
 ) -> None:
     stop = Event()
     inputs = input_without_bus(stop)
@@ -151,13 +168,13 @@ def test_stop_releases_drag_and_modifiers(
                 "y1": 10,
                 "x2": 100,
                 "y2": 100,
-                "button": "left",
+                "button": button,
                 "modifier": ["ctrl", "shift"],
                 "duration": 0,
             },
         )
     assert portal_calls[-3:] == [
-        ("NotifyPointerButton", (272, 0)),
+        ("NotifyPointerButton", (code, 0)),
         ("NotifyKeyboardKeycode", (KEYCODES["shift"], 0)),
         ("NotifyKeyboardKeycode", (KEYCODES["ctrl"], 0)),
     ]
@@ -1096,11 +1113,11 @@ def test_release_frees_xtest_keys_and_buttons(xvfb_display: str) -> None:
     # keycode 9; high codes such as 200 carry keysyms the keymap lacks.
     holder = subprocess.Popen(
         ["xdotool", "keydown", "Escape", "keydown", "50", "keydown", "200"]
-        + ["mousedown", "1", "mousedown", "3", "sleep", "30"]
+        + ["mousedown", "1", "mousedown", "2", "mousedown", "3", "sleep", "30"]
     )
     try:
         expected = {"key[9]=down", "key[50]=down", "key[200]=down"}
-        expected |= {"button[1]=down", "button[3]=down"}
+        expected |= {"button[1]=down", "button[2]=down", "button[3]=down"}
         deadline = time.monotonic() + 5
         while not expected <= set(held_xtest_input()):
             assert holder.poll() is None
