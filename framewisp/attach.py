@@ -115,8 +115,9 @@ for first, row in [
 ]:
     KEYCODES.update({key: first + offset for offset, key in enumerate(row)})
 BUTTONS = {"left": 272, "right": 273}
-INPUT_CANCELLED = "Session stopped; input cancelled."
-# How long a failed input waits for a stop that explains its failure.
+COMMAND_CANCELLED = "Session stopped; command cancelled."
+# How long a command that failed in the desktop portal waits for a stop that
+# explains its failure.
 STOP_GRACE = 0.2
 
 
@@ -129,7 +130,7 @@ class AttachedInput:
 
     def wait(self, seconds: float = 0) -> None:
         if self.stop.wait(min(seconds, TIMEOUT_MAX)):
-            raise InterruptedError(INPUT_CANCELLED)
+            raise InterruptedError(COMMAND_CANCELLED)
 
     def key(self, code: int, pressed: bool) -> None:
         self.wait()
@@ -296,7 +297,10 @@ def save_screenshot(
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
 SCREENSHOT_TIMEOUT = 10
-SCREENSHOT_CANCELLED = "Session stopped; screenshot cancelled."
+
+
+class CaptureError(RuntimeError):
+    """Desktop capture failed, as closing the desktop portal can make it."""
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -338,7 +342,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
                     raise ValueError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
-            raise InterruptedError(SCREENSHOT_CANCELLED)
+            raise InterruptedError(COMMAND_CANCELLED)
         frame = sink.emit("try-pull-sample", 0) or frame
         assert isinstance(frame, Gst.Sample)
         # Stopping the source may release the memory behind its buffers.
@@ -351,7 +355,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
 def playing(pipeline: Gst.Element) -> Generator[None]:
     try:
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
-            raise RuntimeError("Could not start desktop capture.")
+            raise CaptureError("Could not start desktop capture.")
         yield
     finally:
         pipeline.set_state(Gst.State.NULL)
@@ -366,9 +370,9 @@ def finished(
 ) -> bool:
     """Wait briefly for end of stream. Raise on failure, timeout, or stop."""
     if stop.is_set():
-        raise InterruptedError(SCREENSHOT_CANCELLED)
+        raise InterruptedError(COMMAND_CANCELLED)
     if time.monotonic() >= deadline:
-        raise RuntimeError("Desktop capture timed out.")
+        raise CaptureError("Desktop capture timed out.")
     bus = pipeline.get_bus()
     assert bus is not None
     message = bus.timed_pop_filtered(
@@ -383,7 +387,7 @@ def finished(
             # may be on that disk.
             raise ValueError(f"Could not write the screenshot: {error.message}")
         log.write_text(f"{error}\n{detail}\n")
-        raise RuntimeError(f"Desktop capture failed. See {log}")
+        raise CaptureError(f"Desktop capture failed. See {log}")
     return True
 
 
@@ -608,52 +612,58 @@ def _share_desktop(
             )
             if request is None:
                 return
-            status, error = 0, None
             command = (
                 "screenshot"
                 if isinstance(request, Path)
                 else "teach-note" if isinstance(request, str) else request.action
             )
+
+            def failed(failure: BaseException) -> str:
+                """Classify a failure, holding the input lock if the command took it,
+                so no queued input reaches the desktop before a failure stops it."""
+                assert portal is not None
+                if isinstance(failure, InterruptedError):
+                    return COMMAND_CANCELLED
+                if isinstance(failure, (ValueError, TimeoutError)):
+                    return input_error(command, failure)
+                # A stop closes the portal under a running command, which is then
+                # cancelled rather than failed. The backend can fail the call
+                # before the main thread's next dispatch runs the portal callback
+                # that sets `stop`, so wait briefly for it. A lost bus ends the
+                # share with its own failure.
+                if isinstance(failure, (GLib.Error, CaptureError)) and stop.wait(
+                    STOP_GRACE
+                ):
+                    return portal.lost or COMMAND_CANCELLED
+                # Record the redacted error: the raw one can include typed text.
+                error = input_error(command, failure)
+                failures.append(RuntimeError(error))
+                stop.set()
+                portal.close()
+                traceback.print_exception(
+                    RuntimeError(error).with_traceback(failure.__traceback__)
+                )
+                return error
+
+            status, error, locked = 0, None, False
             try:
+                # Notes reach only the lesson, so a screenshot must not delay them.
+                if not isinstance(request, str):
+                    while not (locked := lock.acquire(timeout=0.05)):
+                        inputs.wait()
+                inputs.wait()
                 if isinstance(request, str):
-                    inputs.wait()
                     assert teaching is not None
                     teaching.note(request)
+                elif isinstance(request, Path):
+                    save_screenshot(portal, request, stop, session_dir / "capture.log")
                 else:
-                    while not lock.acquire(timeout=0.05):
-                        inputs.wait()
-                    try:
-                        inputs.wait()
-                        if isinstance(request, Path):
-                            save_screenshot(
-                                portal, request, stop, session_dir / "capture.log"
-                            )
-                        else:
-                            inputs.perform(
-                                command, cast(InputParameters, request.parameters)
-                            )
-                    finally:
-                        lock.release()
-            except (ValueError, InterruptedError, TimeoutError) as failure:
-                status, error = 1, input_error(command, failure)
+                    inputs.perform(command, cast(InputParameters, request.parameters))
             except BaseException as failure:
-                # A stop closes the portal under a running input, which is then
-                # cancelled rather than failed. The backend can fail the call
-                # before the main thread's next dispatch runs the portal
-                # callback that sets `stop`, so wait briefly for it. A lost bus
-                # sets `stop` too, but the input failed with it.
-                cancelled = stop.wait(STOP_GRACE) and portal.lost is None
-                status, error = 1, input_error(
-                    command, InterruptedError(INPUT_CANCELLED) if cancelled else failure
-                )
-                if not cancelled:
-                    # Record the redacted error: the raw one can include typed text.
-                    failures.append(RuntimeError(error))
-                    stop.set()
-                    portal.close()
-                    traceback.print_exception(
-                        RuntimeError(error).with_traceback(failure.__traceback__)
-                    )
+                status, error = 1, failed(failure)
+            finally:
+                if locked:
+                    lock.release()
             answer(status, error)
 
     def serve(listener: socket.socket, emergency: socket.socket) -> None:
@@ -728,7 +738,7 @@ def _share_desktop(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"
                             )
                         if stop.is_set():
-                            raise portal.interruption(INPUT_CANCELLED)
+                            raise portal.interruption("Stopped while starting.")
                         indicator = SharingIndicator(portal.bus, stop)
                         try:
                             indicator.start()
@@ -763,7 +773,7 @@ def _share_desktop(
                                         ):
                                             break
                                         stop.wait(0.01)
-                                    if portal.revoked:
+                                    if portal.revoked or stop.is_set():
                                         break
                                     raise RuntimeError(
                                         "Teaching capture ended unexpectedly."
@@ -778,16 +788,27 @@ def _share_desktop(
                             indicator.close()
                         if teaching is not None:
                             failure = sys.exc_info()[1]
+                            if isinstance(failure, InterruptedError):
+                                # A user stop; `close` applies its normal rule.
+                                failure = None
+                            reason = (
+                                str(failure)
+                                if failure
+                                else str(failures[0]) if failures else None
+                            )
                             try:
-                                teaching.close(
-                                    (
-                                        str(failure)
-                                        if failure
-                                        else str(failures[0]) if failures else None
-                                    ),
-                                    revoked=portal.revoked,
+                                lesson_error = teaching.close(
+                                    reason, revoked=portal.revoked
                                 )
-                                if teaching.created:
+                                if lesson_error is not None:
+                                    print(
+                                        f"Partial lesson: {teaching.directory}",
+                                        file=sys.stderr,
+                                        flush=True,
+                                    )
+                                    if lesson_error != reason:
+                                        failures.append(RuntimeError(lesson_error))
+                                elif teaching.created:
                                     print(
                                         f"Lesson saved: {teaching.directory}",
                                         flush=True,

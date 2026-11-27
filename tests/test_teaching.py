@@ -196,8 +196,7 @@ def test_capture_failure_preserves_a_partial_lesson(teaching: Teaching) -> None:
     teaching.start("videotestsrc is-live=true ! video/x-raw,width=160,height=120")
     wait_for_frames(teaching, 1)
     teaching.note("Keep this note")
-    with pytest.raises(RuntimeError, match="Partial lesson"):
-        teaching.close("The stream disconnected")
+    assert teaching.close("The stream disconnected") == "The stream disconnected"
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
     assert manifest["status"] == "failed"
     assert manifest["error"] == "The stream disconnected"
@@ -294,8 +293,7 @@ def test_source_ending_is_a_failure_even_when_a_last_frame_remains(
     )
     with pytest.raises(RuntimeError, match="ended unexpectedly"):
         wait_for_frames(teaching, 4)
-    with pytest.raises(RuntimeError, match="Partial lesson"):
-        teaching.close()
+    assert teaching.close() == "Teaching capture ended unexpectedly."
     assert (
         json.loads((teaching.directory / "lesson.json").read_text())["status"]
         == "failed"
