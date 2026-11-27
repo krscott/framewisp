@@ -19,7 +19,7 @@ from framewisp.connection import (
     session_kind,
     teaching_refusal,
 )
-from framewisp.desktop import detach_desktop
+from framewisp.desktop import stop_sharing
 from framewisp.errors import SessionError, recorded_app_exit
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
 from framewisp.layout import (
@@ -68,9 +68,9 @@ def main() -> None:
         help="print the bundled agent skill Markdown and exit (use alone)",
     )
     parser.add_argument(
-        "--detach",
+        "--stop-sharing",
         action="store_true",
-        help="stop the active desktop attachment, regardless of session",
+        help="emergency stop for whichever session is sharing the desktop",
     )
     parser.add_argument(
         "session",
@@ -375,13 +375,13 @@ def main() -> None:
     args = parser.parse_args()
     if getattr(args, "agent_skill", False):
         parser.error("--agent-skill must be used alone")
-    if args.detach:
+    if args.stop_sharing:
         if args.session is not None or args.command is not None:
-            parser.error("--detach takes no session or command")
-        raise SystemExit(detach_desktop())
+            parser.error("--stop-sharing takes no session or command")
+        raise SystemExit(stop_sharing())
     if args.session is None or args.command is None:
         parser.error(
-            "SESSION and COMMAND are required (or use --detach or --agent-skill)"
+            "SESSION and COMMAND are required (or use --stop-sharing or --agent-skill)"
         )
     try:
         session_dir = resolve_session_dir(args.session)
@@ -613,7 +613,8 @@ def dispatch(
     elif args.command in {"record-start", "record-stop", "status", "stop"}:
         if desktop is not None and args.command in {"status", "stop"}:
             raise SessionError(
-                "status and stop manage headless sessions. Use framewisp --detach to stop desktop attachment."
+                "status and stop manage headless sessions. The user ends this session with Ctrl+C "
+                "in its terminal."
             )
         result = (
             request_desktop(session_dir, desktop, args.command, {})
@@ -657,7 +658,7 @@ def dispatch(
         parameters = {
             key: value
             for key, value in vars(args).items()
-            if key not in {"session", "command", "detach"}
+            if key not in {"session", "command", "stop_sharing"}
         }
         if desktop is not None:
             parameters.pop("move_duration", None)

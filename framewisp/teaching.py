@@ -143,12 +143,15 @@ class Teaching:
             raise RuntimeError("Teaching capture received no frame within 10 seconds.")
         return True
 
-    def close(self, error: str | None = None, *, revoked: bool = False) -> None:
-        """Finalize within a bounded time, preserving a partial lesson on failure."""
+    def close(self, error: str | None = None, *, revoked: bool = False) -> str | None:
+        """Finalize within a bounded time, preserving a partial lesson on failure.
+
+        Return why the lesson failed, or None when it is complete or was never
+        created."""
         with self.lock:
             self.closed = True
             if not self.created:
-                return
+                return None
             if self.source_ended.is_set() and not revoked:
                 error = error or "Teaching capture ended unexpectedly."
             try:
@@ -184,5 +187,4 @@ class Teaching:
                 if self.video is not None:
                     self.video.close()
             self.manifest("failed" if error else "complete", error)
-            if error is not None:
-                raise RuntimeError(f"{error} Partial lesson: {self.directory}")
+            return error

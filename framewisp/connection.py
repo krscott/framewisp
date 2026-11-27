@@ -14,7 +14,7 @@ from framewisp.batch import MAX_REQUEST_BYTES
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 4
+COMMAND_PROTOCOL = 5
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -79,7 +79,7 @@ def request_desktop(
 
     The caller passes the `kind` it read from the session metadata; it only
     words the messages printed here. The runner refuses a command that its own
-    kind does not accept or whose attachment token does not match.
+    kind does not accept or whose share token does not match.
     """
     try:
         state = json.loads((session_dir / "session.json").read_text())
@@ -92,7 +92,7 @@ def request_desktop(
                         {
                             "command": command,
                             "parameters": parameters,
-                            "attachment": state["attachment"],
+                            "share_token": state["share_token"],
                         }
                     )
                     + "\n"

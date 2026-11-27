@@ -63,8 +63,8 @@ timestamped note. Explain shortcuts, decisions, variable inputs, and expected
 outcomes that may not be evident visually. Notes must be nonblank and at most
 8000 characters. The agent can issue notes from its own shell so the user can
 keep focus on the app. Collect remaining clarifications after the teaching session
-and include them in the procedure. The user stops with Ctrl+C, the sharing indicator, or
-`framewisp --detach`; applications stay running. Screen content and notes are
+and include them in the procedure. The user stops with Ctrl+C or the sharing indicator, or with the
+emergency stop described under Desktop share; applications stay running. Screen content and notes are
 unredacted. No audio, physical key events, or clipboard contents are recorded.
 
 Read DIRECTORY/lesson.json for the goal and status, then timeline.jsonl for
@@ -141,11 +141,12 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `record-stop` | Finalize the active clip, including one started with `run --record`, and leave the app running. Wait for this command to finish before using the MP4. |
 | `status` | Query the live headless runner. Print JSON with backend, display dimensions, app PID/running state, and active recording path/PID/running state (or null). |
 | `stop` | Stop a headless session, finalize any recording, and wait for managed processes and runtime sockets to be cleaned up. Print JSON with stopped status and the last recording summary, if any. |
-| `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the attachment instructions below. |
+| `attach` | User-only: share an existing Wayland or X11 desktop through its portal permission dialog. See the desktop share instructions below. |
 
-Standalone commands take no SESSION: `framewisp --detach` stops the active
-desktop attachment, leaving the user's apps running; `framewisp --agent-skill`
-prints this guide. `framewisp --help` and `framewisp SESSION COMMAND --help`
+Standalone commands take no SESSION: `framewisp --stop-sharing` is the user's
+emergency stop for whichever session is sharing the desktop, leaving the user's
+apps running. Do not run it yourself: it can end a session other than yours.
+`framewisp --agent-skill` prints this guide. `framewisp --help` and `framewisp SESSION COMMAND --help`
 (also `-h`) show the installed version's help.
 
 Input coordinates are integer display pixels, with `(0, 0)` at the top left.
@@ -171,7 +172,7 @@ Coordinates beyond the display clamp to its edge.
 Apps or other clients can move the cursor without updating this tracking; the
 next animation may jump to the tracked position. No compositor patch or cursor
 query is required. Drag's `--duration` controls the separate button-held movement.
-Attached desktops position immediately and reject `--move-duration`.
+Attached sessions position immediately and reject `--move-duration`.
 Batch pointer actions use `move_duration`, default 0.3.
 
 For `click` and `drag`, MOD is `ctrl`, `shift`, or `alt`, case-insensitive.
@@ -313,8 +314,8 @@ framewisp demo stop
 The successful primary path uses three CLI invocations: run, batch, stop, with
 zero images inspected. The optional visual fallback adds one screenshot and image
 inspection. Use `status` if session health is uncertain. Ctrl+C or SIGTERM to the
-runner also stops it. `status` and `stop` require a connected headless session;
-`--detach` is for desktop attachments only.
+runner also stops it. `status` and `stop` require a connected headless session; the user ends an
+attached or teaching session with Ctrl+C in its terminal.
 
 ## Accessible text and state
 
@@ -373,7 +374,7 @@ controls work on Wayland and Xwayland. Qt Quick buttons work, but the tested
 separate popup menu does not appear in its accessible tree. KolourPaint Flatpak
 menus expose names/state, but its canvas still needs screenshots. Keep images
 for appearance, layout, custom drawing, and omitted controls. Inspection is
-unavailable on attached desktops and does not supply semantic clicks.
+unavailable in attached sessions and does not supply semantic clicks.
 
 ## Batch known actions
 
@@ -406,7 +407,7 @@ seconds of requested pointer/typing/drag/screenshot pacing and check deadlines. 
 must each fit in 1 MiB. At least one step is required. The screenshot is optional;
 its delay defaults to zero. Relative screenshot paths use the CLI's working directory.
 Use a new PNG filename in an existing directory; session files and existing files
-are rejected. Recording, lifecycle commands, and loops cannot go inside a batch. Attached desktops do not support batches.
+are rejected. Recording, lifecycle commands, and loops cannot go inside a batch. Attached sessions do not support batches.
 
 The runner serializes the whole batch, including the screenshot, with other input jobs.
 JSON on stdout includes `status`, `results` (zero-based index, `action` or `check`,
@@ -595,32 +596,33 @@ up to 100 MB with the required access). Public-repository attachments are public
 Prefer direct attachments to a media branch that must be retained for its links.
 See [GitHub's CLI attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
 
-## Desktop attachment
+## Desktop share
 
 For an existing desktop, ask the user to run `framewisp SESSION attach` in their
-own foreground terminal and follow its instructions. Never start attachment
+own foreground terminal and follow its instructions. Never start a desktop share
 yourself or allocate a terminal to bypass its user confirmation. The user must
 configure stop shortcuts, type `ATTACH`, approve the desktop dialog, and keep
 the terminal open. Wait for `Attached:` before sending commands.
 
-Other processes with access to the attachment's state and command socket can
-issue commands. Portal approval grants desktop access to the attachment; it
-does not authenticate a particular agent.
+Other processes with access to the attached session's metadata and command
+socket can issue commands. Portal approval grants the desktop share to the
+attached session; it does not authenticate a particular agent.
 
-When sharing is active, the user can open the framewisp tray icon's menu and
-choose "Stop sharing". Its label is "framewisp desktop sharing is active".
+When sharing is active, the user can open the framewisp sharing indicator's menu
+and choose "Stop sharing". Its label is "framewisp desktop share is active".
 KDE Plasma and COSMIC's status area support the tray protocol; GNOME needs an
 enabled StatusNotifierItem/AppIndicator extension. The desktop controls placement,
 overflow, panel auto-hide, and visibility, so registration does not guarantee a
-visible icon. If no compatible host is available, the attachment terminal reports
+visible indicator. If no compatible host is available, the attach terminal reports
 that the indicator is unavailable and explains the shortcut and Ctrl+C stop methods.
-The indicator ends with the attachment owner; reconnecting needs fresh portal
-approval and creates a new item. Keep emergency shortcuts configured. The tray
-menu needs a responsive owner, while emergency detach can stop a suspended owner.
+The indicator disappears when the session ends, and framewisp registers a new one
+for the next attached or teaching session, which needs fresh portal approval. Keep
+emergency shortcuts configured. The indicator's menu needs a responsive runner, while
+`--stop-sharing` can stop a suspended runner.
 
-The stop command is `framewisp --detach`, independent of SESSION. The documented
+The emergency stop command is `framewisp --stop-sharing`, independent of SESSION. The documented
 COSMIC bindings are Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape, so the shortcut also
-works during a Shift gesture. Attachment shares the real pointer and keyboard;
+works during a Shift gesture. An attached session shares the real pointer and keyboard;
 input can reach any focused app, including one outside the captured monitor.
 Screenshots cover the selected monitor. Recording attached sessions is unsupported.
 

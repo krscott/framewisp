@@ -11,8 +11,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterator
-from contextlib import suppress
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from threading import Event, Thread, Timer
 from typing import cast
@@ -22,15 +22,16 @@ import pytest
 
 from framewisp import attach
 from framewisp.attach import (
+    COMMAND_CANCELLED,
     KEYCODES,
     AttachedInput,
     attach_session,
     open_destination,
-    run_attachment,
+    share_desktop,
     write_png,
 )
 from framewisp.connection import DesktopKind, request_desktop
-from framewisp.desktop import detach_desktop, reserve_desktop
+from framewisp.desktop import lock_desktop, stop_sharing
 from framewisp.errors import SessionError
 from framewisp.ownership import (
     recover_session,
@@ -128,7 +129,7 @@ def test_stop_releases_drag_and_modifiers(
             stop.set()
 
     monkeypatch.setattr(inputs, "move", move_and_stop)
-    with pytest.raises(InterruptedError, match="disconnected"):
+    with pytest.raises(InterruptedError, match=COMMAND_CANCELLED):
         inputs.perform(
             "drag",
             {
@@ -202,18 +203,20 @@ def test_stale_attach_socket(
             }
         )
     )
-    assert request_desktop(tmp_path, "attached", "detach", {}) == 1
+    assert request_desktop(tmp_path, "attached", "click", {}) == 1
     assert "disconnected" in capsys.readouterr().err
 
 
 _SERVER = """
+import errno
 import os
 import sys
 import time
 import weakref
 from pathlib import Path
 import framewisp.attach as attach
-from gi.repository import Gio
+from framewisp.portal import DesktopPortal
+from gi.repository import Gio, GLib
 test_bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
 test_bus.up()
 root = Path(sys.argv[1])
@@ -221,6 +224,7 @@ class Portal:
     def __init__(self, stop):
         Portal.active = weakref.ref(self)
         self.revoked = False
+        self.lost = None
         self.stop = stop
         self.size = (800, 600)
         self.node = 1
@@ -230,13 +234,33 @@ class Portal:
         assert options == {'allow_input': not (root / 'teach').exists()}
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
+            attach.dispatch_events()
             if self.stop.wait(.01):
-                raise InterruptedError('cancelled')
+                raise self.interruption('Stopped while waiting for desktop permission.')
+    interruption = DesktopPortal.interruption
+    connection_closed = DesktopPortal.connection_closed
     def input(self, method, signature, *values):
-        if (root / 'fail').exists():
-            raise RuntimeError('injected portal failure')
+        global pending_signal
         with (root / 'events').open('a') as out:
             out.write(repr((method, values)) + '\\n')
+        if (root / 'block-input').exists():
+            (root / 'block-input').unlink()
+            (root / 'blocking').touch()
+            while not self.closed:
+                if (root / 'end-input').exists():
+                    # The backend fails the call before the main thread
+                    # dispatches the signal that explains why.
+                    pending_signal = ((root / 'end-input').read_text(), time.monotonic() + .05)
+                    break
+                if (root / 'fail-input').exists():
+                    if (root / 'fail-input').read_text() == 'backend':
+                        raise RuntimeError(f'injected portal failure: {values!r}')
+                    break
+                time.sleep(.01)
+            raise GLib.Error.new_literal(Gio.io_error_quark(), 'The connection is closed', Gio.IOErrorEnum.CLOSED)
+        if (root / 'fail').exists():
+            # Include the values, as a real backend error might.
+            raise RuntimeError(f'injected portal failure: {values!r}')
     def capture_fd(self):
         return os.open('/dev/null', os.O_RDONLY)
     def close(self):
@@ -252,16 +276,40 @@ if (root / 'teach').exists():
     class TestTeaching(Teaching):
         def start(self, source):
             super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240 ! identity sleep-time=100000')
+        def append(self, entry):
+            if entry['type'] == 'note' and (root / 'fail-note').exists():
+                (root / 'noting').touch()
+                Portal.active().stop.wait(5)
+                # Let the main thread reach the lesson's close first.
+                time.sleep(.3)
+                raise OSError(errno.EIO, 'Input/output error')
+            super().append(entry)
         def close(self, *args, **kwargs):
             if (root / 'slow-close').exists():
                 time.sleep(.8)
-            super().close(*args, **kwargs)
+            return super().close(*args, **kwargs)
     lesson = TestTeaching(root / 'lesson', 'Perform a task')
 original_dispatch = attach.dispatch_events
 revoke_at = None
+pending_signal = None
 def dispatch():
-    global revoke_at
+    global revoke_at, pending_signal
     original_dispatch()
+    if pending_signal is not None and time.monotonic() >= pending_signal[1]:
+        active = Portal.active()
+        if pending_signal[0] == 'revoke':
+            active.revoked = True
+            active.stop.set()
+        else:
+            active.connection_closed(active.bus, True, None)
+        pending_signal = None
+    if (root / 'lose-bus').exists() and pending_signal is None:
+        (root / 'lose-bus').unlink()
+        if (root / 'eos-first').exists():
+            lesson.source_ended.set()
+            pending_signal = ('lose-bus', time.monotonic() + .05)
+        else:
+            Portal.active().connection_closed(None, True, None)
     if (root / 'source-end').exists():
         lesson.source_ended.set()
     if (root / 'revoke').exists():
@@ -293,7 +341,7 @@ if len(sys.argv) > 2:
     import fcntl, termios
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     raise SystemExit(attach.attach_session(root / 'session'))
-raise SystemExit(attach.run_attachment(root / 'session', None, teaching=lesson))
+raise SystemExit(attach.share_desktop(root / 'session', None, teaching=lesson))
 """
 
 
@@ -382,7 +430,7 @@ def test_attach_refuses_shared_desktop_directory(
     shared = private_runtime if target == "runtime" else directory
     shared.chmod(0o755)
     try:
-        with pytest.raises(RuntimeError, match="private"), reserve_desktop():
+        with pytest.raises(RuntimeError, match="private"), lock_desktop():
             pass
     finally:
         shared.chmod(0o700)
@@ -406,7 +454,7 @@ def test_attach_refuses_desktop_directory_of_another_user(
         monkeypatch.setattr("framewisp.desktop.desktop_directory", lambda: directory)
     other = os.getuid() + 1
     monkeypatch.setattr(os, "getuid", lambda: other)
-    with pytest.raises(RuntimeError, match=message), reserve_desktop():
+    with pytest.raises(RuntimeError, match=message), lock_desktop():
         pass
     assert not (directory / "desktop.lock").exists()
 
@@ -510,6 +558,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         )
         assert refused.returncode == 1
         assert "this is a teaching session" in refused.stderr
+        assert "--stop-sharing" not in refused.stderr
     # The runner empties the input log at startup, and a refused command adds
     # no entry.
     assert (session_dir / "inputs.jsonl").read_text() == ""
@@ -522,7 +571,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         )
         assert refused.returncode == 1
         assert "Ctrl+C in its terminal" in refused.stderr
-        assert "--detach" not in refused.stderr
+        assert "--stop-sharing" not in refused.stderr
     assert request_desktop(session_dir, "teaching", "click", {"x": 20, "y": 20}) == 1
     assert (
         request_desktop(
@@ -549,18 +598,54 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
 
 
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
-def test_global_detach_allows_teaching_to_finalize(
+def test_stop_sharing_allows_teaching_to_finalize(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
     wait_file(tmp_path / "lesson/frames/000000.png")
     (tmp_path / "slow-close").touch()
-    assert detach_desktop() == 0
+    assert stop_sharing() == 0
     assert attach_process.wait(timeout=5) == 0
+    stdout, _ = attach_process.communicate(timeout=5)
+    assert stdout.endswith(
+        "Stopped sharing. Your apps and desktop are still running.\n"
+    )
     assert (
         json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
         == "complete"
     )
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+def test_note_failure_during_a_user_stop_fails_the_lesson(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
+    (tmp_path / "fail-note").touch()
+    note = subprocess.Popen(
+        [sys.executable, "-m", "framewisp", str(tmp_path / "session")]
+        + ["teach-note", "A note"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_file(tmp_path / "noting")
+        attach_process.send_signal(signal.SIGINT)
+        assert note.wait(timeout=5) == 1
+        assert attach_process.wait(timeout=5) == 1
+    finally:
+        if note.poll() is None:
+            note.terminate()
+            note.wait(timeout=5)
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert manifest["error"]
+    stdout, stderr = attach_process.communicate(timeout=5)
+    assert "Partial lesson:" in stderr
+    assert "Lesson saved" not in stdout
 
 
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
@@ -639,7 +724,7 @@ def test_source_end_without_revocation_marks_teaching_failed(
     assert "ended unexpectedly" in manifest["error"]
     assert attach_process.stderr is not None
     assert (
-        "Teaching session ended: Teaching capture ended unexpectedly."
+        "Stopped sharing: Teaching capture ended unexpectedly."
         in attach_process.stderr.read()
     )
 
@@ -662,7 +747,7 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
         )
         == 1
     )
-    assert "ended without a frame" in capsys.readouterr().err
+    assert COMMAND_CANCELLED in capsys.readouterr().err
     assert attach_process.wait(timeout=5) == 0
     assert (
         json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
@@ -687,13 +772,16 @@ def test_pending_consent_reserves_session(
     assert "still live" in duplicate.stderr
     assert metadata.read_text() == original
     assert attach_process.poll() is None
-    assert detach_desktop() == 0
+    assert stop_sharing() == 0
     assert not metadata.exists()
     assert (tmp_path / "closed").exists()
     assert attach_process.wait(timeout=5) == 0
+    stdout, stderr = attach_process.communicate(timeout=5)
+    assert "Stopped while waiting for desktop permission." in stderr
+    assert "Stopped sharing" not in stdout
 
 
-def test_detach_cancels_long_input_and_waits_for_cleanup(
+def test_stop_sharing_cancels_long_input_and_waits_for_cleanup(
     tmp_path: Path,
     attach_process: subprocess.Popen[str],
 ) -> None:
@@ -721,7 +809,7 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
     try:
         wait_file(tmp_path / "events")
         started = time.monotonic()
-        assert detach_desktop() == 0
+        assert stop_sharing() == 0
         assert time.monotonic() - started < 3
         assert command.wait(timeout=5) == 1
         assert (tmp_path / "closed").exists()
@@ -749,9 +837,9 @@ def test_attach_requires_user_terminal(tmp_path: Path, private_runtime: Path) ->
     assert not (private_runtime / "framewisp").exists()
 
 
-def test_global_detach_cli_is_idempotent() -> None:
+def test_stop_sharing_cli_is_idempotent() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "framewisp", "--detach"],
+        [sys.executable, "-m", "framewisp", "--stop-sharing"],
         capture_output=True,
         text=True,
         check=False,
@@ -774,23 +862,28 @@ def test_other_session_cannot_take_desktop(
         timeout=5,
     )
     assert result.returncode == 1
-    assert "already exists" in result.stderr
+    assert (
+        "Another attached or teaching session is starting or running" in result.stderr
+    )
+    assert "still running" not in result.stdout
     assert not (other / "waiting").exists()
     assert attach_process.poll() is None
 
 
-def test_global_detach_kills_suspended_owner_and_recovers(
+def test_stop_sharing_kills_suspended_owner_and_recovers(
     tmp_path: Path,
     attach_process: subprocess.Popen[str],
 ) -> None:
     attach_process.send_signal(signal.SIGSTOP)
     start = time.monotonic()
-    assert detach_desktop() == 0
+    assert stop_sharing() == 0
     # Three seconds for SIGTERM, then up to one second to confirm SIGKILL.
     assert time.monotonic() - start < 5
     assert attach_process.wait(timeout=5) == -signal.SIGKILL
     # SIGKILL cannot remove files. The next owner must recover without trusting them.
-    original = json.loads((tmp_path / "session/session.json").read_text())["attachment"]
+    original = json.loads((tmp_path / "session/session.json").read_text())[
+        "share_token"
+    ]
     replacement = subprocess.Popen(
         [sys.executable, "-c", _SERVER, str(tmp_path)],
         stdout=subprocess.PIPE,
@@ -800,13 +893,13 @@ def test_global_detach_kills_suspended_owner_and_recovers(
     try:
         deadline = time.monotonic() + 5
         while (
-            json.loads((tmp_path / "session/session.json").read_text())["attachment"]
+            json.loads((tmp_path / "session/session.json").read_text())["share_token"]
             == original
         ):
             assert replacement.poll() is None
             assert time.monotonic() < deadline
             time.sleep(0.01)
-        assert detach_desktop() == 0
+        assert stop_sharing() == 0
         assert replacement.wait(timeout=5) == 0
     finally:
         if replacement.poll() is None:
@@ -823,8 +916,8 @@ def test_x11_stop_releases_held_input(
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
     read_terminal(attach_process.stdout.fileno(), b"Attached:")
-    assert detach_desktop() == 0
-    # The owner must not wait out the release past detach's SIGKILL deadline.
+    assert stop_sharing() == 0
+    # The owner must not wait out the release past --stop-sharing's SIGKILL deadline.
     assert attach_process.wait(timeout=5) == 0
     assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 
@@ -874,7 +967,7 @@ def test_x11_attach_refuses_without_release(
         raise AssertionError("The portal opened without X11 input release.")
 
     monkeypatch.setattr(attach, "DesktopPortal", no_portal)
-    assert run_attachment(tmp_path / "session", None) == 1
+    assert share_desktop(tmp_path / "session", None) == 1
     error = capsys.readouterr().err
     assert ("DISPLAY" if problem == "no DISPLAY" else "xdotool") in error
 
@@ -908,8 +1001,11 @@ def test_attach_refuses_metadata_of_another_session(
         raise AssertionError("The portal opened over another session's metadata.")
 
     monkeypatch.setattr(attach, "DesktopPortal", no_portal)
-    assert run_attachment(session_dir, None) == 1
-    assert "belongs to another session" in capsys.readouterr().err
+    assert share_desktop(session_dir, None) == 1
+    output = capsys.readouterr()
+    assert output.err.startswith("Could not share the desktop:")
+    assert "belongs to another session" in output.err
+    assert "Stopped sharing" not in output.out
     assert (session_dir / "session.json").read_text() == metadata
 
 
@@ -925,7 +1021,7 @@ def children(pid: int, name: str) -> list[int]:
 
 
 # R-INPUT-5
-def test_x11_attachment_stops_when_release_guard_dies(
+def test_x11_desktop_share_stops_when_release_guard_dies(
     tmp_path: Path, x11_desktop: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
@@ -935,10 +1031,12 @@ def test_x11_attachment_stops_when_release_guard_dies(
     os.kill(guard, signal.SIGKILL)
     assert attach_process.wait(timeout=5) == 1
     assert attach_process.stderr is not None
-    assert (
-        "Attached session ended: The X11 input release helper exited"
-        in attach_process.stderr.read()
-    )
+    stderr = attach_process.stderr.read()
+    assert "Stopped sharing: " in stderr and "release helper exited" in stderr
+    assert "Could not share the desktop" not in stderr
+    stdout = attach_process.stdout.read()
+    assert "Your apps and desktop are still running." in stdout
+    assert "Stopped sharing." not in stdout
     # The owner runs the final release the dead guard cannot.
     assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 
@@ -1026,7 +1124,7 @@ def test_guard_releases_presses_that_land_after_the_owner_exits(
         holder.wait(timeout=5)
 
 
-def test_old_session_metadata_cannot_command_new_attachment(
+def test_old_session_metadata_cannot_command_new_desktop_share(
     tmp_path: Path,
     attach_process: subprocess.Popen[str],
     capsys: pytest.CaptureFixture[str],
@@ -1035,7 +1133,7 @@ def test_old_session_metadata_cannot_command_new_attachment(
     old.mkdir()
     (old / "session.json").write_text((tmp_path / "session/session.json").read_text())
     state = json.loads((old / "session.json").read_text())
-    state["attachment"] = "previous-owner"
+    state["share_token"] = "previous-owner"
     (old / "session.json").write_text(json.dumps(state))
     assert request_desktop(old, "attached", "key", {"chord": "a"}) == 1
     error = capsys.readouterr().err
@@ -1056,14 +1154,14 @@ def request_reply(session_dir: Path, message: bytes) -> dict[str, object]:
 
 
 # R-CONTROL-1, R-CONTROL-2
-def test_malformed_requests_leave_the_attachment_running(
+def test_malformed_requests_leave_the_desktop_share_running(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
     read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
-    token = json.loads((session_dir / "session.json").read_text())["attachment"]
+    token = json.loads((session_dir / "session.json").read_text())["share_token"]
     os.mkfifo(tmp_path / "fifo")
     requests: list[dict[str, object]] = [
         {},
@@ -1101,7 +1199,7 @@ def test_malformed_requests_leave_the_attachment_running(
         b"\xff\n",
         b"[]\n",
         b"[" * 100000 + b"\n",
-        *((json.dumps({"attachment": token} | r) + "\n").encode() for r in requests),
+        *((json.dumps({"share_token": token} | r) + "\n").encode() for r in requests),
     ):
         response = request_reply(session_dir, message)
         assert response["status"] == 1
@@ -1116,7 +1214,7 @@ def test_malformed_requests_leave_the_attachment_running(
 
 
 # R-CONTROL-1, R-CONTROL-2
-def test_trickling_client_gets_a_reply_from_the_attachment(
+def test_trickling_client_gets_a_reply_from_the_attached_session(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
@@ -1244,10 +1342,206 @@ def test_portal_failure_closes_owner(
     assert attach_process.stdout is not None
     read_terminal(attach_process.stdout.fileno(), b"Attached:")
     (tmp_path / "fail").touch()
-    assert request_desktop(tmp_path / "session", "attached", "key", {"chord": "a"}) == 1
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "framewisp",
+            str(tmp_path / "session"),
+            "type",
+            "hunter2",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 1
     assert attach_process.wait(timeout=5) == 1
     assert (tmp_path / "closed").exists()
     assert not (tmp_path / "session/session.json").exists()
+    stdout, stderr = attach_process.communicate(timeout=5)
+    assert "Stopped sharing: RuntimeError: input details omitted" in stderr
+    # The traceback quotes the fake's source line, so match the formatted values too.
+    assert "injected portal failure: (" not in result.stderr + stderr + stdout
+    assert stdout.endswith("Your apps and desktop are still running.\n")
+    assert "Stopped sharing." not in stdout
+
+
+@contextmanager
+def blocked_input(
+    tmp_path: Path, attach_process: subprocess.Popen[str], arguments: list[str]
+) -> Generator[subprocess.Popen[str]]:
+    """Yield a session command whose input the fake portal holds in flight."""
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
+    (tmp_path / "block-input").touch()
+    command = subprocess.Popen(
+        [sys.executable, "-m", "framewisp", str(tmp_path / "session"), *arguments],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_file(tmp_path / "blocking")
+        yield command
+    finally:
+        if command.poll() is None:
+            command.terminate()
+        command.wait(timeout=5)
+
+
+@pytest.mark.parametrize("end", ["sigint", "revoke"])
+@pytest.mark.parametrize("arguments", [["key", "a"], ["move", "1", "1"]])
+def test_user_stop_during_input_cancels_it(
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    end: str,
+    arguments: list[str],
+) -> None:
+    with blocked_input(tmp_path, attach_process, arguments) as command:
+        if end == "sigint":
+            attach_process.send_signal(signal.SIGINT)
+        else:
+            # The backend fails the input before the revocation is dispatched.
+            (tmp_path / "end-input").write_text("revoke")
+        _, client_stderr = command.communicate(timeout=5)
+        assert command.returncode == 1
+        assert COMMAND_CANCELLED in client_stderr
+        assert "quark" not in client_stderr
+        assert attach_process.wait(timeout=5) == 0
+        stdout, stderr = attach_process.communicate(timeout=5)
+        assert "Stopped sharing:" not in stderr
+        assert stdout.endswith(
+            "Stopped sharing. Your apps and desktop are still running.\n"
+        )
+
+
+@pytest.mark.parametrize("arguments", [["type", "hunter2"], ["move", "1", "1"]])
+def test_lost_bus_during_input_fails_the_share(
+    tmp_path: Path, attach_process: subprocess.Popen[str], arguments: list[str]
+) -> None:
+    with blocked_input(tmp_path, attach_process, arguments) as command:
+        (tmp_path / "end-input").write_text("lose-bus")
+        _, client_stderr = command.communicate(timeout=5)
+        assert command.returncode == 1
+        assert "The session bus connection closed." in client_stderr
+        assert COMMAND_CANCELLED not in client_stderr
+        assert attach_process.wait(timeout=5) == 1
+        stdout, stderr = attach_process.communicate(timeout=5)
+        assert (
+            stderr.splitlines().count(
+                "Stopped sharing: The session bus connection closed."
+            )
+            == 1
+        )
+        assert "Stopped sharing: The session bus connection closed.;" not in stderr
+        assert "hunter2" not in client_stderr + stderr + stdout
+        assert stdout.endswith("Your apps and desktop are still running.\n")
+        assert "Stopped sharing." not in stdout
+
+
+def test_lost_bus_between_characters_fails_waiting_commands(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
+    session_dir = tmp_path / "session"
+    typing = subprocess.Popen(
+        [sys.executable, "-m", "framewisp", str(session_dir)]
+        + ["type", "ab", "--interval", "3"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    queued: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.monotonic() + 5
+        while "NotifyKeyboardKeysym" not in (
+            (tmp_path / "events").read_text() if (tmp_path / "events").exists() else ""
+        ):
+            assert time.monotonic() < deadline, "Timed out waiting for a keysym"
+            time.sleep(0.01)
+        queued = subprocess.Popen(
+            [sys.executable, "-m", "framewisp", str(session_dir), "move", "7", "7"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Let the queued command reach the runner and wait for the input lock.
+        time.sleep(0.5)
+        (tmp_path / "lose-bus").touch()
+        for command in (typing, queued):
+            _, client_stderr = command.communicate(timeout=5)
+            assert command.returncode == 1
+            assert "The session bus connection closed." in client_stderr
+            assert COMMAND_CANCELLED not in client_stderr
+        assert attach_process.wait(timeout=5) == 1
+        _, stderr = attach_process.communicate(timeout=5)
+        assert "Stopped sharing: The session bus connection closed." in stderr
+        assert "(7.0, 7.0)" not in (tmp_path / "events").read_text()
+    finally:
+        for process in (typing, queued):
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+
+
+@pytest.mark.parametrize("failure", ["closed", "backend"])
+def test_input_queued_behind_a_failure_never_reaches_the_desktop(
+    tmp_path: Path, attach_process: subprocess.Popen[str], failure: str
+) -> None:
+    session_dir = tmp_path / "session"
+    with blocked_input(tmp_path, attach_process, ["type", "hunter2"]) as command:
+        queued = subprocess.Popen(
+            [sys.executable, "-m", "framewisp", str(session_dir), "move", "7", "7"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Let the queued command reach the runner and wait for the input lock.
+        time.sleep(0.5)
+        (tmp_path / "fail-input").write_text(failure)
+        _, client_stderr = command.communicate(timeout=5)
+        _, queued_stderr = queued.communicate(timeout=5)
+        assert command.returncode == 1
+        assert queued.returncode == 1
+        assert COMMAND_CANCELLED in queued_stderr
+        assert "hunter2" not in client_stderr
+        assert attach_process.wait(timeout=5) == 1
+        assert "(7.0, 7.0)" not in (tmp_path / "events").read_text()
+
+
+@pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
+@pytest.mark.parametrize("eos_first", [False, True])
+def test_lost_bus_fails_the_lesson(
+    tmp_path: Path, attach_process: subprocess.Popen[str], eos_first: bool
+) -> None:
+    (tmp_path / "approve").touch()
+    assert attach_process.stdout is not None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
+    if eos_first:
+        # PipeWire's end of stream reaches the lesson before the bus loss.
+        (tmp_path / "eos-first").touch()
+    (tmp_path / "lose-bus").touch()
+    assert attach_process.wait(timeout=5) == 1
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert manifest["error"] == "The session bus connection closed."
+    _, stderr = attach_process.communicate(timeout=5)
+    assert "Stopped sharing: The session bus connection closed." in stderr.splitlines()
+    assert "Partial lesson:" in stderr
+
+
+def test_lost_bus_while_waiting_for_permission_fails(
+    tmp_path: Path, attach_process: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "lose-bus").touch()
+    assert attach_process.wait(timeout=5) == 1
+    stdout, stderr = attach_process.communicate(timeout=5)
+    assert "Could not share the desktop: The session bus connection closed." in stderr
+    assert "Stopped sharing" not in stdout + stderr
 
 
 @pytest.fixture
@@ -1301,7 +1595,7 @@ def test_terminal_names_stop_methods_before_confirmation(
     terminal_prompt: tuple[subprocess.Popen[bytes], int, bytes],
 ) -> None:
     _process, _master, printed = terminal_prompt
-    assert b"framewisp --detach" in printed
+    assert b"framewisp --stop-sharing" in printed
     assert b"Ctrl+C" in printed
     assert not (tmp_path / "waiting").exists()
 
@@ -1354,7 +1648,7 @@ def test_closing_terminal_disconnects(
     assert not (tmp_path / "session/session.json").exists()
 
 
-def test_detach_needs_only_standard_library() -> None:
+def test_stop_sharing_needs_only_standard_library() -> None:
     script = """
 import sys
 class NoDesktopImports:
@@ -1362,7 +1656,7 @@ class NoDesktopImports:
         if fullname.split('.')[0] in {'gi', 'vncdotool', 'PIL'}:
             raise RuntimeError('Emergency stop imported ' + fullname)
 sys.meta_path.insert(0, NoDesktopImports())
-sys.argv = ['framewisp', '--detach']
+sys.argv = ['framewisp', '--stop-sharing']
 from framewisp.__main__ import main
 main()
 """
@@ -1408,22 +1702,22 @@ def test_invalid_session_metadata_fails_clearly(
     )
 
 
-def test_attachment_refuses_headless_ownership(
+def test_desktop_share_refuses_headless_ownership(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     session_dir = tmp_path / "session"
     session_dir.mkdir()
     with session_lease(session_dir) as lease:
-        assert run_attachment(session_dir, None) == 1
+        assert share_desktop(session_dir, None) == 1
         assert "still live" in capsys.readouterr().err
         write_journal(session_dir, runtime_path(session_dir), lease, created=False)
-    assert run_attachment(session_dir, None) == 1
+    assert share_desktop(session_dir, None) == 1
     assert "recover first" in capsys.readouterr().err
     assert not (session_dir / "session.json").exists()
     recover_session(session_dir)
 
 
-def test_recovery_refuses_live_attachment(
+def test_recovery_refuses_live_desktop_share(
     attach_process: subprocess.Popen[str], tmp_path: Path
 ) -> None:
     state = tmp_path / "session" / "session.json"

@@ -42,7 +42,7 @@ from framewisp.connection import (
     session_kind,
     teaching_refusal,
 )
-from framewisp.desktop import reserve_desktop, write_state
+from framewisp.desktop import STOP_SOCKET, lock_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
 from framewisp.ownership import refuse_abandoned_ownership, session_lease
 from framewisp.portal import DesktopPortal, dispatch_events
@@ -115,6 +115,10 @@ for first, row in [
 ]:
     KEYCODES.update({key: first + offset for offset, key in enumerate(row)})
 BUTTONS = {"left": 272, "right": 273}
+COMMAND_CANCELLED = "Session stopped; command cancelled."
+# How long a command that failed in the desktop portal waits for a stop that
+# explains its failure.
+STOP_GRACE = 0.2
 
 
 class AttachedInput:
@@ -126,7 +130,7 @@ class AttachedInput:
 
     def wait(self, seconds: float = 0) -> None:
         if self.stop.wait(min(seconds, TIMEOUT_MAX)):
-            raise InterruptedError("Attached session disconnected; input cancelled.")
+            raise InterruptedError(COMMAND_CANCELLED)
 
     def key(self, code: int, pressed: bool) -> None:
         self.wait()
@@ -293,7 +297,10 @@ def save_screenshot(
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
 SCREENSHOT_TIMEOUT = 10
-SCREENSHOT_CANCELLED = "The session disconnected; screenshot cancelled."
+
+
+class CaptureError(RuntimeError):
+    """Desktop capture failed, as closing the desktop portal can make it."""
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -332,10 +339,10 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
                 if frame is None:
-                    raise ValueError("Desktop capture ended without a frame.")
+                    raise CaptureError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
-            raise InterruptedError(SCREENSHOT_CANCELLED)
+            raise InterruptedError(COMMAND_CANCELLED)
         frame = sink.emit("try-pull-sample", 0) or frame
         assert isinstance(frame, Gst.Sample)
         # Stopping the source may release the memory behind its buffers.
@@ -348,7 +355,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
 def playing(pipeline: Gst.Element) -> Generator[None]:
     try:
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
-            raise RuntimeError("Could not start desktop capture.")
+            raise CaptureError("Could not start desktop capture.")
         yield
     finally:
         pipeline.set_state(Gst.State.NULL)
@@ -363,9 +370,9 @@ def finished(
 ) -> bool:
     """Wait briefly for end of stream. Raise on failure, timeout, or stop."""
     if stop.is_set():
-        raise InterruptedError(SCREENSHOT_CANCELLED)
+        raise InterruptedError(COMMAND_CANCELLED)
     if time.monotonic() >= deadline:
-        raise RuntimeError("Desktop capture timed out.")
+        raise CaptureError("Desktop capture timed out.")
     bus = pipeline.get_bus()
     assert bus is not None
     message = bus.timed_pop_filtered(
@@ -376,16 +383,16 @@ def finished(
     if message.type == Gst.MessageType.ERROR:
         error, detail = message.parse_error()
         if sink is not None and message.src == sink:
-            # A full disk fails this command, not the attachment, and the log
+            # A full disk fails this command, not the desktop share, and the log
             # may be on that disk.
             raise ValueError(f"Could not write the screenshot: {error.message}")
         log.write_text(f"{error}\n{detail}\n")
-        raise RuntimeError(f"Desktop capture failed. See {log}")
+        raise CaptureError(f"Desktop capture failed. See {log}")
     return True
 
 
 def parse_desktop_request(
-    line: bytes, attachment: str, kind: SessionKind
+    line: bytes, share_token: str, kind: SessionKind
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     fields = parse_request_fields(line)
@@ -393,7 +400,7 @@ def parse_desktop_request(
     # accepting a command addressed to an earlier one. The sender's kind may
     # differ from this session's, and its session directory may differ too, so
     # the message names neither.
-    if fields.get("attachment") != attachment:
+    if fields.get("share_token") != share_token:
         raise ValueError("The session this command was addressed to has ended.")
     command = fields.get("command")
     if not isinstance(command, str):
@@ -431,17 +438,6 @@ def foreground_terminal(descriptor: int) -> bool:
         return False
 
 
-def failure_prefix(teaching: Teaching | None, *, ready: bool) -> str:
-    """Name what failed: starting the session, or the session once ready."""
-    if ready:
-        return (
-            "Teaching session ended"
-            if teaching is not None
-            else "Attached session ended"
-        )
-    return "Could not start teaching" if teaching is not None else "Could not attach"
-
-
 def attach_session(
     session_dir: Path,
     *,
@@ -458,7 +454,7 @@ def attach_session(
             else "attach"
         )
         print(
-            "Desktop attachment must be started by the user in a foreground interactive terminal.\n"
+            "A desktop share must be started by the user in a foreground interactive terminal.\n"
             "Agents: do not allocate a PTY or bypass this check. Ask the user to run:\n"
             f"  framewisp {shlex.quote(str(session_dir))} {command}\n"
             "in another desktop terminal, read the instructions, and approve sharing.",
@@ -471,7 +467,7 @@ def attach_session(
             "Video, sampled frames, and notes are saved unredacted, including any visible secrets.\n"
             f"Goal: {teaching.goal}\nLesson: {teaching.directory}\n"
             "Keep this terminal open and in the foreground. Stop with Ctrl+C here,\n"
-            "the sharing indicator, or framewisp --detach. Your apps stay running.",
+            "the sharing indicator, or framewisp --stop-sharing. Your apps stay running.",
             flush=True,
         )
     else:
@@ -479,9 +475,9 @@ def attach_session(
             "This shares a monitor and gives agent commands keyboard and pointer control of your live desktop.\n"
             "Input can reach any focused app. Keep this terminal open; do not background or suspend this command.\n"
             "Before continuing, bind BOTH Ctrl+Alt+Escape and Ctrl+Alt+Shift+Escape to:\n"
-            "  framewisp --detach\n"
+            "  framewisp --stop-sharing\n"
             "The second binding is needed when the agent holds Shift. Test your bindings.\n"
-            "Ctrl+C here also stops access. Stop sharing before detaching from tmux or screen.",
+            "Ctrl+C here also stops sharing. Stop sharing before detaching from tmux or screen.",
             flush=True,
         )
     if x11_desktop():
@@ -509,14 +505,14 @@ def attach_session(
             file=sys.stderr,
         )
         return 1
-    return run_attachment(
+    return share_desktop(
         session_dir,
         sys.stdin.fileno(),
         teaching=teaching,
     )
 
 
-def run_attachment(
+def share_desktop(
     session_dir: Path,
     terminal: int | None,
     *,
@@ -528,23 +524,23 @@ def run_attachment(
         session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         with session_lease(session_dir):
             refuse_abandoned_ownership(session_dir)
-            return _run_attachment(
+            return _share_desktop(
                 session_dir,
                 terminal,
                 teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
-        print(f"{failure_prefix(teaching, ready=False)}: {failure}", file=sys.stderr)
+        print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
 
 
-def _run_attachment(
+def _share_desktop(
     session_dir: Path,
     terminal: int | None,
     *,
     teaching: Teaching | None = None,
 ) -> int:
-    """Own all desktop access. The CLI must complete interactive consent first."""
+    """Hold the desktop share. The CLI must complete interactive consent first."""
     stop, ready = Event(), Event()
     lock = Lock()
     workers: list[Thread] = []
@@ -553,11 +549,14 @@ def _run_attachment(
     inputs: AttachedInput | None = None
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
-    attachment = uuid.uuid4().hex
+    share_token = uuid.uuid4().hex
     kind: SessionKind = "attached" if teaching is None else "teaching"
     state = session_dir / "session.json"
     owns_state = False
     capture_descriptor: int | None = None
+    shared = False
+    # Why a started share ended, for the summary printed when it stops.
+    reasons: list[str] = []
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -567,7 +566,7 @@ def _run_attachment(
         ready.set()
         label = "Teaching session ready" if teaching is not None else "Attached"
         print(
-            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Press Ctrl+C here to stop; framewisp --stop-sharing is the emergency stop for whichever session is sharing.",
             flush=True,
         )
 
@@ -589,7 +588,7 @@ def _run_attachment(
                     pass
 
             def parse(line: bytes) -> InputAction | Path | str:
-                request = parse_desktop_request(line, attachment, kind)
+                request = parse_desktop_request(line, share_token, kind)
                 if not ready.is_set():
                     raise ValueError(
                         "The teaching session is waiting for desktop permission or its first frame."
@@ -611,42 +610,63 @@ def _run_attachment(
             )
             if request is None:
                 return
-            status, error = 0, None
             command = (
                 "screenshot"
                 if isinstance(request, Path)
                 else "teach-note" if isinstance(request, str) else request.action
             )
-            try:
-                if isinstance(request, str):
-                    inputs.wait()
-                    assert teaching is not None
-                    teaching.note(request)
-                else:
-                    while not lock.acquire(timeout=0.05):
-                        inputs.wait()
-                    try:
-                        inputs.wait()
-                        if isinstance(request, Path):
-                            save_screenshot(
-                                portal, request, stop, session_dir / "capture.log"
-                            )
-                        else:
-                            inputs.perform(
-                                command, cast(InputParameters, request.parameters)
-                            )
-                    finally:
-                        lock.release()
-            except (ValueError, InterruptedError, TimeoutError) as failure:
-                status, error = 1, input_error(command, failure)
-            except BaseException as failure:
-                status, error = 1, input_error(command, failure)
-                failures.append(failure)
+
+            def failed(failure: BaseException) -> str:
+                """Classify a failure, holding the input lock if the command took it,
+                so no queued input reaches the desktop before a failure stops it."""
+                assert portal is not None
+                if isinstance(failure, (ValueError, TimeoutError)):
+                    return input_error(command, failure)
+                # A stop closes the portal under a running command, which is then
+                # cancelled rather than failed. The backend can fail the call
+                # before the main thread's next dispatch runs the portal callback
+                # that sets `stop`, so wait briefly for it. A lost bus ends the
+                # share with its own failure.
+                if isinstance(failure, InterruptedError) or (
+                    isinstance(failure, (GLib.Error, CaptureError))
+                    and stop.wait(STOP_GRACE)
+                ):
+                    return portal.lost or COMMAND_CANCELLED
+                # Record the redacted error: the raw one can include typed text.
+                error = input_error(command, failure)
+                failures.append(RuntimeError(error))
                 stop.set()
                 portal.close()
                 traceback.print_exception(
                     RuntimeError(error).with_traceback(failure.__traceback__)
                 )
+                return error
+
+            # Notes reach only the lesson, so a screenshot must not delay them.
+            # A note holds the lesson's lock until its failure is recorded, as
+            # the lesson's final status is chosen under that lock.
+            held = (
+                teaching.lock
+                if isinstance(request, str) and teaching is not None
+                else lock
+            )
+            status, error, locked = 0, None, False
+            try:
+                while not (locked := held.acquire(timeout=0.05)):
+                    inputs.wait()
+                inputs.wait()
+                if isinstance(request, str):
+                    assert teaching is not None
+                    teaching.note(request)
+                elif isinstance(request, Path):
+                    save_screenshot(portal, request, stop, session_dir / "capture.log")
+                else:
+                    inputs.perform(command, cast(InputParameters, request.parameters))
+            except BaseException as failure:
+                status, error = 1, failed(failure)
+            finally:
+                if locked:
+                    held.release()
             answer(status, error)
 
     def serve(listener: socket.socket, emergency: socket.socket) -> None:
@@ -670,7 +690,7 @@ def _run_attachment(
             traceback.print_exc()
 
     try:
-        with reserve_desktop() as directory:
+        with lock_desktop() as directory:
             try:
                 session_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
                 if state.exists():
@@ -688,7 +708,7 @@ def _run_attachment(
                 ):
                     command_socket = str(directory / "command.sock")
                     listener.bind(command_socket)
-                    emergency.bind(str(directory / "detach.sock"))
+                    emergency.bind(str(directory / STOP_SOCKET))
                     listener.listen(32)
                     emergency.listen(32)
                     write_state(
@@ -696,7 +716,7 @@ def _run_attachment(
                         {
                             "kind": kind,
                             "command_protocol": COMMAND_PROTOCOL,
-                            "attachment": attachment,
+                            "share_token": share_token,
                             "command_socket": command_socket,
                             "processes": {"attach": os.getpid()},
                         },
@@ -713,15 +733,15 @@ def _run_attachment(
                     )
                     server.start()
                     try:
-                        if teaching is None:
-                            portal.open(allow_input=True)
-                        else:
-                            portal.open(allow_input=False)
+                        portal.open(allow_input=teaching is None)
+                        shared = True
+                        if teaching is not None:
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"
                             )
-                        inputs.wait()
+                        if stop.is_set():
+                            raise portal.interruption("Stopped while starting.")
                         indicator = SharingIndicator(portal.bus, stop)
                         try:
                             indicator.start()
@@ -756,36 +776,50 @@ def _run_attachment(
                                         ):
                                             break
                                         stop.wait(0.01)
-                                    if portal.revoked:
+                                    if portal.revoked or stop.is_set():
                                         break
                                     raise RuntimeError(
                                         "Teaching capture ended unexpectedly."
                                     )
                                 if not ready.is_set() and teaching.count:
                                     announce_ready()
+                        if portal.lost is not None:
+                            raise RuntimeError(portal.lost)
                     finally:
                         stop.set()
                         if indicator is not None:
                             indicator.close()
                         if teaching is not None:
                             failure = sys.exc_info()[1]
+                            if isinstance(failure, InterruptedError):
+                                # A user stop; `close` applies its normal rule.
+                                failure = None
                             try:
-                                teaching.close(
-                                    (
+                                # A note records its failure under this lock.
+                                with teaching.lock:
+                                    reason = (
                                         str(failure)
                                         if failure
                                         else str(failures[0]) if failures else None
-                                    ),
-                                    revoked=portal.revoked,
-                                )
-                                if teaching.created:
+                                    )
+                                    lesson_error = teaching.close(
+                                        reason, revoked=portal.revoked
+                                    )
+                                if lesson_error is not None:
+                                    print(
+                                        f"Partial lesson: {teaching.directory}",
+                                        file=sys.stderr,
+                                        flush=True,
+                                    )
+                                    if lesson_error != reason:
+                                        failures.append(RuntimeError(lesson_error))
+                                elif teaching.created:
                                     print(
                                         f"Lesson saved: {teaching.directory}",
                                         flush=True,
                                     )
                             except (OSError, RuntimeError, GLib.Error) as failure:
                                 failures.append(failure)
-                                print(str(failure), file=sys.stderr, flush=True)
                         portal.close()
                         server.join(timeout=0.2)
                         deadline = time.monotonic() + 0.2
@@ -800,13 +834,14 @@ def _run_attachment(
                 if owns_state:
                     state.unlink(missing_ok=True)
                     owns_state = False
-    except InterruptedError:
-        pass
+    except InterruptedError as interruption:
+        if not shared:
+            print(interruption, file=sys.stderr)
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(
-            f"{failure_prefix(teaching, ready=ready.is_set())}: {failure}",
-            file=sys.stderr,
-        )
+        if shared:
+            reasons.append(str(failure))
+        else:
+            print(f"Could not share the desktop: {failure}", file=sys.stderr)
         return 1
     finally:
         stop.set()
@@ -816,5 +851,15 @@ def _run_attachment(
             os.close(capture_descriptor)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-        print("Detached. The app and desktop are still running.", flush=True)
+        reasons += [str(failure) for failure in failures]
+        if shared and reasons:
+            print(f"Stopped sharing: {'; '.join(reasons)}", file=sys.stderr, flush=True)
+            print("Your apps and desktop are still running.", flush=True)
+        elif shared:
+            print(
+                "Stopped sharing. Your apps and desktop are still running.", flush=True
+            )
+        else:
+            for reason in reasons:
+                print(reason, file=sys.stderr, flush=True)
     return int(bool(failures))

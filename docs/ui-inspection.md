@@ -22,7 +22,7 @@ wlroots 0.20.2 and Pixman at 1280x720, without recording.
 | Blender 5.2.0 LTS, custom canvas Flatpak | Tested for images/input | Tested for images/input | No accessible app registers. Checks cannot verify visible geometry or console text. See the real-app runs below. |
 | App without AT-SPI (`sleep` test) | Tested | Not applicable | Explicit `unsupported`, not a successful empty search. |
 | GTK 4 Flatpak and other toolkits/custom canvases | Not tested | Not tested | Writer GTK 3 and Blender coverage does not establish support for these targets. Use screenshots until useful accessible content is demonstrated. |
-| Attached desktop | Unsupported | Unsupported | No connection to the user's desktop accessibility bus. |
+| Attached session | Unsupported | Unsupported | No connection to the user's desktop accessibility bus. |
 
 The matrix describes these apps, not all controls from each toolkit.
 An `ok` result means the exposed tree was traversed within the limits. It cannot
@@ -185,7 +185,7 @@ tests, rather than the framewisp runtime.
 Issue [#79](https://github.com/krscott/framewisp/issues/79) extends the matrix
 with LibreOffice Writer's GTK 3 Flatpak and Blender's custom canvas. These are
 opt-in host tests, separate from the bundled GTK/Qt probes and package checks.
-No additional architecture, OS, compositor, or desktop-attachment support is
+No additional architecture, OS, compositor, or attached session support is
 claimed.
 
 The October 3, 2026 runs used NixOS x86_64, Linux 6.18.54, Python 3.14.7,

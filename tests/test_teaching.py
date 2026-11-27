@@ -78,7 +78,7 @@ def test_teaching_portal_requests_only_screen_access(
 )
 def test_teaching_rejects_commands_but_screenshot_and_note(command: str) -> None:
     line = json.dumps(
-        {"attachment": "token", "command": command, "parameters": {}}
+        {"share_token": "token", "command": command, "parameters": {}}
     ).encode()
     with pytest.raises(ValueError, match="this is a teaching session"):
         parse_desktop_request(line, "token", "teaching")
@@ -87,7 +87,7 @@ def test_teaching_rejects_commands_but_screenshot_and_note(command: str) -> None
 @pytest.mark.parametrize("text", ["", "  ", 1, "n" * 8001])
 def test_teaching_rejects_invalid_notes(text: object) -> None:
     line = json.dumps(
-        {"attachment": "token", "command": "teach-note", "parameters": {"text": text}}
+        {"share_token": "token", "command": "teach-note", "parameters": {"text": text}}
     ).encode()
     with pytest.raises(ValueError, match="nonblank"):
         parse_desktop_request(line, "token", "teaching")
@@ -136,7 +136,7 @@ def test_lesson_has_playable_video_frames_goal_and_timed_notes(
     wait_for_frames(teaching, 1)
     teaching.note("Choose this customer; the name is a variable. ✓")
     wait_for_frames(teaching, 3)
-    teaching.close()
+    assert teaching.close() is None
     with pytest.raises(ValueError, match="notes are closed"):
         teaching.note("Too late")
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
@@ -192,8 +192,7 @@ def test_capture_failure_preserves_a_partial_lesson(teaching: Teaching) -> None:
     teaching.start("videotestsrc is-live=true ! video/x-raw,width=160,height=120")
     wait_for_frames(teaching, 1)
     teaching.note("Keep this note")
-    with pytest.raises(RuntimeError, match="Partial lesson"):
-        teaching.close("The stream disconnected")
+    assert teaching.close("The stream disconnected") == "The stream disconnected"
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
     assert manifest["status"] == "failed"
     assert manifest["error"] == "The stream disconnected"
@@ -228,7 +227,7 @@ def test_sparse_screen_keeps_final_notes_on_the_video_timeline(
     wait_for_frames(teaching, 2)
     teaching.note("This unchanged screen is the final result")
     time.sleep(0.2)
-    teaching.close()
+    assert teaching.close() is None
     entries = [
         json.loads(line)
         for line in (teaching.directory / "timeline.jsonl").read_text().splitlines()
@@ -290,8 +289,7 @@ def test_source_ending_is_a_failure_even_when_a_last_frame_remains(
     )
     with pytest.raises(RuntimeError, match="ended unexpectedly"):
         wait_for_frames(teaching, 4)
-    with pytest.raises(RuntimeError, match="Partial lesson"):
-        teaching.close()
+    assert teaching.close() == "Teaching capture ended unexpectedly."
     assert (
         json.loads((teaching.directory / "lesson.json").read_text())["status"]
         == "failed"
@@ -462,7 +460,7 @@ def test_teaching_captures_a_task_performed_in_the_demo_app(
         timeout=5,
     )
     wait_for_frames(teaching, teaching.count + 3)
-    teaching.close()
+    assert teaching.close() is None
     assert "Applied: LearnMe" in log.read_text()
     frames = sorted((teaching.directory / "frames").iterdir())
     with Image.open(frames[0]) as first, Image.open(frames[-1]) as last:

@@ -321,7 +321,7 @@ def unverified_runtime(session_dir: Path, runtime: Path, problem: str) -> str:
     )
 
 
-def records_attachment(session_dir: Path) -> bool:
+def records_desktop_session(session_dir: Path) -> bool:
     try:
         state = read_metadata(session_dir / "session.json")
     except (OSError, ValueError, RecursionError):
@@ -329,13 +329,12 @@ def records_attachment(session_dir: Path) -> bool:
     return session_kind(state) in DESKTOP_KINDS
 
 
-def stale_attachment(session_dir: Path) -> str:
+def stale_desktop_session(session_dir: Path) -> str:
     metadata = shlex.join(["rm", "-f", "--", str(session_dir / "session.json")])
     return (
-        f"{session_dir} records a desktop attachment, which recover does not clean up. "
+        f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
-        "If the attachment is running, stop it with `framewisp --detach`.\n"
-        "Otherwise start it again with attach or teach "
+        "Start it again with attach or teach "
         "(for teach, with a new lesson directory), "
         f"or delete its metadata:\n  {metadata}"
     ) + kept_recording_note(session_dir)
@@ -529,8 +528,8 @@ def recover_session(session_dir: Path) -> int:
                 path_status(path) != "absent"
                 for path in (likely_runtime(session_dir), *metadata)
             ):
-                if records_attachment(session_dir):
-                    raise SessionError(stale_attachment(session_dir))
+                if records_desktop_session(session_dir):
+                    raise SessionError(stale_desktop_session(session_dir))
                 raise SessionError(
                     unreadable_journal(session_dir, "journal is missing")
                 )

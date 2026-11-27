@@ -15,7 +15,7 @@ import pytest
 from gi.repository import Gio, GLib
 
 from framewisp.attach import AttachedInput
-from framewisp.desktop import detach_desktop
+from framewisp.desktop import stop_sharing
 from framewisp.portal import DesktopPortal, dispatch_events
 from framewisp.tray import (
     ITEM,
@@ -140,8 +140,8 @@ def test_menu_and_active_text(
         GLib.Variant("(s)", (ITEM,)),
     ).unpack()[0]
     assert properties["Status"] == "Active"
-    assert properties["Title"] == "framewisp desktop sharing is active"
-    assert properties["ToolTip"][2] == "framewisp desktop sharing is active"
+    assert properties["Title"] == "framewisp desktop share is active"
+    assert properties["ToolTip"][2] == "framewisp desktop share is active"
     assert properties["Menu"] == MENU_PATH
     assert properties["ItemIsMenu"]
     width, height, pixels = properties["IconPixmap"][0]
@@ -191,7 +191,7 @@ def test_no_host_diagnostic(
     until(lambda: indicator.available is False)
     message = capsys.readouterr().err
     assert "indicator unavailable" in message
-    assert "framewisp --detach" in message and "Ctrl+C" in message
+    assert "framewisp --stop-sharing" in message and "Ctrl+C" in message
     assert not indicator.stop.is_set()
 
 
@@ -459,9 +459,12 @@ import sys
 from pathlib import Path
 from gi.repository import Gio
 from framewisp import attach
+from framewisp.portal import DesktopPortal
 root = Path(sys.argv[1])
 class Portal:
+    interruption = DesktopPortal.interruption
     def __init__(self, stop):
+        self.lost = None
         self.size = (800, 600)
         self.node = 1
         address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
@@ -475,7 +478,7 @@ class Portal:
             self.bus.close_sync(None)
             (root / 'closed').touch()
 attach.DesktopPortal = Portal
-raise SystemExit(attach.run_attachment(root / 'session', None))
+raise SystemExit(attach.share_desktop(root / 'session', None))
 """
 
 
@@ -526,7 +529,7 @@ def registered_item(
         own_watcher_name(host)
         owner = start_owner()
         until(lambda: bool(items) or owner.poll() is not None, timeout=10)
-        assert items, "attach exited or registered no tray item"
+        assert items, "attach exited or registered no sharing indicator"
     sender, path = items[0]
     properties = call(
         host,
@@ -540,15 +543,15 @@ def registered_item(
 
 
 # R-ATTACH-3
-def test_attachment_offers_active_item_to_host(
+def test_desktop_share_offers_sharing_indicator_to_host(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
     start_owner: Callable[[], subprocess.Popen[bytes]],
 ) -> None:
     host = buses[1]
     owner, sender, properties = registered_item(host, start_owner)
     assert properties["Status"] == "Active"
-    assert "desktop sharing is active" in str(properties["Title"])
-    assert detach_desktop() == 0
+    assert "desktop share is active" in str(properties["Title"])
+    assert stop_sharing() == 0
     assert owner.wait(timeout=5) == 0
     with pytest.raises(GLib.Error):
         call(
@@ -562,7 +565,7 @@ def test_attachment_offers_active_item_to_host(
 
 
 # R-ATTACH-4
-def test_tray_stop_ends_attachment(
+def test_sharing_indicator_stop_ends_desktop_share(
     buses: tuple[Gio.DBusConnection, Gio.DBusConnection],
     start_owner: Callable[[], subprocess.Popen[bytes]],
     tmp_path: Path,
@@ -616,5 +619,5 @@ def test_attach_names_stop_methods_without_host(
             own_watcher_name(host)
         owner = start_owner()
         until(diagnosed, timeout=10)
-    assert "framewisp --detach" in lines[0] and "Ctrl+C" in lines[0]
+    assert "framewisp --stop-sharing" in lines[0] and "Ctrl+C" in lines[0]
     assert owner.poll() is None

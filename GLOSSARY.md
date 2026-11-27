@@ -79,7 +79,7 @@ What limits a user to one desktop share at a time.
 _Avoid_: desktop lease, desktop reservation
 
 **Sharing indicator**:
-The tray item that shows a desktop share is active and can end it.
+The item in the desktop's tray that shows a desktop share is active and can end it.
 _Avoid_: tray item, tray icon
 
 ### Input and batches

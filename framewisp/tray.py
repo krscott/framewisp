@@ -1,4 +1,4 @@
-"""An attachment-owned StatusNotifierItem and a static D-Bus stop menu."""
+"""The sharing indicator: a StatusNotifierItem and a static D-Bus stop menu."""
 
 # pyright: reportMissingModuleSource=false
 
@@ -12,10 +12,10 @@ ITEM = "org.kde.StatusNotifierItem"
 MENU = "com.canonical.dbusmenu"
 ITEM_PATH = "/StatusNotifierItem"
 MENU_PATH = "/Menu"
-LABEL = "framewisp desktop sharing is active"
+LABEL = "framewisp desktop share is active"
 UNAVAILABLE = (
     "Sharing indicator unavailable: no compatible tray host or registration failed. "
-    "Stop with framewisp --detach (your configured shortcut) or Ctrl+C in this terminal."
+    "Stop with framewisp --stop-sharing (your configured shortcut) or Ctrl+C in this terminal."
 )
 
 
@@ -146,7 +146,7 @@ class SharingIndicator:
         if self.available != available:
             print(
                 (
-                    "Sharing indicator registered; the desktop controls icon visibility and placement."
+                    "Sharing indicator registered; the desktop controls its visibility and placement."
                     if available
                     else UNAVAILABLE
                 ),
