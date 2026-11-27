@@ -92,8 +92,14 @@ def main() -> None:
             x=x,
             y=y,
             pressed=bool(
-                state & (Gdk.ModifierType.BUTTON1_MASK | Gdk.ModifierType.BUTTON3_MASK)
+                state
+                & (
+                    Gdk.ModifierType.BUTTON1_MASK
+                    | Gdk.ModifierType.BUTTON2_MASK
+                    | Gdk.ModifierType.BUTTON3_MASK
+                )
             ),
+            middle=bool(state & Gdk.ModifierType.BUTTON2_MASK),
             right=bool(state & Gdk.ModifierType.BUTTON3_MASK),
             **modifier_state(state),
         )

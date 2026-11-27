@@ -62,7 +62,7 @@ KEYS = (
     | {character: character for character in PUNCTUATION.values()}
 )
 MODIFIERS = {"ctrl", "shift", "alt"}
-CLICK_BUTTONS = {"left": 1, "right": 3}
+CLICK_BUTTONS = {"left": 1, "middle": 2, "right": 3}
 SCROLL_BUTTONS = {"up": 4, "down": 5, "left": 6, "right": 7}
 
 

@@ -233,6 +233,54 @@ def test_caption_mode_selects_input_kinds(
     assert [caption.text for caption in captions] == expected
 
 
+# R-LOG-4
+def test_middle_button_captions_and_modes(tmp_path: Path) -> None:
+    log = input_log(
+        tmp_path,
+        ("click", {"x": 3, "y": 4, "button": "middle", "count": 1}, 1),
+        ("click", {"x": 3, "y": 4, "button": "middle", "count": 2}, 2),
+        (
+            "click",
+            {"x": 3, "y": 4, "button": "middle", "count": 1, "modifier": ["ctrl"]},
+            3,
+        ),
+        ("drag", {"x1": 5, "y1": 6, "x2": 7, "y2": 8, "button": "middle"}, 4),
+        (
+            "drag",
+            {
+                "x1": 5,
+                "y1": 6,
+                "x2": 7,
+                "y2": 8,
+                "button": "middle",
+                "modifier": ["shift"],
+            },
+            5,
+        ),
+    )
+    assert [
+        caption.text
+        for caption in captions_for_clip(
+            log, origin=0, stopped=9, captions=CaptionOptions(pointer="all")
+        )
+    ] == [
+        "middle click (3, 4)",
+        "Double middle click (3, 4)",
+        "Ctrl+middle click (3, 4)",
+        "middle drag (5, 6) to (7, 8)",
+        "Shift+middle drag (5, 6) to (7, 8)",
+    ]
+    assert [
+        caption.text
+        for caption in captions_for_clip(
+            log, origin=0, stopped=9, captions=CaptionOptions(pointer="modifiers")
+        )
+    ] == [
+        "Ctrl+middle click (3, 4)",
+        "Shift+middle drag (5, 6) to (7, 8)",
+    ]
+
+
 def test_every_input_action_has_exactly_one_caption_kind() -> None:
     assert KEY_ACTIONS | POINTER_ACTIONS == set(ACTION_FIELDS)
     assert not KEY_ACTIONS & POINTER_ACTIONS

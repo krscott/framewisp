@@ -115,7 +115,7 @@ for first, row in [
     (44, "zxcvbnm"),
 ]:
     KEYCODES.update({key: first + offset for offset, key in enumerate(row)})
-BUTTONS = {"left": 272, "right": 273}
+BUTTONS = {"left": 272, "middle": 274, "right": 273}
 COMMAND_CANCELLED = "Session stopped; command cancelled."
 # How long a command that failed in the desktop portal waits for a stop that
 # explains its failure.

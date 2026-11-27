@@ -133,8 +133,8 @@ uppercase names are placeholders. Put all `run` options before `-- APP ...`.
 | `inspect --json [--role ROLE] [--name TEXT] [--text TEXT] [--max-depth N] [--limit N] [--max-nodes N] [--timeout SECONDS]` | Read accessible controls in a headless session. Defaults/maxima: depth 8/64, results 20/100, nodes 256/4096, duration 5/10 seconds. All limits must be positive. |
 | `batch --file FILE` | Execute a JSON list of steps in a headless session, optionally take a screenshot, and print ordered results and timing. |
 | `move X Y [--move-duration SECONDS]` | Move without pressing a button; useful for hover tooltips. |
-| `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default) or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
-| `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move to the start, then drag along a straight line. BUTTON: `left` (default) or `right`. Default duration while holding the button: 0.4 seconds. |
+| `click X Y [--button BUTTON] [--count N] [--modifier MOD]...` | Move and click. BUTTON: `left` (default), `middle`, or `right`. N: `1` (default) or `2`, with 0.1 seconds between clicks. |
+| `drag X1 Y1 X2 Y2 [--button BUTTON] [--duration SECONDS] [--modifier MOD]...` | Move to the start, then drag along a straight line. BUTTON: `left` (default), `middle`, or `right`. Default duration while holding the button: 0.4 seconds. |
 | `scroll X Y DIRECTION [--ticks N]` | Send wheel ticks to the pane under X,Y. DIRECTION: `up`, `down`, `left`, or `right`. N is a positive integer, default 1; ticks are not pixels. |
 | `type [--private] [--interval SECONDS] TEXT` | Type printable Unicode into the focused control. Default interval: 0.08 seconds between characters. Quote TEXT as one shell argument; use `type -- '-text'` for text starting with a hyphen. |
 | `key [--private] CHORD` | Press and release a key or shortcut, such as `Return`, `Ctrl+a`, or `Ctrl+Shift+z`. Supported keys and modifiers are listed below. |

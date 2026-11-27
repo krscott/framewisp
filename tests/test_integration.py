@@ -600,7 +600,7 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
             {
                 "kind": "headless",
                 # COMMAND_PROTOCOL; this file cannot import framewisp.
-                "command_protocol": 7,
+                "command_protocol": 8,
                 "accessibility_bus": f"unix:path={tmp_path / 'accessibility.sock'}",
                 "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
@@ -1086,7 +1086,7 @@ def test_move_shows_tooltip_without_clicking(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
-@pytest.mark.parametrize("button", [None, "right"])
+@pytest.mark.parametrize("button", [None, "middle", "right"])
 @pytest.mark.parametrize("count", [None, 2])
 def test_click_delivers_button_and_recognized_count(
     headless_session: HeadlessSession, button: str | None, count: int | None
@@ -1116,8 +1116,9 @@ def test_click_delivers_button_and_recognized_count(
     assert [event["count"] for event in events] == [
         n for n in range(1, expected_count + 1) for _ in range(2)
     ]
+    expected_button = {"left": 1, "middle": 2, "right": 3}[button or "left"]
     for event in events:
-        assert event["button"] == (3 if button == "right" else 1)
+        assert event["button"] == expected_button
         assert (event["x"], event["y"]) == (200, 150)
 
 
@@ -1157,8 +1158,9 @@ def test_pointer_gesture_holds_and_releases_modifiers(
     events = input_events(headless_session)
     buttons = [event for event in events if event["event"] in {"press", "release"}]
     assert [event["event"] for event in buttons] == ["press", "release"]
+    expected_button = {"left": 1, "middle": 2, "right": 3}[button]
     for event in buttons:
-        assert event["button"] == (1 if button == "left" else 3)
+        assert event["button"] == expected_button
         for modifier in ("ctrl", "shift", "alt"):
             assert event[modifier] == (modifier in modifiers)
     names = {"ctrl": "Control_L", "shift": "Shift_L", "alt": "Alt_L"}
@@ -1174,6 +1176,7 @@ def test_pointer_gesture_holds_and_releases_modifiers(
         ]
         assert len(motion) > 2
         for event in motion:
+            assert event["middle"] == (button == "middle")
             assert event["right"] == (button == "right")
             for modifier in ("ctrl", "shift", "alt"):
                 assert event[modifier] == (modifier in modifiers)
@@ -1190,6 +1193,184 @@ def test_pointer_gesture_holds_and_releases_modifiers(
     ][-1]
     assert plain["button"] == 1
     assert not any(plain[modifier] for modifier in ("ctrl", "shift", "alt"))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("headless_session", ["probe", "x11-probe"], indirect=True)
+def test_middle_button_click_drag_and_batch(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_until(
+        lambda: any(
+            event["event"] == "ready" for event in input_events(headless_session)
+        )
+    )
+    cli(
+        headless_session.directory,
+        "click",
+        "--button",
+        "middle",
+        "--modifier",
+        "shift",
+        "200",
+        "150",
+    )
+    wait_until(
+        lambda: sum(
+            event["event"] == "release" for event in input_events(headless_session)
+        )
+        == 1
+    )
+    first = [
+        event
+        for event in input_events(headless_session)
+        if event["event"] in {"press", "release"}
+    ]
+    assert [event["event"] for event in first] == ["press", "release"]
+    for event in first:
+        assert event["button"] == 2
+        assert (event["x"], event["y"]) == (200, 150)
+        assert event["shift"] and not event["ctrl"] and not event["alt"]
+
+    before_drag = len(input_events(headless_session))
+    cli(
+        headless_session.directory,
+        "drag",
+        "--button",
+        "middle",
+        "--modifier",
+        "ctrl",
+        "--modifier",
+        "alt",
+        "--duration",
+        "0.3",
+        "100",
+        "100",
+        "500",
+        "300",
+    )
+    wait_until(
+        lambda: sum(
+            event["event"] == "release"
+            for event in input_events(headless_session)[before_drag:]
+        )
+        == 1
+    )
+    drag_events = input_events(headless_session)[before_drag:]
+    drag_buttons = [
+        event for event in drag_events if event["event"] in {"press", "release"}
+    ]
+    assert [event["event"] for event in drag_buttons] == ["press", "release"]
+    assert (drag_buttons[0]["x"], drag_buttons[0]["y"]) == (100, 100)
+    assert (drag_buttons[1]["x"], drag_buttons[1]["y"]) == (500, 300)
+    for event in drag_buttons:
+        assert event["button"] == 2
+        assert event["ctrl"] and event["alt"] and not event["shift"]
+    drag_motion = [
+        event
+        for event in drag_events
+        if event["event"] == "motion" and event["pressed"]
+    ]
+    assert len(drag_motion) > 2
+    for event in drag_motion:
+        assert event["middle"] and not event["right"]
+        assert event["ctrl"] and event["alt"] and not event["shift"]
+
+    before_batch = len(input_events(headless_session))
+    plan = tmp_path / "middle.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "action": "click",
+                        "x": 250,
+                        "y": 180,
+                        "button": "middle",
+                        "count": 2,
+                        "modifier": ["ctrl"],
+                        "move_duration": 0,
+                    },
+                    {
+                        "action": "drag",
+                        "x1": 150,
+                        "y1": 220,
+                        "x2": 450,
+                        "y2": 220,
+                        "button": "middle",
+                        "modifier": ["shift"],
+                        "duration": 0.2,
+                        "move_duration": 0,
+                    },
+                ]
+            }
+        )
+    )
+    batch = json.loads(
+        cli(headless_session.directory, "batch", "--file", str(plan)).stdout
+    )
+    assert batch["status"] == "completed"
+    wait_until(
+        lambda: sum(
+            event["event"] == "release"
+            for event in input_events(headless_session)[before_batch:]
+        )
+        == 3
+    )
+    batch_events = input_events(headless_session)[before_batch:]
+    batch_buttons = [
+        event for event in batch_events if event["event"] in {"press", "release"}
+    ]
+    assert [event["event"] for event in batch_buttons] == ["press", "release"] * 3
+    assert [event["button"] for event in batch_buttons] == [2] * 6
+    assert [event["count"] for event in batch_buttons[:4]] == [1, 1, 2, 2]
+    for event in batch_buttons[:4]:
+        assert (event["x"], event["y"]) == (250, 180)
+        assert event["ctrl"] and not event["shift"] and not event["alt"]
+    assert (batch_buttons[4]["x"], batch_buttons[4]["y"]) == (150, 220)
+    assert (batch_buttons[5]["x"], batch_buttons[5]["y"]) == (450, 220)
+    for event in batch_buttons[4:]:
+        assert event["shift"] and not event["ctrl"] and not event["alt"]
+    batch_motion = [
+        event
+        for event in batch_events
+        if event["event"] == "motion" and event["pressed"]
+    ]
+    assert len(batch_motion) > 2
+    for event in batch_motion:
+        assert event["middle"] and not event["right"]
+        assert event["shift"] and not event["ctrl"] and not event["alt"]
+
+    cli(headless_session.directory, "click", "600", "100")
+    wait_until(
+        lambda: sum(
+            event["event"] == "release"
+            for event in input_events(headless_session)[before_batch:]
+        )
+        == 4
+    )
+    plain = [
+        event for event in input_events(headless_session) if event["event"] == "press"
+    ][-1]
+    assert plain["button"] == 1
+    assert not any(plain[modifier] for modifier in ("ctrl", "shift", "alt"))
+    logged = [
+        json.loads(line)
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    middle_starts = [
+        event
+        for event in logged
+        if event["event"] == "start" and event["parameters"].get("button") == "middle"
+    ]
+    assert [event["action"] for event in middle_starts] == [
+        "click",
+        "drag",
+        "click",
+        "drag",
+    ]
 
 
 # R-INPUT-1
@@ -2252,6 +2433,61 @@ def test_mid_session_clip_click_pings_gestures(
     if compact:
         assert summary["duration_seconds"] < elapsed - 1
     assert_click_pings_mark_gestures(headless_session, clip, timed=not compact)
+
+
+# R-REC-5, R-REC-6, R-LOG-4
+@pytest.mark.integration
+@pytest.mark.parametrize("headless_session", ["probe"], indirect=True)
+def test_middle_drag_recording_shows_ping_hold_disc_and_caption(
+    headless_session: HeadlessSession, tmp_path: Path
+) -> None:
+    wait_for_input_probe_window(headless_session)
+    clip = tmp_path / "middle-drag.mp4"
+    cli(
+        headless_session.directory,
+        "record-start",
+        "--pointer-captions",
+        "all",
+        str(clip),
+    )
+    time.sleep(0.5)
+    cli(
+        headless_session.directory,
+        "drag",
+        "--button",
+        "middle",
+        "--duration",
+        "0.6",
+        "200",
+        "250",
+        "600",
+        "250",
+    )
+    time.sleep(0.8)
+    cli(headless_session.directory, "record-stop")
+    logged = [
+        json.loads(line)
+        for line in (headless_session.directory / "inputs.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert [event["event"] for event in logged] == ["start", "press", "release", "end"]
+    assert all(
+        event["action"] == "drag" and event["parameters"]["button"] == "middle"
+        for event in logged
+    )
+    origin = clip_origin(headless_session)
+    start_time = logged[0]["time"]
+    press_time = logged[1]["time"]
+    release_time = logged[2]["time"]
+    ping_frames = pointer_overlay_frames(clip, 200, 250, contrast=120)
+    assert len(ping_frames) >= 4
+    assert abs(ping_frames[0] / 30 - (press_time - origin)) <= 0.05
+    hold_frames = pointer_overlay_frames(clip, 600, 250)
+    assert len(hold_frames) >= 3
+    assert abs(hold_frames[0] / 30 - (release_time - origin)) <= 0.05
+    idle = clip_patch(clip, start_time - origin - 0.15)
+    assert caption_differs(clip_patch(clip, start_time - origin + 0.4), idle)
 
 
 # R-REC-7, R-LOG-3

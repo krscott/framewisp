@@ -753,7 +753,6 @@ def test_invalid_scroll_ticks(ticks: str, tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "option,value",
     [
-        ("--button", "middle"),
         ("--button", "nope"),
         ("--count", "0"),
         ("--count", "-1"),
@@ -784,6 +783,19 @@ def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
     assert "session.json" not in result.stderr
 
 
+@pytest.mark.parametrize("command", ["click", "drag"])
+def test_pointer_help_lists_middle_button(command: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", "demo", command, "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 0
+    assert "{left,middle,right}" in result.stdout
+
+
 # R-INPUT-3
 @pytest.mark.parametrize(
     "action,coordinates",
@@ -794,7 +806,7 @@ def test_invalid_click_options(option: str, value: str, tmp_path: Path) -> None:
     [
         ["--modifier", "super"],
         ["--modifier", "Ctrl", "--modifier", "ctrl"],
-        ["--button", "middle"],
+        ["--button", "nope"],
     ],
 )
 def test_invalid_pointer_gesture(

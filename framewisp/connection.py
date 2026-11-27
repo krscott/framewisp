@@ -15,7 +15,7 @@ from typing import Literal, TypeGuard, TypeVar, cast, get_args
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 7
+COMMAND_PROTOCOL = 8
 MAX_REQUEST_BYTES = 1024 * 1024
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
