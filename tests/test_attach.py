@@ -253,7 +253,7 @@ class Portal:
                 time.sleep(.01)
             raise RuntimeError('g-io-error-quark: The connection is closed (18)')
         if (root / 'fail').exists():
-            # Include the values, as a real backend error might.
+            # Include the values, as a real portal error might.
             raise RuntimeError(f'injected portal failure: {values!r}')
         with (root / 'events').open('a') as out:
             out.write(repr((method, values)) + '\\n')

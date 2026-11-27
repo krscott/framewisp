@@ -201,9 +201,11 @@ def session_lock(session_dir: Path) -> Generator[int, None, None]:
             raise SessionError(
                 f"{session_dir} is in use by a live session, or by supervisors "
                 "cleaning up after a runner that just died.\n"
-                f"To end a live session, run `{stop}`, press Ctrl+C in the terminal "
-                "of an attached or teaching session, or use another session directory.\n"
-                "If the runner just died, wait a few seconds and retry."
+                "To end a live session, press Ctrl+C in its runner's terminal. "
+                f"Once a headless session is ready, `{stop}` also ends it.\n"
+                f"Or use a session directory other than {session_dir}.\n"
+                "If the session is still starting or its runner just died, "
+                "wait a few seconds and retry."
             ) from None
         yield descriptor
     finally:
@@ -343,7 +345,8 @@ def stale_desktop_session(session_dir: Path) -> str:
     return (
         f"{session_dir} records an attached or teaching session, which recover does not clean up. "
         "Nothing was removed.\n"
-        "First confirm that the runner of that attached or teaching session has stopped: "
+        f"If {session_dir / LOCK} was moved or replaced, first confirm that the runner "
+        "of that attached or teaching session has stopped: "
         "the terminal that ran attach or teach is back at its prompt. "
         "Then start it again with attach or teach "
         "(for teach, with a new lesson directory), "

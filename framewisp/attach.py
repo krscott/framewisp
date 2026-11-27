@@ -480,7 +480,7 @@ def attach_session(
         )
     if x11_desktop():
         print(
-            "This is an X11 desktop: programs running as you can already read the screen\n"
+            "This is an X11 desktop: programs running as you can already read the desktop display\n"
             "and send input without the desktop dialog. Approving it does not limit them.",
             flush=True,
         )

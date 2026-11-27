@@ -165,8 +165,11 @@ def test_live_runner_and_copied_or_damaged_metadata(tmp_path: Path) -> None:
         with pytest.raises(SessionError, match="is in use by a live session") as busy:
             recover_session(session_dir)
         stop = shlex.join(["framewisp", str(session_dir), "stop"])
-        assert f"run `{stop}`" in str(busy.value)
-        assert "wait a few seconds and retry" in str(busy.value)
+        message = str(busy.value)
+        assert message.index("Ctrl+C") < message.index(f"`{stop}` also ends it")
+        assert f"other than {session_dir}." in message
+        assert "still starting" in message
+        assert "wait a few seconds and retry" in message
         with pytest.raises(SessionError, match="does not belong"):
             recover_session(copied)
         assert (runtime_dir / "important").read_text() == "live resource"
@@ -701,7 +704,6 @@ def test_null_runtime_directory_identity_steps_use_the_journal_path(
     assert recover_session(session_dir) == 0
 
 
-# R-LIFE-7
 @pytest.mark.parametrize("kind", ["attached", "teaching"])
 def test_stale_desktop_session_gets_desktop_session_steps(
     tmp_path: Path, kind: str
@@ -714,6 +716,7 @@ def test_stale_desktop_session_gets_desktop_session_steps(
     assert "--stop-sharing" not in message
     assert "attach again" not in message
     assert "(for teach, with a new lesson directory)" in message
+    assert f"If {tmp_path / '.session.lock'} was moved or replaced" in message
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0

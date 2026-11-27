@@ -459,14 +459,14 @@ sharing indicator instead.
 ### X11 desktops
 
 On X11 the portal dialog asks for consent but is not a permission boundary. Any
-program running as you can read the screen and send input through the X display
+program running as you can read the desktop display and send input through the X display
 without it. GNOME on Xorg shows no screen-sharing indicator of its own, so the
 framewisp sharing indicator is the visible sign of sharing. Its dialog leaves remote
 interaction off until you switch it on; attach fails without it.
 
 GNOME's X11 backend leaves keys and buttons held when sharing ends. Attach
-therefore starts a release helper that has no screen or portal access. When the
-runner exits, however it exits, the helper releases every key and button
+therefore starts a release helper, which takes no screenshots and does not use
+the portal. When the runner exits, however it exits, the helper releases every key and button
 held by the X server's test input device, which only injected input uses. Your
 physical keyboard and mouse are unaffected. Attach refuses to start on X11
 without `DISPLAY` or a working `xdotool`; the Nix package provides `xdotool`.
@@ -1224,10 +1224,11 @@ After runner SIGKILL or interrupted startup, run `framewisp SESSION recover`
 with the framewisp version that started the session,
 then reuse the directory with `framewisp SESSION run -- APP`. Supervisors start
 cleanup on runner loss. Recovery refuses while the session lock is held. A
-live session holds it: stop that session with `framewisp SESSION stop`, or with
-Ctrl+C in an attached or teaching session's terminal, or use another session
-directory. Supervisors also hold it while they clean up after a runner that just
-died: wait a few seconds and retry. Recovery removes the
+live session holds it: stop that session with Ctrl+C in its runner's terminal
+(for a headless session that is ready, `framewisp SESSION stop` also works), or
+use another session directory. A starting session holds it before it is ready,
+and supervisors hold it while they clean up after a runner that just died: wait
+a few seconds and retry. Recovery removes the
 runtime directory and stale session metadata, preserves logs and clips, and
 prints JSON with `status: "recovered"`. Copy those diagnostics before the next
 session replaces its logs. If a private clip remains, the JSON also has
@@ -1240,7 +1241,7 @@ Recovery never signals PIDs from session metadata or follows its runtime directo
 The recovery journal records the identities (device and inode) of the session directory,
 session lock and runtime directory. Recovery refuses a journal copied into a different
 session directory, or one whose recorded lock or runtime directory identity does not match. Keep `.session.lock` in place, including between sessions.
-If it is deleted or replaced, recovery refuses, removes nothing (R-LIFE-5), and
+If it does not match the identity the recovery journal recorded, recovery refuses, removes nothing (R-LIFE-5), and
 prints the steps to stop the session or clean up manually. `stop` still works. Use a private session directory. Startup and recovery reject session
 directories owned by another user or writable by the group or others. Same-user programs that deliberately
 replace files or remove the session lock or recovery journal are outside this protocol's protection.
