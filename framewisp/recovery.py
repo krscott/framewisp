@@ -418,6 +418,7 @@ def headless_runner_stopped(session_dir: Path) -> bool:
         if not stat.S_ISREG(info.st_mode):
             return False
         try:
+            # flock has no non-locking query; a shared lock avoids blocking other readers.
             fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
         except BlockingIOError:
             return False

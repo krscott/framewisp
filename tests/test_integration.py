@@ -6162,7 +6162,12 @@ def test_killed_runner_session_commands_suggest_recover(
         assert "runner has stopped" in result.stderr
         assert f"`{recover}`" in result.stderr
         assert "sandbox" not in result.stderr
-        assert result.stdout == ""
+        if arguments[0] == "inspect":
+            observation = json.loads(result.stdout)
+            assert observation["status"] == "unavailable"
+            assert any(f"`{recover}`" in hint for hint in observation["hints"])
+        else:
+            assert result.stdout == ""
 
     recovered = cli(session_dir, "recover")
     assert json.loads(recovered.stdout)["status"] == "recovered"

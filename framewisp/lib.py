@@ -64,14 +64,12 @@ from framewisp.recovery import (
     JOURNAL_TEMPORARY,
     LOCK,
     PRIVATE_CLIP,
-    headless_runner_stopped,
     headless_runtime_dir,
     kept_clip,
     records_desktop_session,
     refuse_unrecovered_session,
     session_lock,
     stale_desktop_session,
-    stopped_runner_message,
 )
 
 SWAY_CONFIG = """\
@@ -752,19 +750,18 @@ def session_command(
             with connection.makefile("r") as response:
                 line = response.readline()
     except OSError as connection_error:
-        if headless_runner_stopped(session_dir):
-            raise SessionError(stopped_runner_message(session_dir)) from None
+        hint = SOCKET_ACCESS_HINT
+        if isinstance(connection_error, ConnectionRefusedError):
+            hint = (
+                "The session may be stopping, or supervisors may still be cleaning up "
+                "after its runner died; wait a few seconds and retry.\n"
+                + SOCKET_ACCESS_HINT
+            )
         raise SessionError(
-            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{SOCKET_ACCESS_HINT}"
+            f"Cannot reach session {session_dir} at {endpoint}: {connection_error}\n{hint}"
         ) from None
-    if not line:
-        if headless_runner_stopped(session_dir):
-            raise SessionError(stopped_runner_message(session_dir))
-        print(
-            f"Session {session_dir} disconnected before {command} completed.",
-            file=sys.stderr,
-        )
-        return 1
+    if not line.endswith("\n"):
+        raise SessionError(f"Disconnected before {command} completed.")
     result = json.loads(line)
     error = result["error"]
     if result["data"] is not None and (error is None or command == "batch"):
@@ -1277,22 +1274,15 @@ def screenshot(
     # grim, not the VNC connection: framebuffer requests over VNC timed out
     # while input worked, for an unknown reason. That was seen with Sway 1.12,
     # wlroots 0.20.2, wayvnc 0.10.1 and vncdotool 1.2.0.
-    try:
-        result = display_command(
-            session.session_directory,
-            ["grim", "-t", "png", *selector, str(destination)],
-            runtime_dir=session.runtime_directory,
-            display=session.wayland_display,
-            env=session_environment(session),
-            timeout=10,
-            cancelled=cancelled,
-        )
-    except SessionError:
-        if headless_runner_stopped(session.session_directory):
-            raise SessionError(
-                stopped_runner_message(session.session_directory)
-            ) from None
-        raise
+    result = display_command(
+        session.session_directory,
+        ["grim", "-t", "png", *selector, str(destination)],
+        runtime_dir=session.runtime_directory,
+        display=session.wayland_display,
+        env=session_environment(session),
+        timeout=10,
+        cancelled=cancelled,
+    )
     if metadata and result == 0:
         print(
             json.dumps(

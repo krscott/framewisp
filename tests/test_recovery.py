@@ -19,7 +19,6 @@ import pytest
 
 from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
-from framewisp.lib import screenshot, session_command
 from framewisp.recovery import (
     JOURNAL,
     JOURNAL_TEMPORARY,
@@ -1484,7 +1483,12 @@ def test_session_commands_suggest_recover_when_runner_stopped(
     assert f"`{recover}`" in result.stderr
     assert "sandbox" not in result.stderr
     assert "Traceback" not in result.stderr
-    assert result.stdout == ""
+    if arguments[0] == "inspect":
+        observation = json.loads(result.stdout)
+        assert observation["status"] == "unavailable"
+        assert any(f"`{recover}`" in hint for hint in observation["hints"])
+    else:
+        assert result.stdout == ""
 
 
 @pytest.mark.parametrize("stale_socket", [True, False], ids=["refused", "missing"])
@@ -1497,41 +1501,141 @@ def test_session_commands_keep_sandbox_hint_when_runner_is_alive(
         session_lock(session_dir) as lock,
         headless_runtime_dir(session_dir, lock) as runtime_dir,
     ):
-        metadata = write_headless_metadata(
-            session_dir, runtime_dir, stale_socket=stale_socket
+        write_headless_metadata(session_dir, runtime_dir, stale_socket=stale_socket)
+        status = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
         )
-        with pytest.raises(SessionError, match="sandbox") as command_error:
-            session_command(metadata, "status")
-        assert "runner has stopped" not in str(command_error.value)
-        assert "recover" not in str(command_error.value)
-        with pytest.raises(SessionError, match="sandbox") as screenshot_error:
-            screenshot(metadata, tmp_path / "out.png")
-        assert "runner has stopped" not in str(screenshot_error.value)
-        assert "recover" not in str(screenshot_error.value)
+        assert status.returncode == 1
+        assert "sandbox" in status.stderr
+        assert "runner has stopped" not in status.stderr
+        assert "recover" not in status.stderr
+        assert ("wait a few seconds and retry" in status.stderr) is stale_socket
+
+        shot = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "framewisp",
+                str(session_dir),
+                "screenshot",
+                str(tmp_path / "out.png"),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert shot.returncode == 1
+        assert "sandbox" in shot.stderr
+        assert "runner has stopped" not in shot.stderr
+        assert "recover" not in shot.stderr
 
 
-def test_session_command_suggests_recover_on_empty_reply_after_runner_stopped(
+@pytest.mark.parametrize("reply_bytes", [b"", b'{"data": '], ids=["eof", "truncated"])
+@pytest.mark.parametrize("live", [False, True], ids=["stopped", "live"])
+def test_session_command_handles_eof_and_truncated_reply(
+    tmp_path: Path, reply_bytes: bytes, live: bool
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    runtime_dir = runtime_dir_path(session_dir)
+
+    def run_server(command_socket: Path) -> subprocess.CompletedProcess[str]:
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(str(command_socket))
+            server.listen(1)
+
+            def drain_and_close() -> None:
+                connection, _ = server.accept()
+                with connection:
+                    # Drain the request so closing sends EOF rather than ECONNRESET.
+                    with connection.makefile("r") as request:
+                        request.readline()
+                    if reply_bytes:
+                        connection.sendall(reply_bytes)
+
+            thread = threading.Thread(target=drain_and_close, daemon=True)
+            thread.start()
+            try:
+                return subprocess.run(
+                    [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+            finally:
+                thread.join(timeout=5)
+
+    if live:
+        with (
+            session_lock(session_dir) as lock,
+            headless_runtime_dir(session_dir, lock) as live_runtime,
+        ):
+            metadata = write_headless_metadata(
+                session_dir, live_runtime, stale_socket=False
+            )
+            result = run_server(metadata.command_socket)
+        assert result.returncode == 1
+        assert "Disconnected before status completed" in result.stderr
+        assert "runner has stopped" not in result.stderr
+        assert "Traceback" not in result.stderr
+    else:
+        with session_lock(session_dir) as lock:
+            write_journal(session_dir, runtime_dir, lock, created=False)
+            runtime_dir.mkdir(mode=0o700)
+            write_journal(session_dir, runtime_dir, lock, created=True)
+        try:
+            metadata = write_headless_metadata(
+                session_dir, runtime_dir, stale_socket=False
+            )
+            result = run_server(metadata.command_socket)
+            recover = shlex.join(["framewisp", str(session_dir), "recover"])
+            assert result.returncode == 1
+            assert "runner has stopped" in result.stderr
+            assert f"`{recover}`" in result.stderr
+            assert "Traceback" not in result.stderr
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+
+
+def test_app_exit_with_stopped_runner_keeps_exit_code_and_suggests_recover(
     abandoned: tuple[Path, Path],
 ) -> None:
-    session_dir, runtime_dir = abandoned
-    metadata = write_headless_metadata(session_dir, runtime_dir, stale_socket=False)
-    with socket.socket(socket.AF_UNIX) as server:
-        server.bind(str(metadata.command_socket))
-        server.listen(1)
-
-        def accept_and_close() -> None:
-            connection, _ = server.accept()
-            connection.close()
-
-        thread = threading.Thread(target=accept_and_close, daemon=True)
-        thread.start()
-        try:
-            with pytest.raises(SessionError, match="runner has stopped") as failure:
-                session_command(metadata, "status")
-        finally:
-            thread.join(timeout=5)
+    session_dir, _ = abandoned
+    (session_dir / "app-exit.json").write_text(json.dumps({"returncode": 2, "time": 0}))
     recover = shlex.join(["framewisp", str(session_dir), "recover"])
-    assert f"`{recover}`" in str(failure.value)
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "App exited: exit 2" in result.stderr
+    assert str(session_dir / "app.log") in result.stderr
+    assert "runner has stopped" in result.stderr
+    assert f"`{recover}`" in result.stderr
+
+    # After clean recovery, an app-exit record alone does not suggest recover.
+    assert recover_session(session_dir) == 0
+    (session_dir / "app-exit.json").write_text(json.dumps({"returncode": 2, "time": 0}))
+    clean = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert clean.returncode == 1
+    assert "App exited: exit 2" in clean.stderr
+    assert "runner has stopped" not in clean.stderr
+    assert "recover" not in clean.stderr
 
 
 def test_headless_runner_stopped_verifies_lock_and_journal(
