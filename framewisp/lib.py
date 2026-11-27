@@ -23,6 +23,7 @@ from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.compact import ffprobe
 from framewisp.connection import (
     COMMAND_PROTOCOL,
+    HeadlessSessionMetadata,
     parse_request_fields,
     receive_request,
     reply,
@@ -712,7 +713,7 @@ class Recording:
 
 
 def session_command(
-    session_dir: Path,
+    session: HeadlessSessionMetadata,
     command: str,
     clip_destination: Path | None = None,
     *,
@@ -722,7 +723,7 @@ def session_command(
     compact: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> int:
-    metadata = json.loads((session_dir / "session.json").read_text())
+    session_dir = session.session_directory
     request: dict[str, object] = {
         "command": command,
         "session_directory": str(session_dir),
@@ -741,7 +742,7 @@ def session_command(
     message = (json.dumps(request) + "\n").encode()
     if len(message) > MAX_REQUEST_BYTES:
         raise SessionError("Session request exceeds the 1 MiB limit.")
-    endpoint = Path(metadata["command_socket"])
+    endpoint = session.command_socket
     try:
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))
@@ -1102,20 +1103,28 @@ def _run_session(
                     command, log=session_dir / "app.log", env=app_env, output=output
                 )
             )
-            command_socket = str(runtime_dir / "command.sock")
+            command_socket = runtime_dir / "command.sock"
             listener = stack.enter_context(socket.socket(socket.AF_UNIX))
-            listener.bind(command_socket)
+            listener.bind(str(command_socket))
             listener.listen()
             listener.settimeout(0.1)
+            session = HeadlessSessionMetadata(
+                session_directory=session_dir,
+                command_socket=command_socket,
+                runtime_directory=runtime_dir,
+                accessibility_bus=env["AT_SPI_BUS_ADDRESS"],
+                wayland_display=display,
+                width=size[0],
+                height=size[1],
+                x11_display=x11_display,
+            )
             inputs = InputWorker(
-                session_dir,
+                session,
                 input_client,
                 stop,
-                x11=x11,
-                size=size,
                 caption_capture=recording.caption_capture,
                 screenshot=lambda path, cancelled: batch_screenshot(
-                    recording, path, cancelled
+                    session, recording, path, cancelled
                 ),
             )
             stack.callback(inputs.close)
@@ -1131,8 +1140,8 @@ def _run_session(
                         {
                             "kind": "headless",
                             "command_protocol": COMMAND_PROTOCOL,
-                            "accessibility_bus": env["AT_SPI_BUS_ADDRESS"],
-                            "command_socket": command_socket,
+                            "accessibility_bus": session.accessibility_bus,
+                            "command_socket": str(session.command_socket),
                             "runtime_directory": directory,
                             "wayland_display": display,
                             "width": size[0],
@@ -1228,16 +1237,15 @@ def _run_session(
                 )
 
 
-def session_environment(session_dir: Path) -> dict[str, str]:
-    metadata = json.loads((session_dir / "session.json").read_text())
+def session_environment(session: HeadlessSessionMetadata) -> dict[str, str]:
     return os.environ | {
-        "XDG_RUNTIME_DIR": metadata["runtime_directory"],
-        "WAYLAND_DISPLAY": metadata["wayland_display"],
+        "XDG_RUNTIME_DIR": str(session.runtime_directory),
+        "WAYLAND_DISPLAY": session.wayland_display,
     }
 
 
 def screenshot(
-    session_dir: Path,
+    session: HeadlessSessionMetadata,
     destination: Path,
     *,
     region: tuple[int, int, int, int] | None = None,
@@ -1249,16 +1257,10 @@ def screenshot(
             "screenshot --json requires a file path; '-' writes PNG to stdout."
         )
     if str(destination) != "-":
-        # Read the active clip's destination from session metadata, not from the
-        # runner: record-stop renders in the runner's command loop, so asking
-        # the runner would wait for it.
-        clip_destination = json.loads((session_dir / "session.json").read_text())[
-            "clip_destination"
-        ]
-        error = screenshot_path_error(
-            destination,
-            Path(clip_destination) if clip_destination is not None else None,
-        )
+        # Check the active clip destination from the parsed session metadata,
+        # not from the runner: record-stop renders in the runner's command
+        # loop, so asking the runner would wait for it.
+        error = screenshot_path_error(destination, session.clip_destination)
         if error is not None:
             raise SessionError(error)
     selector = ["-o", "HEADLESS-1"]
@@ -1266,11 +1268,7 @@ def screenshot(
     x = y = 0
     display_width = display_height = 0
     if region is not None or metadata:
-        session_metadata = json.loads((session_dir / "session.json").read_text())
-        display_width, display_height = (
-            session_metadata["width"],
-            session_metadata["height"],
-        )
+        display_width, display_height = session.width, session.height
         x, y, width, height = region or (0, 0, display_width, display_height)
         if x < 0 or y < 0 or width <= 0 or height <= 0:
             raise SessionError(
@@ -1288,9 +1286,11 @@ def screenshot(
     # while input worked, for an unknown reason. That was seen with Sway 1.12,
     # wlroots 0.20.2, wayvnc 0.10.1 and vncdotool 1.2.0.
     result = display_command(
-        session_dir,
+        session.session_directory,
         ["grim", "-t", "png", *selector, str(destination)],
-        env=session_environment(session_dir),
+        runtime_dir=session.runtime_directory,
+        display=session.wayland_display,
+        env=session_environment(session),
         timeout=10,
         cancelled=cancelled,
     )
@@ -1313,7 +1313,10 @@ def screenshot(
 
 
 def batch_screenshot(
-    recording: Recording, destination: Path, cancelled: Callable[[], bool]
+    session: HeadlessSessionMetadata,
+    recording: Recording,
+    destination: Path,
+    cancelled: Callable[[], bool],
 ) -> int:
     """Publish only a complete PNG, without overwriting another client's artifact."""
     try:
@@ -1321,7 +1324,7 @@ def batch_screenshot(
             prefix=".framewisp-screenshot-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "screenshot.png"
-            screenshot(recording.session_dir, temporary, cancelled=cancelled)
+            screenshot(session, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Screenshot cancelled; caller disconnected or session stopped."

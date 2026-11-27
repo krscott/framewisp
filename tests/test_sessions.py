@@ -184,7 +184,14 @@ def test_cli_resolves_named_session_without_legacy_fallback(
     session_dir = resolve_session_dir("browser")
     session_dir.mkdir(parents=True)
     metadata = (
-        {"kind": "attached", "command_protocol": COMMAND_PROTOCOL} if attached else {}
+        {
+            "kind": "attached",
+            "command_protocol": COMMAND_PROTOCOL,
+            "command_socket": str(session_dir / "command.sock"),
+            "share_token": "token",
+        }
+        if attached
+        else {}
     )
     (session_dir / "session.json").write_text(json.dumps(metadata))
     legacy = tmp_path / "browser"

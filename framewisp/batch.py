@@ -7,9 +7,9 @@ from typing import cast
 
 from framewisp.actions import InputAction
 from framewisp.checks import CHECK_KINDS, Check
+from framewisp.connection import MAX_REQUEST_BYTES as MAX_REQUEST_BYTES
 from framewisp.pointer import DEFAULT_MOVE_DURATION
 
-MAX_REQUEST_BYTES = 1024 * 1024
 MAX_STEPS = 256
 MAX_TEXT = 16384
 MAX_SCROLL_TICKS = 10000

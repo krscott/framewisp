@@ -601,9 +601,13 @@ def test_disconnected_display_error_has_context(tmp_path: Path) -> None:
                 "kind": "headless",
                 # COMMAND_PROTOCOL; this file cannot import framewisp.
                 "command_protocol": 7,
+                "accessibility_bus": f"unix:path={tmp_path / 'accessibility.sock'}",
                 "command_socket": str(tmp_path / "command.sock"),
                 "runtime_directory": str(tmp_path),
                 "wayland_display": "wayland-does-not-exist",
+                "width": 1280,
+                "height": 720,
+                "x11_display": None,
                 "clip_destination": None,
             }
         )

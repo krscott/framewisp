@@ -80,17 +80,17 @@ def display_command(
     session_dir: Path,
     command: list[str],
     *,
+    runtime_dir: Path,
+    display: str,
     timeout: float,
     env: dict[str, str] | None = None,
-    display: str | None = None,
     input_text: str | None = None,
     cancelled: Callable[[], bool] | None = None,
     input_content: bool = False,
 ) -> int:
-    metadata = json.loads((session_dir / "session.json").read_text())
     context = (
-        f"{command[0]} failed for session {session_dir}, display {display or metadata['wayland_display']}, "
-        f"runtime directory {metadata['runtime_directory']}"
+        f"{command[0]} failed for session {session_dir}, display {display}, "
+        f"runtime directory {runtime_dir}"
     )
     try:
         with subprocess.Popen(

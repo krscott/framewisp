@@ -2,7 +2,6 @@ import argparse
 import json
 import math
 import os
-import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -11,12 +10,11 @@ from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import (
-    COMMAND_PROTOCOL,
-    DESKTOP_KINDS,
     TEACHING_COMMANDS,
-    DesktopKind,
+    DesktopSessionMetadata,
+    SessionMetadata,
+    read_session_metadata,
     request_desktop,
-    session_kind,
     teaching_refusal,
 )
 from framewisp.desktop import stop_sharing
@@ -490,7 +488,6 @@ def main() -> None:
         layout = clip_layout((args.width, args.height), args.console_panel)
         if isinstance(layout, str):
             parser.error(layout)
-    metadata_path = session_dir / "session.json"
     if args.command == "teach":
         if not args.goal.strip():
             parser.error("--goal must not be blank")
@@ -504,174 +501,137 @@ def main() -> None:
             parser.error(
                 f"The lesson's parent must be an existing writable directory: {parent}"
             )
-    desktop: DesktopKind | None = None
-    if args.command not in {"run", "attach", "teach", "recover"}:
-        if args.command == "screenshot" and args.delay:
-            # Wait first, so that the checks below see the session the screenshot shows.
-            time.sleep(args.delay)
-        exit_message = recorded_app_exit(session_dir)
-        if exit_message is not None:
-            parser.exit(1, exit_message + "\n")
-        if not metadata_path.exists():
-            parser.exit(
-                1,
-                "Session is disconnected. Start run, or ask the user to run attach or teach in another terminal.\n",
-            )
+    if args.command in {"run", "attach", "teach", "recover"}:
         try:
-            metadata = json.loads(metadata_path.read_text())
-            protocol = metadata.get("command_protocol")
-            published_kind = session_kind(metadata)
-        except (OSError, ValueError, RecursionError, AttributeError) as error:
-            parser.exit(1, f"Cannot read session metadata: {error}\n")
-        # Every session command passes here, so none needs its own check
-        # (R-CONTROL-3).
-        if protocol != COMMAND_PROTOCOL:
-            published = (
-                "no command protocol"
-                if protocol is None
-                else f"command protocol {protocol!r}"
-            )
-            if published_kind in DESKTOP_KINDS:
-                remedy = (
-                    "Ask the user to end it with Ctrl+C in its terminal if it is "
-                    "still running, then to start it again with this version "
-                    "(for teach, with a new lesson directory)."
-                )
-            else:
-                remedy = (
-                    "Stop its runner with Ctrl+C or SIGTERM. If the runner has "
-                    f"died, run `{shlex.join(['framewisp', str(session_dir), 'recover'])}` "
-                    "with the framewisp version that started the session. Then start the "
-                    "session again with this version."
-                )
-            parser.exit(
-                1,
-                f"Session {session_dir} was started by another version of framewisp: "
-                f"it publishes {published} and this version uses {COMMAND_PROTOCOL}. "
-                f"{remedy}\n",
-            )
-        if published_kind is None:
-            parser.exit(
-                1,
-                f"Cannot read session metadata: {metadata_path} publishes no known "
-                "session kind.\n",
-            )
-        if published_kind != "headless":
-            desktop = published_kind
-        if desktop == "teaching" and args.command not in TEACHING_COMMANDS:
-            parser.exit(1, f"Session {session_dir}: {teaching_refusal(args.command)}\n")
+            result = dispatch_lifecycle(session_dir, args)
+        except (SessionError, OSError, subprocess.TimeoutExpired) as error:
+            parser.exit(1, f"Session {session_dir}: {error}\n")
+        raise SystemExit(result)
+    if args.command == "screenshot" and args.delay:
+        # Wait first, so that the single read below sees the session the screenshot shows.
+        time.sleep(args.delay)
+    exit_message = recorded_app_exit(session_dir)
+    if exit_message is not None:
+        parser.exit(1, exit_message + "\n")
+    session = read_session_metadata(session_dir)
+    if isinstance(session, str):
+        parser.exit(1, session + "\n")
+    if (
+        isinstance(session, DesktopSessionMetadata)
+        and session.kind == "teaching"
+        and args.command not in TEACHING_COMMANDS
+    ):
+        parser.exit(1, f"Session {session_dir}: {teaching_refusal(args.command)}\n")
     try:
-        result = dispatch(session_dir, args, desktop=desktop)
+        result = dispatch_session_command(session, args)
     except (SessionError, OSError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f"Session {session_dir}: {error}\n")
     raise SystemExit(result)
 
 
-def dispatch(
-    session_dir: Path, args: argparse.Namespace, *, desktop: DesktopKind | None
-) -> int:
-    if args.command == "inspect":
-        from framewisp.inspection import inspect_session
-
-        observation = inspect_session(session_dir, args.query)
-        print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
-        result = 0 if observation["status"] == "ok" else 1
-    elif args.command == "batch":
-        if desktop is not None:
-            raise SessionError("batch supports headless sessions only.")
-        batch: Batch = args.batch
-        result = session_command(session_dir, "batch", parameters=batch.parameters())
-    elif args.command in {"attach", "teach"}:
+def dispatch_lifecycle(session_dir: Path, args: argparse.Namespace) -> int:
+    if args.command in {"attach", "teach"}:
         # Desktop portal imports are only needed by the runner of an attached or teaching session.
         from framewisp.attach import attach_session
 
         if args.command == "teach":
             from framewisp.teaching import Teaching
 
-            result = attach_session(
+            return attach_session(
                 session_dir, teaching=Teaching(args.directory, args.goal)
             )
-        else:
-            result = attach_session(session_dir)
-    elif args.command == "teach-note":
-        if desktop != "teaching":
+        return attach_session(session_dir)
+    if args.command == "recover":
+        return recover_session(session_dir)
+    app_command: list[str] = args.app_command
+    if app_command[:1] == ["--"]:
+        app_command = app_command[1:]
+    return run_session(
+        session_dir,
+        app_command,
+        clip_destination=args.record,
+        captions=args.captions,
+        click_pings=not args.no_click_pings,
+        console_panel=args.console_panel,
+        compact=args.compact,
+        size=(args.width, args.height),
+        x11=args.x11,
+        real_env=args.real_env,
+    )
+
+
+def dispatch_session_command(session: SessionMetadata, args: argparse.Namespace) -> int:
+    if args.command == "inspect":
+        if isinstance(session, DesktopSessionMetadata):
+            raise SessionError(
+                "inspect supports headless sessions only; use screenshot in attached and teaching sessions"
+            )
+        from framewisp.inspection import inspect_session
+
+        observation = inspect_session(session, args.query)
+        print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
+        return 0 if observation["status"] == "ok" else 1
+    if args.command == "batch":
+        if isinstance(session, DesktopSessionMetadata):
+            raise SessionError("batch supports headless sessions only.")
+        batch: Batch = args.batch
+        return session_command(session, "batch", parameters=batch.parameters())
+    if args.command == "teach-note":
+        if (
+            not isinstance(session, DesktopSessionMetadata)
+            or session.kind != "teaching"
+        ):
             raise SessionError("teach-note requires a teaching session.")
-        result = request_desktop(
-            session_dir, "teaching", "teach-note", {"text": args.text}
+        return request_desktop(session, "teach-note", {"text": args.text})
+    if args.command in {"record-start", "record-stop", "status", "stop"}:
+        if isinstance(session, DesktopSessionMetadata):
+            if args.command in {"status", "stop"}:
+                raise SessionError(
+                    "status and stop manage headless sessions. The user ends this session with Ctrl+C "
+                    "in its terminal."
+                )
+            return request_desktop(session, args.command, {})
+        return session_command(
+            session,
+            args.command,
+            args.path if args.command == "record-start" else None,
+            captions=getattr(args, "captions", CaptionOptions()),
+            click_pings=not getattr(args, "no_click_pings", False),
+            console_panel=getattr(args, "console_panel", None),
+            compact=getattr(args, "compact", False),
         )
-    elif args.command == "recover":
-        result = recover_session(session_dir)
-    elif args.command == "run":
-        app_command: list[str] = args.app_command
-        if app_command[:1] == ["--"]:
-            app_command = app_command[1:]
-        result = run_session(
-            session_dir,
-            app_command,
-            clip_destination=args.record,
-            captions=args.captions,
-            click_pings=not args.no_click_pings,
-            console_panel=args.console_panel,
-            compact=args.compact,
-            size=(args.width, args.height),
-            x11=args.x11,
-            real_env=args.real_env,
+    if args.command == "screenshot":
+        if isinstance(session, DesktopSessionMetadata):
+            if args.region is not None or args.json:
+                raise SessionError(
+                    "screenshot --region and --json support headless sessions only."
+                )
+            return request_desktop(
+                session, "screenshot", {"path": str(args.path.resolve())}
+            )
+        return screenshot(
+            session,
+            args.path,
+            region=tuple(args.region) if args.region is not None else None,
+            metadata=args.json,
         )
-    elif args.command in {"record-start", "record-stop", "status", "stop"}:
-        if desktop is not None and args.command in {"status", "stop"}:
-            raise SessionError(
-                "status and stop manage headless sessions. The user ends this session with Ctrl+C "
-                "in its terminal."
-            )
-        result = (
-            request_desktop(session_dir, desktop, args.command, {})
-            if desktop is not None
-            else session_command(
-                session_dir,
-                args.command,
-                args.path if args.command == "record-start" else None,
-                captions=getattr(args, "captions", CaptionOptions()),
-                click_pings=not getattr(args, "no_click_pings", False),
-                console_panel=getattr(args, "console_panel", None),
-                compact=getattr(args, "compact", False),
-            )
-        )
-    elif args.command == "screenshot":
-        if desktop is not None and (args.region is not None or args.json):
-            raise SessionError(
-                "screenshot --region and --json support headless sessions only."
-            )
-        result = (
-            request_desktop(
-                session_dir, desktop, "screenshot", {"path": str(args.path.resolve())}
-            )
-            if desktop is not None
-            else screenshot(
-                session_dir,
-                args.path,
-                region=tuple(args.region) if args.region is not None else None,
-                metadata=args.json,
-            )
-        )
-    else:
-        if args.command in {"move", "click", "scroll", "drag"}:
-            if desktop is not None:
-                if args.move_duration is not None:
-                    raise SessionError(
-                        "--move-duration is supported only for headless sessions."
-                    )
-            elif args.move_duration is None:
-                args.move_duration = DEFAULT_MOVE_DURATION
-        parameters = {
-            key: value
-            for key, value in vars(args).items()
-            if key not in {"session", "command", "stop_sharing"}
-        }
-        if desktop is not None:
-            parameters.pop("move_duration", None)
-            with log_input(session_dir, args.command, parameters) as action:
-                result = request_desktop(session_dir, desktop, args.command, parameters)
-                action.returncode = result
-        else:
-            result = session_command(session_dir, args.command, parameters=parameters)
-    return result
+    if args.command in {"move", "click", "scroll", "drag"}:
+        if isinstance(session, DesktopSessionMetadata):
+            if args.move_duration is not None:
+                raise SessionError(
+                    "--move-duration is supported only for headless sessions."
+                )
+        elif args.move_duration is None:
+            args.move_duration = DEFAULT_MOVE_DURATION
+    parameters = {
+        key: value
+        for key, value in vars(args).items()
+        if key not in {"session", "command", "stop_sharing"}
+    }
+    if isinstance(session, DesktopSessionMetadata):
+        parameters.pop("move_duration", None)
+        with log_input(session.session_directory, args.command, parameters) as action:
+            result = request_desktop(session, args.command, parameters)
+            action.returncode = result
+        return result
+    return session_command(session, args.command, parameters=parameters)

@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Iterator
@@ -11,6 +12,7 @@ from typing import cast
 import pytest
 from gi.repository import Gio, GLib
 
+from framewisp.connection import COMMAND_PROTOCOL, HeadlessSessionMetadata
 from framewisp.display_bounds import Rect, Window
 from framewisp.errors import SessionError
 from framewisp.inspection import (
@@ -42,23 +44,45 @@ def test_query_rejects_unbounded_arguments(field: str, value: object) -> None:
 
 
 # R-INSPECT-1
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {"kind": "attached"},
-        {"kind": "teaching"},
-        {
-            "runtime_directory": "/tmp/private",
-            "accessibility_bus": "unix:path=/run/user/1000/at-spi/bus",
-        },
-    ],
-)
-def test_inspection_never_falls_back_to_desktop(
-    tmp_path: Path, metadata: dict[str, object]
-) -> None:
-    (tmp_path / "session.json").write_text(json.dumps(metadata))
+def test_inspection_never_falls_back_to_desktop_bus(tmp_path: Path) -> None:
+    session = HeadlessSessionMetadata(
+        session_directory=tmp_path,
+        command_socket=tmp_path / "command.sock",
+        runtime_directory=Path("/tmp/private"),
+        accessibility_bus="unix:path=/run/user/1000/at-spi/bus",
+        wayland_display="wayland-1",
+        width=1280,
+        height=720,
+    )
     with pytest.raises(SessionError):
-        inspect_session(tmp_path, Query())
+        inspect_session(session, Query())
+
+
+# R-INSPECT-1
+@pytest.mark.parametrize("kind", ["attached", "teaching"])
+def test_inspection_refuses_desktop_sessions(tmp_path: Path, kind: str) -> None:
+    (tmp_path / "session.json").write_text(
+        json.dumps(
+            {
+                "kind": kind,
+                "command_protocol": COMMAND_PROTOCOL,
+                "command_socket": str(tmp_path / "command.sock"),
+                "share_token": "token",
+            }
+        )
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "inspect", "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert (
+        "teaching session" if kind == "teaching" else "headless sessions only"
+    ) in result.stderr
 
 
 # R-INSPECT-4

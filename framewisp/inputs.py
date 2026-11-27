@@ -1,6 +1,5 @@
 """Serialized headless input on the runner's persistent VNC connection."""
 
-import json
 import math
 import os
 import select
@@ -17,7 +16,7 @@ from framewisp.actions import InputAction
 from framewisp.batch import Batch, step_name
 from framewisp.checks import Check, perform_check
 from framewisp.compact import log_activity
-from framewisp.connection import reply
+from framewisp.connection import HeadlessSessionMetadata, reply
 from framewisp.errors import SessionError, display_command
 from framewisp.input_log import KEY_ACTIONS, CaptionCapture, input_error, log_input
 from framewisp.keys import CLICK_BUTTONS, SCROLL_BUTTONS, key_commands
@@ -42,20 +41,19 @@ class VNC(Protocol):
 class InputWorker:
     def __init__(
         self,
-        session_dir: Path,
+        session: HeadlessSessionMetadata,
         client: VNC,
         stop: Event,
         *,
-        x11: bool,
-        size: tuple[int, int],
         screenshot: Callable[[Path, Callable[[], bool]], int],
         caption_capture: CaptionCapture | None = None,
     ):
-        self.session_dir = session_dir
+        self.session = session
+        self.session_dir = session.session_directory
         self.client = client
         self.stop = stop
-        self.x11 = x11
-        self.size = size
+        self.x11 = session.x11_display is not None
+        self.size = (session.width, session.height)
         self.pointer_primed = False
         self.pointer_position: tuple[int, int] | None = None
         self.screenshot = screenshot
@@ -161,7 +159,7 @@ class InputWorker:
             self.wait(connection)
             if self.x11:
                 # Check at dequeue time so mappings allocated by earlier jobs count.
-                characters = mapped_characters(self.session_dir)
+                characters = mapped_characters(self.session.runtime_directory)
                 for index, step in enumerate(batch.steps):
                     if isinstance(step, InputAction) and step.action == "type":
                         characters.update(
@@ -188,7 +186,7 @@ class InputWorker:
                             ]
                         with log_activity(self.session_dir):
                             perform_check(
-                                self.session_dir,
+                                self.session,
                                 step,
                                 result,
                                 cancelled=lambda: self.cancelled(connection),
@@ -370,7 +368,7 @@ class InputWorker:
                             key(character, False)
                     else:
                         type_unicode(
-                            self.session_dir,
+                            self.session,
                             text,
                             interval=interval,
                             cancelled=lambda: self.cancelled(connection),
@@ -397,24 +395,27 @@ class InputWorker:
 
 
 def type_unicode(
-    session_dir: Path,
+    session: HeadlessSessionMetadata,
     text: str,
     *,
     interval: float,
     cancelled: Callable[[], bool] | None = None,
 ) -> int:
-    metadata = json.loads((session_dir / "session.json").read_text())
     env = os.environ | {
-        "XDG_RUNTIME_DIR": metadata["runtime_directory"],
-        "WAYLAND_DISPLAY": metadata["wayland_display"],
+        "XDG_RUNTIME_DIR": str(session.runtime_directory),
+        "WAYLAND_DISPLAY": session.wayland_display,
     }
-    if display := metadata.get("x11_display"):
+    if session.x11_display is not None:
         env = env | {
-            "DISPLAY": display,
+            "DISPLAY": session.x11_display,
             "XAUTHORITY": "/dev/null",
         }
         return type_x11_text(
-            session_dir, text, interval=interval, env=env, cancelled=cancelled
+            session.session_directory,
+            text,
+            interval=interval,
+            env=env,
+            cancelled=cancelled,
         )
     # wtype uploads a keymap containing the requested characters; wayvnc's US
     # keymap cannot represent arbitrary Unicode. Use keysyms so text never
@@ -428,8 +429,10 @@ def type_unicode(
     duration = max(0, len(text) - 1) * pause_ms / 1000
     # wtype also spends 2 ms on each key press and release.
     return display_command(
-        session_dir,
+        session.session_directory,
         arguments,
+        runtime_dir=session.runtime_directory,
+        display=session.wayland_display,
         env=env,
         timeout=15 + duration + len(text) * 0.004,
         cancelled=cancelled,

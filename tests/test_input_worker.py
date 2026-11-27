@@ -8,8 +8,21 @@ import pytest
 
 from framewisp.actions import InputAction
 from framewisp.batch import DEFAULTS, Batch
+from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
 from framewisp.inputs import InputWorker
+
+
+def headless_session(session_dir: Path) -> HeadlessSessionMetadata:
+    return HeadlessSessionMetadata(
+        session_directory=session_dir,
+        command_socket=session_dir / "command.sock",
+        runtime_directory=session_dir,
+        accessibility_bus=f"unix:path={session_dir / 'accessibility.sock'}",
+        wayland_display="wayland-1",
+        width=800,
+        height=600,
+    )
 
 
 class HoldingClient:
@@ -48,11 +61,9 @@ def test_interrupted_drag_releases_held_input(tmp_path: Path, cause: str) -> Non
     interrupted = Event()
     client = HoldingClient(stop if cause == "stop" else interrupted)
     worker = InputWorker(
-        tmp_path,
+        headless_session(tmp_path),
         client,
         stop,
-        x11=False,
-        size=(800, 600),
         screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
@@ -110,11 +121,9 @@ def perform(
 ) -> dict[str, object]:
     stop = Event()
     worker = InputWorker(
-        session_dir,
+        headless_session(session_dir),
         client if client is not None else HoldingClient(Event()),
         stop,
-        x11=False,
-        size=(800, 600),
         screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
@@ -200,11 +209,9 @@ def test_interrupted_drag_logs_its_press_only(tmp_path: Path) -> None:
     stop = Event()
     client = HoldingClient(stop)
     worker = InputWorker(
-        tmp_path,
+        headless_session(tmp_path),
         client,
         stop,
-        x11=False,
-        size=(800, 600),
         screenshot=lambda _path, _cancelled: 0,
     )
     caller, runner = socket.socketpair()
