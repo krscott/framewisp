@@ -6,7 +6,22 @@ import pytest
 from framewisp import inspection
 from framewisp.batch import Batch
 from framewisp.checks import Check, Condition, Limits, perform_check
+from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
+
+
+def headless_session(session_dir: Path) -> HeadlessSessionMetadata:
+    return HeadlessSessionMetadata(
+        session_directory=session_dir,
+        command_socket=session_dir / "command.sock",
+        runtime_directory=session_dir,
+        accessibility_bus=f"unix:path={session_dir / 'accessibility.sock'}",
+        wayland_display="wayland-1",
+        width=800,
+        height=600,
+        x11_display=None,
+        clip_destination=None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -160,7 +175,7 @@ def test_baseline_requires_a_nonmatching_value(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str | None
 ) -> None:
     def inspect(
-        session_dir: Path,
+        session: HeadlessSessionMetadata,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -175,7 +190,11 @@ def test_baseline_requires_a_nonmatching_value(
     result: dict[str, object] = {}
     with pytest.raises(SessionError, match="nonmatching"):
         perform_check(
-            tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None
+            headless_session(tmp_path),
+            check,
+            result,
+            cancelled=lambda: False,
+            wait=lambda _: None,
         )
     assert "baseline_observation_id" not in result
 
@@ -188,14 +207,15 @@ def test_query_settings_and_authoritative_deadline(
     monkeypatch.setattr("framewisp.checks.time.monotonic", lambda: clock[0])
     queries: list[inspection.Query] = []
     cancelled = lambda: False
+    expected = headless_session(tmp_path)
 
     def inspect(
-        session_dir: Path,
+        session: HeadlessSessionMetadata,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, object]:
-        assert session_dir == tmp_path
+        assert session == expected
         assert cancelled is not None and not cancelled()
         queries.append(query)
         clock[0] += 3
@@ -211,7 +231,7 @@ def test_query_settings_and_authoritative_deadline(
         },
     )
     result: dict[str, object] = {}
-    perform_check(tmp_path, check, result, cancelled=cancelled, wait=lambda _: None)
+    perform_check(expected, check, result, cancelled=cancelled, wait=lambda _: None)
     assert queries == [
         inspection.Query(
             role="label",
@@ -235,7 +255,7 @@ def test_query_settings_and_authoritative_deadline(
         }
     )
     with pytest.raises(SessionError, match="timed out"):
-        perform_check(tmp_path, check, {}, cancelled=cancelled, wait=lambda _: None)
+        perform_check(expected, check, {}, cancelled=cancelled, wait=lambda _: None)
     assert queries[-1].timeout == 2
 
 
@@ -247,7 +267,7 @@ def test_wait_partial_responses_and_remaining_budget(
     queries: list[inspection.Query] = []
 
     def inspect(
-        session_dir: Path,
+        session: HeadlessSessionMetadata,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -268,7 +288,13 @@ def test_wait_partial_responses_and_remaining_budget(
     with pytest.raises(
         SessionError, match=r"limits.max_nodes.*longer check timeout alone"
     ):
-        perform_check(tmp_path, check, result, cancelled=lambda: False, wait=wait)
+        perform_check(
+            headless_session(tmp_path),
+            check,
+            result,
+            cancelled=lambda: False,
+            wait=wait,
+        )
     assert [q.timeout for q in queries] == pytest.approx([2, 2, 0.9])
     assert result["observations"] == 3
     assert result["verified"] is False
@@ -288,7 +314,7 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
     )
 
     def inspect(
-        session_dir: Path,
+        session: HeadlessSessionMetadata,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -300,7 +326,7 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
     check = Check.parse({"check": "wait", "condition": condition(), "timeout": 2})
     with pytest.raises(SessionError, match="timed out") as failure:
         perform_check(
-            tmp_path,
+            headless_session(tmp_path),
             check,
             {},
             cancelled=lambda: False,
@@ -314,7 +340,11 @@ def test_complete_poll_clears_earlier_caps_and_bus_failure_stops(
     result: dict[str, object] = {}
     with pytest.raises(SessionError, match="bus is unavailable"):
         perform_check(
-            tmp_path, check, result, cancelled=lambda: False, wait=lambda _: None
+            headless_session(tmp_path),
+            check,
+            result,
+            cancelled=lambda: False,
+            wait=lambda _: None,
         )
     assert result["observations"] == 1
 
@@ -332,7 +362,7 @@ def test_incomplete_check_diagnostics(
     field: str,
 ) -> None:
     def inspect(
-        session_dir: Path,
+        session: HeadlessSessionMetadata,
         query: inspection.Query,
         *,
         cancelled: Callable[[], bool] | None = None,
@@ -342,7 +372,13 @@ def test_incomplete_check_diagnostics(
     monkeypatch.setattr(inspection, "inspect_session", inspect)
     check = Check.parse({"check": kind, "condition": condition(), "timeout": 5})
     with pytest.raises(SessionError, match=f"limits.{field}"):
-        perform_check(tmp_path, check, {}, cancelled=lambda: False, wait=lambda _: None)
+        perform_check(
+            headless_session(tmp_path),
+            check,
+            {},
+            cancelled=lambda: False,
+            wait=lambda _: None,
+        )
 
 
 # R-CHECK-1

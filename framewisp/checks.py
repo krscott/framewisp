@@ -4,10 +4,10 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal, cast, get_args
 
 from framewisp import inspection_limits as limits
+from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
 
 
@@ -190,7 +190,7 @@ class Check:
 
 
 def perform_check(
-    session_dir: Path,
+    session: HeadlessSessionMetadata,
     check: Check,
     result: dict[str, object],
     *,
@@ -251,7 +251,7 @@ def perform_check(
         if remaining <= 0:
             raise failure("Condition timed out before a complete matching observation.")
         observation = inspect_session(
-            session_dir,
+            session,
             Query(
                 role=check.condition.role,
                 name=check.condition.name,

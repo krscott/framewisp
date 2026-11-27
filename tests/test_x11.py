@@ -14,15 +14,6 @@ def test_unicode_connection_failure_has_context(tmp_path: Path, mapped: bool) ->
     session_dir = tmp_path / "disconnected-x11"
     session_dir.mkdir()
     display = ":framewisp-missing"
-    (session_dir / "session.json").write_text(
-        json.dumps(
-            {
-                "runtime_directory": str(tmp_path),
-                "wayland_display": "wayland-missing",
-                "x11_display": display,
-            }
-        )
-    )
     if mapped:
         (tmp_path / "x11-keymap.json").write_text(json.dumps({"é": 120}))
     with pytest.raises(RuntimeError) as error:

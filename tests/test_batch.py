@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.batch import MAX_REQUEST_BYTES, MAX_STEPS, Batch
-from framewisp.connection import COMMAND_PROTOCOL
+from framewisp.batch import MAX_STEPS, Batch
+from framewisp.connection import COMMAND_PROTOCOL, MAX_REQUEST_BYTES
 
 
 @pytest.mark.parametrize(
@@ -155,7 +155,14 @@ def test_invalid_file_before_session_access(tmp_path: Path, content: bytes) -> N
 
 def test_batch_rejects_attached_session(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps({"kind": "attached", "command_protocol": COMMAND_PROTOCOL})
+        json.dumps(
+            {
+                "kind": "attached",
+                "command_protocol": COMMAND_PROTOCOL,
+                "command_socket": str(tmp_path / "command.sock"),
+                "share_token": "token",
+            }
+        )
     )
     path = tmp_path / "batch.json"
     path.write_text(json.dumps({"steps": [{"action": "key", "chord": "a"}]}))

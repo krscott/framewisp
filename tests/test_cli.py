@@ -1,5 +1,6 @@
 import json
 import os
+import select
 import shlex
 import socket
 import subprocess
@@ -7,14 +8,52 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from framewisp import cli
-from framewisp.connection import COMMAND_PROTOCOL
+from framewisp.connection import (
+    COMMAND_PROTOCOL,
+    DesktopKind,
+    DesktopSessionMetadata,
+    HeadlessSessionMetadata,
+    parse_session_metadata,
+    read_session_metadata,
+)
+from framewisp.input_log import log_input as original_log_input
 from framewisp.layout import ConsolePanel
 from framewisp.lib import session_command
+
+
+def headless_metadata(session_dir: Path, **overrides: object) -> dict[str, object]:
+    return {
+        "kind": "headless",
+        "command_protocol": COMMAND_PROTOCOL,
+        "accessibility_bus": f"unix:path={session_dir / 'accessibility.sock'}",
+        "command_socket": str(session_dir / "command.sock"),
+        "runtime_directory": str(session_dir),
+        "wayland_display": "wayland-1",
+        "width": 1280,
+        "height": 720,
+        "x11_display": None,
+        "clip_destination": None,
+        **overrides,
+    }
+
+
+def desktop_metadata(
+    session_dir: Path, kind: DesktopKind = "attached", **overrides: object
+) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "command_protocol": COMMAND_PROTOCOL,
+        "command_socket": str(session_dir / "command.sock"),
+        "share_token": "share-token",
+        **overrides,
+    }
 
 
 def test_cli_help() -> None:
@@ -228,8 +267,16 @@ def test_record_start_sends_console_panel(
     # Pytest's own paths can exceed the Unix socket path limit.
     with tempfile.TemporaryDirectory() as directory:
         session_dir = Path(directory)
-        (session_dir / "session.json").write_text(
-            json.dumps({"command_socket": str(session_dir / "command.sock")})
+        session = HeadlessSessionMetadata(
+            session_directory=session_dir,
+            command_socket=session_dir / "command.sock",
+            runtime_directory=session_dir,
+            accessibility_bus=f"unix:path={session_dir / 'accessibility.sock'}",
+            wayland_display="wayland-1",
+            width=1280,
+            height=720,
+            x11_display=None,
+            clip_destination=None,
         )
         with socket.socket(socket.AF_UNIX) as server:
             server.bind(str(session_dir / "command.sock"))
@@ -237,7 +284,7 @@ def test_record_start_sends_console_panel(
             thread = threading.Thread(target=runner, args=(server,), daemon=True)
             thread.start()
             result = session_command(
-                session_dir,
+                session,
                 "record-start",
                 session_dir / "clip.mp4",
                 console_panel=console_panel,
@@ -377,6 +424,8 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
         {},
         {"command_protocol": COMMAND_PROTOCOL - 1},
         {"command_protocol": COMMAND_PROTOCOL + 1},
+        {"command_protocol": float(COMMAND_PROTOCOL)},
+        {"command_protocol": True},
         {"command_protocol": str(COMMAND_PROTOCOL)},
         {"kind": "attached"},
         {"kind": "teaching"},
@@ -887,9 +936,7 @@ def test_compositor_failure_includes_log_excerpt(tmp_path: Path) -> None:
 def test_screenshot_options_reject_attached_sessions(
     tmp_path: Path, options: list[str]
 ) -> None:
-    (tmp_path / "session.json").write_text(
-        json.dumps({"kind": "attached", "command_protocol": COMMAND_PROTOCOL})
-    )
+    (tmp_path / "session.json").write_text(json.dumps(desktop_metadata(tmp_path)))
     destination = tmp_path / "screenshot.png"
     result = subprocess.run(
         [
@@ -912,9 +959,7 @@ def test_screenshot_options_reject_attached_sessions(
 
 
 def test_screenshot_json_rejects_png_stdout(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text(
-        json.dumps({"kind": "headless", "command_protocol": COMMAND_PROTOCOL})
-    )
+    (tmp_path / "session.json").write_text(json.dumps(headless_metadata(tmp_path)))
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path), "screenshot", "--json", "-"],
         capture_output=True,
@@ -924,3 +969,359 @@ def test_screenshot_json_rejects_png_stdout(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "requires a file path" in result.stderr
     assert not result.stdout
+
+
+def test_parse_valid_session_metadata(tmp_path: Path) -> None:
+    clip = tmp_path / "clip.mp4"
+    expected_headless = HeadlessSessionMetadata(
+        session_directory=tmp_path,
+        command_socket=tmp_path / "command.sock",
+        runtime_directory=tmp_path,
+        accessibility_bus=f"unix:path={tmp_path / 'accessibility.sock'}",
+        wayland_display="wayland-1",
+        width=1280,
+        height=720,
+        x11_display=":42",
+        clip_destination=clip,
+    )
+    assert (
+        parse_session_metadata(
+            headless_metadata(tmp_path, x11_display=":42", clip_destination=str(clip)),
+            tmp_path,
+        )
+        == expected_headless
+    )
+    assert (
+        parse_session_metadata(
+            json.loads(json.dumps(expected_headless.to_json({"app": 123}))),
+            tmp_path,
+        )
+        == expected_headless
+    )
+    for kind in ("attached", "teaching"):
+        expected_desktop = DesktopSessionMetadata(
+            session_directory=tmp_path,
+            kind=kind,
+            command_socket=tmp_path / "command.sock",
+            share_token="share-token",
+        )
+        assert (
+            parse_session_metadata(desktop_metadata(tmp_path, kind), tmp_path)
+            == expected_desktop
+        )
+        assert (
+            parse_session_metadata(
+                json.loads(json.dumps(expected_desktop.to_json())),
+                tmp_path,
+            )
+            == expected_desktop
+        )
+
+
+def test_read_session_metadata_handles_missing_and_malformed_files(
+    tmp_path: Path,
+) -> None:
+    missing = read_session_metadata(tmp_path)
+    assert isinstance(missing, str) and "Session is disconnected" in missing
+    (tmp_path / "session.json").write_text("{")
+    bad_json = read_session_metadata(tmp_path)
+    assert isinstance(bad_json, str) and "Cannot read session metadata" in bad_json
+    (tmp_path / "session.json").write_text("[]")
+    not_object = read_session_metadata(tmp_path)
+    assert isinstance(not_object, str) and "must be a JSON object" in not_object
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "command_socket",
+        "runtime_directory",
+        "accessibility_bus",
+        "wayland_display",
+        "width",
+        "height",
+        "x11_display",
+        "clip_destination",
+    ],
+)
+def test_headless_metadata_refuses_missing_field(tmp_path: Path, field: str) -> None:
+    raw = headless_metadata(tmp_path)
+    del raw[field]
+    result = parse_session_metadata(raw, tmp_path)
+    assert isinstance(result, str)
+    assert field in result and "missing" in result
+
+
+@pytest.mark.parametrize("kind", ["attached", "teaching"])
+@pytest.mark.parametrize("field", ["command_socket", "share_token"])
+def test_desktop_metadata_refuses_missing_field(
+    tmp_path: Path, kind: DesktopKind, field: str
+) -> None:
+    raw = desktop_metadata(tmp_path, kind)
+    del raw[field]
+    result = parse_session_metadata(raw, tmp_path)
+    assert isinstance(result, str)
+    assert field in result and "missing" in result
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("command_socket", ""),
+        ("command_socket", "relative.sock"),
+        ("command_socket", "/tmp/bad\0.sock"),
+        ("command_socket", "/tmp/\ud800.sock"),
+        ("command_socket", 123),
+        ("runtime_directory", "relative"),
+        ("runtime_directory", "/tmp/\ud800"),
+        ("runtime_directory", None),
+        ("accessibility_bus", ""),
+        ("accessibility_bus", "unix:path=/tmp/\ud800"),
+        ("accessibility_bus", 42),
+        ("wayland_display", ""),
+        ("wayland_display", "\ud800"),
+        ("wayland_display", False),
+        ("width", 0),
+        ("width", -10),
+        ("width", True),
+        ("width", 1280.0),
+        ("width", "1280"),
+        ("height", 0),
+        ("height", False),
+        ("x11_display", ""),
+        ("x11_display", "\ud800"),
+        ("x11_display", 0),
+        ("clip_destination", ""),
+        ("clip_destination", "relative.mp4"),
+        ("clip_destination", "/tmp/\ud800.mp4"),
+        ("clip_destination", 5),
+    ],
+)
+def test_headless_metadata_refuses_wrongly_typed_field(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    raw = headless_metadata(tmp_path, **{field: value})
+    result = parse_session_metadata(raw, tmp_path)
+    assert isinstance(result, str)
+    assert field in result and "invalid" in result
+
+
+@pytest.mark.parametrize("kind", ["attached", "teaching"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("command_socket", "relative.sock"),
+        ("command_socket", "/tmp/\ud800.sock"),
+        ("command_socket", None),
+        ("share_token", ""),
+        ("share_token", "\ud800"),
+        ("share_token", 123),
+    ],
+)
+def test_desktop_metadata_refuses_wrongly_typed_field(
+    tmp_path: Path, kind: DesktopKind, field: str, value: object
+) -> None:
+    raw = desktop_metadata(tmp_path, kind, **{field: value})
+    result = parse_session_metadata(raw, tmp_path)
+    assert isinstance(result, str)
+    assert field in result and "invalid" in result
+
+
+@pytest.mark.parametrize(
+    ("metadata_kind", "field", "value", "arguments"),
+    [
+        ("headless", "width", None, ("screenshot", "--json", "out.png")),
+        ("headless", "wayland_display", "\ud800", ("screenshot", "out.png")),
+        ("headless", "command_socket", "relative.sock", ("status",)),
+        ("headless", "runtime_directory", 123, ("inspect", "--json")),
+        ("attached", "share_token", None, ("click", "1", "1")),
+        ("teaching", "command_socket", None, ("teach-note", "note")),
+    ],
+)
+def test_cli_refuses_metadata_with_missing_or_wrongly_typed_field(
+    tmp_path: Path,
+    metadata_kind: str,
+    field: str,
+    value: object,
+    arguments: tuple[str, ...],
+) -> None:
+    if metadata_kind == "headless":
+        raw = headless_metadata(tmp_path)
+    else:
+        raw = desktop_metadata(
+            tmp_path, "teaching" if metadata_kind == "teaching" else "attached"
+        )
+    if value is None:
+        del raw[field]
+    else:
+        raw[field] = value
+    (tmp_path / "session.json").write_text(json.dumps(raw))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), *arguments],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert field in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (tmp_path / "out.png").exists()
+
+
+# R-CONTROL-3
+def test_attached_input_does_not_reread_metadata_after_input_log_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replacing session.json while waiting on inputs.jsonl cannot redirect a command."""
+    received: list[tuple[str, dict[str, object]]] = []
+    done = threading.Event()
+
+    def serve(servers: dict[socket.socket, str]) -> None:
+        deadline = time.monotonic() + 5
+        try:
+            while not done.is_set() and time.monotonic() < deadline:
+                readable, _, _ = select.select(list(servers), [], [], 0.05)
+                for server in readable:
+                    connection, _ = server.accept()
+                    connection.settimeout(5)
+                    with connection, connection.makefile("rw") as stream:
+                        received.append(
+                            (servers[server], json.loads(stream.readline()))
+                        )
+                        stream.write(json.dumps({"status": 0, "error": None}) + "\n")
+        finally:
+            for server in servers:
+                server.close()
+
+    with tempfile.TemporaryDirectory(prefix="fw-toctou-") as directory:
+        sock_dir = Path(directory)
+        original_sock = sock_dir / "original.sock"
+        replacement_sock = sock_dir / "replacement.sock"
+        (tmp_path / "session.json").write_text(
+            json.dumps(
+                desktop_metadata(
+                    tmp_path,
+                    "attached",
+                    command_socket=str(original_sock),
+                    share_token="original-token",
+                )
+            )
+        )
+        (tmp_path / "inputs.jsonl").write_text("")
+
+        @contextmanager
+        def log_input_during_takeover(
+            session_dir: Path, action: str, parameters: dict[str, object]
+        ) -> Generator[object, None, None]:
+            with original_log_input(session_dir, action, parameters) as logged:
+                # Another version takes over session.json while this command
+                # was waiting on the input log lock.
+                (tmp_path / "session.json").write_text(
+                    json.dumps(
+                        desktop_metadata(
+                            tmp_path,
+                            "attached",
+                            command_protocol=COMMAND_PROTOCOL + 1,
+                            command_socket=str(replacement_sock),
+                            share_token="replacement-token",
+                        )
+                    )
+                )
+                yield logged
+
+        with (
+            socket.socket(socket.AF_UNIX) as original_server,
+            socket.socket(socket.AF_UNIX) as replacement_server,
+        ):
+            original_server.bind(str(original_sock))
+            original_server.listen(1)
+            replacement_server.bind(str(replacement_sock))
+            replacement_server.listen(1)
+            server_thread = threading.Thread(
+                target=serve,
+                args=(
+                    {original_server: "original", replacement_server: "replacement"},
+                ),
+                daemon=True,
+            )
+            server_thread.start()
+            try:
+                monkeypatch.setattr(cli, "log_input", log_input_during_takeover)
+                monkeypatch.setattr(
+                    sys, "argv", ["framewisp", str(tmp_path), "click", "1", "1"]
+                )
+                with pytest.raises(SystemExit) as stopped:
+                    cli.main()
+            finally:
+                done.set()
+                server_thread.join(timeout=5)
+    assert stopped.value.code == 0
+    assert len(received) == 1
+    assert received[0][0] == "original"
+    assert received[0][1]["share_token"] == "original-token"
+
+
+def test_screenshot_reads_session_metadata_once_after_delay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    metadata_path = tmp_path / "session.json"
+    metadata_path.write_text(json.dumps(headless_metadata(tmp_path)))
+    events: list[str] = []
+    original_read_text = Path.read_text
+
+    def counted_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == metadata_path:
+            events.append("read")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    def record_sleep(seconds: float) -> None:
+        events.append(f"sleep:{seconds:g}")
+
+    def fake_display_command(
+        session_dir: Path,
+        command: list[str],
+        *,
+        runtime_dir: Path,
+        display: str,
+        timeout: float,
+        env: dict[str, str] | None = None,
+        cancelled: object = None,
+    ) -> int:
+        assert session_dir == tmp_path
+        assert runtime_dir == tmp_path
+        assert display == "wayland-1"
+        events.append("grim")
+        return 0
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+    monkeypatch.setattr(time, "sleep", record_sleep)
+    monkeypatch.setattr("framewisp.lib.display_command", fake_display_command)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "framewisp",
+            str(tmp_path),
+            "screenshot",
+            "--delay",
+            "2",
+            "--region",
+            "10",
+            "20",
+            "100",
+            "50",
+            "--json",
+            str(tmp_path / "shot.png"),
+        ],
+    )
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 0
+    assert events == ["sleep:2", "read", "grim"]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["width"] == 100
+    assert payload["height"] == 50
+    assert payload["display_width"] == 1280
+    assert payload["display_height"] == 720

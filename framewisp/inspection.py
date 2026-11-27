@@ -2,7 +2,6 @@
 
 # pyright: reportMissingModuleSource=false
 
-import json
 import math
 import time
 import uuid
@@ -16,7 +15,7 @@ from typing import cast
 from gi.repository import Gio, GLib
 
 from framewisp import inspection_limits as limits
-from framewisp.connection import DESKTOP_KINDS, session_kind
+from framewisp.connection import HeadlessSessionMetadata
 from framewisp.display_bounds import Rect, convert_bounds, match_window, read_windows
 from framewisp.environment import unix_bus_address
 from framewisp.errors import SessionError
@@ -193,25 +192,21 @@ def wait_for_registry(address: str, stop: Event) -> None:
 
 
 def inspect_session(
-    session_dir: Path, query: Query, *, cancelled: Callable[[], bool] | None = None
+    session: HeadlessSessionMetadata,
+    query: Query,
+    *,
+    cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
-    metadata = json.loads((session_dir / "session.json").read_text())
-    if session_kind(metadata) in DESKTOP_KINDS:
-        raise SessionError(
-            "inspect supports headless sessions only; use screenshot in attached and teaching sessions"
-        )
     # Only the exact private socket created by this runner is eligible. Never fall
     # back to the caller's desktop bus or AT_SPI_BUS_ADDRESS environment variable.
-    expected = unix_bus_address(
-        Path(metadata["runtime_directory"]) / "accessibility.sock"
-    )
-    if metadata.get("accessibility_bus") != expected:
+    expected = unix_bus_address(session.runtime_directory / "accessibility.sock")
+    if session.accessibility_bus != expected:
         raise SessionError("Invalid private accessibility bus in session metadata")
     return inspect_bus(
         expected,
         query,
         cancelled=cancelled,
-        runtime_dir=Path(metadata["runtime_directory"]),
+        runtime_dir=session.runtime_directory,
     )
 
 

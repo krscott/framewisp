@@ -253,12 +253,13 @@ def test_destination_lookup_failure_is_an_error_reply(
 def test_tool_error_naming_a_non_utf8_path_stays_a_session_error(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "session.json").write_text(
-        json.dumps({"wayland_display": "wayland-1", "runtime_directory": "/run"})
-    )
     with pytest.raises(SessionError, match="caf"):
         display_command(
-            tmp_path, ["sh", "-c", r"printf 'caf\351' >&2; exit 1"], timeout=5
+            tmp_path,
+            ["sh", "-c", r"printf 'caf\351' >&2; exit 1"],
+            runtime_dir=Path("/run"),
+            display="wayland-1",
+            timeout=5,
         )
 
 

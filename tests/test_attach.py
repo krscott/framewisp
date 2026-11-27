@@ -31,7 +31,20 @@ from framewisp.attach import (
     share_desktop,
     write_png,
 )
-from framewisp.connection import DesktopKind, request_desktop
+from framewisp.connection import (
+    DesktopKind,
+    DesktopSessionMetadata,
+    read_session_metadata,
+    request_desktop,
+)
+
+
+def desktop_session(session_dir: Path) -> DesktopSessionMetadata:
+    session = read_session_metadata(session_dir)
+    assert isinstance(session, DesktopSessionMetadata), session
+    return session
+
+
 from framewisp.desktop import lock_desktop, stop_sharing
 from framewisp.errors import SessionError
 from framewisp.portal import DesktopPortal
@@ -196,15 +209,13 @@ def test_stale_attach_socket(
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="fw-stale-") as temporary:
         missing = Path(temporary) / "gone"
-    (tmp_path / "session.json").write_text(
-        json.dumps(
-            {
-                "kind": "attached",
-                "command_socket": str(missing / "command.sock"),
-            }
-        )
+    session = DesktopSessionMetadata(
+        session_directory=tmp_path,
+        kind="attached",
+        command_socket=missing / "command.sock",
+        share_token="token",
     )
-    assert request_desktop(tmp_path, "attached", "click", {}) == 1
+    assert request_desktop(session, "click", {}) == 1
     assert "disconnected" in capsys.readouterr().err
 
 
@@ -576,11 +587,11 @@ def test_teaching_runner_records_notes_rejects_input_and_finalizes(
         assert refused.returncode == 1
         assert "Ctrl+C in its terminal" in refused.stderr
         assert "--stop-sharing" not in refused.stderr
-    assert request_desktop(session_dir, "teaching", "click", {"x": 20, "y": 20}) == 1
+    session = desktop_session(session_dir)
+    assert request_desktop(session, "click", {"x": 20, "y": 20}) == 1
     assert (
         request_desktop(
-            session_dir,
-            "teaching",
+            session,
             "screenshot",
             {"path": str(tmp_path / "lesson/video.webm")},
         )
@@ -672,8 +683,7 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
         worker = Thread(
             target=lambda: results.append(
                 request_desktop(
-                    tmp_path / "session",
-                    "teaching",
+                    desktop_session(tmp_path / "session"),
                     "screenshot",
                     {"path": str(tmp_path / "screenshot.png")},
                 )
@@ -743,8 +753,7 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
     (tmp_path / "empty-screenshot").touch()
     assert (
         request_desktop(
-            tmp_path / "session",
-            "teaching",
+            desktop_session(tmp_path / "session"),
             "screenshot",
             {"path": str(tmp_path / "screenshot.png")},
         )
@@ -789,7 +798,7 @@ def test_stop_sharing_cancels_long_input_and_waits_for_cleanup(
     runner: subprocess.Popen[str],
 ) -> None:
     session_dir = tmp_path / "session"
-    assert request_desktop(session_dir, "attached", "key", {"chord": "a"}) == 1
+    assert request_desktop(desktop_session(session_dir), "key", {"chord": "a"}) == 1
     assert not (tmp_path / "events").exists()
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
@@ -1140,7 +1149,7 @@ def test_old_session_metadata_cannot_command_new_desktop_share(
     metadata = json.loads((old / "session.json").read_text())
     metadata["share_token"] = "previous-runner"
     (old / "session.json").write_text(json.dumps(metadata))
-    assert request_desktop(old, "attached", "key", {"chord": "a"}) == 1
+    assert request_desktop(desktop_session(old), "key", {"chord": "a"}) == 1
     error = capsys.readouterr().err
     assert "The session this command was addressed to has ended." in error
     assert "run attach" not in error
@@ -1211,10 +1220,11 @@ def test_malformed_requests_leave_the_desktop_share_running(
         assert isinstance(response["error"], str) and response["error"]
         assert runner.poll() is None
     assert not (tmp_path / "events").exists()
-    assert request_desktop(session_dir, "attached", "key", {"chord": "a"}) == 0
+    session = desktop_session(session_dir)
+    assert request_desktop(session, "key", {"chord": "a"}) == 0
     assert (tmp_path / "events").exists()
     click: dict[str, object] = {"x": 10, "y": 20, "button": "left", "count": 1}
-    assert request_desktop(session_dir, "attached", "click", click) == 0
+    assert request_desktop(session, "click", click) == 0
     assert runner.poll() is None
 
 
@@ -1235,7 +1245,7 @@ def test_trickling_client_gets_a_reply_from_the_attached_session(
             assert time.monotonic() - started < 10
             connection.sendall(b" ")
         assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
-    assert request_desktop(session_dir, "attached", "key", {"chord": "a"}) == 0
+    assert request_desktop(desktop_session(session_dir), "key", {"chord": "a"}) == 0
     assert runner.poll() is None
 
 
@@ -1676,30 +1686,52 @@ main()
 
 
 @pytest.mark.parametrize(
-    ("kind", "metadata", "message"),
+    ("kind", "reply", "message"),
     [
-        # Metadata that changes after the CLI read its kind is reported as
-        # that kind.
-        ("attached", "{", "Cannot use attached session"),
-        ("teaching", "[]", "Cannot use teaching session"),
-        ("attached", '{"kind": "attached"}', "Cannot use attached session"),
-        ("teaching", '{"kind": "teaching"}', "Cannot use teaching session"),
-        (
-            "teaching",
-            '{"kind": "teaching", "command_socket": "/nonexistent/command.sock"}',
-            "Teaching session is disconnected",
-        ),
+        ("attached", b"{", "Cannot use attached session"),
+        ("teaching", b"[]\n", "Cannot use teaching session"),
+        ("attached", None, "Attached session is disconnected"),
+        ("teaching", None, "Teaching session is disconnected"),
     ],
 )
-def test_invalid_session_metadata_fails_clearly(
+def test_desktop_request_errors_name_the_session_kind(
     tmp_path: Path,
     kind: DesktopKind,
-    metadata: str,
+    reply: bytes | None,
     message: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (tmp_path / "session.json").write_text(metadata)
-    assert request_desktop(tmp_path, kind, "key", {"chord": "a"}) == 1
+    if reply is None:
+        session = DesktopSessionMetadata(
+            session_directory=tmp_path,
+            kind=kind,
+            command_socket=Path("/nonexistent/command.sock"),
+            share_token="token",
+        )
+        assert request_desktop(session, "key", {"chord": "a"}) == 1
+    else:
+        with tempfile.TemporaryDirectory(prefix="fw-bad-reply-") as directory:
+            endpoint = Path(directory) / "command.sock"
+            with socket.socket(socket.AF_UNIX) as server:
+                server.bind(str(endpoint))
+                server.listen(1)
+
+                def serve() -> None:
+                    connection, _ = server.accept()
+                    with connection:
+                        connection.recv(4096)
+                        connection.sendall(reply)
+
+                thread = Thread(target=serve, daemon=True)
+                thread.start()
+                session = DesktopSessionMetadata(
+                    session_directory=tmp_path,
+                    kind=kind,
+                    command_socket=endpoint,
+                    share_token="token",
+                )
+                assert request_desktop(session, "key", {"chord": "a"}) == 1
+                thread.join(timeout=5)
     error = capsys.readouterr().err
     assert message in error
     assert ("run teach again with a new lesson directory" in error) is (
