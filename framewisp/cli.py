@@ -10,7 +10,15 @@ from framewisp import inspection_limits as limits
 from framewisp.batch import MAX_REQUEST_BYTES, Batch
 from framewisp.captions import KEY_CAPTIONS, POINTER_CAPTIONS, CaptionOptions, log_input
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
-from framewisp.connection import COMMAND_PROTOCOL, request_attached
+from framewisp.connection import (
+    COMMAND_PROTOCOL,
+    DESKTOP_KINDS,
+    TEACHING_COMMANDS,
+    DesktopKind,
+    request_desktop,
+    session_kind,
+    teaching_refusal,
+)
 from framewisp.desktop import detach_desktop
 from framewisp.errors import SessionError, recorded_app_exit
 from framewisp.keys import CLICK_BUTTONS, MODIFIERS, SCROLL_BUTTONS
@@ -138,14 +146,13 @@ def main() -> None:
         "attach", help="share an existing desktop through its permission dialog"
     )
     teach = commands.add_parser(
-        "teach", help="record a screen-only teaching demonstration from your desktop"
+        "teach",
+        help="record a lesson from your desktop without keyboard or pointer access",
     )
-    teach.add_argument(
-        "directory", type=Path, help="new directory for the demonstration bundle"
-    )
+    teach.add_argument("directory", type=Path, help="new directory for the lesson")
     teach.add_argument("--goal", required=True, help="what the agent should learn")
     note = commands.add_parser(
-        "teach-note", help="add an explanation to an active demonstration"
+        "teach-note", help="add an explanation to an active teaching session"
     )
     note.add_argument("text", help="intent, variable inputs, or an expected result")
 
@@ -484,14 +491,14 @@ def main() -> None:
         args.directory = args.directory.absolute()
         if args.directory.exists() or args.directory.is_symlink():
             parser.error(
-                "Teaching requires a new output directory; choose a different path."
+                "Teaching requires a new lesson directory; choose a different path."
             )
         parent = args.directory.parent
         if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
             parser.error(
-                f"Teaching output parent must be an existing writable directory: {parent}"
+                f"The lesson's parent must be an existing writable directory: {parent}"
             )
-    attached = False
+    desktop: DesktopKind | None = None
     if args.command not in {"run", "attach", "teach", "recover"}:
         if args.command == "screenshot" and args.delay:
             # Wait first, so that the checks below see the session the screenshot shows.
@@ -502,12 +509,12 @@ def main() -> None:
         if not state_path.exists():
             parser.exit(
                 1,
-                "Session is disconnected. Start run, or ask the user to run attach in another terminal.\n",
+                "Session is disconnected. Start run, or ask the user to run attach or teach in another terminal.\n",
             )
         try:
             metadata = json.loads(state_path.read_text())
             protocol = metadata.get("command_protocol")
-            attached = metadata.get("kind") == "attached"
+            published_kind = session_kind(metadata)
         except (OSError, ValueError, RecursionError, AttributeError) as error:
             parser.exit(1, f"Cannot read session metadata: {error}\n")
         # Every session command passes here, so none needs its own check
@@ -518,28 +525,44 @@ def main() -> None:
                 if protocol is None
                 else f"command protocol {protocol!r}"
             )
-            remedy = (
-                "Ask the user to end it with Ctrl+C in its terminal if it is still "
-                "running, then to start it again with this version."
-                if attached
-                else "Stop its runner with Ctrl+C or SIGTERM, or run framewisp "
-                "SESSION recover if the runner has died, then start the session "
-                "again with this version."
-            )
+            if published_kind in DESKTOP_KINDS:
+                remedy = (
+                    "Ask the user to end it with Ctrl+C in its terminal if it is "
+                    "still running, then to start it again with this version "
+                    "(for teach, with a new lesson directory)."
+                )
+            else:
+                remedy = (
+                    "Stop its runner with Ctrl+C or SIGTERM, or run framewisp "
+                    "SESSION recover if the runner has died, then start the "
+                    "session again with this version."
+                )
             parser.exit(
                 1,
                 f"Session {session_dir} was started by another version of framewisp: "
                 f"it publishes {published} and this version uses {COMMAND_PROTOCOL}. "
                 f"{remedy}\n",
             )
+        if published_kind is None:
+            parser.exit(
+                1,
+                f"Cannot read session metadata: {state_path} publishes no known "
+                "session kind.\n",
+            )
+        if published_kind != "headless":
+            desktop = published_kind
+        if desktop == "teaching" and args.command not in TEACHING_COMMANDS:
+            parser.exit(1, f"Session {session_dir}: {teaching_refusal(args.command)}\n")
     try:
-        result = dispatch(session_dir, args, attached=attached)
+        result = dispatch(session_dir, args, desktop=desktop)
     except (SessionError, OSError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f"Session {session_dir}: {error}\n")
     raise SystemExit(result)
 
 
-def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> int:
+def dispatch(
+    session_dir: Path, args: argparse.Namespace, *, desktop: DesktopKind | None
+) -> int:
     if args.command == "inspect":
         from framewisp.inspection import inspect_session
 
@@ -547,7 +570,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         result = 0 if observation["status"] == "ok" else 1
     elif args.command == "batch":
-        if attached:
+        if desktop is not None:
             raise SessionError("batch supports headless sessions only.")
         batch: Batch = args.batch
         result = session_command(session_dir, "batch", parameters=batch.parameters())
@@ -564,11 +587,11 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
         else:
             result = attach_session(session_dir)
     elif args.command == "teach-note":
-        if not attached:
-            raise SessionError(
-                "teach-note requires a teaching session on your desktop."
-            )
-        result = request_attached(session_dir, "teach-note", {"text": args.text})
+        if desktop != "teaching":
+            raise SessionError("teach-note requires a teaching session.")
+        result = request_desktop(
+            session_dir, "teaching", "teach-note", {"text": args.text}
+        )
     elif args.command == "recover":
         result = recover_session(session_dir)
     elif args.command == "run":
@@ -588,13 +611,13 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             real_env=args.real_env,
         )
     elif args.command in {"record-start", "record-stop", "status", "stop"}:
-        if attached and args.command in {"status", "stop"}:
+        if desktop is not None and args.command in {"status", "stop"}:
             raise SessionError(
                 "status and stop manage headless sessions. Use framewisp --detach to stop desktop attachment."
             )
         result = (
-            request_attached(session_dir, args.command, {})
-            if attached
+            request_desktop(session_dir, desktop, args.command, {})
+            if desktop is not None
             else session_command(
                 session_dir,
                 args.command,
@@ -606,15 +629,15 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             )
         )
     elif args.command == "screenshot":
-        if attached and (args.region is not None or args.json):
+        if desktop is not None and (args.region is not None or args.json):
             raise SessionError(
                 "screenshot --region and --json support headless sessions only."
             )
         result = (
-            request_attached(
-                session_dir, "screenshot", {"path": str(args.path.resolve())}
+            request_desktop(
+                session_dir, desktop, "screenshot", {"path": str(args.path.resolve())}
             )
-            if attached
+            if desktop is not None
             else screenshot(
                 session_dir,
                 args.path,
@@ -624,7 +647,7 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
         )
     else:
         if args.command in {"move", "click", "scroll", "drag"}:
-            if attached:
+            if desktop is not None:
                 if args.move_duration is not None:
                     raise SessionError(
                         "--move-duration is supported only for headless sessions."
@@ -636,10 +659,10 @@ def dispatch(session_dir: Path, args: argparse.Namespace, *, attached: bool) -> 
             for key, value in vars(args).items()
             if key not in {"session", "command", "detach"}
         }
-        if attached:
+        if desktop is not None:
             parameters.pop("move_duration", None)
             with log_input(session_dir, args.command, parameters) as action:
-                result = request_attached(session_dir, args.command, parameters)
+                result = request_desktop(session_dir, desktop, args.command, parameters)
                 action.returncode = result
         else:
             result = session_command(session_dir, args.command, parameters=parameters)

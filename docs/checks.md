@@ -2,12 +2,12 @@
 
 A headless batch can send input and verify known accessible state in one request.
 Its steps are actions (`"action": ...`) and checks (`"check": ...`).
-Checks use the same private AT-SPI tree as `inspect`. The GTK demo and the test
+Checks use the same private AT-SPI tree as `inspect`. The demo app and the test
 probe work on Wayland and Xwayland. Toolkit omissions still apply; see
 [inspection coverage](ui-inspection.md). Visual-only state needs screenshots.
 
 Save this example as `check.json` and run
-`framewisp /tmp/framewisp-demo batch --file check.json` after starting the demo:
+`framewisp /tmp/framewisp-demo batch --file check.json` after starting the demo app:
 
 ```json
 {

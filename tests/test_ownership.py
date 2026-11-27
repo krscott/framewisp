@@ -663,15 +663,36 @@ def test_null_runtime_identity_steps_use_the_journal_path(
 
 
 # R-LIFE-7
-def test_stale_attachment_gets_attachment_steps(tmp_path: Path) -> None:
-    (tmp_path / "session.json").write_text('{"kind": "attached"}')
+@pytest.mark.parametrize("kind", ["attached", "teaching"])
+def test_stale_attachment_gets_attachment_steps(tmp_path: Path, kind: str) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
     with pytest.raises(SessionError, match="--detach") as refusal:
         recover_session(tmp_path)
     message = str(refusal.value)
     assert " run -- APP" not in message
+    assert "attach again" not in message
+    assert "(for teach, with a new lesson directory)" in message
     assert (tmp_path / "session.json").exists()
     run_commands(message, "rm ")
     assert recover_session(tmp_path) == 0
+
+
+@pytest.mark.parametrize("kind", [[], {}])
+def test_recover_refuses_metadata_with_an_unhashable_kind(
+    tmp_path: Path, kind: object
+) -> None:
+    (tmp_path / "session.json").write_text(json.dumps({"kind": kind}))
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), "recover"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "journal is missing" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert (tmp_path / "session.json").exists()
 
 
 # R-LIFE-7

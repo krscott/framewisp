@@ -29,7 +29,7 @@ from framewisp.attach import (
     run_attachment,
     write_png,
 )
-from framewisp.connection import request_attached
+from framewisp.connection import DesktopKind, request_desktop
 from framewisp.desktop import detach_desktop, reserve_desktop
 from framewisp.errors import SessionError
 from framewisp.ownership import (
@@ -202,7 +202,7 @@ def test_stale_attach_socket(
             }
         )
     )
-    assert request_attached(tmp_path, "detach", {}) == 1
+    assert request_desktop(tmp_path, "attached", "detach", {}) == 1
     assert "disconnected" in capsys.readouterr().err
 
 
@@ -227,8 +227,7 @@ class Portal:
         self.closed = False
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     def open(self, **options):
-        if (root / 'teach').exists():
-            assert options == {'observe_only': True}
+        assert options == {'allow_input': not (root / 'teach').exists()}
         (root / 'waiting').touch()
         while not (root / 'approve').exists():
             if self.stop.wait(.01):
@@ -257,7 +256,7 @@ if (root / 'teach').exists():
             if (root / 'slow-close').exists():
                 time.sleep(.8)
             super().close(*args, **kwargs)
-    lesson = TestTeaching(root / 'lesson', 'Demonstrate a task')
+    lesson = TestTeaching(root / 'lesson', 'Perform a task')
 original_dispatch = attach.dispatch_events
 revoke_at = None
 def dispatch():
@@ -439,8 +438,7 @@ def test_attached_cli_input_retention(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     for arguments in [
         ("type", "--interval", "0", "café 日本語 😀"),
@@ -484,8 +482,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
     assert (tmp_path / "lesson/frames/000000.png").exists()
     session_dir = tmp_path / "session"
     note = subprocess.run(
@@ -502,12 +499,37 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
         timeout=5,
     )
     assert note.returncode == 0, note.stderr
-    assert request_attached(session_dir, "click", {"x": 20, "y": 20}) == 1
+    metadata = json.loads((session_dir / "session.json").read_text())
+    assert metadata["kind"] == "teaching"
+    for arguments in [("click", "20", "20"), ("type", "secret")]:
+        refused = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert refused.returncode == 1
+        assert "this is a teaching session" in refused.stderr
+    # The runner empties the input log at startup, and a refused command adds
+    # no entry.
+    assert (session_dir / "inputs.jsonl").read_text() == ""
+    for command in ["status", "stop"]:
+        refused = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session_dir), command],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert refused.returncode == 1
+        assert "Ctrl+C in its terminal" in refused.stderr
+        assert "--detach" not in refused.stderr
+    assert request_desktop(session_dir, "teaching", "click", {"x": 20, "y": 20}) == 1
     assert (
-        request_attached(
+        request_desktop(
             session_dir,
+            "teaching",
             "screenshot",
-            {"path": str(tmp_path / "lesson/demonstration.webm")},
+            {"path": str(tmp_path / "lesson/video.webm")},
         )
         == 1
     )
@@ -515,7 +537,7 @@ def test_teaching_owner_records_notes_rejects_input_and_finalizes(
     attach_process.send_signal(stop_signal)
     assert attach_process.wait(timeout=5) == 0
     assert attach_process.stderr is not None
-    assert "Partial demonstration" not in attach_process.stderr.read()
+    assert "Partial lesson" not in attach_process.stderr.read()
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
     assert manifest["status"] == "complete"
     assert (
@@ -560,8 +582,9 @@ def test_portal_revocation_finishes_teaching_even_during_screenshot(
         (tmp_path / "slow-screenshot").touch()
         worker = Thread(
             target=lambda: results.append(
-                request_attached(
+                request_desktop(
                     tmp_path / "session",
+                    "teaching",
                     "screenshot",
                     {"path": str(tmp_path / "screenshot.png")},
                 )
@@ -607,12 +630,18 @@ def test_source_end_without_revocation_marks_teaching_failed(
     tmp_path: Path, attach_process: subprocess.Popen[str]
 ) -> None:
     (tmp_path / "approve").touch()
-    wait_file(tmp_path / "lesson/frames/000000.png")
+    assert attach_process.stdout is not None
+    read_terminal(attach_process.stdout.fileno(), b"Teaching session ready:")
     (tmp_path / "source-end").touch()
     assert attach_process.wait(timeout=5) == 1
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
     assert manifest["status"] == "failed"
     assert "ended unexpectedly" in manifest["error"]
+    assert attach_process.stderr is not None
+    assert (
+        "Teaching session ended: Teaching capture ended unexpectedly."
+        in attach_process.stderr.read()
+    )
 
 
 @pytest.mark.parametrize("attach_process", ["teaching"], indirect=True)
@@ -625,8 +654,9 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
     wait_file(tmp_path / "lesson/frames/000000.png")
     (tmp_path / "empty-screenshot").touch()
     assert (
-        request_attached(
+        request_desktop(
             tmp_path / "session",
+            "teaching",
             "screenshot",
             {"path": str(tmp_path / "screenshot.png")},
         )
@@ -668,12 +698,11 @@ def test_detach_cancels_long_input_and_waits_for_cleanup(
     attach_process: subprocess.Popen[str],
 ) -> None:
     session_dir = tmp_path / "session"
-    assert request_attached(session_dir, "key", {"chord": "a"}) == 1
+    assert request_desktop(session_dir, "attached", "key", {"chord": "a"}) == 1
     assert not (tmp_path / "events").exists()
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     command = subprocess.Popen(
         [
             sys.executable,
@@ -793,8 +822,7 @@ def test_x11_stop_releases_held_input(
     assert releases(x11_desktop) == [STARTUP_RELEASE]
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     assert detach_desktop() == 0
     # The owner must not wait out the release past detach's SIGKILL deadline.
     assert attach_process.wait(timeout=5) == 0
@@ -818,8 +846,7 @@ def test_x11_release_survives_killing_the_owner_job(
         wait_file(tmp_path / "waiting")
         (tmp_path / "approve").touch()
         assert owner.stdout is not None
-        while "Attached:" not in owner.stdout.readline():
-            assert owner.poll() is None
+        read_terminal(owner.stdout.fileno(), b"Attached:")
         os.killpg(owner.pid, signal.SIGKILL)
         assert owner.wait(timeout=5) == -signal.SIGKILL
         assert wait_releases(x11_desktop, 2)[1] == FINAL_RELEASE
@@ -853,7 +880,19 @@ def test_x11_attach_refuses_without_release(
 
 
 @pytest.mark.parametrize(
-    "metadata", ["", "{", "[" * 10000, "[]", "null", "{}", '{"kind": "other"}']
+    "metadata",
+    [
+        "",
+        "{",
+        "[" * 10000,
+        "[]",
+        "null",
+        "{}",
+        '{"kind": "other"}',
+        '{"kind": "headless"}',
+        '{"kind": []}',
+        '{"kind": {}}',
+    ],
 )
 def test_attach_refuses_metadata_of_another_session(
     tmp_path: Path,
@@ -891,13 +930,15 @@ def test_x11_attachment_stops_when_release_guard_dies(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     (guard,) = children(attach_process.pid, "bash")
     os.kill(guard, signal.SIGKILL)
     assert attach_process.wait(timeout=5) == 1
     assert attach_process.stderr is not None
-    assert "release helper exited" in attach_process.stderr.read()
+    assert (
+        "Attached session ended: The X11 input release helper exited"
+        in attach_process.stderr.read()
+    )
     # The owner runs the final release the dead guard cannot.
     assert wait_releases(x11_desktop, 2) == [STARTUP_RELEASE, FINAL_RELEASE]
 
@@ -986,7 +1027,9 @@ def test_guard_releases_presses_that_land_after_the_owner_exits(
 
 
 def test_old_session_metadata_cannot_command_new_attachment(
-    tmp_path: Path, attach_process: subprocess.Popen[str]
+    tmp_path: Path,
+    attach_process: subprocess.Popen[str],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = tmp_path / "old"
     old.mkdir()
@@ -994,7 +1037,10 @@ def test_old_session_metadata_cannot_command_new_attachment(
     state = json.loads((old / "session.json").read_text())
     state["attachment"] = "previous-owner"
     (old / "session.json").write_text(json.dumps(state))
-    assert request_attached(old, "key", {"chord": "a"}) == 1
+    assert request_desktop(old, "attached", "key", {"chord": "a"}) == 1
+    error = capsys.readouterr().err
+    assert "The session this command was addressed to has ended." in error
+    assert "run attach" not in error
     assert not (tmp_path / "events").exists()
     assert attach_process.poll() is None
 
@@ -1015,8 +1061,7 @@ def test_malformed_requests_leave_the_attachment_running(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     token = json.loads((session_dir / "session.json").read_text())["attachment"]
     os.mkfifo(tmp_path / "fifo")
@@ -1063,10 +1108,10 @@ def test_malformed_requests_leave_the_attachment_running(
         assert isinstance(response["error"], str) and response["error"]
         assert attach_process.poll() is None
     assert not (tmp_path / "events").exists()
-    assert request_attached(session_dir, "key", {"chord": "a"}) == 0
+    assert request_desktop(session_dir, "attached", "key", {"chord": "a"}) == 0
     assert (tmp_path / "events").exists()
     click: dict[str, object] = {"x": 10, "y": 20, "button": "left", "count": 1}
-    assert request_attached(session_dir, "click", click) == 0
+    assert request_desktop(session_dir, "attached", "click", click) == 0
     assert attach_process.poll() is None
 
 
@@ -1076,8 +1121,7 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     session_dir = tmp_path / "session"
     state = json.loads((session_dir / "session.json").read_text())
     with socket.socket(socket.AF_UNIX) as connection:
@@ -1088,7 +1132,7 @@ def test_trickling_client_gets_a_reply_from_the_attachment(
             assert time.monotonic() - started < 10
             connection.sendall(b" ")
         assert "Timed out waiting" in json.loads(connection.recv(4096))["error"]
-    assert request_attached(session_dir, "key", {"chord": "a"}) == 0
+    assert request_desktop(session_dir, "attached", "key", {"chord": "a"}) == 0
     assert attach_process.poll() is None
 
 
@@ -1198,10 +1242,9 @@ def test_portal_failure_closes_owner(
 ) -> None:
     (tmp_path / "approve").touch()
     assert attach_process.stdout is not None
-    while "Attached:" not in attach_process.stdout.readline():
-        assert attach_process.poll() is None
+    read_terminal(attach_process.stdout.fileno(), b"Attached:")
     (tmp_path / "fail").touch()
-    assert request_attached(tmp_path / "session", "key", {"chord": "a"}) == 1
+    assert request_desktop(tmp_path / "session", "attached", "key", {"chord": "a"}) == 1
     assert attach_process.wait(timeout=5) == 1
     assert (tmp_path / "closed").exists()
     assert not (tmp_path / "session/session.json").exists()
@@ -1241,6 +1284,7 @@ def terminal_process(
 
 
 def read_terminal(descriptor: int, expected: bytes) -> bytes:
+    """Read until `expected` appears, failing with the output after 5 seconds."""
     output = b""
     deadline = time.monotonic() + 5
     while expected not in output:
@@ -1332,13 +1376,36 @@ main()
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("state", ["{", "[]", '{"kind": "attached"}'])
+@pytest.mark.parametrize(
+    ("kind", "state", "message"),
+    [
+        # Metadata that changes after the CLI read its kind is reported as
+        # that kind.
+        ("attached", "{", "Cannot use attached session"),
+        ("teaching", "[]", "Cannot use teaching session"),
+        ("attached", '{"kind": "attached"}', "Cannot use attached session"),
+        ("teaching", '{"kind": "teaching"}', "Cannot use teaching session"),
+        (
+            "teaching",
+            '{"kind": "teaching", "command_socket": "/nonexistent/command.sock"}',
+            "Teaching session is disconnected",
+        ),
+    ],
+)
 def test_invalid_session_metadata_fails_clearly(
-    tmp_path: Path, state: str, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    kind: DesktopKind,
+    state: str,
+    message: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     (tmp_path / "session.json").write_text(state)
-    assert request_attached(tmp_path, "key", {"chord": "a"}) == 1
-    assert "Cannot use attached session" in capsys.readouterr().err
+    assert request_desktop(tmp_path, kind, "key", {"chord": "a"}) == 1
+    error = capsys.readouterr().err
+    assert message in error
+    assert ("run teach again with a new lesson directory" in error) is (
+        kind == "teaching"
+    )
 
 
 def test_attachment_refuses_headless_ownership(

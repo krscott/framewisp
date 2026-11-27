@@ -375,6 +375,9 @@ def test_agent_skill_rejects_session_command(tmp_path: Path) -> None:
         {"command_protocol": COMMAND_PROTOCOL + 1},
         {"command_protocol": str(COMMAND_PROTOCOL)},
         {"kind": "attached"},
+        {"kind": "teaching"},
+        # The previous version published teaching sessions as attached.
+        {"kind": "attached", "command_protocol": 3},
     ],
 )
 @pytest.mark.parametrize(
@@ -406,10 +409,41 @@ def test_session_commands_refuse_another_command_protocol(
     )
     assert result.returncode == 1
     assert "another version of framewisp" in result.stderr
-    assert ("Ask the user" in result.stderr) is (metadata.get("kind") == "attached")
+    assert ("Ask the user" in result.stderr) is (
+        metadata.get("kind") in {"attached", "teaching"}
+    )
     assert "again with this version" in result.stderr
+    assert ("a new lesson directory" in result.stderr) is (
+        metadata.get("kind") in {"attached", "teaching"}
+    )
     assert "Traceback" not in result.stderr
     assert not (tmp_path / "screenshot.png").exists()
+
+
+@pytest.mark.parametrize("kind", [[], {}, "other"])
+@pytest.mark.parametrize("protocol", [COMMAND_PROTOCOL, None])
+@pytest.mark.parametrize("arguments", [("stop",), ("type", "a")])
+def test_session_commands_refuse_an_unknown_session_kind(
+    tmp_path: Path, kind: object, protocol: int | None, arguments: tuple[str, ...]
+) -> None:
+    (tmp_path / "session.json").write_text(
+        json.dumps({"kind": kind, "command_protocol": protocol})
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(tmp_path), *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 1
+    assert (
+        "publishes no known session kind"
+        if protocol == COMMAND_PROTOCOL
+        else "another version of framewisp"
+    ) in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (tmp_path / "inputs.jsonl").exists()
 
 
 # R-CONTROL-3
@@ -874,7 +908,7 @@ def test_screenshot_options_reject_attached_sessions(
 
 def test_screenshot_json_rejects_png_stdout(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text(
-        json.dumps({"command_protocol": COMMAND_PROTOCOL})
+        json.dumps({"kind": "headless", "command_protocol": COMMAND_PROTOCOL})
     )
     result = subprocess.run(
         [sys.executable, "-m", "framewisp", str(tmp_path), "screenshot", "--json", "-"],

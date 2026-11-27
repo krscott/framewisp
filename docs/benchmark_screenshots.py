@@ -1,4 +1,4 @@
-"""Compare full and region CLI screenshots of identical frozen demo content."""
+"""Compare full and region CLI screenshots of identical frozen demo app content."""
 
 import argparse
 import json

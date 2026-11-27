@@ -92,7 +92,7 @@ class DesktopPortal:
                 if self.stop.wait(0.02):
                     self.close()
                     raise InterruptedError(
-                        "Attach stopped while waiting for desktop permission."
+                        "Stopped while waiting for desktop permission."
                     )
             code, result = response[0]
             if code:
@@ -118,8 +118,8 @@ class DesktopPortal:
             None,
         )
 
-    def open(self, *, observe_only: bool = False) -> None:
-        interface = SCREENCAST if observe_only else REMOTE
+    def open(self, *, allow_input: bool) -> None:
+        interface = REMOTE if allow_input else SCREENCAST
         result = self.request(
             interface,
             "CreateSession",
@@ -155,7 +155,7 @@ class DesktopPortal:
             closed,
             None,
         )
-        if not observe_only:
+        if allow_input:
             self.request(
                 REMOTE,
                 "SelectDevices",
@@ -179,28 +179,28 @@ class DesktopPortal:
         )
         print(
             (
-                "Select one monitor to record in the desktop dialog."
-                if observe_only
-                else "Approve keyboard/pointer access and select one monitor in the desktop dialog."
+                "Approve keyboard/pointer access and select one monitor in the desktop dialog."
+                if allow_input
+                else "Select one monitor to record in the desktop dialog."
             ),
             flush=True,
         )
         result = self.request(interface, "Start", "(osa{sv})", (self.session, ""), {})
-        if not observe_only and result.get("devices") != 3:
+        if allow_input and result.get("devices") != 3:
             raise RuntimeError(
                 "Attach requires both keyboard and pointer permission. "
                 "Allow remote interaction in the desktop dialog and attach again."
             )
         streams = cast(list[tuple[int, dict[str, object]]], result.get("streams", []))
         if len(streams) != 1:
-            raise RuntimeError("Attach requires exactly one shared monitor.")
+            raise RuntimeError("Share exactly one monitor in the desktop dialog.")
         self.node, properties = streams[0]
         self.size = cast(tuple[int, int], properties.get("size", (0, 0)))
         # COSMIC creates its EI devices on the first Notify call. Zero motion
         # starts that handshake without changing the pointer's position.
-        if not observe_only:
+        if allow_input:
             self.input("NotifyPointerMotion", "dd", 0.0, 0.0)
-        if not observe_only and self.stop.wait(0.1):
+        if allow_input and self.stop.wait(0.1):
             raise InterruptedError("Attach stopped during input setup.")
 
     def input(self, method: str, signature: str, *values: object) -> None:

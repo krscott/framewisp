@@ -71,7 +71,7 @@ def main() -> None:
                         time.perf_counter() - started
                     )
                     app_log = session_dir / "app.log"
-                    while "Demo ready" not in app_log.read_text():
+                    while "Demo app ready" not in app_log.read_text():
                         assert time.perf_counter() - started < 20
                         time.sleep(0.005)
                     if cold:
@@ -128,7 +128,7 @@ def main() -> None:
                             ):
                                 if time.monotonic() >= deadline:
                                     raise RuntimeError(
-                                        "Demo did not acknowledge the sequence"
+                                        "The demo app did not acknowledge the sequence"
                                     )
                                 time.sleep(0.005)
                             if index:

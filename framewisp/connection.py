@@ -7,14 +7,14 @@ import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Literal, TypeVar, cast, get_args
 
 from framewisp.batch import MAX_REQUEST_BYTES
 
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
 # another value, so bump it in any change to their fields or meaning.
-COMMAND_PROTOCOL = 3
+COMMAND_PROTOCOL = 4
 # A connection carries one request, and a client gets this long to send it.
 REQUEST_SECONDS = 2.0
 # What validators raise for a bad request. Anything else is a validator bug.
@@ -22,15 +22,67 @@ REJECTED_REQUEST = (ValueError, TypeError, OverflowError, OSError)
 
 Request = TypeVar("Request")
 
+# The `kind` that session metadata publishes.
+SessionKind = Literal["headless", "attached", "teaching"]
+# The kinds of session on the user's desktop, reached by `request_desktop`.
+DesktopKind = Literal["attached", "teaching"]
+DESKTOP_KINDS: frozenset[SessionKind] = frozenset(get_args(DesktopKind))
+# The session commands a teaching session accepts; it only watches.
+TEACHING_COMMANDS = frozenset({"screenshot", "teach-note"})
 
-def request_attached(
-    session_dir: Path, command: str, parameters: dict[str, object]
+
+def session_kind(metadata: object) -> SessionKind | None:
+    """Return the kind that parsed session metadata publishes.
+
+    None means it publishes no known kind. Such a session is not a desktop
+    session, and session commands refuse it.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    kind = cast(dict[str, object], metadata).get("kind")
+    # Compare by equality: an unhashable kind cannot be looked up in a set.
+    return next((known for known in get_args(SessionKind) if known == kind), None)
+
+
+def teaching_refusal(command: str) -> str:
+    return (
+        f"{command} is refused: this is a teaching session, which only watches. "
+        "It accepts only screenshot and teach-note. "
+        "The user ends this session with Ctrl+C in its terminal."
+    )
+
+
+def desktop_session(kind: DesktopKind) -> str:
+    return "teaching session" if kind == "teaching" else "attached session"
+
+
+def restart_remedy(kind: DesktopKind) -> str:
+    """Say how the user starts a desktop session of this kind again."""
+    if kind == "teaching":
+        return "Ask the user to run teach again with a new lesson directory."
+    return "Ask the user to run attach in another terminal."
+
+
+def disconnected(kind: DesktopKind) -> str:
+    return (
+        f"{desktop_session(kind).capitalize()} is disconnected. {restart_remedy(kind)}"
+    )
+
+
+def request_desktop(
+    session_dir: Path,
+    kind: DesktopKind,
+    command: str,
+    parameters: dict[str, object],
 ) -> int:
+    """Send a command to the desktop session in `session_dir`.
+
+    The caller passes the `kind` it read from the session metadata; it only
+    words the messages printed here. The runner refuses a command that its own
+    kind does not accept or whose attachment token does not match.
+    """
     try:
         state = json.loads((session_dir / "session.json").read_text())
-        if state.get("kind") != "attached":
-            print("This command requires an attached desktop session.", file=sys.stderr)
-            return 1
         endpoint = Path(state["command_socket"])
         with socket.socket(socket.AF_UNIX) as connection:
             connection.connect(str(endpoint))
@@ -49,22 +101,19 @@ def request_attached(
             with connection.makefile("r") as response:
                 line = response.readline()
         if not line:
-            print("Attached session disconnected.", file=sys.stderr)
+            print(disconnected(kind), file=sys.stderr)
             return 1
         result = json.loads(line)
         if result["error"]:
             print(result["error"], file=sys.stderr)
         return int(result["status"])
     except (FileNotFoundError, ConnectionError):
-        print(
-            "Attached session is disconnected. Ask the user to run attach in another terminal.",
-            file=sys.stderr,
-        )
+        print(disconnected(kind), file=sys.stderr)
         return 1
 
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         print(
-            f"Cannot use attached session: {error}. Ask the user to reconnect.",
+            f"Cannot use {desktop_session(kind)}: {error}. {restart_remedy(kind)}",
             file=sys.stderr,
         )
         return 1

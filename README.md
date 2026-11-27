@@ -2,7 +2,7 @@
 
 Run a Wayland or X11 app without a physical display, save PNG screenshots or MP4 recordings, and
 send clicks, drags, and keystrokes from the CLI. The MVP targets this repo's NixOS
-development environment and includes a small GTK demo.
+development environment and includes a small GTK demo app.
 
 ## Stack
 
@@ -18,7 +18,7 @@ Framewisp's Python CLI manages the session and calls these tools:
 | wtype | Types non-ASCII text through a Wayland virtual keyboard with a matching keymap. |
 | grim | Captures the Wayland display as a PNG. Screenshots do not use VNC. |
 | wf-recorder | Records the display as silent H.264 MP4 when requested, using its FFmpeg libraries. |
-| GTK 4, GLib, and PyGObject | Provide the bundled demo and test apps, their event loops, and Python bindings. |
+| GTK 4, GLib, and PyGObject | Provide the bundled demo app and test apps, their event loops, and Python bindings. |
 
 The Nix flake pins and packages these dependencies and wraps the installed
 commands with their runtime environment. The apps you run, including Flatpaks,
@@ -39,7 +39,7 @@ declarations.
 ## Install or run with Nix
 
 The flake supports `x86_64-linux`. The package supplies framewisp's display,
-input, screenshot, and recording tools, plus the bundled GTK demo. No development
+input, screenshot, and recording tools, plus the bundled GTK demo app. No development
 shell, checkout, virtual environment, or sudo is needed for `nix run`. Other
 apps, such as Flatpaks, still need their own installation.
 
@@ -64,7 +64,7 @@ affect its own tools only. A command such as `run -- python -m myapp` resolves
 The private display, accessibility settings, and
 [sanitized app environment](#app-environment) override the corresponding settings.
 If `framewisp-demo` is absent from the caller's PATH, `run` resolves that bundled
-demo through framewisp's runtime PATH. This keeps the `nix run` example working
+demo app through framewisp's runtime PATH. This keeps the `nix run` example working
 without adding framewisp's dependencies to an external app's PATH.
 Editable installs and `python -m framewisp` use the active Python environment.
 
@@ -120,7 +120,7 @@ appearance, layout, canvas content, or controls missing from accessibility.
 Accessible bounds are window-relative toolkit units, not necessarily display
 pixels. Inspection cost and coverage vary by app.
 
-After installation, start a fresh demo session in the first terminal:
+After installation, start a fresh demo app session in the first terminal:
 
 ```sh
 check_dir=$(mktemp -d /tmp/framewisp-check.XXXXXX)
@@ -149,14 +149,14 @@ JSON
 framewisp demo batch --file check.json
 ```
 
-The first wait checks that the fresh demo's empty entry is accessible before
+The first wait checks that the fresh demo app's empty entry is accessible before
 clicking its known coordinates. `interval: 0` removes deliberate typing pauses;
 use paced typing for demonstrations or timing-sensitive behavior. The final wait
 checks for `Entered: HelloGUI`. Read `status: "completed"` and `verified: true` in
 the JSON. This verifies the requested accessible conditions, not appearance or
 every app effect. Successful input without checks has `verified: null`.
 
-To try failure, repeat with a fresh demo session and working directory, changing
+To try failure, repeat with a fresh demo app session and working directory, changing
 only the last `equals` to `"Entered: Wrong"`. The batch exits 1 with
 `status: "failed"`, `verified: false`, `failed_phase: "check"`, and `failed_index: 4`.
 Read `error` and `results[4].observation` for the last accessible result and its
@@ -221,7 +221,7 @@ session-independent.
 
 | Command | Behavior |
 | --- | --- |
-| `teach DIRECTORY --goal TEXT` | Record a human demonstration on one desktop monitor into a new directory; screen-only access. |
+| `teach DIRECTORY --goal TEXT` | Record a lesson of the user performing a task on one desktop monitor into a new directory, without keyboard or pointer access. |
 | `teach-note TEXT` | Add a timestamped explanation to an active teaching session. |
 | `run [--real-env] [--width W] [--height H] [--record FILE] [--console] [--console-position POSITION] [--console-size PIXELS] [--console-cell-scale FACTOR] [--pointer-captions all\|modifiers] [--key-captions all\|non-text] [--compact] [--no-click-pings] -- APP [ARGS...]` | Start the display, optional recording, and app; stay in the foreground. |
 | `attach` | Request capture and input access to your existing desktop; stay in the foreground. |
@@ -241,7 +241,7 @@ session-independent.
 | `type [--private] [--interval SECONDS] TEXT` | Send printable Unicode with a pause between characters (default: 0.08 seconds). |
 | `key [--private] CHORD` | Press/release a key with optional Ctrl, Shift, and Alt modifiers. |
 
-The automated tests cover the bundled demo on Wayland and Xwayland. Swell Foop 50.0 and
+The automated tests cover the bundled demo app on Wayland and Xwayland. Swell Foop 50.0 and
 KolourPaint 26.04.3 have also been tested manually as Flatpaks (see below).
 Attaching to an X11 desktop without RemoteDesktop and ScreenCast portals, such as
 most standalone window managers, and GPU-dependent apps are outside this MVP.
@@ -271,9 +271,9 @@ The delay accepts finite, nonnegative seconds, including fractions. It defaults
 to zero and does not count toward the capture process's ten-second timeout.
 Capture again when necessary.
 
-## Demo controls
+## Demo app controls
 
-`framewisp-demo` includes controls for every input command. The demo uses bundled DejaVu Sans 11 to keep its control positions stable. At the default
+`framewisp-demo` includes controls for every input command. The demo app uses bundled DejaVu Sans 11 to keep its control positions stable. At the default
 1280x720 session size, use these targets:
 
 | Interaction | Target and result |
@@ -288,48 +288,49 @@ Capture again when necessary.
 | Scroll | At `(700, 250)`, scroll down/up or right/left. Row/column labels and the `Scroll: x=... y=...` label show the position. |
 | Reset | Click `(700, 513)` to clear text, turn the option off, restore the slider to 25, scroll to the origin, and focus the entry. |
 
-Coordinates apply to the packaged demo in the default headless session. Inspect a
+Coordinates apply to the packaged demo app in the default headless session. Inspect a
 screenshot when using a different window size, desktop theme, or display scale.
 Use `--duration` for paced drags, `--interval` for paced typing, and screenshot
-`--delay` when a tooltip or scroll animation needs time. The demo logs resulting
+`--delay` when a tooltip or scroll animation needs time. The demo app logs resulting
 widget state to `app.log`; screenshots show the same values. Run `framewisp-demo`
 directly to use these controls on your desktop.
 
-## Teach an agent by demonstration
+## Teach an agent with a lesson
 
 To show an agent a task in an app on your normal desktop, run this yourself in a
 desktop terminal:
 
 ```sh
-framewisp lesson teach ./customer-lesson --goal 'Update a customer and verify the saved changes'
+framewisp teaching teach ./customer-lesson --goal 'Update a customer and verify the saved changes'
 ```
 
-Choose a new output directory. Read the instructions, type `ATTACH`, and select
-one monitor in the desktop sharing dialog. Teaching requests screen access only;
-agent mouse and keyboard commands are disabled. Perform the task normally, then
+Choose a new lesson directory. Read the instructions, type `ATTACH`, and select
+one monitor in the desktop sharing dialog. Teaching requests no keyboard or
+pointer access; the teaching session refuses agent mouse and keyboard commands.
+It prints `Teaching session ready:` once it saves its first frame. Perform the task normally, then
 stop with Ctrl+C in the teaching terminal. Your apps keep running. The sharing
 indicator and `framewisp --detach` can also stop capture.
 
 You or the agent can add explanations from another terminal while recording:
 
 ```sh
-framewisp lesson teach-note 'The customer name is an input; verify the saved address before finishing.'
+framewisp teaching teach-note 'The customer name is an input; verify the saved address before finishing.'
 ```
 
-The output contains `lesson.json` with the goal and completion status,
-`demonstration.webm` with the silent video and cursor, `frames/` with roughly
-one PNG per second, and `timeline.jsonl` mapping images and notes to capture
-times in seconds. The agent can study the PNGs directly, even while recording,
+The lesson contains `lesson.json` with the goal and completion status,
+`video.webm` with the silent video and cursor, `frames/` with roughly one PNG
+frame per second, and `timeline.jsonl` mapping frames and notes to capture
+times in seconds. The agent can study the frames directly, even while recording,
 and extract additional frames from the video for fast interactions. Notes,
-images, and video are unredacted. Teaching does not capture physical key events,
+frames, and video are unredacted. Teaching does not capture physical key events,
 audio, or clipboard contents; explain shortcuts and choices in notes.
 
-Ask the agent to turn the demonstration into a procedure with variable inputs
+Ask the agent to turn the lesson into a procedure with variable inputs
 and outcome checks, clarify uncertain steps, and try it on a fresh example.
-Framewisp supplies the evidence; your agent writes the procedure. A `recording`
+Framewisp supplies the lesson; your agent writes the procedure. A `recording`
 status after the process exits means capture was interrupted; `failed` includes
-an error. Saved partial evidence remains available. See the
-[agent guide](framewisp/SKILL.md#learn-from-a-human-demonstration) for the full
+an error. A partial lesson keeps what it saved. See the
+[agent guide](framewisp/SKILL.md#learn-from-a-lesson) for the full
 workflow.
 
 ## Attach to an existing desktop
@@ -443,7 +444,7 @@ or screen can leave that terminal and the attach process running. Use `--detach`
 before disconnecting from a terminal multiplexer. If the attach
 process crashes or is killed, its private portal connection and capture handles
 close with it. The stop command escalates to killing an unresponsive attach process
-after three seconds. This allows teaching recordings to finalize. It uses Linux
+after three seconds. This allows lessons to finalize. It uses Linux
 6.5 or newer to identify the socket owner safely.
 Disconnecting cancels ongoing input and releases framewisp's held keys and buttons. Your app stays
 open in its current state. Reconnecting requires running `attach` and approving
@@ -971,7 +972,7 @@ and locale stay fixed unless you change those too. Tool caches under HOME, such 
 those of `cargo`, `uv` and `npm`, start cold in each session unless you point them
 somewhere else, and tools managed under HOME, such as `rustup` toolchains, are
 missing. Build first and `run` the built program, or use a virtual environment.
-`env` hides a bare `framewisp-demo` from the bundled demo fallback,
+`env` hides a bare `framewisp-demo` from the bundled demo app fallback,
 so use its full path if it is not on your PATH.
 
 ### Use the real environment
@@ -1055,7 +1056,7 @@ framewisp swell run -- \
   flatpak run --socket=wayland org.gnome.SwellFoop
 ```
 
-Use the same screenshot and click commands as for the demo. A manual test of
+Use the same screenshot and click commands as for the demo app. A manual test of
 Swell Foop 50.0 with GNOME runtime 50 covered starting a game, removing tile
 groups, Undo, Redo, and stopping the runner with SIGTERM. All test processes,
 including the Flatpak wrapper and game, exited on shutdown.
@@ -1120,10 +1121,10 @@ framewisp x11 key Return
 framewisp x11 screenshot /tmp/x11.png
 ```
 
-The demo prints `Display: X11Display` in `app.log` and shows that backend in its
+The demo app prints `Display: X11Display` in `app.log` and shows that backend in its
 heading. This verifies GTK is using X11. The same click, drag, scroll, keyboard,
 screenshot, and recording commands work in this mode. All required tools and the
-demo come with the Nix package; no X11 desktop or development shell is needed.
+demo app come with the Nix package; no X11 desktop or development shell is needed.
 
 The runner discovers Xwayland's allocated display number. It removes the host's
 `DISPLAY`, `WAYLAND_DISPLAY`, and `XAUTHORITY`, then gives the app the private
@@ -1132,7 +1133,7 @@ The runner discovers Xwayland's allocated display number. It removes the host's
 not a security sandbox for untrusted apps. Sway owns Xwayland and shuts
 it down when the session ends.
 
-The bundled GTK demo is the tested X11 target. GPU/game support, desktop services,
+The bundled GTK demo app is the tested X11 target. GPU/game support, desktop services,
 and native X11 desktop attachment are outside this mode's scope. X11 Flatpak
 launching has not been verified. The first X11 pointer command primes the virtual
 pointer with a one-pixel motion and a 100 ms pause to avoid losing its first
@@ -1269,7 +1270,7 @@ pyright
 ```
 
 Tests run a real compositor, VNC server, and GTK app. They check input through
-the demo's output, compare screenshot regions, decode recordings, and verify
+the demo app's output, compare screenshot regions, decode recordings, and verify
 managed-process cleanup.
 
 Declare Python dependencies in `pyproject.toml` and the corresponding Nix
@@ -1295,14 +1296,14 @@ command and may download Node and pyright on first use. `just format` skips Nix
 formatting when Nix is absent and shell formatting when shfmt is absent.
 
 `just test` and `just check` also run the GUI integration suite. For that suite,
-install libadwaita with its introspection data, D-Bus, dconf, AT-SPI, the GTK 4
-demo and its compiled GSettings schemas, a Qt 6 QML runner, and the DejaVu and
+install libadwaita with its introspection data, D-Bus, dconf, AT-SPI, GTK 4's
+`gtk4-demo` and its compiled GSettings schemas, a Qt 6 QML runner, and the DejaVu and
 Noto fonts used by the Nix package. Configure these paths for your installation:
 
 | Environment variable | Value |
 | --- | --- |
 | `FRAMEWISP_TEST_GTK_APP` | Absolute path to `gtk4-demo`. |
-| `FRAMEWISP_TEST_GTK_SCHEMAS` | Directory containing the demo's compiled GSettings schemas. |
+| `FRAMEWISP_TEST_GTK_SCHEMAS` | Directory containing `gtk4-demo`'s compiled GSettings schemas. |
 | `FRAMEWISP_TEST_DCONF_SERVICE` | Absolute path to `ca.desrt.dconf.service`. |
 | `FRAMEWISP_TEST_DCONF_MODULES` | GIO module directory containing the dconf backend. |
 | `FRAMEWISP_FONTCONFIG_FILE` | Fontconfig file for apps, captions and console panels. Required by every `run`. |

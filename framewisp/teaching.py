@@ -1,4 +1,4 @@
-"""A demonstration bundle produced from a screen-only capture stream."""
+"""A lesson produced from a capture stream of the shared display."""
 
 # pyright: reportMissingModuleSource=false
 
@@ -37,7 +37,7 @@ class Teaching:
                 "schema_version": 1,
                 "goal": self.goal,
                 "status": status,
-                "video": "demonstration.webm",
+                "video": "video.webm",
                 "timeline": "timeline.jsonl",
                 "frame_count": self.count,
                 "error": error,
@@ -52,7 +52,7 @@ class Teaching:
         (self.directory / "frames").mkdir(mode=0o700)
         (self.directory / "timeline.jsonl").touch(mode=0o600)
         self.manifest("recording")
-        self.video = (self.directory / "demonstration.webm").open("xb")
+        self.video = (self.directory / "video.webm").open("xb")
         # A streamable WebM stays decodable without a final seek, so an
         # interrupted lesson keeps the video recorded so far.
         pipeline = Gst.parse_launch(
@@ -107,7 +107,7 @@ class Teaching:
 
     def drain(self) -> bool:
         assert self.frames is not None
-        # Process at most one observation so slow storage cannot starve stop checks.
+        # Process at most one frame so slow storage cannot starve stop checks.
         sample = self.frames.emit("try-pull-sample", 0)
         if sample is not None:
             assert isinstance(sample, Gst.Sample)
@@ -144,7 +144,7 @@ class Teaching:
         return True
 
     def close(self, error: str | None = None, *, revoked: bool = False) -> None:
-        """Finalize within a bounded time, preserving partial evidence on failure."""
+        """Finalize within a bounded time, preserving a partial lesson on failure."""
         with self.lock:
             self.closed = True
             if not self.created:
@@ -177,7 +177,7 @@ class Teaching:
                     finally:
                         self.pipeline.set_state(Gst.State.NULL)
                 if self.count == 0:
-                    error = error or "Teaching capture saved no observations."
+                    error = error or "Teaching capture saved no frames."
             except (OSError, RuntimeError, GLib.Error) as failure:
                 error = error or str(failure)
             finally:
@@ -185,4 +185,4 @@ class Teaching:
                     self.video.close()
             self.manifest("failed" if error else "complete", error)
             if error is not None:
-                raise RuntimeError(f"{error} Partial demonstration: {self.directory}")
+                raise RuntimeError(f"{error} Partial lesson: {self.directory}")

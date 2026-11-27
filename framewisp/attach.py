@@ -1,7 +1,7 @@
 """Share an existing desktop without owning its app or compositor processes."""
 
 # pyright: reportMissingModuleSource=false
-# `parse_attached_request` validates required command fields before `perform`.
+# `parse_desktop_request` validates required command fields before `perform`.
 # pyright: reportTypedDictNotRequiredAccess=false
 
 import json
@@ -33,9 +33,14 @@ from framewisp.actions import InputAction
 from framewisp.captions import input_error
 from framewisp.connection import (
     COMMAND_PROTOCOL,
+    DESKTOP_KINDS,
+    TEACHING_COMMANDS,
+    SessionKind,
     parse_request_fields,
     receive_request,
     resolved_request_path,
+    session_kind,
+    teaching_refusal,
 )
 from framewisp.desktop import reserve_desktop, write_state
 from framewisp.keys import SHIFTED_KEYS, parse_chord
@@ -288,7 +293,7 @@ def save_screenshot(
 # before its current frames, and sets no timestamps to tell them apart.
 FRAME_SETTLE = 0.1
 SCREENSHOT_TIMEOUT = 10
-SCREENSHOT_CANCELLED = "Attached session disconnected; screenshot cancelled."
+SCREENSHOT_CANCELLED = "The session disconnected; screenshot cancelled."
 
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
@@ -379,24 +384,22 @@ def finished(
     return True
 
 
-def parse_attached_request(
-    line: bytes, attachment: str, *, teaching: bool = False
+def parse_desktop_request(
+    line: bytes, attachment: str, kind: SessionKind
 ) -> InputAction | Path | str:
     """Validate a request: a screenshot destination, or an input action."""
     fields = parse_request_fields(line)
     # The token keeps a later desktop share at the same socket path from
-    # accepting a command addressed to an earlier one.
+    # accepting a command addressed to an earlier one. The sender's kind may
+    # differ from this session's, and its session directory may differ too, so
+    # the message names neither.
     if fields.get("attachment") != attachment:
-        raise ValueError(
-            "Attached session is disconnected. Ask the user to attach again."
-        )
+        raise ValueError("The session this command was addressed to has ended.")
     command = fields.get("command")
     if not isinstance(command, str):
         raise ValueError("command must be a string.")
-    if teaching and command not in {"screenshot", "teach-note"}:
-        raise ValueError(
-            "Teaching is observation-only; input and recording commands are disabled."
-        )
+    if kind == "teaching" and command not in TEACHING_COMMANDS:
+        raise ValueError(teaching_refusal(command))
     if command.startswith("record-"):
         raise ValueError("Recording attached sessions is not supported yet.")
     raw = fields.get("parameters")
@@ -404,7 +407,7 @@ def parse_attached_request(
         raise ValueError("parameters must be an object.")
     parameters = cast(dict[str, object], raw)
     if command == "teach-note":
-        if not teaching:
+        if kind != "teaching":
             raise ValueError("teach-note requires a teaching session.")
         text = parameters.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > 8000:
@@ -426,6 +429,17 @@ def foreground_terminal(descriptor: int) -> bool:
         return os.isatty(descriptor) and os.tcgetpgrp(descriptor) == os.getpgrp()
     except OSError:
         return False
+
+
+def failure_prefix(teaching: Teaching | None, *, ready: bool) -> str:
+    """Name what failed: starting the session, or the session once ready."""
+    if ready:
+        return (
+            "Teaching session ended"
+            if teaching is not None
+            else "Attached session ended"
+        )
+    return "Could not start teaching" if teaching is not None else "Could not attach"
 
 
 def attach_session(
@@ -454,8 +468,8 @@ def attach_session(
     if teaching is not None:
         print(
             "Teaching records your selected monitor and cursor, without keyboard or pointer control.\n"
-            "Video, sampled images, and notes are saved unredacted, including any visible secrets.\n"
-            f"Goal: {teaching.goal}\nOutput: {teaching.directory}\n"
+            "Video, sampled frames, and notes are saved unredacted, including any visible secrets.\n"
+            f"Goal: {teaching.goal}\nLesson: {teaching.directory}\n"
             "Keep this terminal open and in the foreground. Stop with Ctrl+C here,\n"
             "the sharing indicator, or framewisp --detach. Your apps stay running.",
             flush=True,
@@ -476,21 +490,22 @@ def attach_session(
             "and send input without the desktop dialog. Approving it does not limit them.",
             flush=True,
         )
+    declined = "Teaching not started." if teaching is not None else "Not attached."
     try:
         confirmation = input(
-            "Type ATTACH to confirm you understand and want to record this demonstration: "
+            "Type ATTACH to confirm you understand and want to record this lesson: "
             if teaching is not None
             else "Type ATTACH to confirm the bindings are configured and you understand this access: "
         )
     except (EOFError, KeyboardInterrupt):
-        print("\nNot attached.")
+        print(f"\n{declined}")
         return 1
     if confirmation != "ATTACH":
-        print("Not attached.")
+        print(declined)
         return 1
     if not foreground_terminal(sys.stdin.fileno()):
         print(
-            "Not attached: this command is no longer the terminal foreground job.",
+            f"{declined} This command is no longer the terminal foreground job.",
             file=sys.stderr,
         )
         return 1
@@ -519,7 +534,7 @@ def run_attachment(
                 teaching=teaching,
             )
     except (OSError, RuntimeError) as failure:
-        print(f"Could not attach: {failure}", file=sys.stderr)
+        print(f"{failure_prefix(teaching, ready=False)}: {failure}", file=sys.stderr)
         return 1
 
 
@@ -539,6 +554,7 @@ def _run_attachment(
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
     attachment = uuid.uuid4().hex
+    kind: SessionKind = "attached" if teaching is None else "teaching"
     state = session_dir / "session.json"
     owns_state = False
     capture_descriptor: int | None = None
@@ -549,8 +565,9 @@ def _run_attachment(
     def announce_ready() -> None:
         assert portal is not None
         ready.set()
+        label = "Teaching session ready" if teaching is not None else "Attached"
         print(
-            f"Attached: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
+            f"{label}: {session_dir} ({portal.size[0]}x{portal.size[1]}). Stop with framewisp --detach or Ctrl+C.",
             flush=True,
         )
 
@@ -572,12 +589,12 @@ def _run_attachment(
                     pass
 
             def parse(line: bytes) -> InputAction | Path | str:
-                request = parse_attached_request(
-                    line, attachment, teaching=teaching is not None
-                )
+                request = parse_desktop_request(line, attachment, kind)
                 if not ready.is_set():
                     raise ValueError(
-                        "Attach is waiting for desktop permission or the first teaching frame."
+                        "The teaching session is waiting for desktop permission or its first frame."
+                        if teaching is not None
+                        else "The attached session is waiting for desktop permission."
                     )
                 if (
                     teaching is not None
@@ -585,7 +602,7 @@ def _run_attachment(
                     and request.is_relative_to(teaching.directory.resolve())
                 ):
                     raise ValueError(
-                        "Screenshots cannot overwrite the active teaching bundle. Choose a path outside it."
+                        "Screenshots cannot overwrite the active lesson. Choose a path outside it."
                     )
                 return request
 
@@ -661,9 +678,7 @@ def _run_attachment(
                         existing: object = json.loads(state.read_text())
                     except (ValueError, RecursionError):
                         existing = None
-                    if not isinstance(existing, dict) or (
-                        cast(dict[str, object], existing).get("kind") != "attached"
-                    ):
+                    if session_kind(existing) not in DESKTOP_KINDS:
                         raise RuntimeError(
                             f"{state} belongs to another session. Use a different directory."
                         )
@@ -679,7 +694,7 @@ def _run_attachment(
                     write_state(
                         state,
                         {
-                            "kind": "attached",
+                            "kind": kind,
                             "command_protocol": COMMAND_PROTOCOL,
                             "attachment": attachment,
                             "command_socket": command_socket,
@@ -699,9 +714,9 @@ def _run_attachment(
                     server.start()
                     try:
                         if teaching is None:
-                            portal.open()
+                            portal.open(allow_input=True)
                         else:
-                            portal.open(observe_only=True)
+                            portal.open(allow_input=False)
                             capture_descriptor = portal.capture_fd()
                             teaching.start(
                                 f"pipewiresrc fd={capture_descriptor} path={portal.node}"
@@ -720,7 +735,7 @@ def _run_attachment(
                                 terminal
                             ):
                                 raise RuntimeError(
-                                    "The attach terminal is no longer in the foreground; disconnecting."
+                                    "This session's terminal is no longer in the foreground; disconnecting."
                                 )
                             if guard is not None and guard.poll() is not None:
                                 raise RuntimeError(
@@ -765,7 +780,7 @@ def _run_attachment(
                                 )
                                 if teaching.created:
                                     print(
-                                        f"Demonstration saved: {teaching.directory}",
+                                        f"Lesson saved: {teaching.directory}",
                                         flush=True,
                                     )
                             except (OSError, RuntimeError, GLib.Error) as failure:
@@ -788,7 +803,10 @@ def _run_attachment(
     except InterruptedError:
         pass
     except (OSError, RuntimeError, ValueError, GLib.Error) as failure:
-        print(f"Could not attach: {failure}", file=sys.stderr)
+        print(
+            f"{failure_prefix(teaching, ready=ready.is_set())}: {failure}",
+            file=sys.stderr,
+        )
         return 1
     finally:
         stop.set()
