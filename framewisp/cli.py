@@ -13,6 +13,7 @@ from framewisp.batch import Batch
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import (
     MAX_REQUEST_BYTES,
+    SESSION_DISCONNECTED,
     TEACHING_COMMANDS,
     DesktopSessionMetadata,
     SessionMetadata,
@@ -524,9 +525,7 @@ def main() -> None:
         parser.exit(1, exit_message + "\n")
     session = read_session_metadata(session_dir)
     if isinstance(session, str):
-        if not (session_dir / "session.json").exists() and headless_runner_stopped(
-            session_dir
-        ):
+        if session == SESSION_DISCONNECTED and headless_runner_stopped(session_dir):
             parser.exit(
                 1, f"Session {session_dir}: {stopped_runner_message(session_dir)}\n"
             )
@@ -592,15 +591,12 @@ def dispatch_session_command(session: SessionMetadata, args: argparse.Namespace)
         from framewisp.inspection import inspect_session
 
         observation = inspect_session(session, args.query)
-        stopped = observation["status"] != "ok" and headless_runner_stopped(
+        if observation["status"] != "ok" and headless_runner_stopped(
             session.session_directory
-        )
-        if stopped:
+        ):
             message = stopped_runner_message(session.session_directory)
             cast(list[str], observation["hints"]).append(message)
-            print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
             print(f"Session {session.session_directory}: {message}", file=sys.stderr)
-            return 1
         print(json.dumps(observation, ensure_ascii=False, allow_nan=False))
         return 0 if observation["status"] == "ok" else 1
     if args.command == "batch":

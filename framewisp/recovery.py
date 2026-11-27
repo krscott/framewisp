@@ -409,6 +409,7 @@ def headless_runner_stopped(session_dir: Path) -> bool:
     returns False so callers keep their normal diagnostics.
     """
     lock_path = session_dir / LOCK
+    journal_path = session_dir / JOURNAL
     try:
         descriptor = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
@@ -417,20 +418,25 @@ def headless_runner_stopped(session_dir: Path) -> bool:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             return False
+        # Parse and verify the journal before taking the lock so the shared
+        # lock is held only for the final presence check.
+        journal_id = identity(journal_path)
+        value = read_json(journal_path)
+        if not isinstance(value, dict):
+            return False
+        journal = cast(dict[str, object], value)
+        if journal.get("session_directory_identity") != identity(
+            session_dir
+        ) or parse_identity(journal.get("session_lock_identity")) != lock_identity(
+            descriptor
+        ):
+            return False
         try:
             # flock has no non-locking query; a shared lock avoids blocking other readers.
             fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
         except BlockingIOError:
             return False
-        value = read_json(session_dir / JOURNAL)
-        if not isinstance(value, dict):
-            return False
-        journal = cast(dict[str, object], value)
-        return journal.get("session_directory_identity") == identity(
-            session_dir
-        ) and parse_identity(journal.get("session_lock_identity")) == lock_identity(
-            descriptor
-        )
+        return identity(journal_path) == journal_id
     except (OSError, ValueError, RecursionError):
         return False
     finally:

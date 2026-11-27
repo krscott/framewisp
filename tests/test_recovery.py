@@ -1658,6 +1658,34 @@ def test_missing_session_metadata_with_abandoned_journal_suggests_recover(
     assert "Start run" not in result.stderr
 
 
+@pytest.mark.skipif(os.getuid() == 0, reason="Root can traverse 000 directories")
+def test_unreadable_session_metadata_symlink_preserves_permission_error(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session_dir, _ = abandoned
+    locked_dir = tmp_path / "locked"
+    locked_dir.mkdir()
+    target = locked_dir / "session.json"
+    target.write_text("{}")
+    (session_dir / "session.json").unlink()
+    (session_dir / "session.json").symlink_to(target)
+    locked_dir.chmod(0)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "framewisp", str(session_dir), "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    finally:
+        locked_dir.chmod(0o700)
+    assert result.returncode == 1
+    assert "Cannot read session metadata" in result.stderr
+    assert "runner has stopped" not in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
