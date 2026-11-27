@@ -1,6 +1,7 @@
 """Command socket messages; no desktop libraries required."""
 
 import json
+import os
 import shlex
 import socket
 import sys
@@ -9,7 +10,7 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeVar, cast, get_args
+from typing import Literal, TypeGuard, TypeVar, cast, get_args
 
 # The version of what a session command and a runner exchange: session metadata,
 # requests and replies. A session command refuses a session that publishes
@@ -79,8 +80,27 @@ class HeadlessSessionMetadata:
     wayland_display: str
     width: int
     height: int
-    x11_display: str | None = None
-    clip_destination: Path | None = None
+    x11_display: str | None
+    clip_destination: Path | None
+
+    def to_json(self, processes: dict[str, int]) -> dict[str, object]:
+        return {
+            "kind": "headless",
+            "command_protocol": COMMAND_PROTOCOL,
+            "accessibility_bus": self.accessibility_bus,
+            "command_socket": str(self.command_socket),
+            "runtime_directory": str(self.runtime_directory),
+            "wayland_display": self.wayland_display,
+            "width": self.width,
+            "height": self.height,
+            "x11_display": self.x11_display,
+            "clip_destination": (
+                str(self.clip_destination)
+                if self.clip_destination is not None
+                else None
+            ),
+            "processes": processes,
+        }
 
 
 @dataclass(frozen=True)
@@ -90,12 +110,30 @@ class DesktopSessionMetadata:
     command_socket: Path
     share_token: str
 
+    def to_json(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "command_protocol": COMMAND_PROTOCOL,
+            "share_token": self.share_token,
+            "command_socket": str(self.command_socket),
+        }
+
 
 SessionMetadata = HeadlessSessionMetadata | DesktopSessionMetadata
 
 
 class _MetadataError(Exception):
     pass
+
+
+def _is_usable_string(value: object) -> TypeGuard[str]:
+    if not isinstance(value, str) or not value or "\0" in value:
+        return False
+    try:
+        os.fsencode(value)
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _field(data: dict[str, object], name: str, path: Path) -> object:
@@ -106,13 +144,17 @@ def _field(data: dict[str, object], name: str, path: Path) -> object:
     return data[name]
 
 
+def _invalid(path: Path, name: str, expected: str) -> str:
+    return (
+        f"Cannot read session metadata: {path} has invalid {name!r} "
+        f"(expected {expected})."
+    )
+
+
 def _string(data: dict[str, object], name: str, path: Path) -> str:
     value = _field(data, name, path)
-    if not isinstance(value, str) or not value or "\0" in value:
-        raise _MetadataError(
-            f"Cannot read session metadata: {path} has invalid {name!r} "
-            "(expected a nonempty string)."
-        )
+    if not _is_usable_string(value):
+        raise _MetadataError(_invalid(path, name, "a nonempty string"))
     return value
 
 
@@ -120,26 +162,15 @@ def _optional_string(data: dict[str, object], name: str, path: Path) -> str | No
     value = _field(data, name, path)
     if value is None:
         return None
-    if not isinstance(value, str) or not value or "\0" in value:
-        raise _MetadataError(
-            f"Cannot read session metadata: {path} has invalid {name!r} "
-            "(expected a nonempty string or null)."
-        )
+    if not _is_usable_string(value):
+        raise _MetadataError(_invalid(path, name, "a nonempty string or null"))
     return value
 
 
 def _path(data: dict[str, object], name: str, path: Path) -> Path:
     value = _field(data, name, path)
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\0" in value
-        or not Path(value).is_absolute()
-    ):
-        raise _MetadataError(
-            f"Cannot read session metadata: {path} has invalid {name!r} "
-            "(expected an absolute path)."
-        )
+    if not _is_usable_string(value) or not Path(value).is_absolute():
+        raise _MetadataError(_invalid(path, name, "an absolute path"))
     return Path(value)
 
 
@@ -147,27 +178,43 @@ def _optional_path(data: dict[str, object], name: str, path: Path) -> Path | Non
     value = _field(data, name, path)
     if value is None:
         return None
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\0" in value
-        or not Path(value).is_absolute()
-    ):
-        raise _MetadataError(
-            f"Cannot read session metadata: {path} has invalid {name!r} "
-            "(expected an absolute path or null)."
-        )
+    if not _is_usable_string(value) or not Path(value).is_absolute():
+        raise _MetadataError(_invalid(path, name, "an absolute path or null"))
     return Path(value)
 
 
 def _positive_int(data: dict[str, object], name: str, path: Path) -> int:
     value = _field(data, name, path)
     if type(value) is not int or value <= 0:
-        raise _MetadataError(
-            f"Cannot read session metadata: {path} has invalid {name!r} "
-            "(expected a positive integer)."
-        )
+        raise _MetadataError(_invalid(path, name, "a positive integer"))
     return value
+
+
+def _restart_guidance(
+    session_dir: Path, published_kind: SessionKind | None, *, version_mismatch: bool
+) -> str:
+    if published_kind in DESKTOP_KINDS:
+        if version_mismatch:
+            return (
+                "Ask the user to end it with Ctrl+C in its terminal if it is "
+                "still running, then to start it again with this version "
+                "(for teach, with a new lesson directory)."
+            )
+        return (
+            "Ask the user to end it with Ctrl+C in its terminal if it is still "
+            "running, then to start it again (for teach, with a new lesson directory)."
+        )
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    if version_mismatch:
+        return (
+            "Stop its runner with Ctrl+C or SIGTERM. If the runner has "
+            f"died, run `{recover}` with the framewisp version that started "
+            "the session. Then start the session again with this version."
+        )
+    return (
+        "Stop its runner with Ctrl+C or SIGTERM. If the runner has died, "
+        f"run `{recover}`, then start the session again."
+    )
 
 
 def parse_session_metadata(raw: object, session_dir: Path) -> SessionMetadata | str:
@@ -186,19 +233,7 @@ def parse_session_metadata(raw: object, session_dir: Path) -> SessionMetadata | 
             if protocol is None
             else f"command protocol {protocol!r}"
         )
-        if published_kind in DESKTOP_KINDS:
-            remedy = (
-                "Ask the user to end it with Ctrl+C in its terminal if it is "
-                "still running, then to start it again with this version "
-                "(for teach, with a new lesson directory)."
-            )
-        else:
-            remedy = (
-                "Stop its runner with Ctrl+C or SIGTERM. If the runner has "
-                f"died, run `{shlex.join(['framewisp', str(session_dir), 'recover'])}` "
-                "with the framewisp version that started the session. Then start the "
-                "session again with this version."
-            )
+        remedy = _restart_guidance(session_dir, published_kind, version_mismatch=True)
         return (
             f"Session {session_dir} was started by another version of framewisp: "
             f"it publishes {published} and this version uses {COMMAND_PROTOCOL}. "
@@ -231,7 +266,8 @@ def parse_session_metadata(raw: object, session_dir: Path) -> SessionMetadata | 
             share_token=_string(data, "share_token", metadata_path),
         )
     except _MetadataError as error:
-        return str(error)
+        remedy = _restart_guidance(session_dir, published_kind, version_mismatch=False)
+        return f"{error} {remedy}"
 
 
 def read_session_metadata(session_dir: Path) -> SessionMetadata | str:

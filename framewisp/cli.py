@@ -7,9 +7,10 @@ import time
 from pathlib import Path
 
 from framewisp import inspection_limits as limits
-from framewisp.batch import MAX_REQUEST_BYTES, Batch
+from framewisp.batch import Batch
 from framewisp.compact import PADDING_AFTER, PADDING_BEFORE
 from framewisp.connection import (
+    MAX_REQUEST_BYTES,
     TEACHING_COMMANDS,
     DesktopSessionMetadata,
     SessionMetadata,

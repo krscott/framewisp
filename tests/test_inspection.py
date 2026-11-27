@@ -53,6 +53,8 @@ def test_inspection_never_falls_back_to_desktop_bus(tmp_path: Path) -> None:
         wayland_display="wayland-1",
         width=1280,
         height=720,
+        x11_display=None,
+        clip_destination=None,
     )
     with pytest.raises(SessionError):
         inspect_session(session, Query())

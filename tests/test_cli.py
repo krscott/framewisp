@@ -1,5 +1,6 @@
 import json
 import os
+import select
 import shlex
 import socket
 import subprocess
@@ -274,6 +275,8 @@ def test_record_start_sends_console_panel(
             wayland_display="wayland-1",
             width=1280,
             height=720,
+            x11_display=None,
+            clip_destination=None,
         )
         with socket.socket(socket.AF_UNIX) as server:
             server.bind(str(session_dir / "command.sock"))
@@ -970,11 +973,7 @@ def test_screenshot_json_rejects_png_stdout(tmp_path: Path) -> None:
 
 def test_parse_valid_session_metadata(tmp_path: Path) -> None:
     clip = tmp_path / "clip.mp4"
-    headless = parse_session_metadata(
-        headless_metadata(tmp_path, x11_display=":42", clip_destination=str(clip)),
-        tmp_path,
-    )
-    assert headless == HeadlessSessionMetadata(
+    expected_headless = HeadlessSessionMetadata(
         session_directory=tmp_path,
         command_socket=tmp_path / "command.sock",
         runtime_directory=tmp_path,
@@ -985,13 +984,37 @@ def test_parse_valid_session_metadata(tmp_path: Path) -> None:
         x11_display=":42",
         clip_destination=clip,
     )
+    assert (
+        parse_session_metadata(
+            headless_metadata(tmp_path, x11_display=":42", clip_destination=str(clip)),
+            tmp_path,
+        )
+        == expected_headless
+    )
+    assert (
+        parse_session_metadata(
+            json.loads(json.dumps(expected_headless.to_json({"app": 123}))),
+            tmp_path,
+        )
+        == expected_headless
+    )
     for kind in ("attached", "teaching"):
-        desktop = parse_session_metadata(desktop_metadata(tmp_path, kind), tmp_path)
-        assert desktop == DesktopSessionMetadata(
+        expected_desktop = DesktopSessionMetadata(
             session_directory=tmp_path,
             kind=kind,
             command_socket=tmp_path / "command.sock",
             share_token="share-token",
+        )
+        assert (
+            parse_session_metadata(desktop_metadata(tmp_path, kind), tmp_path)
+            == expected_desktop
+        )
+        assert (
+            parse_session_metadata(
+                json.loads(json.dumps(expected_desktop.to_json())),
+                tmp_path,
+            )
+            == expected_desktop
         )
 
 
@@ -1047,12 +1070,16 @@ def test_desktop_metadata_refuses_missing_field(
         ("command_socket", ""),
         ("command_socket", "relative.sock"),
         ("command_socket", "/tmp/bad\0.sock"),
+        ("command_socket", "/tmp/\ud800.sock"),
         ("command_socket", 123),
         ("runtime_directory", "relative"),
+        ("runtime_directory", "/tmp/\ud800"),
         ("runtime_directory", None),
         ("accessibility_bus", ""),
+        ("accessibility_bus", "unix:path=/tmp/\ud800"),
         ("accessibility_bus", 42),
         ("wayland_display", ""),
+        ("wayland_display", "\ud800"),
         ("wayland_display", False),
         ("width", 0),
         ("width", -10),
@@ -1062,9 +1089,11 @@ def test_desktop_metadata_refuses_missing_field(
         ("height", 0),
         ("height", False),
         ("x11_display", ""),
+        ("x11_display", "\ud800"),
         ("x11_display", 0),
         ("clip_destination", ""),
         ("clip_destination", "relative.mp4"),
+        ("clip_destination", "/tmp/\ud800.mp4"),
         ("clip_destination", 5),
     ],
 )
@@ -1082,8 +1111,10 @@ def test_headless_metadata_refuses_wrongly_typed_field(
     ("field", "value"),
     [
         ("command_socket", "relative.sock"),
+        ("command_socket", "/tmp/\ud800.sock"),
         ("command_socket", None),
         ("share_token", ""),
+        ("share_token", "\ud800"),
         ("share_token", 123),
     ],
 )
@@ -1100,6 +1131,7 @@ def test_desktop_metadata_refuses_wrongly_typed_field(
     ("metadata_kind", "field", "value", "arguments"),
     [
         ("headless", "width", None, ("screenshot", "--json", "out.png")),
+        ("headless", "wayland_display", "\ud800", ("screenshot", "out.png")),
         ("headless", "command_socket", "relative.sock", ("status",)),
         ("headless", "runtime_directory", 123, ("inspect", "--json")),
         ("attached", "share_token", None, ("click", "1", "1")),
@@ -1143,14 +1175,18 @@ def test_attached_input_does_not_reread_metadata_after_input_log_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Replacing session.json while waiting on inputs.jsonl cannot redirect a command."""
-    received_original: list[dict[str, object]] = []
+    received: list[tuple[str, dict[str, object]]] = []
+    done = threading.Event()
 
-    def serve(server: socket.socket) -> None:
-        server.settimeout(5)
-        connection, _ = server.accept()
-        with connection, connection.makefile("rw") as stream:
-            received_original.append(json.loads(stream.readline()))
-            stream.write(json.dumps({"status": 0, "error": None}) + "\n")
+    def serve(servers: dict[socket.socket, str]) -> None:
+        deadline = time.monotonic() + 5
+        while not done.is_set() and time.monotonic() < deadline:
+            readable, _, _ = select.select(list(servers), [], [], 0.05)
+            for server in readable:
+                connection, _ = server.accept()
+                with connection, connection.makefile("rw") as stream:
+                    received.append((servers[server], json.loads(stream.readline())))
+                    stream.write(json.dumps({"status": 0, "error": None}) + "\n")
 
     with tempfile.TemporaryDirectory(prefix="fw-toctou-") as directory:
         sock_dir = Path(directory)
@@ -1196,23 +1232,28 @@ def test_attached_input_does_not_reread_metadata_after_input_log_lock(
             original_server.listen(1)
             replacement_server.bind(str(replacement_sock))
             replacement_server.listen(1)
-            replacement_server.setblocking(False)
-            original_thread = threading.Thread(
-                target=serve, args=(original_server,), daemon=True
+            server_thread = threading.Thread(
+                target=serve,
+                args=(
+                    {original_server: "original", replacement_server: "replacement"},
+                ),
+                daemon=True,
             )
-            original_thread.start()
-            monkeypatch.setattr(cli, "log_input", log_input_during_takeover)
-            monkeypatch.setattr(
-                sys, "argv", ["framewisp", str(tmp_path), "click", "1", "1"]
-            )
-            with pytest.raises(SystemExit) as stopped:
-                cli.main()
-            original_thread.join(timeout=5)
-            with pytest.raises(BlockingIOError):
-                replacement_server.accept()
+            server_thread.start()
+            try:
+                monkeypatch.setattr(cli, "log_input", log_input_during_takeover)
+                monkeypatch.setattr(
+                    sys, "argv", ["framewisp", str(tmp_path), "click", "1", "1"]
+                )
+                with pytest.raises(SystemExit) as stopped:
+                    cli.main()
+            finally:
+                done.set()
+                server_thread.join(timeout=5)
     assert stopped.value.code == 0
-    assert len(received_original) == 1
-    assert received_original[0]["share_token"] == "original-token"
+    assert len(received) == 1
+    assert received[0][0] == "original"
+    assert received[0][1]["share_token"] == "original-token"
 
 
 def test_screenshot_reads_session_metadata_once_after_delay(

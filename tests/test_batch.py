@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from framewisp.batch import MAX_REQUEST_BYTES, MAX_STEPS, Batch
-from framewisp.connection import COMMAND_PROTOCOL
+from framewisp.batch import MAX_STEPS, Batch
+from framewisp.connection import COMMAND_PROTOCOL, MAX_REQUEST_BYTES
 
 
 @pytest.mark.parametrize(

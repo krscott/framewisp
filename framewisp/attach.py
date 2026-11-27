@@ -31,9 +31,10 @@ from gi.repository import GLib, Gst
 
 from framewisp.actions import InputAction
 from framewisp.connection import (
-    COMMAND_PROTOCOL,
     DESKTOP_KINDS,
     TEACHING_COMMANDS,
+    DesktopKind,
+    DesktopSessionMetadata,
     SessionKind,
     parse_request_fields,
     receive_request,
@@ -552,7 +553,7 @@ def _share_desktop(
     indicator: SharingIndicator | None = None
     guard: subprocess.Popen[bytes] | None = None
     share_token = uuid.uuid4().hex
-    kind: SessionKind = "attached" if teaching is None else "teaching"
+    kind: DesktopKind = "attached" if teaching is None else "teaching"
     metadata_path = session_dir / "session.json"
     wrote_metadata = False
     capture_descriptor: int | None = None
@@ -708,19 +709,19 @@ def _share_desktop(
                     socket.socket(socket.AF_UNIX) as listener,
                     socket.socket(socket.AF_UNIX) as emergency,
                 ):
-                    command_socket = str(directory / "command.sock")
-                    listener.bind(command_socket)
+                    command_socket = directory / "command.sock"
+                    listener.bind(str(command_socket))
                     emergency.bind(str(directory / STOP_SOCKET))
                     listener.listen(32)
                     emergency.listen(32)
                     write_json(
                         metadata_path,
-                        {
-                            "kind": kind,
-                            "command_protocol": COMMAND_PROTOCOL,
-                            "share_token": share_token,
-                            "command_socket": command_socket,
-                        },
+                        DesktopSessionMetadata(
+                            session_directory=session_dir,
+                            kind=kind,
+                            command_socket=command_socket,
+                            share_token=share_token,
+                        ).to_json(),
                     )
                     wrote_metadata = True
                     (session_dir / "app-exit.json").unlink(missing_ok=True)

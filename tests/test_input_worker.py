@@ -22,6 +22,8 @@ def headless_session(session_dir: Path) -> HeadlessSessionMetadata:
         wayland_display="wayland-1",
         width=800,
         height=600,
+        x11_display=None,
+        clip_destination=None,
     )
 
 

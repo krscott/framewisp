@@ -12,17 +12,17 @@ import tempfile
 import time
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from threading import Event
 from types import FrameType
 from typing import Any, Literal, cast, get_args
 
 from framewisp.actions import InputAction
-from framewisp.batch import MAX_REQUEST_BYTES, Batch
+from framewisp.batch import Batch
 from framewisp.compact import ffprobe
 from framewisp.connection import (
-    COMMAND_PROTOCOL,
+    MAX_REQUEST_BYTES,
     HeadlessSessionMetadata,
     parse_request_fields,
     receive_request,
@@ -1117,6 +1117,7 @@ def _run_session(
                 width=size[0],
                 height=size[1],
                 x11_display=x11_display,
+                clip_destination=None,
             )
             inputs = InputWorker(
                 session,
@@ -1134,28 +1135,13 @@ def _run_session(
                 processes = support_processes | {"app": app}
                 if recording.process is not None:
                     processes["recorder"] = recording.process
+                current = replace(session, clip_destination=recording.clip_destination)
                 temporary = session_dir / ".session.json"
                 temporary.write_text(
                     json.dumps(
-                        {
-                            "kind": "headless",
-                            "command_protocol": COMMAND_PROTOCOL,
-                            "accessibility_bus": session.accessibility_bus,
-                            "command_socket": str(session.command_socket),
-                            "runtime_directory": directory,
-                            "wayland_display": display,
-                            "width": size[0],
-                            "height": size[1],
-                            "x11_display": x11_display,
-                            "clip_destination": (
-                                str(recording.clip_destination)
-                                if recording.clip_destination is not None
-                                else None
-                            ),
-                            "processes": {
-                                name: process.pid for name, process in processes.items()
-                            },
-                        }
+                        current.to_json(
+                            {name: process.pid for name, process in processes.items()}
+                        )
                     )
                     + "\n"
                 )
@@ -1324,7 +1310,8 @@ def batch_screenshot(
             prefix=".framewisp-screenshot-", dir=destination.parent
         ) as directory:
             temporary = Path(directory) / "screenshot.png"
-            screenshot(session, temporary, cancelled=cancelled)
+            current = replace(session, clip_destination=recording.clip_destination)
+            screenshot(current, temporary, cancelled=cancelled)
             if cancelled():
                 raise InterruptedError(
                     "Screenshot cancelled; caller disconnected or session stopped."
