@@ -339,7 +339,7 @@ def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
             if finished(pipeline, None, stop, log, deadline):
                 frame = sink.emit("try-pull-sample", 0)
                 if frame is None:
-                    raise ValueError("Desktop capture ended without a frame.")
+                    raise CaptureError("Desktop capture ended without a frame.")
                 break
         if stop.wait(FRAME_SETTLE):
             raise InterruptedError(COMMAND_CANCELLED)
@@ -622,8 +622,6 @@ def _share_desktop(
                 """Classify a failure, holding the input lock if the command took it,
                 so no queued input reaches the desktop before a failure stops it."""
                 assert portal is not None
-                if isinstance(failure, InterruptedError):
-                    return COMMAND_CANCELLED
                 if isinstance(failure, (ValueError, TimeoutError)):
                     return input_error(command, failure)
                 # A stop closes the portal under a running command, which is then
@@ -631,8 +629,9 @@ def _share_desktop(
                 # before the main thread's next dispatch runs the portal callback
                 # that sets `stop`, so wait briefly for it. A lost bus ends the
                 # share with its own failure.
-                if isinstance(failure, (GLib.Error, CaptureError)) and stop.wait(
-                    STOP_GRACE
+                if isinstance(failure, InterruptedError) or (
+                    isinstance(failure, (GLib.Error, CaptureError))
+                    and stop.wait(STOP_GRACE)
                 ):
                     return portal.lost or COMMAND_CANCELLED
                 # Record the redacted error: the raw one can include typed text.
@@ -645,12 +644,18 @@ def _share_desktop(
                 )
                 return error
 
+            # Notes reach only the lesson, so a screenshot must not delay them.
+            # A note holds the lesson's lock until its failure is recorded, as
+            # the lesson's final status is chosen under that lock.
+            held = (
+                teaching.lock
+                if isinstance(request, str) and teaching is not None
+                else lock
+            )
             status, error, locked = 0, None, False
             try:
-                # Notes reach only the lesson, so a screenshot must not delay them.
-                if not isinstance(request, str):
-                    while not (locked := lock.acquire(timeout=0.05)):
-                        inputs.wait()
+                while not (locked := held.acquire(timeout=0.05)):
+                    inputs.wait()
                 inputs.wait()
                 if isinstance(request, str):
                     assert teaching is not None
@@ -663,7 +668,7 @@ def _share_desktop(
                 status, error = 1, failed(failure)
             finally:
                 if locked:
-                    lock.release()
+                    held.release()
             answer(status, error)
 
     def serve(listener: socket.socket, emergency: socket.socket) -> None:
@@ -790,15 +795,17 @@ def _share_desktop(
                             if isinstance(failure, InterruptedError):
                                 # A user stop; `close` applies its normal rule.
                                 failure = None
-                            reason = (
-                                str(failure)
-                                if failure
-                                else str(failures[0]) if failures else None
-                            )
                             try:
-                                lesson_error = teaching.close(
-                                    reason, revoked=portal.revoked
-                                )
+                                # A note records its failure under this lock.
+                                with teaching.lock:
+                                    reason = (
+                                        str(failure)
+                                        if failure
+                                        else str(failures[0]) if failures else None
+                                    )
+                                    lesson_error = teaching.close(
+                                        reason, revoked=portal.revoked
+                                    )
                                 if lesson_error is not None:
                                     print(
                                         f"Partial lesson: {teaching.directory}",

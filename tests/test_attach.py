@@ -209,6 +209,7 @@ def test_stale_attach_socket(
 
 
 _SERVER = """
+import errno
 import os
 import sys
 import time
@@ -276,6 +277,14 @@ if (root / 'teach').exists():
     class TestTeaching(Teaching):
         def start(self, source):
             super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240 ! identity sleep-time=100000')
+        def append(self, entry):
+            if entry['type'] == 'note' and (root / 'fail-note').exists():
+                (root / 'noting').touch()
+                Portal.active().stop.wait(5)
+                # Let the main thread reach the lesson's close first.
+                time.sleep(.3)
+                raise OSError(errno.EIO, 'Input/output error')
+            super().append(entry)
         def close(self, *args, **kwargs):
             if (root / 'slow-close').exists():
                 time.sleep(.8)
@@ -612,6 +621,38 @@ def test_stop_sharing_allows_teaching_to_finalize(
 
 
 @pytest.mark.parametrize("runner", ["teaching"], indirect=True)
+def test_note_failure_during_a_user_stop_fails_the_lesson(
+    tmp_path: Path, runner: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert runner.stdout is not None
+    read_terminal(runner.stdout.fileno(), b"Teaching session ready:")
+    (tmp_path / "fail-note").touch()
+    note = subprocess.Popen(
+        [sys.executable, "-m", "framewisp", str(tmp_path / "session")]
+        + ["teach-note", "A note"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_file(tmp_path / "noting")
+        runner.send_signal(signal.SIGINT)
+        assert note.wait(timeout=5) == 1
+        assert runner.wait(timeout=5) == 1
+    finally:
+        if note.poll() is None:
+            note.terminate()
+            note.wait(timeout=5)
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert manifest["error"]
+    stdout, stderr = runner.communicate(timeout=5)
+    assert "Partial lesson:" in stderr
+    assert "Lesson saved" not in stdout
+
+
+@pytest.mark.parametrize("runner", ["teaching"], indirect=True)
 @pytest.mark.parametrize("screenshot", [False, True])
 @pytest.mark.parametrize("eos_first", [False, True])
 def test_portal_revocation_finishes_teaching_even_during_screenshot(
@@ -709,7 +750,7 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
         )
         == 1
     )
-    assert "ended without a frame" in capsys.readouterr().err
+    assert COMMAND_CANCELLED in capsys.readouterr().err
     assert runner.wait(timeout=5) == 0
     assert (
         json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
@@ -1403,6 +1444,53 @@ def test_lost_bus_during_input_fails_the_share(
         assert "hunter2" not in client_stderr + stderr + stdout
         assert stdout.endswith("Your apps and desktop are still running.\n")
         assert "Stopped sharing." not in stdout
+
+
+def test_lost_bus_between_characters_fails_waiting_commands(
+    tmp_path: Path, runner: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert runner.stdout is not None
+    read_terminal(runner.stdout.fileno(), b"Attached:")
+    session_dir = tmp_path / "session"
+    typing = subprocess.Popen(
+        [sys.executable, "-m", "framewisp", str(session_dir)]
+        + ["type", "ab", "--interval", "3"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    queued: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.monotonic() + 5
+        while "NotifyKeyboardKeysym" not in (
+            (tmp_path / "events").read_text() if (tmp_path / "events").exists() else ""
+        ):
+            assert time.monotonic() < deadline, "Timed out waiting for a keysym"
+            time.sleep(0.01)
+        queued = subprocess.Popen(
+            [sys.executable, "-m", "framewisp", str(session_dir), "move", "7", "7"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Let the queued command reach the runner and wait for the input lock.
+        time.sleep(0.5)
+        (tmp_path / "lose-bus").touch()
+        for command in (typing, queued):
+            _, client_stderr = command.communicate(timeout=5)
+            assert command.returncode == 1
+            assert "The session bus connection closed." in client_stderr
+            assert COMMAND_CANCELLED not in client_stderr
+        assert runner.wait(timeout=5) == 1
+        _, stderr = runner.communicate(timeout=5)
+        assert "Stopped sharing: The session bus connection closed." in stderr
+        assert "(7.0, 7.0)" not in (tmp_path / "events").read_text()
+    finally:
+        for process in (typing, queued):
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
 
 
 @pytest.mark.parametrize("failure", ["closed", "backend"])
