@@ -33,7 +33,6 @@ from framewisp.attach import (
 from framewisp.connection import DesktopKind, request_desktop
 from framewisp.desktop import lock_desktop, stop_sharing
 from framewisp.errors import SessionError
-from framewisp.input_log import input_error
 from framewisp.ownership import (
     recover_session,
     runtime_path,
