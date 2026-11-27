@@ -4,10 +4,12 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -15,12 +17,15 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
+from framewisp.connection import HeadlessSessionMetadata
 from framewisp.errors import SessionError
+from framewisp.lib import screenshot, session_command
 from framewisp.recovery import (
     JOURNAL,
     JOURNAL_TEMPORARY,
     LOCK,
     PRIVATE_CLIP,
+    headless_runner_stopped,
     headless_runtime_dir,
     recover_session,
     runtime_dir_path,
@@ -1424,3 +1429,178 @@ def test_writable_session_refused_before_creating_lock(
         assert not (tmp_path / LOCK).exists()
     finally:
         tmp_path.chmod(0o700)
+
+
+def write_headless_metadata(
+    session_dir: Path, runtime_dir: Path, *, stale_socket: bool = True
+) -> HeadlessSessionMetadata:
+    command_socket = runtime_dir / "command.sock"
+    if stale_socket:
+        # Binding and closing leaves a socket path that refuses connections,
+        # matching a runner killed with SIGKILL.
+        with socket.socket(socket.AF_UNIX) as listener:
+            listener.bind(str(command_socket))
+    metadata = HeadlessSessionMetadata(
+        session_directory=session_dir,
+        command_socket=command_socket,
+        runtime_directory=runtime_dir,
+        accessibility_bus=f"unix:path={runtime_dir / 'accessibility.sock'}",
+        wayland_display="wayland-1",
+        width=1280,
+        height=720,
+        x11_display=None,
+        clip_destination=None,
+    )
+    (session_dir / "session.json").write_text(json.dumps(metadata.to_json({})))
+    return metadata
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("status",),
+        ("stop",),
+        ("click", "10", "10"),
+        ("screenshot", "out.png"),
+        ("inspect", "--json"),
+    ],
+)
+def test_session_commands_suggest_recover_when_runner_stopped(
+    abandoned: tuple[Path, Path], tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    session_dir, runtime_dir = abandoned
+    write_headless_metadata(session_dir, runtime_dir, stale_socket=True)
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    result = subprocess.run(
+        [sys.executable, "-m", "framewisp", str(session_dir), *arguments],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "runner has stopped" in result.stderr
+    assert f"`{recover}`" in result.stderr
+    assert "sandbox" not in result.stderr
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("stale_socket", [True, False], ids=["refused", "missing"])
+def test_session_commands_keep_sandbox_hint_when_runner_is_alive(
+    tmp_path: Path, stale_socket: bool
+) -> None:
+    session_dir = tmp_path / "live"
+    session_dir.mkdir()
+    with (
+        session_lock(session_dir) as lock,
+        headless_runtime_dir(session_dir, lock) as runtime_dir,
+    ):
+        metadata = write_headless_metadata(
+            session_dir, runtime_dir, stale_socket=stale_socket
+        )
+        with pytest.raises(SessionError, match="sandbox") as command_error:
+            session_command(metadata, "status")
+        assert "runner has stopped" not in str(command_error.value)
+        assert "recover" not in str(command_error.value)
+        with pytest.raises(SessionError, match="sandbox") as screenshot_error:
+            screenshot(metadata, tmp_path / "out.png")
+        assert "runner has stopped" not in str(screenshot_error.value)
+        assert "recover" not in str(screenshot_error.value)
+
+
+def test_session_command_suggests_recover_on_empty_reply_after_runner_stopped(
+    abandoned: tuple[Path, Path],
+) -> None:
+    session_dir, runtime_dir = abandoned
+    metadata = write_headless_metadata(session_dir, runtime_dir, stale_socket=False)
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind(str(metadata.command_socket))
+        server.listen(1)
+
+        def accept_and_close() -> None:
+            connection, _ = server.accept()
+            connection.close()
+
+        thread = threading.Thread(target=accept_and_close, daemon=True)
+        thread.start()
+        try:
+            with pytest.raises(SessionError, match="runner has stopped") as failure:
+                session_command(metadata, "status")
+        finally:
+            thread.join(timeout=5)
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    assert f"`{recover}`" in str(failure.value)
+
+
+def test_headless_runner_stopped_verifies_lock_and_journal(
+    abandoned: tuple[Path, Path], tmp_path: Path
+) -> None:
+    session_dir, _ = abandoned
+    assert headless_runner_stopped(session_dir)
+
+    # Moving within the same filesystem preserves directory and lock identities.
+    moved = tmp_path / "moved"
+    session_dir.rename(moved)
+    assert headless_runner_stopped(moved)
+    moved.rename(session_dir)
+
+    # Copies (regular and hard-linked) have a different session directory identity.
+    copied = tmp_path / "copied"
+    shutil.copytree(session_dir, copied)
+    assert not headless_runner_stopped(copied)
+    hard_linked = tmp_path / "hard-linked"
+    subprocess.run(["cp", "-al", session_dir, hard_linked], check=True)
+    assert not headless_runner_stopped(hard_linked)
+
+    # A replaced lock cannot match the journal's lock identity.
+    original_lock = replace_lock(session_dir)
+    assert not headless_runner_stopped(session_dir)
+    original_lock.replace(session_dir / LOCK)
+    assert headless_runner_stopped(session_dir)
+
+    # A clean recovery removes the journal while keeping the lock file.
+    assert recover_session(session_dir) == 0
+    assert (session_dir / LOCK).exists()
+    assert not headless_runner_stopped(session_dir)
+
+
+@pytest.mark.parametrize("kind", ["missing", "symlink", "directory", "fifo"])
+def test_headless_runner_stopped_rejects_unusable_lock(
+    abandoned: tuple[Path, Path], kind: str
+) -> None:
+    session_dir, _ = abandoned
+    lock_path = session_dir / LOCK
+    target = session_dir / "other"
+    target.write_text("x")
+    lock_path.unlink()
+    if kind == "symlink":
+        lock_path.symlink_to(target)
+    elif kind == "directory":
+        lock_path.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(lock_path, 0o600)
+    assert not headless_runner_stopped(session_dir)
+
+
+def test_headless_runner_stopped_rejects_live_and_damaged_journal(
+    tmp_path: Path,
+) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    with (
+        session_lock(session_dir) as lock,
+        headless_runtime_dir(session_dir, lock) as runtime_dir,
+    ):
+        assert not headless_runner_stopped(session_dir)
+        # Replacing the lock while the runner is still live must not read as stopped.
+        replace_lock(session_dir)
+        assert not headless_runner_stopped(session_dir)
+        assert runtime_dir.is_dir()
+
+    # Damaged journal with an otherwise valid free lock is rejected.
+    with session_lock(session_dir) as lock:
+        write_journal(session_dir, runtime_dir_path(session_dir), lock, created=False)
+    (session_dir / JOURNAL).write_text("{")
+    assert not headless_runner_stopped(session_dir)

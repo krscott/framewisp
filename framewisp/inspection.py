@@ -19,6 +19,7 @@ from framewisp.connection import HeadlessSessionMetadata
 from framewisp.display_bounds import Rect, convert_bounds, match_window, read_windows
 from framewisp.environment import unix_bus_address
 from framewisp.errors import SessionError
+from framewisp.recovery import headless_runner_stopped, stopped_runner_message
 
 ACCESSIBLE = "org.a11y.atspi.Accessible"
 ROOT: tuple[str, str] = ("org.a11y.atspi.Registry", "/org/a11y/atspi/accessible/root")
@@ -202,12 +203,17 @@ def inspect_session(
     expected = unix_bus_address(session.runtime_directory / "accessibility.sock")
     if session.accessibility_bus != expected:
         raise SessionError("Invalid private accessibility bus in session metadata")
-    return inspect_bus(
+    observation = inspect_bus(
         expected,
         query,
         cancelled=cancelled,
         runtime_dir=session.runtime_directory,
     )
+    if observation["status"] == "unavailable" and headless_runner_stopped(
+        session.session_directory
+    ):
+        raise SessionError(stopped_runner_message(session.session_directory))
+    return observation
 
 
 def component_bounds(

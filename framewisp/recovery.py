@@ -400,6 +400,50 @@ def read_journal(session_dir: Path, lock: int) -> Journal:
     return Journal(runtime_dir, runtime_dir_identity)
 
 
+def headless_runner_stopped(session_dir: Path) -> bool:
+    """Return True only when the verified session lock is free and a journal remains.
+
+    A live headless runner and its supervisors hold an exclusive flock on the
+    lock inode recorded in the recovery journal, and clean shutdown deletes the
+    journal before releasing the lock. Unreadable, replaced, or copied state
+    returns False so callers keep their normal diagnostics.
+    """
+    lock_path = session_dir / LOCK
+    try:
+        descriptor = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            return False
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        value = read_json(session_dir / JOURNAL)
+        if not isinstance(value, dict):
+            return False
+        journal = cast(dict[str, object], value)
+        return journal.get("session_directory_identity") == identity(
+            session_dir
+        ) and parse_identity(journal.get("session_lock_identity")) == lock_identity(
+            descriptor
+        )
+    except (OSError, ValueError, RecursionError):
+        return False
+    finally:
+        os.close(descriptor)
+
+
+def stopped_runner_message(session_dir: Path) -> str:
+    recover = shlex.join(["framewisp", str(session_dir), "recover"])
+    return (
+        "The runner has stopped without cleaning up. "
+        f"Run `{recover}` to clean up the session directory."
+    )
+
+
 def sync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
