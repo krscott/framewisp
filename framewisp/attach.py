@@ -773,8 +773,10 @@ def _share_desktop(
                             if stop.is_set():
                                 break
                             if teaching is not None:
-                                if not teaching.poll():
-                                    # PipeWire EOS can precede the portal's Closed signal.
+                                source_stop = teaching.poll()
+                                if source_stop is not None:
+                                    # PipeWire EOS or a capture-source error can precede
+                                    # the portal's stop callback.
                                     deadline = time.monotonic() + 0.25
                                     while not portal.revoked:
                                         dispatch_events()
@@ -784,11 +786,9 @@ def _share_desktop(
                                         ):
                                             break
                                         stop.wait(0.01)
-                                    if portal.revoked or stop.is_set():
+                                    if portal.revoked or portal.lost is not None:
                                         break
-                                    raise RuntimeError(
-                                        "Teaching capture ended unexpectedly."
-                                    )
+                                    raise RuntimeError(source_stop)
                                 if not ready.is_set() and teaching.count:
                                     announce_ready()
                         if portal.lost is not None:

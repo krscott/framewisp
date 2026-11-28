@@ -16,6 +16,22 @@ from gi.repository import GLib, Gst
 from framewisp.desktop import write_json
 
 
+def upstream_elements(pad: Gst.Pad) -> set[Gst.Object]:
+    """Return every pipeline element feeding `pad`."""
+    elements: set[Gst.Object] = set()
+    pending = [pad]
+    while pending:
+        peer = pending.pop().get_peer()
+        if peer is None:
+            continue
+        element = peer.get_parent_element()
+        if element is None or element in elements:
+            continue
+        elements.add(element)
+        pending.extend(element.sinkpads)
+    return elements
+
+
 class Teaching:
     def __init__(self, directory: Path, goal: str):
         self.directory = directory
@@ -27,6 +43,8 @@ class Teaching:
         self.count = 0
         self.started = 0.0
         self.source_ended = Event()
+        self.source_error: str | None = None
+        self.source_elements: set[Gst.Object] = set()
         self.lock = RLock()
         self.closed = False
 
@@ -78,6 +96,7 @@ class Teaching:
         assert capture is not None
         pad = capture.get_static_pad("sink")
         assert pad is not None
+        self.source_elements = upstream_elements(pad)
         pad.add_probe(Gst.PadProbeType.EVENT_DOWNSTREAM, self.capture_event)
         self.started = time.monotonic()
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
@@ -130,22 +149,42 @@ class Teaching:
             return True
         return False
 
-    def poll(self) -> bool:
+    def _from_source(self, origin: Gst.Object | None) -> bool:
+        while origin is not None:
+            if origin in self.source_elements:
+                return True
+            origin = origin.get_parent()
+        return False
+
+    def poll(self) -> str | None:
+        """Drain a frame and check the pipeline.
+
+        Return why the capture source stopped when it ended or errored, or None
+        while capture is running. Storage, encoding, and timeout errors raise
+        immediately.
+        """
         assert self.pipeline is not None
         self.drain()
-        if self.source_ended.is_set():
-            return False
         bus = self.pipeline.get_bus()
         assert bus is not None
-        message = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
-        if message is not None:
+        while (
+            message := bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
+        ) is not None:
             if message.type == Gst.MessageType.ERROR:
                 error, detail = message.parse_error()
-                raise RuntimeError(f"Teaching capture failed: {error}; {detail}")
-            raise RuntimeError("Teaching capture ended unexpectedly.")
+                reason = f"Teaching capture failed: {error}; {detail}"
+                if not self._from_source(message.src):
+                    raise RuntimeError(reason)
+                self.source_error = self.source_error or reason
+            elif not self.source_ended.is_set():
+                raise RuntimeError("Teaching capture ended unexpectedly.")
+        if self.source_error is not None:
+            return self.source_error
+        if self.source_ended.is_set():
+            return "Teaching capture ended unexpectedly."
         if self.count == 0 and time.monotonic() - self.started > 10:
             raise RuntimeError("Teaching capture received no frame within 10 seconds.")
-        return True
+        return None
 
     def close(self, error: str | None = None, *, revoked: bool = False) -> str | None:
         """Finalize within a bounded time, preserving a partial lesson on failure.
@@ -156,8 +195,11 @@ class Teaching:
             self.closed = True
             if not self.created:
                 return None
-            if self.source_ended.is_set() and not revoked:
-                error = error or "Teaching capture ended unexpectedly."
+            if not revoked:
+                if self.source_error is not None:
+                    error = error or self.source_error
+                elif self.source_ended.is_set():
+                    error = error or "Teaching capture ended unexpectedly."
             try:
                 if self.pipeline is not None:
                     try:
@@ -168,9 +210,29 @@ class Teaching:
                         # imagefreeze holds the last frame after input EOS. Direct EOS
                         # stops its clocked output and lets the encoder finalize.
                         timeline.send_event(Gst.Event.new_eos())
-                        message = bus.timed_pop_filtered(
-                            Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR
-                        )
+                        deadline = time.monotonic() + 1.0
+                        message: Gst.Message | None = None
+                        while True:
+                            remaining = int((deadline - time.monotonic()) * Gst.SECOND)
+                            if remaining <= 0:
+                                message = None
+                                break
+                            message = bus.timed_pop_filtered(
+                                remaining, Gst.MessageType.EOS | Gst.MessageType.ERROR
+                            )
+                            if message is None or message.type == Gst.MessageType.EOS:
+                                break
+                            if self._from_source(message.src):
+                                # A failing or revoked source can leave follow-up
+                                # bus errors behind while downstream finalizes EOS.
+                                if not revoked:
+                                    failure, detail = message.parse_error()
+                                    error = (
+                                        error
+                                        or f"Teaching capture failed: {failure}; {detail}"
+                                    )
+                                continue
+                            break
                         while self.drain():
                             pass
                         if message is None:

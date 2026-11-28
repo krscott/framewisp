@@ -120,8 +120,8 @@ def test_existing_lesson_directory_is_untouched(tmp_path: Path, kind: str) -> No
 def wait_for_frames(lesson: Teaching, count: int) -> None:
     deadline = time.monotonic() + 8
     while lesson.count < count:
-        if not lesson.poll():
-            raise RuntimeError("Teaching capture ended unexpectedly.")
+        if (source_stop := lesson.poll()) is not None:
+            raise RuntimeError(source_stop)
         assert time.monotonic() < deadline, "No teaching frames arrived"
         time.sleep(0.02)
 
@@ -298,6 +298,153 @@ def test_source_ending_is_a_failure_even_when_a_last_frame_remains(
         json.loads((teaching.directory / "lesson.json").read_text())["status"]
         == "failed"
     )
+
+
+def wait_for_source_stop(lesson: Teaching) -> str:
+    deadline = time.monotonic() + 8
+    while (source_stop := lesson.poll()) is None:
+        assert time.monotonic() < deadline, "Capture source did not stop"
+        time.sleep(0.02)
+    return source_stop
+
+
+# R-TEACH-3, R-TEACH-4
+@pytest.mark.parametrize("revoked", [True, False])
+def test_source_error_returns_reason_and_honors_revocation(
+    teaching: Teaching, revoked: bool
+) -> None:
+    teaching.start(
+        "videotestsrc is-live=true ! video/x-raw,width=160,height=120,framerate=30/1 ! "
+        "identity error-after=15"
+    )
+    wait_for_frames(teaching, 1)
+    teaching.note("Saved before source error")
+    reason = wait_for_source_stop(teaching)
+    assert reason.startswith("Teaching capture failed:")
+    # Let videotestsrc post its follow-up internal data stream error before close.
+    time.sleep(0.05)
+    result = teaching.close(revoked=revoked)
+    manifest = json.loads((teaching.directory / "lesson.json").read_text())
+    if revoked:
+        assert result is None
+        assert manifest["status"] == "complete"
+        assert manifest["error"] is None
+    else:
+        assert result == reason
+        assert manifest["status"] == "failed"
+        assert manifest["error"] == reason
+    assert (teaching.directory / "frames/000000.png").exists()
+    assert (
+        "Saved before source error"
+        in (teaching.directory / "timeline.jsonl").read_text()
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(teaching.directory / manifest["video"]),
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+
+
+def find_element(pipeline: object, factory_name: str) -> object:
+    from gi.repository import Gst
+
+    assert isinstance(pipeline, Gst.Bin)
+    iterator = pipeline.iterate_elements()
+    assert iterator is not None
+    while True:
+        status, element = iterator.next()
+        if status != Gst.IteratorResult.OK:
+            break
+        factory = element.get_factory()
+        if factory is not None and factory.get_name() == factory_name:
+            return element
+    raise AssertionError(f"Element {factory_name!r} not found")
+
+
+# R-TEACH-4
+@pytest.mark.parametrize("failure_kind", ["storage", "encoding"])
+def test_storage_and_encoding_errors_raise_immediately(
+    teaching: Teaching, failure_kind: str
+) -> None:
+    from gi.repository import GLib, Gst
+
+    teaching.start(
+        "videotestsrc is-live=true ! video/x-raw,width=160,height=120,framerate=30/1"
+    )
+    wait_for_frames(teaching, 1)
+    assert teaching.pipeline is not None
+    if failure_kind == "storage":
+        assert teaching.video is not None
+        full = os.open("/dev/full", os.O_WRONLY)
+        try:
+            os.dup2(full, teaching.video.fileno())
+        finally:
+            os.close(full)
+    else:
+        encoder = find_element(teaching.pipeline, "vp8enc")
+        assert isinstance(encoder, Gst.Element)
+        encoder.post_message(
+            Gst.Message.new_error(
+                encoder,
+                GLib.Error.new_literal(
+                    Gst.stream_error_quark(),
+                    "Could not encode frame",
+                    Gst.StreamError.ENCODE,
+                ),
+                "injected",
+            )
+        )
+    deadline = time.monotonic() + 5
+    with pytest.raises(RuntimeError, match="Teaching capture failed:"):
+        while True:
+            assert teaching.poll() is None
+            assert time.monotonic() < deadline, "Downstream error did not arrive"
+            time.sleep(0.02)
+    assert teaching.close("Downstream failed", revoked=True) == "Downstream failed"
+    assert (
+        json.loads((teaching.directory / "lesson.json").read_text())["status"]
+        == "failed"
+    )
+
+
+def test_downstream_error_during_revoked_close_still_fails(
+    teaching: Teaching,
+) -> None:
+    from gi.repository import GLib, Gst
+
+    teaching.start(
+        "videotestsrc is-live=true ! video/x-raw,width=160,height=120,framerate=30/1"
+    )
+    wait_for_frames(teaching, 1)
+    assert teaching.pipeline is not None
+    encoder = find_element(teaching.pipeline, "vp8enc")
+    assert isinstance(encoder, Gst.Element)
+    encoder.post_message(
+        Gst.Message.new_error(
+            encoder,
+            GLib.Error.new_literal(
+                Gst.stream_error_quark(),
+                "Could not finalize frame",
+                Gst.StreamError.ENCODE,
+            ),
+            "injected",
+        )
+    )
+    result = teaching.close(revoked=True)
+    assert result is not None and "Teaching video finalization failed:" in result
+    manifest = json.loads((teaching.directory / "lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert manifest["error"] == result
 
 
 def test_teach_requires_user_terminal_and_reports_the_right_command(
