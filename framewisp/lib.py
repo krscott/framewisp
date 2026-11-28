@@ -414,9 +414,17 @@ def start_recording(
                 )
         if process.returncode != 0:
             raise log_failure(f"Recorder failed to finalize {destination}", log)
+        # Refuse to publish a truncated or otherwise unreadable MP4 (R-REC-26).
+        try:
+            probe = probe_clip(clip, env=env)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            raise SessionError(
+                f"Could not verify recorded clip; not saved to {destination}. "
+                f"Cause: {error}"
+            ) from None
         failure: Exception | None = None
         try:
-            restored = restore_hidden_frames(clip, log=log, env=env)
+            restored = restore_hidden_frames(clip, probe, log=log, env=env)
         except Exception as error:
             restored = False
             failure = raw_clip_failure(clip, error, extras=timed)
@@ -573,13 +581,14 @@ def probe_clip(path: Path, *, env: dict[str, str]) -> ClipProbe:
     )
 
 
-def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool:
+def restore_hidden_frames(
+    clip: Path, probe: ClipProbe, *, log: Path, env: dict[str, str]
+) -> bool:
     """Remux a clip whose edit list hides its frames (R-REC-3).
 
     Return whether the clip has a duration. A failed remux is logged because the
     clip stays usable as evidence, and its summary reports the null (R-REC-22).
     """
-    probe = probe_clip(clip, env=env)
     if probe.duration is not None:
         return True
     if probe.width is None:
@@ -618,8 +627,14 @@ def restore_hidden_frames(clip: Path, *, log: Path, env: dict[str, str]) -> bool
         except OSError:
             pass  # The disk that failed the remux can also refuse this note.
         return False
+    try:
+        has_duration = probe_clip(remuxed, env=env).duration is not None
+    except Exception:
+        with suppress(OSError):
+            remuxed.unlink(missing_ok=True)
+        raise
     remuxed.replace(clip)
-    return probe_clip(clip, env=env).duration is not None
+    return has_duration
 
 
 def clip_summary(destination: Path, *, env: dict[str, str]) -> dict[str, object]:

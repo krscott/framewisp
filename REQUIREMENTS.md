@@ -213,10 +213,9 @@ investigate or ask; never invent a rationale.
   retained frame. Each keeps its full duration unless the clip ends first.
 - **R-REC-9** [test] With `--console`, click pings and hold discs keep their GUI
   positions. They never draw on the console panel.
-- **R-REC-10** [test] When the recorder stops cleanly but finalization fails
-  before publishing the clip, the raw clip remains at the clip destination, or
-  under R-REC-18 at another path. It is playable when the recorder wrote a
-  playable file. The error names where.
+- **R-REC-10** [test] When the recorder writes a readable clip and finalization
+  fails before publishing it, the raw clip remains at the clip destination, or
+  under R-REC-18 at another path. The error names where.
 - **R-REC-11** [test] Caption options do not change click pings or hold discs.
 - **R-REC-12** [test] `--console-position` places the console panel on the left,
   right, top, or bottom edge of the clip. The default is right.
@@ -267,6 +266,14 @@ investigate or ask; never invent a rationale.
 
   Rationale: Agents can make room for scripts that draw larger without
   framewisp measuring every font.
+
+- **R-REC-26** [test] When the recorder writes an unreadable clip, framewisp
+  does not publish it at the clip destination. The file remains at another path
+  and the error names that path.
+
+  Rationale: `wf-recorder` can exit 0 after failing to write an MP4 trailer,
+  leaving a truncated file. Refusing to publish it keeps an unplayable file from
+  looking like a finished clip while preserving it for inspection.
 
 ## Lifetime and recovery (LIFE)
 
