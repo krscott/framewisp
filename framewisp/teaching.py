@@ -191,10 +191,10 @@ class Teaching:
                 if not self._from_source(message.src):
                     raise RuntimeError(reason)
                 self.source_error = self.source_error or reason
-            elif self.source_ended.is_set():
-                self.pipeline_ended = True
             else:
-                raise RuntimeError(_UNEXPECTED_END)
+                self.pipeline_ended = True
+                if not self.source_ended.is_set():
+                    raise RuntimeError(_UNEXPECTED_END)
         if (source_stop := self._source_stop()) is not None:
             return source_stop
         if self.count == 0 and time.monotonic() - self.started > 10:
@@ -217,33 +217,21 @@ class Teaching:
                     try:
                         bus = self.pipeline.get_bus()
                         assert bus is not None
-                        state_change, _, _ = self.pipeline.get_state(0)
-                        if (
-                            self.pipeline_ended
-                            or state_change == Gst.StateChangeReturn.FAILURE
-                        ):
-                            while (
-                                message := bus.pop_filtered(Gst.MessageType.ERROR)
-                            ) is not None:
-                                if self._from_source(message.src):
-                                    if not revoked:
-                                        error = error or _capture_failure(message)
-                                else:
-                                    failure, detail = message.parse_error()
-                                    error = (
-                                        error
-                                        or f"Teaching video finalization failed: {failure}; {detail}"
-                                    )
-                                    break
-                        else:
+                        state_change, state, _ = self.pipeline.get_state(0)
+                        finalize = not self.pipeline_ended and not (
+                            state_change == Gst.StateChangeReturn.FAILURE
+                            and state < Gst.State.PLAYING
+                        )
+                        if finalize:
                             timeline = self.pipeline.get_by_name("timeline")
                             assert timeline is not None
                             # imagefreeze holds the last frame after input EOS. Direct EOS
                             # stops its clocked output and lets the encoder finalize.
                             timeline.send_event(Gst.Event.new_eos())
-                            deadline = time.monotonic() + 1.0
-                            message = None
-                            while True:
+                        deadline = time.monotonic() + 1.0
+                        message: Gst.Message | None = None
+                        while True:
+                            if finalize:
                                 remaining = int(
                                     (deadline - time.monotonic()) * Gst.SECOND
                                 )
@@ -254,30 +242,30 @@ class Teaching:
                                     remaining,
                                     Gst.MessageType.EOS | Gst.MessageType.ERROR,
                                 )
-                                if (
-                                    message is None
-                                    or message.type == Gst.MessageType.EOS
-                                ):
-                                    break
-                                if self._from_source(message.src):
-                                    # A failing or revoked source can leave follow-up
-                                    # bus errors behind while downstream finalizes EOS.
-                                    if not revoked:
-                                        error = error or _capture_failure(message)
-                                    continue
+                            else:
+                                message = bus.pop_filtered(Gst.MessageType.ERROR)
+                            if message is None or message.type == Gst.MessageType.EOS:
                                 break
-                            if message is None:
-                                error = (
-                                    error or "Teaching video finalization timed out."
-                                )
-                            elif message.type == Gst.MessageType.ERROR:
-                                failure, detail = message.parse_error()
-                                error = (
-                                    error
-                                    or f"Teaching video finalization failed: {failure}; {detail}"
-                                )
+                            if self._from_source(message.src):
+                                # A failing or revoked source can leave follow-up
+                                # bus errors behind while downstream finalizes EOS.
+                                if not revoked:
+                                    error = error or _capture_failure(message)
+                                continue
+                            break
                         while self.drain():
                             pass
+                        if finalize and message is None:
+                            error = error or "Teaching video finalization timed out."
+                        elif (
+                            message is not None
+                            and message.type == Gst.MessageType.ERROR
+                        ):
+                            failure, detail = message.parse_error()
+                            error = (
+                                error
+                                or f"Teaching video finalization failed: {failure}; {detail}"
+                            )
                     finally:
                         self.pipeline.set_state(Gst.State.NULL)
                 if self.count == 0:

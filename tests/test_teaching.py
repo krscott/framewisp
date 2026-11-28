@@ -308,6 +308,25 @@ def wait_for_source_stop(lesson: Teaching) -> str:
     return source_stop
 
 
+def watch_sink_eos(pipeline: object) -> Event:
+    from gi.repository import Gst
+
+    sink = find_element(pipeline, "fdsink")
+    assert isinstance(sink, Gst.Element)
+    pad = sink.get_static_pad("sink")
+    assert pad is not None
+    seen = Event()
+
+    def on_event(_pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
+        event = info.get_event()
+        if event is not None and event.type == Gst.EventType.EOS:
+            seen.set()
+        return Gst.PadProbeReturn.OK
+
+    pad.add_probe(Gst.PadProbeType.EVENT_DOWNSTREAM, on_event)
+    return seen
+
+
 # R-TEACH-3, R-TEACH-4
 @pytest.mark.parametrize("revoked", [True, False])
 def test_source_error_returns_reason_and_honors_revocation(
@@ -320,10 +339,11 @@ def test_source_error_returns_reason_and_honors_revocation(
         "identity error-after=15"
     )
     wait_for_frames(teaching, 1)
+    assert teaching.pipeline is not None
+    sink_eos = watch_sink_eos(teaching.pipeline)
     teaching.note("Saved before source error")
     reason = wait_for_source_stop(teaching)
     assert reason.startswith("Teaching capture failed:")
-    assert teaching.pipeline is not None
     source = teaching.pipeline.get_by_name("src")
     assert source is not None
     # Queue a follow-up source error so close() must skip it before EOS.
@@ -339,6 +359,7 @@ def test_source_error_returns_reason_and_honors_revocation(
         )
     )
     result = teaching.close(revoked=revoked)
+    assert sink_eos.is_set()
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
     if revoked:
         assert result is None
@@ -381,6 +402,7 @@ def test_unpolled_source_error_during_non_revoked_close_fails_lesson(
     )
     wait_for_frames(teaching, 1)
     assert teaching.pipeline is not None
+    sink_eos = watch_sink_eos(teaching.pipeline)
     source = teaching.pipeline.get_by_name("src")
     assert source is not None
     source.post_message(
@@ -395,6 +417,7 @@ def test_unpolled_source_error_during_non_revoked_close_fails_lesson(
         )
     )
     result = teaching.close(revoked=False)
+    assert sink_eos.is_set()
     assert result is not None
     assert result.startswith("Teaching capture failed:")
     assert "Source lost during close" in result
@@ -418,25 +441,33 @@ def test_unpolled_source_error_during_non_revoked_close_fails_lesson(
     )
 
 
+@pytest.mark.parametrize("revoked", [True, False])
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected_prefix"),
     [
-        "videotestsrc is-live=true num-buffers=0 ! video/x-raw,width=160,height=120,framerate=30/1",
-        "videotestsrc is-live=true ! video/x-raw,width=160,height=120,framerate=30/1 ! identity error-after=1",
+        (
+            "videotestsrc is-live=true num-buffers=0 ! video/x-raw,width=160,height=120,framerate=30/1",
+            "Teaching capture ended unexpectedly.",
+        ),
+        (
+            "videotestsrc is-live=true ! video/x-raw,width=160,height=120,framerate=30/1 ! identity error-after=1",
+            "Teaching capture failed:",
+        ),
     ],
 )
 def test_early_source_stop_before_first_frame_does_not_timeout_close(
-    teaching: Teaching, source: str
+    teaching: Teaching, source: str, expected_prefix: str, revoked: bool
 ) -> None:
     teaching.start(source)
     wait_for_source_stop(teaching)
     started = time.monotonic()
-    result = teaching.close(revoked=True)
+    result = teaching.close(revoked=revoked)
     assert time.monotonic() - started < 0.5
-    assert result == "Teaching capture saved no frames."
+    expected = "Teaching capture saved no frames." if revoked else expected_prefix
+    assert result is not None and result.startswith(expected)
     manifest = json.loads((teaching.directory / "lesson.json").read_text())
     assert manifest["status"] == "failed"
-    assert manifest["error"] == "Teaching capture saved no frames."
+    assert manifest["error"] == result
 
 
 def find_element(pipeline: object, factory_name: str) -> object:
