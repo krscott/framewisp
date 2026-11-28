@@ -15,6 +15,13 @@ from gi.repository import GLib, Gst
 
 from framewisp.desktop import write_json
 
+_UNEXPECTED_END = "Teaching capture ended unexpectedly."
+
+
+def _capture_failure(message: Gst.Message) -> str:
+    error, detail = message.parse_error()
+    return f"Teaching capture failed: {error}; {detail}"
+
 
 def upstream_elements(pad: Gst.Pad) -> set[Gst.Object]:
     """Return every pipeline element feeding `pad`."""
@@ -44,6 +51,7 @@ class Teaching:
         self.started = 0.0
         self.source_ended = Event()
         self.source_error: str | None = None
+        self.pipeline_ended = False
         self.source_elements: set[Gst.Object] = set()
         self.lock = RLock()
         self.closed = False
@@ -156,11 +164,19 @@ class Teaching:
             origin = origin.get_parent()
         return False
 
+    def _source_stop(self) -> str | None:
+        if self.source_error is not None:
+            return self.source_error
+        if self.source_ended.is_set():
+            return _UNEXPECTED_END
+        return None
+
     def poll(self) -> str | None:
         """Drain a frame and check the pipeline.
 
         Return why the capture source stopped when it ended or errored, or None
-        while capture is running. Storage, encoding, and timeout errors raise
+        while capture is running. Errors from elements outside the capture
+        source, unexpected pipeline EOS, and the no-frame timeout raise
         immediately.
         """
         assert self.pipeline is not None
@@ -171,17 +187,16 @@ class Teaching:
             message := bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
         ) is not None:
             if message.type == Gst.MessageType.ERROR:
-                error, detail = message.parse_error()
-                reason = f"Teaching capture failed: {error}; {detail}"
+                reason = _capture_failure(message)
                 if not self._from_source(message.src):
                     raise RuntimeError(reason)
                 self.source_error = self.source_error or reason
-            elif not self.source_ended.is_set():
-                raise RuntimeError("Teaching capture ended unexpectedly.")
-        if self.source_error is not None:
-            return self.source_error
-        if self.source_ended.is_set():
-            return "Teaching capture ended unexpectedly."
+            elif self.source_ended.is_set():
+                self.pipeline_ended = True
+            else:
+                raise RuntimeError(_UNEXPECTED_END)
+        if (source_stop := self._source_stop()) is not None:
+            return source_stop
         if self.count == 0 and time.monotonic() - self.started > 10:
             raise RuntimeError("Teaching capture received no frame within 10 seconds.")
         return None
@@ -196,53 +211,73 @@ class Teaching:
             if not self.created:
                 return None
             if not revoked:
-                if self.source_error is not None:
-                    error = error or self.source_error
-                elif self.source_ended.is_set():
-                    error = error or "Teaching capture ended unexpectedly."
+                error = error or self._source_stop()
             try:
                 if self.pipeline is not None:
                     try:
                         bus = self.pipeline.get_bus()
                         assert bus is not None
-                        timeline = self.pipeline.get_by_name("timeline")
-                        assert timeline is not None
-                        # imagefreeze holds the last frame after input EOS. Direct EOS
-                        # stops its clocked output and lets the encoder finalize.
-                        timeline.send_event(Gst.Event.new_eos())
-                        deadline = time.monotonic() + 1.0
-                        message: Gst.Message | None = None
-                        while True:
-                            remaining = int((deadline - time.monotonic()) * Gst.SECOND)
-                            if remaining <= 0:
-                                message = None
-                                break
-                            message = bus.timed_pop_filtered(
-                                remaining, Gst.MessageType.EOS | Gst.MessageType.ERROR
-                            )
-                            if message is None or message.type == Gst.MessageType.EOS:
-                                break
-                            if self._from_source(message.src):
-                                # A failing or revoked source can leave follow-up
-                                # bus errors behind while downstream finalizes EOS.
-                                if not revoked:
+                        state_change, _, _ = self.pipeline.get_state(0)
+                        if (
+                            self.pipeline_ended
+                            or state_change == Gst.StateChangeReturn.FAILURE
+                        ):
+                            while (
+                                message := bus.pop_filtered(Gst.MessageType.ERROR)
+                            ) is not None:
+                                if self._from_source(message.src):
+                                    if not revoked:
+                                        error = error or _capture_failure(message)
+                                else:
                                     failure, detail = message.parse_error()
                                     error = (
                                         error
-                                        or f"Teaching capture failed: {failure}; {detail}"
+                                        or f"Teaching video finalization failed: {failure}; {detail}"
                                     )
-                                continue
-                            break
+                                    break
+                        else:
+                            timeline = self.pipeline.get_by_name("timeline")
+                            assert timeline is not None
+                            # imagefreeze holds the last frame after input EOS. Direct EOS
+                            # stops its clocked output and lets the encoder finalize.
+                            timeline.send_event(Gst.Event.new_eos())
+                            deadline = time.monotonic() + 1.0
+                            message = None
+                            while True:
+                                remaining = int(
+                                    (deadline - time.monotonic()) * Gst.SECOND
+                                )
+                                if remaining <= 0:
+                                    message = None
+                                    break
+                                message = bus.timed_pop_filtered(
+                                    remaining,
+                                    Gst.MessageType.EOS | Gst.MessageType.ERROR,
+                                )
+                                if (
+                                    message is None
+                                    or message.type == Gst.MessageType.EOS
+                                ):
+                                    break
+                                if self._from_source(message.src):
+                                    # A failing or revoked source can leave follow-up
+                                    # bus errors behind while downstream finalizes EOS.
+                                    if not revoked:
+                                        error = error or _capture_failure(message)
+                                    continue
+                                break
+                            if message is None:
+                                error = (
+                                    error or "Teaching video finalization timed out."
+                                )
+                            elif message.type == Gst.MessageType.ERROR:
+                                failure, detail = message.parse_error()
+                                error = (
+                                    error
+                                    or f"Teaching video finalization failed: {failure}; {detail}"
+                                )
                         while self.drain():
                             pass
-                        if message is None:
-                            error = error or "Teaching video finalization timed out."
-                        elif message.type == Gst.MessageType.ERROR:
-                            failure, detail = message.parse_error()
-                            error = (
-                                error
-                                or f"Teaching video finalization failed: {failure}; {detail}"
-                            )
                     finally:
                         self.pipeline.set_state(Gst.State.NULL)
                 if self.count == 0:

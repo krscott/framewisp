@@ -778,7 +778,7 @@ def _share_desktop(
                                     # PipeWire EOS or a capture-source error can precede
                                     # the portal's stop callback.
                                     deadline = time.monotonic() + 0.25
-                                    while not portal.revoked:
+                                    while True:
                                         dispatch_events()
                                         if (
                                             stop.is_set()
@@ -786,7 +786,7 @@ def _share_desktop(
                                         ):
                                             break
                                         stop.wait(0.01)
-                                    if portal.revoked or portal.lost is not None:
+                                    if portal.revoked or stop.is_set():
                                         break
                                     raise RuntimeError(source_stop)
                                 if not ready.is_set() and teaching.count:
