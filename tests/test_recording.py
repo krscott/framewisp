@@ -14,7 +14,7 @@ from framewisp.console import ConsoleCapture
 from framewisp.errors import SessionError
 from framewisp.finalization import capture_origin
 from framewisp.layout import ConsolePanel
-from framewisp.lib import Recording
+from framewisp.lib import ClipProbe, Recording
 from framewisp.recorder import filter_recorder_output, recorder_output
 from framewisp.recovery import PRIVATE_CLIP, interrupted_clip
 
@@ -149,8 +149,33 @@ def fail_remux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str) -> 
     monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
 
 
-def fail_restore(clip: Path, *, log: Path, env: dict[str, str]) -> bool:
-    raise RuntimeError("probe failed")
+def fail_restore(
+    clip: Path, probe: ClipProbe, *, log: Path, env: dict[str, str]
+) -> bool:
+    raise RuntimeError("restore failed")
+
+
+# R-REC-26
+@pytest.mark.parametrize("click_pings", [True, False])
+def test_truncated_clip_is_not_published_and_remains_at_private_path(
+    tmp_path: Path, click_pings: bool
+) -> None:
+    truncated = tmp_path / "truncated.mp4"
+    truncated.write_bytes(ZERO_DURATION_CLIP.read_bytes()[:64])
+    recording = started_by_fake_recorder(tmp_path, truncated, click_pings=click_pings)
+    with pytest.raises(SessionError) as failure:
+        recording.finish()
+    destination = tmp_path / "clip.mp4"
+    assert not destination.exists()
+    assert recording.last_summary is None
+    kept_dirs = list(tmp_path.glob(".framewisp-clip-*"))
+    assert len(kept_dirs) == 1
+    kept = kept_dirs[0] / "clip.mp4"
+    assert kept.read_bytes() == truncated.read_bytes()
+    assert (tmp_path / "session" / PRIVATE_CLIP).readlink() == kept
+    error = str(failure.value)
+    assert "Could not inspect clip" in error
+    assert f"The clip remains at {kept}." in error
 
 
 # R-REC-10
@@ -169,7 +194,7 @@ def test_failed_restore_publishes_the_raw_clip(
     assert not list(tmp_path.glob(".framewisp-clip-*"))
     error = str(failure.value)
     assert f"raw clip remains at {clip}" in error
-    assert "probe failed" in error
+    assert "restore failed" in error
     assert ("without overlays" in error) == click_pings
 
 
