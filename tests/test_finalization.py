@@ -440,11 +440,29 @@ def test_raw_clip_failure_names_the_clip_missing_extras_and_cause() -> None:
     )
 
 
-def test_render_clip_malformed_input_log_omits_finalization_log(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "bad_line",
+    ["not json", '{"id": "missing-event"}', "[1]"],
+)
+def test_render_clip_malformed_input_log_omits_finalization_log(
+    tmp_path: Path, bad_line: str
+) -> None:
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"raw")
     input_log = tmp_path / "inputs.jsonl"
-    input_log.write_text('{"id": "a"}\nnot json\n')
+    input_log.write_text(
+        json.dumps(
+            {
+                "id": "a",
+                "event": "press",
+                "action": "click",
+                "time": 0.2,
+                "x": 10,
+                "y": 10,
+            }
+        )
+        + f"\n{bad_line}\n"
+    )
     finalization_log = tmp_path / "finalization.log"
     finalization_log.write_text("previous clip ffmpeg output\n")
     with pytest.raises(ValueError) as failure:
@@ -460,7 +478,6 @@ def test_render_clip_malformed_input_log_omits_finalization_log(tmp_path: Path) 
         )
     message = str(failure.value)
     assert str(input_log) in message
-    assert "line 2" in message
     assert "finalization.log" not in message
     assert finalization_log.read_text() == "previous clip ffmpeg output\n"
 

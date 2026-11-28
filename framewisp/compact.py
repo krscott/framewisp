@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from framewisp.errors import SessionError
 from framewisp.processes import run_managed
@@ -59,11 +59,21 @@ def activity_events(log: Path) -> list[ActivityEvent]:
     events: list[ActivityEvent] = []
     for line_number, line in enumerate(complete, start=1):
         try:
-            events.append(json.loads(line))
+            event = json.loads(line)
         except ValueError as error:
+            detail = (
+                f"{error.msg} (column {error.colno})"
+                if isinstance(error, json.JSONDecodeError)
+                else str(error)
+            )
             raise ValueError(
-                f"Malformed line {line_number} in {log}: {error}"
+                f"Malformed line {line_number} in {log}: {detail}"
             ) from None
+        if not isinstance(event, dict):
+            raise ValueError(
+                f"Malformed line {line_number} in {log}: expected a JSON object"
+            )
+        events.append(cast(ActivityEvent, event))
     return events
 
 
@@ -88,17 +98,22 @@ def retained_frames(
     retain(duration - PADDING_AFTER, duration)
     for log in logs:
         events = activity_events(log)
-        ends = {
-            event["id"]: event["time"] for event in events if event["event"] == "end"
-        }
-        for event in events:
-            if event["event"] != "start":
-                continue
-            start = event["time"]
-            end = ends.get(event["id"], stopped)
-            if start >= stopped or end < origin:
-                continue
-            retain(start - origin - PADDING_BEFORE, end - origin + PADDING_AFTER)
+        try:
+            ends = {
+                event["id"]: event["time"]
+                for event in events
+                if event["event"] == "end"
+            }
+            for event in events:
+                if event["event"] != "start":
+                    continue
+                start = event["time"]
+                end = ends.get(event["id"], stopped)
+                if start >= stopped or end < origin:
+                    continue
+                retain(start - origin - PADDING_BEFORE, end - origin + PADDING_AFTER)
+        except (KeyError, TypeError) as error:
+            raise ValueError(f"Invalid event in {log}: {error}") from None
 
     merged: list[tuple[int, int]] = []
     for first, last in sorted(ranges):

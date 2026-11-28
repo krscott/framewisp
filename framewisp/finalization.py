@@ -211,22 +211,25 @@ def render_clip(
     layout: ClipLayout,
     env: dict[str, str],
 ) -> None:
-    entries = (
-        captions_for_clip(
-            input_log,
-            origin=origin,
-            stopped=stopped,
-            captions=captions,
-            literal_captions=literal_captions,
+    try:
+        entries = (
+            captions_for_clip(
+                input_log,
+                origin=origin,
+                stopped=stopped,
+                captions=captions,
+                literal_captions=literal_captions,
+            )
+            if captions.enabled
+            else []
         )
-        if captions.enabled
-        else []
-    )
-    overlays = (
-        pointer_overlays_for_clip(input_log, origin=origin, stopped=stopped)
-        if click_pings
-        else []
-    )
+        overlays = (
+            pointer_overlays_for_clip(input_log, origin=origin, stopped=stopped)
+            if click_pings
+            else []
+        )
+    except (KeyError, TypeError) as error:
+        raise ValueError(f"Invalid event in {input_log}: {error}") from None
     console_panel = layout.console_panel
     if not entries and not overlays and console_panel is None and not compact:
         return
