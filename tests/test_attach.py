@@ -365,11 +365,13 @@ def save_screenshot(portal, *args):
         return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
     if (root / 'error-screenshot').exists():
         _destination, stop, log = args
-        if lesson is not None:
-            lesson.source_ended.set()
-        revoke_at = time.monotonic() + .05
-        (root / 'revoke').touch()
-        return attach.newest_frame('videotestsrc ! identity error-after=1', stop, log)
+        try:
+            return attach.newest_frame('videotestsrc ! identity error-after=1', stop, log)
+        finally:
+            if lesson is not None:
+                lesson.source_ended.set()
+            revoke_at = time.monotonic() + .05
+            (root / 'revoke').touch()
     if not (root / 'slow-screenshot').exists():
         return original_save_screenshot(portal, *args)
     (root / 'capturing').touch()
