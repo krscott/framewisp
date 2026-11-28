@@ -387,7 +387,12 @@ def finished(
             # A full disk fails this command, not the desktop share, and the log
             # may be on that disk.
             raise ValueError(f"Could not write the screenshot: {error.message}")
-        log.write_text(f"{error}\n{detail}\n")
+        try:
+            log.write_text(f"{error}\n{detail}\n", encoding="utf-8")
+        except OSError as write_error:
+            raise CaptureError(
+                f"Desktop capture failed: {error.message} (could not write {log}: {write_error})"
+            ) from None
         raise CaptureError(f"Desktop capture failed. See {log}")
     return True
 

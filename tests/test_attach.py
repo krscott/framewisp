@@ -27,7 +27,9 @@ from framewisp.attach import (
     COMMAND_CANCELLED,
     KEYCODES,
     AttachedInput,
+    CaptureError,
     attach_session,
+    newest_frame,
     open_destination,
     share_desktop,
     write_png,
@@ -349,7 +351,8 @@ def dispatch():
             return
         active = Portal.active()
         active.revoked = True
-        lesson.source_ended.set()
+        if lesson is not None:
+            lesson.source_ended.set()
         active.stop.set()
 attach.dispatch_events = dispatch
 original_save_screenshot = attach.save_screenshot
@@ -360,6 +363,13 @@ def save_screenshot(portal, *args):
         revoke_at = time.monotonic() + .1
         (root / 'revoke').touch()
         return attach.newest_frame('videotestsrc num-buffers=0', portal.stop, root / 'capture.log')
+    if (root / 'error-screenshot').exists():
+        _destination, stop, log = args
+        if lesson is not None:
+            lesson.source_ended.set()
+        revoke_at = time.monotonic() + .05
+        (root / 'revoke').touch()
+        return attach.newest_frame('videotestsrc ! identity error-after=1', stop, log)
     if not (root / 'slow-screenshot').exists():
         return original_save_screenshot(portal, *args)
     (root / 'capturing').touch()
@@ -782,6 +792,37 @@ def test_screenshot_eos_during_revocation_does_not_fail_teaching(
         json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
         == "complete"
     )
+
+
+@pytest.mark.parametrize("runner", [None, "teaching"], indirect=True)
+def test_screenshot_error_with_unwritable_capture_log_during_revocation_does_not_fail_share(
+    tmp_path: Path,
+    runner: subprocess.Popen[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "approve").touch()
+    if (tmp_path / "teach").exists():
+        wait_file(tmp_path / "lesson/frames/000000.png")
+    else:
+        assert runner.stdout is not None
+        read_terminal(runner.stdout.fileno(), b"Attached:")
+    (tmp_path / "session" / "capture.log").mkdir()
+    (tmp_path / "error-screenshot").touch()
+    assert (
+        request_desktop(
+            desktop_session(tmp_path / "session"),
+            "screenshot",
+            {"path": str(tmp_path / "screenshot.png")},
+        )
+        == 1
+    )
+    assert COMMAND_CANCELLED in capsys.readouterr().err
+    assert runner.wait(timeout=5) == 0
+    if (tmp_path / "teach").exists():
+        assert (
+            json.loads((tmp_path / "lesson/lesson.json").read_text())["status"]
+            == "complete"
+        )
 
 
 def test_pending_consent_reserves_session(
@@ -1297,6 +1338,27 @@ def test_screenshot_write_failure_fails_only_that_command(tmp_path: Path) -> Non
     with open("/dev/full", "wb") as output:
         with pytest.raises(ValueError, match="Could not write"):
             write_png("videotestsrc num-buffers=1", output.fileno(), Event(), log)
+
+
+def test_capture_error_falls_back_when_capture_log_cannot_be_written(
+    tmp_path: Path,
+) -> None:
+    writable = tmp_path / "capture.log"
+    with pytest.raises(CaptureError) as raised:
+        newest_frame("videotestsrc ! identity error-after=1", Event(), writable)
+    assert str(raised.value) == f"Desktop capture failed. See {writable}"
+    assert "Failed after iterations as requested." in writable.read_text(
+        encoding="utf-8"
+    )
+
+    unwritable = tmp_path / "capture-dir"
+    unwritable.mkdir()
+    with pytest.raises(CaptureError) as raised:
+        newest_frame("videotestsrc ! identity error-after=1", Event(), unwritable)
+    message = str(raised.value)
+    assert "Desktop capture failed:" in message
+    assert "Failed after iterations as requested." in message
+    assert f"could not write {unwritable}:" in message
 
 
 class CapturePortal:
