@@ -174,8 +174,32 @@ def test_truncated_clip_is_not_published_and_remains_at_private_path(
     assert kept.read_bytes() == truncated.read_bytes()
     assert (tmp_path / "session" / PRIVATE_CLIP).readlink() == kept
     error = str(failure.value)
+    assert f"not saved to {destination}" in error
     assert "Could not inspect clip" in error
     assert f"The clip remains at {kept}." in error
+
+
+# R-REC-10
+def test_unreadable_remux_keeps_and_publishes_the_raw_clip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = tmp_path / "remux-tools"
+    tools.mkdir()
+    remuxer = tools / "ffmpeg"
+    remuxer.write_text(
+        '#!/bin/sh\nwhile [ $# -gt 1 ]; do shift; done\nprintf "truncated" > "$1"\n'
+    )
+    remuxer.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tools}:{os.environ['PATH']}")
+    recording = started_by_fake_recorder(tmp_path, ZERO_DURATION_CLIP)
+    with pytest.raises(SessionError) as failure:
+        recording.finish()
+    clip = tmp_path / "clip.mp4"
+    assert clip.read_bytes() == ZERO_DURATION_CLIP.read_bytes()
+    assert not list(tmp_path.glob(".framewisp-clip-*"))
+    error = str(failure.value)
+    assert f"raw clip remains at {clip}" in error
+    assert "Could not inspect clip" in error
 
 
 # R-REC-10

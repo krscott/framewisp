@@ -415,7 +415,13 @@ def start_recording(
         if process.returncode != 0:
             raise log_failure(f"Recorder failed to finalize {destination}", log)
         # Refuse to publish a truncated or otherwise unreadable MP4 (R-REC-26).
-        probe = probe_clip(clip, env=env)
+        try:
+            probe = probe_clip(clip, env=env)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            raise SessionError(
+                f"Could not verify recorded clip; not saved to {destination}. "
+                f"Cause: {error}"
+            ) from None
         failure: Exception | None = None
         try:
             restored = restore_hidden_frames(clip, probe, log=log, env=env)
@@ -624,7 +630,8 @@ def restore_hidden_frames(
     try:
         has_duration = probe_clip(remuxed, env=env).duration is not None
     except Exception:
-        remuxed.unlink(missing_ok=True)
+        with suppress(OSError):
+            remuxed.unlink(missing_ok=True)
         raise
     remuxed.replace(clip)
     return has_duration

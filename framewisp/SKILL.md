@@ -528,11 +528,13 @@ A click ping (a red ring) marks each click and drag press, and a translucent hol
 disc follows each completed drag while its button is held. `--no-click-pings`
 disables both for the clip. They appear only in clips. Wait about 0.5 seconds after a final
 click before `record-stop` to preserve the full click ping animation.
-Finalization adds time to stopping. If finalization fails, the raw clip remains
+Finalization adds time to stopping. If the recorder writes an unreadable file,
+framewisp does not publish it; the file stays in a hidden directory and the error
+names its path. If finalization fails on a readable clip, the raw clip remains
 at the clip destination and the error names its path and cause (including
-`finalization.log` when FFmpeg failed). If
-framewisp cannot publish the clip there, it leaves any file there intact and the
-error names where the clip is. Either failure stops the session.
+`finalization.log` when FFmpeg failed). If framewisp cannot publish the clip
+there, it leaves any file there intact and the error names where the clip is.
+Any of these failures stops the session.
 On success, `record-stop` prints a JSON summary with `path`, `duration_seconds`,
 `width`, `height`, and `size_bytes`, measured from the finished MP4.
 `duration_seconds` is `null` for a clip with no measurable duration, and `width`
