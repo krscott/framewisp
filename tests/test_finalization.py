@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -6,12 +7,14 @@ from pathlib import Path
 import pytest
 
 from framewisp.actions import ACTION_FIELDS
+from framewisp.console import ConsoleCapture
 from framewisp.finalization import (
     POINTER_ACTIONS,
     Caption,
     CaptionOptions,
     captions_for_clip,
     raw_clip_failure,
+    render_clip,
     subtitle_script,
 )
 from framewisp.input_log import KEY_ACTIONS, CaptionCapture, log_input
@@ -426,20 +429,91 @@ def test_caption_text_cannot_inject_ass_formatting() -> None:
 
 
 # R-REC-10
-def test_raw_clip_failure_names_the_clip_missing_extras_and_logs() -> None:
-    error = str(
-        raw_clip_failure(
-            Path("clip.mp4"),
-            ValueError("bad line"),
-            extras=True,
-            logs=(Path("finalization.log"), Path("inputs.jsonl")),
-        )
-    )
+def test_raw_clip_failure_names_the_clip_missing_extras_and_cause() -> None:
+    error = str(raw_clip_failure(Path("clip.mp4"), ValueError("bad line"), extras=True))
     assert error == (
         "Finalization failed; raw clip remains at clip.mp4 without overlays, "
-        "console panel or compaction. See finalization.log and inputs.jsonl. "
-        "Cause: bad line"
+        "console panel or compaction. Cause: bad line"
     )
     assert str(raw_clip_failure(Path("clip.mp4"), ValueError("x"), extras=False)) == (
         "Finalization failed; raw clip remains at clip.mp4. Cause: x"
     )
+
+
+@pytest.mark.parametrize(
+    "bad_line",
+    ["not json", '{"id": "missing-event"}', "[1]"],
+)
+def test_render_clip_malformed_input_log_omits_finalization_log(
+    tmp_path: Path, bad_line: str
+) -> None:
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"raw")
+    input_log = tmp_path / "inputs.jsonl"
+    input_log.write_text(
+        json.dumps(
+            {
+                "id": "a",
+                "event": "press",
+                "action": "click",
+                "time": 0.2,
+                "x": 10,
+                "y": 10,
+            }
+        )
+        + f"\n{bad_line}\n"
+    )
+    finalization_log = tmp_path / "finalization.log"
+    finalization_log.write_text("previous clip ffmpeg output\n")
+    with pytest.raises(ValueError) as failure:
+        render_clip(
+            clip,
+            input_log=input_log,
+            origin=0,
+            stopped=1,
+            log=finalization_log,
+            console=ConsoleCapture(tmp_path),
+            layout=plain_layout((1280, 720)),
+            env=dict(os.environ),
+        )
+    message = str(failure.value)
+    assert str(input_log) in message
+    assert "finalization.log" not in message
+    assert finalization_log.read_text() == "previous clip ffmpeg output\n"
+
+
+def test_render_clip_ffmpeg_failure_names_finalization_log(tmp_path: Path) -> None:
+    clip = tmp_path / "invalid.mp4"
+    clip.write_bytes(b"not an mp4")
+    input_log = tmp_path / "inputs.jsonl"
+    input_log.write_text(
+        json.dumps(
+            {
+                "id": "a",
+                "event": "press",
+                "action": "click",
+                "time": 0.2,
+                "x": 10,
+                "y": 10,
+            }
+        )
+        + "\n"
+    )
+    finalization_log = tmp_path / "finalization.log"
+    finalization_log.write_text("previous clip ffmpeg output\n")
+    with pytest.raises(RuntimeError) as failure:
+        render_clip(
+            clip,
+            input_log=input_log,
+            origin=0,
+            stopped=1,
+            log=finalization_log,
+            console=ConsoleCapture(tmp_path),
+            layout=plain_layout((1280, 720)),
+            env=dict(os.environ),
+        )
+    assert str(finalization_log) in str(failure.value)
+    assert "previous clip ffmpeg output" not in finalization_log.read_text(
+        errors="replace"
+    )
+    assert finalization_log.stat().st_size > 0

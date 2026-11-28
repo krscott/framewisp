@@ -440,9 +440,7 @@ def start_recording(
                     env=env,
                 )
             except Exception as error:
-                failure = raw_clip_failure(
-                    clip, error, extras=True, logs=(finalization_log, input_log)
-                )
+                failure = raw_clip_failure(clip, error, extras=True)
         publish_clip(clip, destination, failure)
     finally:
         if not capturing:

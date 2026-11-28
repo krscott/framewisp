@@ -2725,6 +2725,9 @@ def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
     if failure == "unwritable-log":
         (headless_session.directory / "finalization.log").mkdir()
     else:
+        (headless_session.directory / "finalization.log").write_text(
+            "previous clip ffmpeg output\n"
+        )
         with (headless_session.directory / "inputs.jsonl").open("a") as log:
             log.write("not json\n")
     result = subprocess.run(
@@ -2737,7 +2740,11 @@ def test_failed_click_ping_render_leaves_click_pings_only_clip_playable(
     assert result.returncode == 1
     assert "raw clip remains" in result.stderr
     assert str(clip) in " ".join(result.stderr.split())
-    assert "finalization.log" in result.stderr
+    if failure == "unwritable-log":
+        assert "finalization.log" in result.stderr
+    else:
+        assert "inputs.jsonl" in result.stderr
+        assert "finalization.log" not in result.stderr
     assert headless_session.process.wait(timeout=5) == 1
     assert not private_directories(clip.parent)
     assert len(clip_frames(clip)) > 1

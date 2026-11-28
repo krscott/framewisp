@@ -130,8 +130,19 @@ def test_malformed_complete_line_is_not_ignored(
 ) -> None:
     log = tmp_path / "inputs.jsonl"
     log.write_bytes(b'{"id": "first"}\n' + malformed + unfinished)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as failure:
         activity_events(log)
+    assert str(log) in str(failure.value)
+    assert "line 2" in str(failure.value)
+    assert "line 1" not in str(failure.value)
+
+
+def test_retained_frames_names_log_for_invalid_event_shape(tmp_path: Path) -> None:
+    activity_log = tmp_path / "activity.jsonl"
+    activity_log.write_text('{"id": "missing-event"}\n')
+    with pytest.raises(ValueError) as failure:
+        retained_frames((activity_log,), origin=0, stopped=5, duration=5)
+    assert str(activity_log) in str(failure.value)
 
 
 def test_activity_log_closes_cancelled_wait_without_retaining_content(
