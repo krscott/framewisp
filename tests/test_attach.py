@@ -306,7 +306,7 @@ if (root / 'teach').exists():
     from framewisp.teaching import Teaching
     class TestTeaching(Teaching):
         def start(self, source):
-            super().start('videotestsrc is-live=true ! video/x-raw,width=320,height=240 ! identity sleep-time=100000')
+            super().start('videotestsrc name=testsrc is-live=true ! video/x-raw,width=320,height=240 ! identity name=testidentity sleep-time=100000')
         def append(self, entry):
             if entry['type'] == 'note' and (root / 'fail-note').exists():
                 (root / 'noting').touch()
@@ -320,11 +320,36 @@ if (root / 'teach').exists():
                 time.sleep(.8)
             return super().close(*args, **kwargs)
     lesson = TestTeaching(root / 'lesson', 'Perform a task')
+def post_gst_error(element_name, message):
+    from gi.repository import Gst
+    element = lesson.pipeline.get_by_name(element_name)
+    if element is None:
+        iterator = lesson.pipeline.iterate_elements()
+        while True:
+            status, candidate = iterator.next()
+            if status != Gst.IteratorResult.OK:
+                break
+            factory = candidate.get_factory()
+            if factory is not None and factory.get_name() == element_name:
+                element = candidate
+                break
+    assert element is not None, element_name
+    element.post_message(
+        Gst.Message.new_error(
+            element,
+            GLib.Error.new_literal(Gst.resource_error_quark(), message, Gst.ResourceError.FAILED),
+            'injected',
+        )
+    )
+def post_source_error():
+    post_gst_error('testidentity', 'Capture stream disconnected')
+    post_gst_error('testsrc', 'Internal data stream error.')
 original_dispatch = attach.dispatch_events
 revoke_at = None
 pending_signal = None
+injected_error = False
 def dispatch():
-    global revoke_at, pending_signal
+    global revoke_at, pending_signal, injected_error
     original_dispatch()
     if pending_signal is not None and time.monotonic() >= pending_signal[1]:
         active = Portal.active()
@@ -339,13 +364,31 @@ def dispatch():
         if (root / 'eos-first').exists():
             lesson.source_ended.set()
             pending_signal = ('lose-bus', time.monotonic() + .05)
+        elif (root / 'error-first').exists():
+            post_source_error()
+            pending_signal = ('lose-bus', time.monotonic() + .05)
         else:
             Portal.active().connection_closed(None, True, None)
     if (root / 'source-end').exists():
         lesson.source_ended.set()
+    if (root / 'source-error').exists() and not injected_error:
+        injected_error = True
+        post_source_error()
     if (root / 'revoke').exists():
         if (root / 'eos-first').exists() and not lesson.source_ended.is_set():
             lesson.source_ended.set()
+            revoke_at = time.monotonic() + .05
+        elif (root / 'error-first').exists() and not injected_error:
+            injected_error = True
+            post_source_error()
+            revoke_at = time.monotonic() + .05
+        elif (root / 'storage-error').exists() and not injected_error:
+            injected_error = True
+            post_gst_error('fdsink', 'No space left on the resource.')
+            revoke_at = time.monotonic() + .05
+        elif (root / 'encoding-error').exists() and not injected_error:
+            injected_error = True
+            post_gst_error('vp8enc', 'Could not encode frame')
             revoke_at = time.monotonic() + .05
         if revoke_at is not None and time.monotonic() < revoke_at:
             return
@@ -769,6 +812,68 @@ def test_source_end_without_revocation_marks_teaching_failed(
     assert (
         "Stopped sharing: Teaching capture ended unexpectedly." in runner.stderr.read()
     )
+
+
+@pytest.mark.parametrize("runner", ["teaching"], indirect=True)
+def test_portal_revocation_after_source_error_completes_teaching(
+    tmp_path: Path, runner: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert runner.stdout is not None
+    read_terminal(runner.stdout.fileno(), b"Teaching session ready:")
+    (tmp_path / "error-first").touch()
+    (tmp_path / "revoke").touch()
+    assert runner.wait(timeout=5) == 0
+    stdout, stderr = runner.communicate(timeout=5)
+    assert "Stopped sharing:" not in stderr
+    assert "Partial lesson:" not in stderr
+    assert "Lesson saved:" in stdout
+    assert stdout.endswith(
+        "Stopped sharing. Your apps and desktop are still running.\n"
+    )
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "complete"
+    assert manifest["error"] is None
+
+
+# R-TEACH-4
+@pytest.mark.parametrize("runner", ["teaching"], indirect=True)
+def test_source_error_without_revocation_marks_teaching_failed(
+    tmp_path: Path, runner: subprocess.Popen[str]
+) -> None:
+    (tmp_path / "approve").touch()
+    assert runner.stdout is not None
+    read_terminal(runner.stdout.fileno(), b"Teaching session ready:")
+    (tmp_path / "source-error").touch()
+    assert runner.wait(timeout=5) == 1
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "Teaching capture failed:" in manifest["error"]
+    assert "Capture stream disconnected" in manifest["error"]
+    _, stderr = runner.communicate(timeout=5)
+    assert "Stopped sharing: Teaching capture failed:" in stderr
+    assert "Partial lesson:" in stderr
+
+
+# R-TEACH-4
+@pytest.mark.parametrize("runner", ["teaching"], indirect=True)
+@pytest.mark.parametrize("failure_flag", ["storage-error", "encoding-error"])
+def test_storage_or_encoding_error_before_revocation_fails_teaching(
+    tmp_path: Path, runner: subprocess.Popen[str], failure_flag: str
+) -> None:
+    (tmp_path / "approve").touch()
+    assert runner.stdout is not None
+    read_terminal(runner.stdout.fileno(), b"Teaching session ready:")
+    (tmp_path / failure_flag).touch()
+    (tmp_path / "revoke").touch()
+    assert runner.wait(timeout=5) == 1
+    manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "Teaching capture failed:" in manifest["error"]
+    stdout, stderr = runner.communicate(timeout=5)
+    assert "Stopped sharing: Teaching capture failed:" in stderr
+    assert "Partial lesson:" in stderr
+    assert "Lesson saved:" not in stdout
 
 
 @pytest.mark.parametrize("runner", ["teaching"], indirect=True)
@@ -1610,16 +1715,16 @@ def test_input_queued_behind_a_failure_never_reaches_the_desktop(
 
 
 @pytest.mark.parametrize("runner", ["teaching"], indirect=True)
-@pytest.mark.parametrize("eos_first", [False, True])
+@pytest.mark.parametrize("precursor", [None, "eos-first", "error-first"])
 def test_lost_bus_fails_the_lesson(
-    tmp_path: Path, runner: subprocess.Popen[str], eos_first: bool
+    tmp_path: Path, runner: subprocess.Popen[str], precursor: str | None
 ) -> None:
     (tmp_path / "approve").touch()
     assert runner.stdout is not None
     read_terminal(runner.stdout.fileno(), b"Teaching session ready:")
-    if eos_first:
-        # PipeWire's end of stream reaches the lesson before the bus loss.
-        (tmp_path / "eos-first").touch()
+    if precursor is not None:
+        # PipeWire's EOS or error reaches the lesson before the bus loss.
+        (tmp_path / precursor).touch()
     (tmp_path / "lose-bus").touch()
     assert runner.wait(timeout=5) == 1
     manifest = json.loads((tmp_path / "lesson/lesson.json").read_text())
