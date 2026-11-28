@@ -183,20 +183,15 @@ Format: Layer, Start, End, Style, Text
     return script
 
 
-def raw_clip_failure(
-    clip: Path, cause: Exception, *, extras: bool, logs: Iterable[Path] = ()
-) -> RuntimeError:
+def raw_clip_failure(clip: Path, cause: Exception, *, extras: bool) -> RuntimeError:
     """Report a finalization failure with the raw clip it left behind (R-REC-10).
 
     `extras` says whether the clip requested overlays, a console panel or
     compaction, which the raw clip lacks.
     """
     missing = " without overlays, console panel or compaction" if extras else ""
-    names = " and ".join(str(log) for log in logs)
-    see = f" See {names}." if names else ""
     return RuntimeError(
-        f"Finalization failed; raw clip remains at {clip}{missing}.{see} "
-        f"Cause: {cause}"
+        f"Finalization failed; raw clip remains at {clip}{missing}. Cause: {cause}"
     )
 
 
@@ -318,5 +313,5 @@ def render_clip(
             cwd=work,
         )
         if result:
-            raise RuntimeError(f"FFmpeg exited with status {result}.")
+            raise RuntimeError(f"FFmpeg exited with status {result}. See {log}.")
         rendered.replace(clip)

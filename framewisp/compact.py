@@ -56,7 +56,15 @@ def activity_events(log: Path) -> list[ActivityEvent]:
         fcntl.flock(source, fcntl.LOCK_SH)
         snapshot = source.read()
     *complete, _unfinished = snapshot.split(b"\n")
-    return [json.loads(line) for line in complete]
+    events: list[ActivityEvent] = []
+    for line_number, line in enumerate(complete, start=1):
+        try:
+            events.append(json.loads(line))
+        except ValueError as error:
+            raise ValueError(
+                f"Malformed line {line_number} in {log}: {error}"
+            ) from None
+    return events
 
 
 def retained_frames(

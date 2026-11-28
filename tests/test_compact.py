@@ -130,8 +130,10 @@ def test_malformed_complete_line_is_not_ignored(
 ) -> None:
     log = tmp_path / "inputs.jsonl"
     log.write_bytes(b'{"id": "first"}\n' + malformed + unfinished)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as failure:
         activity_events(log)
+    assert str(log) in str(failure.value)
+    assert "line 2" in str(failure.value)
 
 
 def test_activity_log_closes_cancelled_wait_without_retaining_content(
