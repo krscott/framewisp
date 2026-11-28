@@ -306,7 +306,6 @@ class CaptureError(RuntimeError):
 
 def write_png(source: str, output: int, stop: Event, log: Path) -> None:
     """Write the newest frame a GStreamer source delivers to a descriptor."""
-    Gst.init(None)
     frame = newest_frame(source, stop, log)
     encoder = Gst.parse_launch(
         "appsrc name=frame ! videoconvert ! pngenc snapshot=true ! fdsink name=sink"
@@ -326,6 +325,7 @@ def write_png(source: str, output: int, stop: Event, log: Path) -> None:
 
 def newest_frame(source: str, stop: Event, log: Path) -> Gst.Sample:
     """Return the newest frame seen within FRAME_SETTLE of the first one."""
+    Gst.init(None)
     pipeline = Gst.parse_launch(
         # Raw caps keep frames in system memory, as videoconvert needs.
         f"{source} ! appsink name=frames caps=video/x-raw sync=false"
@@ -387,7 +387,13 @@ def finished(
             # A full disk fails this command, not the desktop share, and the log
             # may be on that disk.
             raise ValueError(f"Could not write the screenshot: {error.message}")
-        log.write_text(f"{error}\n{detail}\n")
+        try:
+            log.write_text(f"{error}\n{detail}\n", encoding="utf-8")
+        except OSError as write_error:
+            reason = write_error.strerror or write_error
+            raise CaptureError(
+                f"Desktop capture failed: {error.message} (could not write {log}: {reason})"
+            ) from None
         raise CaptureError(f"Desktop capture failed. See {log}")
     return True
 
